@@ -510,6 +510,57 @@ button.sm.gate { background: var(--gate); }
 }
 .msg.since.pinned { margin: 10px 14px 0; flex: none; max-height: 40%; overflow: auto; }
 
+/* Improvement Council */
+.center.view-improve { grid-template-rows: auto minmax(0, 1fr) auto; }
+.improve { min-height: 0; overflow: auto; }
+.imp-top { display: grid; grid-template-columns: 200px 1fr; gap: 14px; padding: 10px 14px; border-bottom: 1px solid var(--line); align-items: center; }
+.lens-wheel { width: 200px; height: 200px; overflow: visible; }
+.lw-orbit { fill: none; stroke: var(--line); stroke-dasharray: 2 3; }
+.lw-spoke { stroke: var(--line); stroke-width: 1; }
+.lw-node { fill: var(--panel-2); stroke: #2c4566; stroke-width: 1; transition: stroke 0.3s, fill 0.3s; }
+.lw-av { fill: var(--accent); font-size: 13px; }
+.lw-name { fill: var(--muted); font: 600 8px var(--display); letter-spacing: 0.06em; text-transform: uppercase; }
+.lw-count { fill: var(--good); font: 8px var(--mono); }
+.lw-core { fill: var(--accent-dim); stroke: var(--accent); stroke-opacity: 0.5; }
+.lw-core-t { fill: var(--accent); font-size: 14px; }
+.lw-seat.s-thinking .lw-node { stroke: var(--accent); fill: var(--accent-dim); animation: twinkle 1.2s ease-in-out infinite; }
+.lw-seat.s-thinking .lw-spoke { stroke: var(--accent); stroke-dasharray: 3 3; animation: lw-flow 0.8s linear infinite; }
+.lw-seat.s-done .lw-node { stroke: var(--good); }
+.lw-seat.s-failed .lw-node { stroke: var(--bad); }
+.lens-wheel.running .lw-core { animation: twinkle 1.6s ease-in-out infinite; }
+@keyframes lw-flow { to { stroke-dashoffset: -6; } }
+.imp-ctl { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.imp-now { font-size: 13px; }
+.imp-pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); margin-right: 6px; animation: twinkle 1s ease-in-out infinite; }
+.imp-run { display: flex; gap: 6px; }
+.imp-run select, .imp-auto select { min-width: 0; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; font: 12px var(--body); }
+.imp-run select { flex: 1; }
+.imp-meter .meter { height: 6px; border-radius: 3px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; margin-top: 3px; }
+.imp-meter .meter span { display: block; height: 100%; background: var(--accent); transition: width 0.4s; }
+.imp-meter .meter span.hot { background: var(--gate); }
+.imp-auto { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12px; }
+.imp-why { flex-basis: 100%; font-size: 12px; }
+.imp-tabs { position: sticky; top: 0; z-index: 1; }
+.imp-list { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; }
+.imp-card { border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; }
+.imp-card.st-accepted { border-color: rgba(94, 224, 160, 0.4); }
+.imp-card.st-rejected { opacity: 0.6; }
+.imp-card-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.imp-card-head b { flex: 1; min-width: 200px; }
+.pill { font: 600 10px var(--display); letter-spacing: 0.08em; text-transform: uppercase; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+.pill.imp-high { color: var(--good); border-color: rgba(94, 224, 160, 0.5); }
+.pill.imp-low { opacity: 0.7; }
+.imp-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.imp-lens { color: var(--accent); }
+.imp-target { color: var(--ink); }
+.imp-why-line, .imp-change { margin: 0; font-size: 13px; }
+.imp-why-line { color: var(--muted); }
+.imp-files { font-size: 11px; overflow-wrap: anywhere; }
+.imp-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 2px; }
+.imp-log { padding: 4px 14px 12px; }
+.imp-log summary { cursor: pointer; font-size: 12px; padding: 4px 0; }
+.imp-log-row { display: flex; gap: 6px; align-items: center; padding: 2px 0; color: var(--muted); }
+@media (max-width: 900px) { .imp-top { grid-template-columns: 1fr; justify-items: center; } }
 /* ---------- Projects: navigation, the fleet manifest, a project's workspace ---------- */
 a { color: var(--accent); }
 .brand-nav { display: flex; align-items: center; gap: 22px; }

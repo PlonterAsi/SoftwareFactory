@@ -18,6 +18,7 @@ import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
+import { ImproveCouncil, type Target } from "./improve/council.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
 
 /** The built-in Overseer's prompt with its station contract (the live one comes from the Agent Bay). */
@@ -37,10 +38,12 @@ export interface CoreOptions {
   dropDir?: string;
   /** Where the database lives (shown in the setup panel). */
   dataDir?: string;
+  /** Improvement Council caps: daily USD and hours between automatic sessions. */
+  improve?: { maxUsd?: number; everyHours?: number };
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts }: CoreOptions) {
   const bay = new AgentBay(log, runtime);
   const settings = readSettings(log);
   const drop = new DropFolder(log, settings.dropDir ?? dropDir ?? join(homedir(), "SoftwareFactory", "Drop"));
@@ -52,6 +55,12 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   };
   const factory = new Factory(log, runtime, projectsDir, bay);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
+  // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
+  const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
+    maxUsd: settings.improveMaxUsd ?? improveOpts?.maxUsd, everyHours: settings.improveEveryHours ?? improveOpts?.everyHours,
+    autoGate: () => ((runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime)) === "real" ? null : "the practice crew only answers when you press Look now; switch to the real crew in Systems for automatic sessions"),
+  }).listen();
+  improve.auto = settings.improveAuto ?? true;
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
   log.on("event", (e: SfEvent) => {
     if (e.type !== "signal.captured") return;
@@ -207,6 +216,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await projectsRoute({ log, order, factory, readJson, canBuild }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (url.pathname.startsWith("/api/improve/")) {
+        const r = await improveRoute(improve, req, url.pathname, log, (idea) => {
+          if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");
+          return factory.start(idea, {});
+        });
+        if (r) return json(res, r[0], r[1]);
+      }
       if (url.pathname.startsWith("/api/order/")) {
         const r = await orderRoute(order, req, url.pathname);
         if (r) return json(res, r[0], r[1]);
@@ -231,11 +247,11 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 400, { error: (e as Error).message });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop });
+  return Object.assign(handler, { factory, order, bay, drop, improve });
 }
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
-export function readSettings(log: EventLog): { crewMode?: CrewMode; dropDir?: string } {
+export function readSettings(log: EventLog): { crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number } {
   const rows = log.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]));
 }
@@ -274,6 +290,50 @@ async function bayRoute(bay: AgentBay, req: IncomingMessage, url: URL): Promise<
   }
   m = path.match(/^\/api\/bay\/slots\/([a-z]+)$/);
   if (m && SLOTS.includes(m[1] as Slot)) return [200, bay.assign(m[1] as Slot, (Array.isArray(body.agents) ? body.agents : []).map(String))];
+  return null;
+}
+
+/** The Improvement Council's API. Every write is an event, so the Bridge sees it on the stream. */
+async function improveRoute(improve: ImproveCouncil, req: IncomingMessage, path: string, log: EventLog, build: (idea: string) => number): Promise<[number, unknown] | null> {
+  if (req.method === "GET" && path === "/api/improve/state") return [200, improve.state()];
+  if (req.method !== "POST") return null;
+  const body = await readJson(req);
+  if (path === "/api/improve/run") {
+    const t = body.target as Partial<Target> | undefined;
+    const target = t && t.kind ? { kind: t.kind, id: t.id == null ? null : Number(t.id), title: String(t.title ?? "") } as Target : undefined;
+    try {
+      const p = improve.run({ target, trigger: "manual" });
+      p.catch((e) => console.error("improve session failed:", e));
+    } catch (e) { return [409, { error: (e as Error).message }]; }
+    // The session's start event is written before the first agent call, so it is already in the state.
+    return [202, { session: improve.sessions().at(-1) }];
+  }
+  if (path === "/api/improve/settings") {
+    const out: Record<string, unknown> = {};
+    if (typeof body.auto === "boolean") { improve.auto = body.auto; log.append("settings.changed", { key: "improveAuto", value: body.auto }); out.auto = body.auto; }
+    if (typeof body.maxUsd === "number") {
+      if (!(body.maxUsd >= 0 && body.maxUsd <= 5)) return [400, { error: "The daily cap must be between $0 and $5." }];
+      improve.opts.maxUsd = body.maxUsd; log.append("settings.changed", { key: "improveMaxUsd", value: body.maxUsd });
+    }
+    if (typeof body.everyHours === "number") {
+      if (!(body.everyHours >= 1 && body.everyHours <= 168)) return [400, { error: "Look every 1 to 168 hours." }];
+      improve.opts.everyHours = body.everyHours; log.append("settings.changed", { key: "improveEveryHours", value: body.everyHours });
+    }
+    return [200, improve.state()];
+  }
+  const m = path.match(/^\/api\/improve\/proposals\/(\d+)\/(decide|build)$/);
+  if (m) {
+    const id = Number(m[1]);
+    if (m[2] === "decide") {
+      const d = String(body.decision);
+      if (!["accepted", "rejected", "parked", "inbox"].includes(d)) return [400, { error: "decision is accepted, rejected, parked or inbox" }];
+      return [200, improve.decide(id, d as "accepted", body.note ? String(body.note) : undefined)];
+    }
+    const p = improve.proposals().find((x) => x.id === id);
+    if (!p) return [404, { error: `No proposal #${id}` }];
+    if (p.status !== "accepted") improve.decide(id, "accepted");
+    try { return [202, { run: build(improve.buildIdea(id)) }]; } catch (e) { return [409, { error: (e as Error).message }]; }
+  }
   return null;
 }
 
@@ -331,7 +391,9 @@ if (isMain) {
   const projectsDir = process.env.SF_PROJECTS ?? resolve(dataDir, "projects");
   const orderMode = process.env.SF_ORDER_MODE as "agent" | "heuristic" | undefined;
   const orderMax = process.env.SF_ORDER_MAX_USD ? Number(process.env.SF_ORDER_MAX_USD) : undefined;
-  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir: process.env.SF_DROP, order: { mode: orderMode, maxUsd: orderMax } });
+  const improveMax = process.env.SF_IMPROVE_MAX_USD ? Number(process.env.SF_IMPROVE_MAX_USD) : undefined;
+  const improveEvery = process.env.SF_IMPROVE_EVERY_H ? Number(process.env.SF_IMPROVE_EVERY_H) : undefined;
+  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir: process.env.SF_DROP, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery } });
   core.drop.start();
   const server = createServer(core);
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.
@@ -344,6 +406,10 @@ if (isMain) {
   };
   sweepIfDue();
   setInterval(sweepIfDue, 3_600_000).unref();
+  // The Improvement Council looks again on its own (real crew only, within its caps): first a few minutes after start, then every 15 minutes it checks if a look is due.
+  const improveTick = () => { core.improve.tick().catch((e) => console.error("improve tick failed:", e)); };
+  setTimeout(improveTick, 3 * 60_000).unref();
+  setInterval(improveTick, 15 * 60_000).unref();
   // Runs the app closed on pick up again from their last completed station (SF_AUTO_RESUME=0 leaves them for the Resume button).
   if (process.env.SF_AUTO_RESUME !== "0" && core.factory.interrupted.length) {
     if (!checkGit().found) console.log("Not resuming interrupted runs: Git is not installed.");
