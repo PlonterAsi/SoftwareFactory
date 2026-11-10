@@ -8,7 +8,7 @@ import {
 } from "./model.js";
 import { ARCHIVIST_ROLE, FILE_AT, archivistPrompt, heuristicArchivist, parseArchivistPlan, type ArchivistPlan } from "./archivist.js";
 import { ORDER_VIEW, orderView } from "../store/tables.js";
-import { polarity, replacesCue, similarity, tokens } from "./text.js";
+import { polarity, replacesCue, similarity, titleOf, tokens } from "./text.js";
 
 export interface OrderOptions {
   /** "agent": the Archivist agent files Signals (heuristics as fallback). "heuristic": free, no model calls. */
@@ -29,7 +29,7 @@ export interface OrderOptions {
   crew?: CrewSource;
 }
 
-export interface IngestResult { signalId: number; mode: "agent" | "heuristic"; fragments: Fragment[]; conflicts: Conflict[]; costUsd: number; note?: string }
+export interface IngestResult { signalId: number; mode: "agent" | "heuristic" | "factory"; fragments: Fragment[]; conflicts: Conflict[]; costUsd: number; note?: string }
 
 /**
  * The Order Engine: messy thinking in, order out.
@@ -83,6 +83,18 @@ export class OrderEngine {
   idle(): Promise<unknown> { return this.queue; }
 
   private async ingestNow(signal: { id: number; text: string; source?: string }): Promise<IngestResult> {
+    // An idea sent to the factory is a project by definition: give it its own
+    // body on the star map at once, with no Archivist call (free, and never misfiled).
+    if (signal.source === "factory") {
+      this.emit("order.ingest", { signalId: signal.id, mode: "factory", state: "started" });
+      const plan: ArchivistPlan = {
+        nodes: [{ ref: "run", kind: "project", title: projectTitle(signal.text), parent: null }],
+        fragments: [{ text: signal.text.slice(0, 600), kind: "idea", important: false, node: "run", confidence: 1, contradicts: [] }],
+      };
+      const result = this.apply(signal, plan, "factory");
+      this.emit("order.ingest", { signalId: signal.id, mode: "factory", state: "done", costUsd: 0, fragments: result.fragments.map((f) => f.id) });
+      return { ...result, signalId: signal.id, mode: "factory", costUsd: 0 };
+    }
     let mode = this.opts.mode;
     let note: string | undefined;
     if (mode === "agent" && this.spentUsd() + this.opts.perCallUsd > this.opts.maxUsd) {
@@ -344,4 +356,15 @@ export class OrderEngine {
     const t = st.fragments.find((f) => f.id === fragmentId)?.text ?? `#${fragmentId}`;
     return `"${t.length > 70 ? t.slice(0, 67) + "…" : t}"`;
   }
+}
+
+/** A project name from a one-line idea: its noun phrase, or its first words when that is too short ("CLI"). */
+export function projectTitle(idea: string): string {
+  const base = idea.trim().replace(/^(please\s+)?(build|make|create|write)\s+(me\s+|us\s+)?/i, "");
+  const t = titleOf(base, 6);
+  if (t.split(/\s+/).length >= 2) return t;
+  const words = base.replace(/^(a|an|the)\s+/i, "").replace(/[`*_#>.!?]/g, "").split(/\s+/).slice(0, 6);
+  while (words.length > 1 && /^(a|an|the|by|of|to|for|with|and|or|in|on|at|that|which)$/i.test(words.at(-1)!)) words.pop();
+  const w = words.join(" ");
+  return w.charAt(0).toUpperCase() + w.slice(1);
 }

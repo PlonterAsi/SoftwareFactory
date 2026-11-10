@@ -1,5 +1,6 @@
 import type { EventLog } from "./events.js";
 import type { AgentRequest, AgentResult, AgentRuntime } from "./runtime.js";
+import { explainAgentError } from "./setup.js";
 
 export interface AgentRun {
   runId: number;
@@ -16,8 +17,10 @@ export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: stri
     log.append("agent.run.completed", { runId: start.id, agent, ...meta, ...result });
     return { runId: start.id, agent, result };
   } catch (e) {
-    const error = (e as Error).message;
-    log.append("agent.run.failed", { runId: start.id, agent, ...meta, error });
+    // Say what to do first; keep the raw message for the log.
+    const raw = (e as Error).message;
+    const error = explainAgentError(raw);
+    log.append("agent.run.failed", { runId: start.id, agent, ...meta, error, ...(error !== raw ? { raw: raw.slice(0, 2000) } : {}) });
     return { runId: start.id, agent, error };
   }
 }

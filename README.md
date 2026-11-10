@@ -4,9 +4,25 @@ A loop-engineered software factory with an AI crew. Drop a messy idea in; an Ord
 
 Plan: [SoftwareFactory: MVP plan and tech stack](https://claude.ai/artifact/9vnEmBfz1VaSGaB1KKwh9H)
 
-![The Bridge, milestone 4: the Agent Bay, with the station board, crew cards and an agent's test runs](docs/img/bridge-m4-bay.png)
+![The Bridge, milestone 5: a "since you left" card, the Overseer offering a Build button, a shipped run with Open folder, and factory ideas as systems on the star map](docs/img/bridge-m5.png)
 
-## Status: milestone 4 (the Agent Bay and the Council)
+## Status: milestone 5 (Bridge polish and the Overseer)
+
+The Bridge is now meant to be used every day, starting from a fresh Windows PC:
+
+- **Nothing to install to start**: the Windows installer ships its own Node.js. Without Claude Code the app runs the free **practice crew** (canned agents that walk the whole loop and always build a sample word counter); with Claude Code installed and signed in it runs the **real crew**. Git is needed to ship apps.
+![Ship's systems: crew mode, checks for this computer, and where things land](docs/img/bridge-m5-systems.png)
+
+- **Ship's systems** (the *Systems* button or the crew chip in the top bar): switch Practice / Real at any time (remembered in the database), see what this computer has (Node.js, Claude Code, Git, each with the one thing to do if it is missing) and **where things land**: the built-apps folder, the drop folder and the database, each with *Open* and *Copy path*.
+- **Welcome and guidance**: a first launch shows what Build it, Capture and Ask do, with examples to try. A gate waiting for you is also said in the Overseer channel with a *Show me* button. A shipped run has an *Open folder* button. Agent failures read as what to do ("Claude Code is installed but not signed in: run `claude` and sign in"); the raw text stays in the log.
+- **The Overseer** answers from a live status digest of the factory (runs, gates, conflicts, projects and their rules, spend), and when you describe something to build it offers a one-tap **Build** button. Nothing starts until you press it.
+- **Since you left**: when you come back after 10 minutes or more, one card lists what shipped or failed, what waits for you, new conflicts, what was filed where, drops and spend.
+- **Drop folder** (default `%USERPROFILE%\SoftwareFactory\Drop`, changeable in Systems): save a `.txt` or `.md` note there, even from your phone through OneDrive or Google Drive, and it becomes a Signal within seconds. The note moves to `filed/`; the same note is never read twice.
+- **Live factory floor**: the agent working a station docks on it with its avatar, a scan line sweeps the active station, and the flowing edge glows. **Star map**: every factory idea becomes its own system at once (no Archivist call), ringed while building, amber when it waits for you, green when shipped; double-click it to watch its run.
+- **When the core will not start**, the desktop app says why (Node missing, the core crashed), shows the core's log and has a *Restart the core* button. The core writes `core.log` in the data folder.
+- **Storage**: crew mode and drop folder are `settings` rows, picked-up notes are `drops` rows, and "seen up to here" is a `bridge.seen` event, all derived from the log like every other table.
+
+## Milestone 4 (the Agent Bay and the Council)
 
 Agents are workers you create, edit, test and put on stations. Every factory run now goes:
 
@@ -81,7 +97,9 @@ idea → Planner (spec + task graph) → [you approve plan] → Tester (acceptan
 
 ## Run it
 
-Needs Node 22+ and the Claude Code CLI signed in. For the desktop app, also Rust and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+**Just use it (Windows)**: download [SoftwareFactory-setup.exe](https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory-setup.exe), run it (SmartScreen: *More info*, *Run anyway*), and start SoftwareFactory. For real agents install [Claude Code](https://claude.com/claude-code) and sign in once (`claude` in a terminal); for shipping apps install [Git](https://git-scm.com/download/win). The *Systems* panel checks both.
+
+**From source**: needs Node 22.5+ (and the Claude Code CLI signed in for real agents). For the desktop app, also Rust and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
 ```bash
 npm install

@@ -25,7 +25,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
         <div className="tabs" role="tablist">
           {tabs.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "tab on" : "tab"} onClick={() => setTab(id)}>{label}</button>)}
         </div>
-        {run?.dir && <span className="muted mono deck-dir" title={run.dir}>{run.dir.split("/").slice(-1)[0]}</span>}
+        {run?.dir && <span className="muted mono deck-dir" title={run.dir}>{run.dir.split(/[\\/]/).slice(-1)[0]}</span>}
       </header>
       <div className="deck-body">
         {!run && <div className="empty">Start a run to see its plan as a task graph, its tests as a grid and its files as a heat map.</div>}

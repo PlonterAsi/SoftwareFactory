@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventLog, type SfEvent } from "./events.js";
 import { captureSignal, listSignals } from "./signals.js";
@@ -12,6 +14,10 @@ import { canonFor, type NodeKind } from "./order/model.js";
 import { AgentBay } from "./bay/bay.js";
 import { SLOTS, type Slot } from "./bay/agentfile.js";
 import { storeReport } from "./store/inspect.js";
+import "./bridge/tables.js";
+import { DropFolder } from "./bridge/drop.js";
+import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
+import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
 
 /** The built-in Overseer's prompt with its station contract (the live one comes from the Agent Bay). */
 export const OVERSEER_ROLE =
@@ -26,11 +32,23 @@ export interface CoreOptions {
   projectsDir?: string;
   /** Order Engine options; by default the agent Archivist runs on any real runtime, heuristics on the mock. */
   order?: OrderOptions;
+  /** The drop folder: notes saved here become Signals. Off when absent. */
+  dropDir?: string;
+  /** Where the database lives (shown in the setup panel). */
+  dataDir?: string;
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir }: CoreOptions) {
   const bay = new AgentBay(log, runtime);
+  const settings = readSettings(log);
+  const drop = new DropFolder(log, settings.dropDir ?? dropDir ?? join(homedir(), "SoftwareFactory", "Drop"));
+  // Git is needed to ship anything; checking costs a process spawn, so remember it for a minute.
+  let gitOk: { ok: boolean; at: number } = { ok: true, at: 0 };
+  const gitReady = () => {
+    if (Date.now() - gitOk.at > 60_000) gitOk = { ok: checkGit().found, at: Date.now() };
+    return gitOk.ok;
+  };
   const factory = new Factory(log, runtime, projectsDir, bay);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
@@ -45,7 +63,63 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     if (req.method === "OPTIONS") return end(res, 204);
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
-      if (req.method === "GET" && url.pathname === "/api/health") return json(res, 200, { ok: true, runtime: runtime.name });
+      if (req.method === "GET" && url.pathname === "/api/health") return json(res, 200, { ok: true, runtime: runtime.name, mode: runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime) });
+      if (req.method === "GET" && url.pathname === "/api/setup") {
+        const fresh = url.searchParams.get("fresh") === "1";
+        if (fresh) gitOk.at = 0;
+        return json(res, 200, { ...setupReport(runtime, fresh), paths: { data: dataDir ?? dirname(projectsDir), projects: projectsDir, drop: drop.dir }, drops: drop.recent(10) });
+      }
+      if (req.method === "POST" && url.pathname === "/api/setup/mode") {
+        const body = await readJson(req);
+        const mode = body.mode === "real" ? "real" : "practice";
+        if (!(runtime instanceof SwitchableRuntime)) return json(res, 409, { error: "This core was started with a fixed runtime." });
+        const rep = setupReport(runtime, true);
+        if (mode === "real" && !rep.claude.found) return json(res, 409, { error: rep.claude.hint });
+        runtime.switchTo(mode);
+        // The Archivist follows the crew unless its mode was pinned (SF_ORDER_MODE).
+        if (!orderOpts?.mode) order.opts.mode = mode === "real" ? "agent" : "heuristic";
+        log.append("settings.changed", { key: "crewMode", value: mode });
+        return json(res, 200, { ...setupReport(runtime), paths: { data: dataDir ?? dirname(projectsDir), projects: projectsDir, drop: drop.dir }, drops: drop.recent(10) });
+      }
+      if (req.method === "POST" && url.pathname === "/api/setup/drop") {
+        const body = await readJson(req);
+        const dir = String(body.dir ?? "").trim();
+        if (!dir || !isAbsolute(dir)) return json(res, 400, { error: "Give a full folder path, for example C:\\Users\\you\\OneDrive\\SoftwareFactory Drop" });
+        mkdirSync(dir, { recursive: true });
+        drop.dir = dir;
+        log.append("settings.changed", { key: "dropDir", value: dir });
+        drop.scan();
+        return json(res, 200, { dir });
+      }
+      if (req.method === "POST" && url.pathname === "/api/setup/drop/scan") return json(res, 200, { results: drop.scan(), drops: drop.recent(10) });
+      if (req.method === "POST" && url.pathname === "/api/open") {
+        const body = await readJson(req);
+        const target = String(body.target ?? "");
+        let dir: string | null = null;
+        if (target === "projects") dir = projectsDir;
+        else if (target === "drop") dir = drop.dir;
+        else if (target === "data") dir = dataDir ?? dirname(projectsDir);
+        else if (target === "run") {
+          const row = log.db.prepare("SELECT dir FROM factory_runs WHERE id = ?").get(Number(body.run)) as { dir: string | null } | undefined;
+          dir = row?.dir ?? null;
+        }
+        if (!dir) return json(res, 404, { error: "Nothing to open there yet." });
+        mkdirSync(dir, { recursive: true });
+        openFolder(dir);
+        return json(res, 200, { ok: true, dir });
+      }
+      if (req.method === "GET" && url.pathname === "/api/since") {
+        const from = url.searchParams.get("from");
+        return json(res, 200, sinceReport(log, order.state(), from ? Number(from) : undefined));
+      }
+      if (req.method === "POST" && url.pathname === "/api/presence") {
+        // The Bridge says "seen up to here" as you leave it; the next "since you left" starts there.
+        const body = await readJson(req);
+        const eventId = Number(body.eventId);
+        const prev = lastSeen(log);
+        if (Number.isFinite(eventId) && eventId > (prev?.eventId ?? 0)) log.append("bridge.seen", { eventId });
+        return json(res, 200, { ok: true });
+      }
       if (req.method === "GET" && url.pathname === "/api/signals") {
         const q = url.searchParams.get("q");
         return json(res, 200, q ? log.searchSignals(q) : listSignals(log));
@@ -60,17 +134,20 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (!prompt) return json(res, 400, { error: "prompt is required" });
         // The Overseer is an agent like the others: its prompt, model and cap live in the Agent Bay.
         const o = bay.crewFor("overseer")[0];
+        // The Overseer reads a live status digest first, so it answers about this factory, not in general.
+        const digest = statusDigest(log, order.state(), runtime.name);
         const run = await runAgent(log, runtime, o.id, {
-          prompt,
+          prompt: `Status of the factory right now:\n${digest}\n\nThe person says:\n${prompt}`,
           model: body.model ? String(body.model) : o.model,
           systemPrompt: o.role,
           budgetUsd: typeof body.budgetUsd === "number" ? body.budgetUsd : Math.min(budgetUsd, o.budgetUsd),
           pluginDirs: o.pluginDirs.length ? o.pluginDirs : undefined,
         }, { agentVersion: o.version, station: "overseer" });
-        return json(res, run.error ? 502 : 200, run);
+        return json(res, run.error ? 502 : 200, { ...run, suggestion: run.result ? buildSuggestion(run.result.text).build : undefined });
       }
       if (req.method === "POST" && url.pathname === "/api/factory/runs") {
         const body = await readJson(req);
+        if (!gitReady()) return json(res, 409, { error: "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again." });
         const run = factory.start(String(body.idea ?? ""), {
           maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined,
           autoApprove: body.autoApprove === true,
@@ -114,7 +191,23 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 400, { error: (e as Error).message });
     }
   };
-  return Object.assign(handler, { factory, order, bay });
+  return Object.assign(handler, { factory, order, bay, drop });
+}
+
+/** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
+export function readSettings(log: EventLog): { crewMode?: CrewMode; dropDir?: string } {
+  const rows = log.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
+  return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]));
+}
+
+/** Show a folder in the system file manager (Explorer on Windows). */
+export function openFolder(dir: string) {
+  const [cmd, args] = process.platform === "win32" ? ["explorer.exe", [dir]] : process.platform === "darwin" ? ["open", [dir]] : ["xdg-open", [dir]];
+  try {
+    const child = spawn(cmd, args as string[], { detached: true, stdio: "ignore", windowsHide: false });
+    child.on("error", () => {});
+    child.unref();
+  } catch { /* no file manager here (a server, CI); the Bridge shows the path anyway */ }
 }
 
 /** The Agent Bay's API. Every write is an event, so the Bridge sees it on the stream. Status -1 = a plain-text file. */
@@ -188,15 +281,24 @@ if (isMain) {
   const dbPath = process.env.SF_DB ?? resolve(process.cwd(), ".sf-data/factory.db");
   if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
   const port = Number(process.env.SF_PORT ?? 4317);
-  const runtime = runtimeFromEnv();
-  const projectsDir = process.env.SF_PROJECTS ?? resolve(dbPath === ":memory:" ? process.cwd() : dirname(dbPath), "projects");
+  const log = new EventLog(dbPath);
+  // Crew mode: what you last picked in the Bridge, else what the shell found (real when Claude Code is installed).
+  const picked = readSettings(log).crewMode;
+  const envMode: CrewMode = modeOf(runtimeFromEnv());
+  const mode = picked ?? envMode;
+  const runtime = new SwitchableRuntime(mode === "real" && process.env.SF_RUNTIME?.startsWith("claude-code") ? runtimeFromEnv() : runtimeFor(mode), mode);
+  const dataDir = dbPath === ":memory:" ? process.cwd() : dirname(dbPath);
+  const projectsDir = process.env.SF_PROJECTS ?? resolve(dataDir, "projects");
   const orderMode = process.env.SF_ORDER_MODE as "agent" | "heuristic" | undefined;
   const orderMax = process.env.SF_ORDER_MAX_USD ? Number(process.env.SF_ORDER_MAX_USD) : undefined;
-  const core = createCore({ log: new EventLog(dbPath), runtime, projectsDir, order: { mode: orderMode, maxUsd: orderMax } });
+  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir: process.env.SF_DROP, order: { mode: orderMode, maxUsd: orderMax } });
+  core.drop.start();
   const server = createServer(core);
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.
   const { order } = core;
   const sweepIfDue = () => {
+    // Nothing filed yet (a first launch): no briefing, the welcome speaks instead.
+    if (!order.state().fragments.length) return;
     const last = order.state().briefings.at(-1);
     if (!last || Date.now() - Date.parse(last.ts) >= 86_400_000) order.sweep();
   };

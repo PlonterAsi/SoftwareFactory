@@ -112,6 +112,7 @@ export function syntaxErrors(root: string, paths: string[]): string[] {
 
 export function git(root: string, ...args: string[]): string {
   const r = spawnSync("git", ["-c", "user.name=SoftwareFactory", "-c", "user.email=factory@softwarefactory.local", "-c", "commit.gpgsign=false", ...args], { cwd: root, encoding: "utf8", windowsHide: true });
+  if (r.error && (r.error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("Git is not installed (or not on PATH). Install Git for Windows from git-scm.com, then try again.");
   if (r.status !== 0) throw new Error(`git ${args[0]} failed: ${r.stderr || r.stdout}`);
   return r.stdout.trim();
 }

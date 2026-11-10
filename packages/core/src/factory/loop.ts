@@ -92,8 +92,10 @@ export class Factory {
     const text = idea.trim();
     if (!text) throw new Error("An idea needs some text");
     const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: opts.review !== false };
-    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, runtime: this.runtime.name, council: o.council, review: o.review });
-    const done = new Run(this, this.log, this.runtime, ev.id, text, o).go().finally(() => this.active.delete(ev.id));
+    // A run keeps the crew it started with, even if you switch Practice/Real meanwhile.
+    const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
+    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, runtime: runtime.name, council: o.council, review: o.review });
+    const done = new Run(this, this.log, runtime, ev.id, text, o).go().finally(() => this.active.delete(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
   }

@@ -5,3 +5,4 @@ target/
 *.db-*
 .sf-data/
 src-tauri/gen/
+src-tauri/node/

@@ -123,10 +123,19 @@ export function useFactory() {
   const [events, setEvents] = useState<SfEvent[]>([]);
   const [online, setOnline] = useState(false);
   const [runtime, setRuntime] = useState<string>("…");
+  const [mode, setMode] = useState<CrewMode | null>(null);
+  const settingsAt = events.filter((e) => e.type === "settings.changed").at(-1)?.id ?? 0;
+
+  // Which crew is working: asked again whenever the core reconnects or a setting changes.
+  useEffect(() => {
+    if (!online) return;
+    let closed = false;
+    fetch(`${API}/api/health`).then((r) => r.json()).then((h) => { if (!closed) { setRuntime(h.runtime); setMode(h.mode ?? (h.runtime === "mock" ? "practice" : "real")); } }).catch(() => {});
+    return () => { closed = true; };
+  }, [online, settingsAt]);
 
   useEffect(() => {
     let closed = false;
-    fetch(`${API}/api/health`).then((r) => r.json()).then((h) => !closed && setRuntime(h.runtime)).catch(() => {});
     const es = new EventSource(`${API}/api/events`);
     es.onopen = () => setOnline(true);
     es.onerror = () => setOnline(false);
@@ -158,7 +167,7 @@ export function useFactory() {
 
   const factoryRuns = useMemo(() => foldRuns(events), [events]);
   const totalUsd = runs.reduce((s, r) => s + (r.costUsd ?? 0), 0);
-  return { events, signals, runs, factoryRuns, online, runtime, totalUsd };
+  return { events, signals, runs, factoryRuns, online, runtime, mode, totalUsd };
 }
 
 // ---- Order Engine (milestone 3) ----
@@ -283,4 +292,40 @@ export function useBay(events: SfEvent[]) {
     return () => { stop = true; clearTimeout(t); };
   }, [lastId]);
   return state;
+}
+
+// ---- Setup, drop folder, "since you left" (milestone 5) ----
+
+export type CrewMode = "practice" | "real";
+export interface ToolCheck { found: boolean; path?: string; version?: string; hint: string }
+export interface DropView { id: number; ts: string; file: string; bytes: number; signalId: number | null; status: "filed" | "skipped"; note?: string }
+export interface SetupView {
+  mode: CrewMode; runtime: string; node: { version: string; ok: boolean; path: string }; claude: ToolCheck; git: ToolCheck;
+  realReady: boolean; blocker?: string; paths: { data: string; projects: string; drop: string }; drops: DropView[];
+}
+export interface SinceView { fromEvent: number; toEvent: number; leftAt: string | null; awayMinutes: number; lines: { kind: string; text: string; ref?: number }[] }
+
+export const setupApi = {
+  get: async (fresh = false) => (await fetch(`${API}/api/setup${fresh ? "?fresh=1" : ""}`)).json() as Promise<SetupView>,
+  mode: (mode: CrewMode) => post(`/api/setup/mode`, { mode }) as Promise<SetupView>,
+  drop: (dir: string) => post(`/api/setup/drop`, { dir }) as Promise<{ dir: string }>,
+  scanDrop: () => post(`/api/setup/drop/scan`) as Promise<{ drops: DropView[] }>,
+  open: (target: "projects" | "drop" | "data" | "run", run?: number) => post(`/api/open`, { target, run }) as Promise<{ dir: string }>,
+  since: async () => (await fetch(`${API}/api/since`)).json() as Promise<SinceView>,
+  // keepalive: this is sent as the window hides or closes.
+  seen: (eventId: number) => fetch(`${API}/api/presence`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ eventId }), keepalive: true }).catch(() => {}),
+};
+
+/** The desktop shell's own commands (core process status, restart). Absent in a plain browser. */
+export async function shell<T>(cmd: string): Promise<T | null> {
+  const t = (window as unknown as { __TAURI_INTERNALS__?: { invoke: (c: string, a?: unknown) => Promise<T> } }).__TAURI_INTERNALS__;
+  if (!t) return null;
+  try { return await t.invoke(cmd); } catch { return null; }
+}
+export interface CoreStatus { running: boolean; error: string | null; node: string; entry: string; log: string; logTail: string; dataDir: string; bundledNode: boolean }
+
+/** The Overseer may end a reply with "BUILD: <idea>"; that line becomes a Build button. */
+export function splitBuild(text: string): { text: string; build?: string } {
+  const m = text.match(/^\s*BUILD:\s*(.+?)\s*$/m);
+  return m ? { text: text.replace(m[0], "").trim(), build: m[1] } : { text };
 }

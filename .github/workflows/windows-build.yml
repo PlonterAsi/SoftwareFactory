@@ -41,8 +41,21 @@ jobs:
 
       - run: npm test
 
+      # Ship Node.js inside the app, so a fresh PC needs nothing else installed.
+      # The same node.exe that just ran the tests, with its MIT license next to it.
+      - name: Bundle Node.js
+        shell: pwsh
+        run: |
+          $node = (Get-Command node).Source
+          New-Item -ItemType Directory -Force src-tauri/node | Out-Null
+          Copy-Item $node src-tauri/node/node.exe
+          $lic = Join-Path (Split-Path $node) "LICENSE"
+          if (Test-Path $lic) { Copy-Item $lic src-tauri/node/LICENSE } else { Invoke-WebRequest "https://raw.githubusercontent.com/nodejs/node/v$((node -p 'process.versions.node'))/LICENSE" -OutFile src-tauri/node/LICENSE }
+          node -p "'bundled node ' + process.version"
+
       # Runs `npm run build` first (beforeBuildCommand), then compiles and bundles.
-      - run: npx tauri build
+      # tauri.ship-node.json adds the bundled Node.js to the installer's resources.
+      - run: npx tauri build --config src-tauri/tauri.ship-node.json
 
       - name: Collect installers under stable names
         shell: pwsh
@@ -56,6 +69,8 @@ jobs:
           Copy-Item src-tauri/target/release/softwarefactory.exe portable/SoftwareFactory/SoftwareFactory.exe
           Copy-Item -Recurse packages/core/dist/* portable/SoftwareFactory/core/
           Copy-Item packages/core/package.json portable/SoftwareFactory/core/
+          New-Item -ItemType Directory -Force portable/SoftwareFactory/node | Out-Null
+          Copy-Item src-tauri/node/* portable/SoftwareFactory/node/
           Compress-Archive -Path portable/SoftwareFactory -DestinationPath out/SoftwareFactory-portable.zip
           Get-ChildItem out | Format-Table Name, Length
 
@@ -70,6 +85,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes="Windows build of main at ${GITHUB_SHA::7} ($(date -u +%Y-%m-%d)). Needs Node 22+ installed. Unsigned: Windows SmartScreen will warn, choose More info, then Run anyway."
+          notes="Windows build of main at ${GITHUB_SHA::7} ($(date -u +%Y-%m-%d)). Ships its own Node.js. For real agents install Claude Code and sign in; Git is needed to ship apps. Unsigned: Windows SmartScreen will warn, choose More info, then Run anyway."
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest out/* --title "SoftwareFactory (latest main)" --notes "$notes" --prerelease --target "$GITHUB_SHA"
