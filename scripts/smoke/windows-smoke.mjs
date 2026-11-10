@@ -215,13 +215,15 @@ console.log("seeded", db);
     const r = (await api(`/api/factory/runs/${run2}`)).body;
     return r.station && ["tests", "build"].includes(r.station.station) && r.station.state === "active" ? r.station.station : null;
   }, 120_000, 100);
-  must("run 2 got going", cutAt, "never reached tests/build");
+  must("run 2 got going", cutAt, cutAt ? `cut at ${cutAt}` : "never reached tests/build");
   const k = kill(app.child.pid, true);
   log("killed the app at", cutAt, k.stdout.trim());
-  check("the app and its core stop when killed", await waitDown(20_000), "the core still answers after taskkill /T /F");
+  const killedDown = await waitDown(20_000);
+  check("the app and its core stop when killed", killedDown, killedDown ? "" : "the core still answers after taskkill /T /F");
   saveLogs("killed");
   launch(exe, "installed-again");
-  must("the app starts again", await until("the core to answer again", health, 120_000, 1000), readTail(join(DATA, "core.log")));
+  const again = await until("the core to answer again", health, 120_000, 1000);
+  must("the app starts again", again, again ? "" : readTail(join(DATA, "core.log")));
   await waitBridge(60_000);
   const fin2 = await waitRun(run2, 240_000);
   saveLogs("resumed");
@@ -230,11 +232,25 @@ console.log("seeded", db);
 
   // ---------- 7. a normal close takes the core with it ----------
   const pid = app.child.pid;
-  kill(pid, false);
-  const down = await waitDown(30_000);
-  check("closing the window stops the core", down, "the core outlived the window");
+  const corePid = (await health())?.pid;
+  const closed = ps(`$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { [void]$p.CloseMainWindow(); 'sent' } else { 'gone' }`);
+  log("asked the window to close:", closed.stdout.trim(), closed.stderr.trim());
+  const appGone = await until("the app to exit", async () => !alive(pid), 30_000, 300);
+  check("closing the window exits the app", appGone, `app pid ${pid} still running`);
+  const down = await waitDown(15_000);
+  check("closing the window stops the core", down, `core pid ${corePid} still answers${alive(corePid) ? " (process alive)" : ""}`);
   if (!down) { kill(pid, true); spawnSync("taskkill", ["/IM", "node.exe", "/F"]); await waitDown(10_000); }
   saveLogs("closed");
+
+  // ---------- 7b. the shell killed alone (crash, Task Manager): the core must not linger ----------
+  launch(exe, "installed-orphan-check");
+  const h3 = await until("the core to answer", health, 120_000, 1000);
+  if (h3) {
+    spawnSync("taskkill", ["/PID", String(app.child.pid), "/F"]);
+    const gone = await waitDown(15_000);
+    check("the core exits when the app is killed alone (no orphan on port 4317)", gone, `core pid ${h3.pid} ${alive(h3.pid) ? "still running" : "gone but port busy"}`);
+    if (!gone && h3.pid) { spawnSync("taskkill", ["/PID", String(h3.pid), "/F"]); await waitDown(10_000); }
+  }
 
   // ---------- 8. portable zip ----------
   if (args.portable) {
@@ -252,10 +268,17 @@ console.log("seeded", db);
     check("the portable app reopens the same database without another upgrade", pst && pst.schemaVersion === pst.latestSchema && pst.backups.length === backups, `${pst?.backups.length} backups, was ${backups}`);
     check("the portable Bridge window reached the core", await waitBridge(60_000), "");
     screenshot("4-portable");
-    kill(app.child.pid, false);
-    if (!(await waitDown(30_000))) { kill(app.child.pid, true); await waitDown(10_000); }
+    ps(`$p = Get-Process -Id ${app.child.pid} -ErrorAction SilentlyContinue; if ($p) { [void]$p.CloseMainWindow() }`);
+    check("closing the portable app stops its core", await waitDown(30_000), "the core outlived the window");
+    kill(app.child.pid, true);
+    await waitDown(10_000);
     saveLogs("portable");
   }
+}
+
+function alive(pid) {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
 }
 
 function readTail(p) {

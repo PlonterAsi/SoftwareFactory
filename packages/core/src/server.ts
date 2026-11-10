@@ -342,5 +342,18 @@ if (isMain) {
     if (!checkGit().found) console.log("Not resuming interrupted runs: Git is not installed.");
     else for (const id of core.factory.resumeInterrupted()) console.log(`Resumed run #${id} where it left off`);
   }
+  // Started by the desktop shell: leave with it. Polling is cheap and works on every OS,
+  // including when the shell is killed outright and cannot stop its child.
+  const parent = Number(process.env.SF_PARENT_PID);
+  if (parent > 0) {
+    setInterval(() => {
+      try { process.kill(parent, 0); } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "EPERM") return; // alive, just not ours to signal
+        console.log(`The app (pid ${parent}) is gone; the core stops too.`);
+        try { log.close(); } catch { /* already closed */ }
+        process.exit(0);
+      }
+    }, 1000).unref();
+  }
   server.listen(port, "127.0.0.1", () => console.log(`SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, db ${dbPath})`));
 }
