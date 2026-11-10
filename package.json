@@ -1,0 +1,22 @@
+{
+  "name": "softwarefactory",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SoftwareFactory: loop-engineered software factory with an AI crew. Milestone 1: skeleton and agent runtime spike.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @sf/core & npm run dev -w @sf/bridge",
+    "build": "npm run build -w @sf/core && npm run build -w @sf/bridge",
+    "test": "npm test -w @sf/core",
+    "typecheck": "npm run typecheck -w @sf/core && npm run typecheck -w @sf/bridge",
+    "spike": "npm run spike -w @sf/core",
+    "app": "npm run build -w @sf/core && tauri dev",
+    "app:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}
