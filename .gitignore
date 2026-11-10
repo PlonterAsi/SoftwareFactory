@@ -1,0 +1,7 @@
+node_modules/
+dist/
+target/
+*.db
+*.db-*
+.sf-data/
+src-tauri/gen/
