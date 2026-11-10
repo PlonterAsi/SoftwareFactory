@@ -14,7 +14,8 @@ describe("agent output parsing", () => {
   });
 
   it("accepts the closing tags models get wrong", () => {
-    expect(parseFileBlocks("<<<FILE a.js\nx();\n</FILE>>>\n<<<FILE b.js\ny();\n</FILE>").map((f) => f.content)).toEqual(["x();\n", "y();\n"]);
+    const text = "<<<FILE a.js\nx();\n</FILE>>>\n<<<FILE b.js\ny();\n</FILE>\n<<<FILE c.js\nz();\n>>>FILE\n<<<FILE d.js\nw();\n<<<FILE e.js\nv();";
+    expect(parseFileBlocks(text).map((f) => [f.path, f.content])).toEqual([["a.js", "x();\n"], ["b.js", "y();\n"], ["c.js", "z();\n"], ["d.js", "w();\n"], ["e.js", "v();\n"]]);
   });
 
   it("reads a fenced json block", () => {

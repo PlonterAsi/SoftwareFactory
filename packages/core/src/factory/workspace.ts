@@ -6,18 +6,33 @@ import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
 
 export interface FileBlock { path: string; content: string }
 
-/** Pull `<<<FILE path ... FILE>>>` blocks out of an agent's answer. */
+/**
+ * Pull `<<<FILE path ... FILE>>>` blocks out of an agent's answer.
+ * Models vary the closing tag ("FILE>>>", "</FILE>>>", "</FILE>", ">>>FILE"),
+ * so any line made of FILE plus angle brackets closes a block, and so does the
+ * next opening tag or the end of the answer.
+ */
 export function parseFileBlocks(text: string): FileBlock[] {
   const out: FileBlock[] = [];
-    // Models sometimes close with "</FILE>>>" or "</FILE>"; accept those too.
-  const re = /<<<FILE[ \t]+([^\n]+)\n([\s\S]*?)\n?(?:<\/FILE>{0,3}|FILE>>>)/g;
-  for (const m of text.matchAll(re)) {
-    let content = m[2];
+  const OPEN = /^\s*<<<\s*FILE[ \t]+(.+?)\s*$/;
+  const CLOSE = /^\s*(?:<\/)?(?:>>>|<<<)?\s*\/?FILE\s*(?:>>>|>)?\s*$/;
+  let cur: { path: string; lines: string[] } | null = null;
+  const flush = () => {
+    if (!cur) return;
+    let content = cur.lines.join("\n");
     // Agents sometimes wrap the content in a code fence; drop it.
     const fenced = content.match(/^```[\w-]*\n([\s\S]*?)\n```\s*$/);
     if (fenced) content = fenced[1];
-    out.push({ path: m[1].trim().replace(/^`|`$/g, ""), content: content.endsWith("\n") ? content : content + "\n" });
+    if (content.trim()) out.push({ path: cur.path.replace(/^`|`$/g, ""), content: content.endsWith("\n") ? content : content + "\n" });
+    cur = null;
+  };
+  for (const line of text.split("\n")) {
+    const open = line.match(OPEN);
+    if (open) { flush(); cur = { path: open[1], lines: [] }; continue; }
+    if (cur && CLOSE.test(line)) { flush(); continue; }
+    if (cur) cur.lines.push(line);
   }
+  flush();
   return out;
 }
 
