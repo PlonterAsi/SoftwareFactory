@@ -7,3 +7,7 @@ export * from "./factory/crew.js";
 export * from "./factory/loop.js";
 export * from "./factory/workspace.js";
 export * from "./factory/visualize.js";
+export * from "./order/text.js";
+export * from "./order/model.js";
+export * from "./order/archivist.js";
+export * from "./order/engine.js";

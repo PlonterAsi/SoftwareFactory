@@ -16,6 +16,8 @@ SoftwareFactory rule: **nothing exists only as text.** If it runs, thinks, costs
 
 In the factory loop the check is code: `packages/core/src/factory/visualize.ts` runs after every station and appends a `factory.visual` event. A station with a missing visual is marked incomplete and escalates; the Bridge's run deck lists every check.
 
+In the Order Engine the same check runs for every Signal it files (`packages/core/src/order/engine.ts`, `visualCheck`): each new node has a body on the star map, each filed fragment a particle to its node, each tray fragment an asteroid, each touched Canon a constellation, each conflict a red link and a card. It appends an `order.visual` event; the Order deck's Visuals tab lists them.
+
 ## What to check
 
 For each thing the station produced, confirm a visual exists and is fed from the event log, so it stays live:

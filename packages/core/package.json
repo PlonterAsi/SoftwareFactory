@@ -12,7 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "spike": "tsx src/spike.ts",
-    "factory": "tsx src/factory-cli.ts"
+    "factory": "tsx src/factory-cli.ts",
+    "order": "tsx src/order-cli.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

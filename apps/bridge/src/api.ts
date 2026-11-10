@@ -150,3 +150,80 @@ export function useFactory() {
   const totalUsd = runs.reduce((s, r) => s + (r.costUsd ?? 0), 0);
   return { events, signals, runs, factoryRuns, online, runtime, totalUsd };
 }
+
+// ---- Order Engine (milestone 3) ----
+
+export type FragmentKind = "idea" | "rule" | "decision" | "question" | "task" | "note" | "noise";
+export interface OrderNode { id: number; kind: "project" | "idea" | "thread"; title: string; parentId: number | null; createdAt: string; signalId: number | null; by: string; mergedInto?: number; lastActive: string }
+export interface Fragment {
+  id: number; signalId: number; ts: string; text: string; kind: FragmentKind; nodeId: number | null; suggestedNodeId: number | null;
+  confidence: number; important: boolean; pinned: boolean; origin: "explicit" | "inferred"; by: string; state: "live" | "superseded" | "faded"; supersededBy?: number; lastTouched: string;
+}
+export interface Conflict {
+  id: number; ts: string; a: number; b: number; nodeId: number | null; reason: string; detectedBy: string; status: "open" | "resolved";
+  winner?: number; loser?: number; rule?: string; effect?: string; by?: string; proposal?: { winner: number; rule: string; why: string };
+}
+export interface SweepItem { id: number; ts: string; action: "fade" | "raise" | "digest" | "merge-proposal" | "merge"; fragmentId?: number; nodeId?: number; intoNodeId?: number; summary?: string; reason: string; undone: boolean }
+export interface OrderState {
+  nodes: OrderNode[]; fragments: Fragment[]; conflicts: Conflict[]; sweeps: SweepItem[];
+  ingests: { signalId: number; ts: string; mode: string; state: string; costUsd: number; fragments: number[]; note?: string }[];
+  briefings: { id: number; ts: string; lines: { kind: string; text: string; ref?: number }[] }[];
+  visuals: { id: number; signalId: number | null; scope: string; pass: boolean; items: string[]; missing: string[] }[];
+  signals: Record<number, { ts: string; text: string; source: string }>;
+  canon: Record<number, { id: number; inheritedFrom: number | null; rank: number }[]>;
+  spentUsd: number; mode: string; maxUsd: number;
+}
+
+const EMPTY: OrderState = { nodes: [], fragments: [], conflicts: [], sweeps: [], ingests: [], briefings: [], visuals: [], signals: {}, canon: {}, spentUsd: 0, mode: "…", maxUsd: 0 };
+
+async function post(path: string, body: unknown = {}) {
+  const r = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? "request failed");
+  return j;
+}
+
+export const orderApi = {
+  move: (fragmentId: number, nodeId: number | null) => post(`/api/order/fragments/${fragmentId}/move`, { nodeId }),
+  pin: (fragmentId: number, pinned: boolean) => post(`/api/order/fragments/${fragmentId}/pin`, { pinned }),
+  resolve: (conflictId: number, winner: number) => post(`/api/order/conflicts/${conflictId}/resolve`, { winner }),
+  sweep: () => post(`/api/order/sweep`),
+  undo: (sweepId: number) => post(`/api/order/sweeps/${sweepId}/undo`),
+  acceptMerge: (sweepId: number) => post(`/api/order/sweeps/${sweepId}/accept`),
+  createNode: (kind: string, title: string, parentId: number | null) => post(`/api/order/nodes`, { kind, title, parentId }),
+};
+
+/**
+ * The Order Engine's state is folded from the same event log by the core.
+ * Refetch whenever an order event arrives; remember when each fragment
+ * arrived so the star map can fly it in as a particle.
+ */
+export function useOrder(events: SfEvent[]) {
+  const [state, setState] = useState<OrderState>(EMPTY);
+  const [arrivals, setArrivals] = useState<Record<number, number>>({});
+  const orderEvents = events.filter((e) => e.type.startsWith("order."));
+  const lastId = orderEvents.at(-1)?.id ?? 0;
+  const firstLoad = useMemo(() => ({ done: false }), []);
+  useEffect(() => {
+    let stop = false;
+    const t = setTimeout(() => {
+      fetch(`${API}/api/order/state`).then((r) => r.json()).then((s: OrderState) => {
+        if (stop) return;
+        setState(s);
+        if (firstLoad.done) {
+          const now = Date.now();
+          setArrivals((prev) => {
+            const next = { ...prev };
+            for (const f of s.fragments) if (!(f.id in next)) next[f.id] = now;
+            return next;
+          });
+        } else {
+          firstLoad.done = true;
+          setArrivals(Object.fromEntries(s.fragments.map((f) => [f.id, 0])));
+        }
+      }).catch(() => {});
+    }, 120);
+    return () => { stop = true; clearTimeout(t); };
+  }, [lastId, firstLoad]);
+  return { ...state, arrivals };
+}
