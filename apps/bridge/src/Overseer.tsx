@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
-import { askOverseer, captureSignal, type AgentRunView, type Signal } from "./api";
+import { askOverseer, captureSignal, startFactoryRun, type AgentRunView, type FactoryRunView, type Signal } from "./api";
 
-type Item = { key: string; ts: string; kind: "signal" | "reply" | "error"; text: string; meta?: string };
+type Item = { key: string; ts: string; kind: "signal" | "reply" | "error" | "factory"; text: string; meta?: string };
 
 /** The one voice you talk to. Every message is saved as a Signal first; asking also runs the Overseer agent. */
-export function Overseer({ signals, runs }: { signals: Signal[]; runs: AgentRunView[] }) {
+export function Overseer({ signals, runs, factoryRuns, onRunStarted }: { signals: Signal[]; runs: AgentRunView[]; factoryRuns: FactoryRunView[]; onRunStarted: (run: number) => void }) {
   const [text, setText] = useState("");
   const [model, setModel] = useState("haiku");
   const [busy, setBusy] = useState(false);
@@ -12,8 +12,13 @@ export function Overseer({ signals, runs }: { signals: Signal[]; runs: AgentRunV
   const feedRef = useRef<HTMLDivElement>(null);
 
   const items: Item[] = [
-    ...signals.map((s) => ({ key: "s" + s.id, ts: s.ts, kind: "signal" as const, text: s.text })),
-    ...runs.filter((r) => r.state !== "running").map((r) => ({
+    ...signals.filter((s) => s.source !== "factory").map((s) => ({ key: "s" + s.id, ts: s.ts, kind: "signal" as const, text: s.text })),
+    ...factoryRuns.map((r) => ({ key: "f" + r.run, ts: r.startedAt, kind: "signal" as const, text: r.idea, meta: `factory run #${r.run}` })),
+    ...factoryRuns.filter((r) => r.finished).map((r) => ({
+      key: "fd" + r.run, ts: r.startedAt + "~", kind: (r.finished!.outcome === "shipped" ? "factory" : "error") as Item["kind"],
+      text: r.finished!.reason, meta: r.finished!.totalUsd != null ? `run #${r.run} · $${r.finished!.totalUsd.toFixed(4)} · ${r.finished!.agentCalls ?? 0} agent calls · ${r.fixRounds} fix rounds` : undefined,
+    })),
+    ...runs.filter((r) => r.state !== "running" && !r.factoryRun).map((r) => ({
       key: "r" + r.runId,
       ts: r.startedAt,
       kind: r.state === "failed" ? ("error" as const) : ("reply" as const),
@@ -24,6 +29,22 @@ export function Overseer({ signals, runs }: { signals: Signal[]; runs: AgentRunV
 
   // Keep the newest message in view.
   useEffect(() => { feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight }); }, [items.length]);
+
+  async function build(e: MouseEvent) {
+    e.preventDefault();
+    const t = text.trim();
+    if (!t || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      onRunStarted(await startFactoryRun(t));
+      setText("");
+    } catch (x) {
+      setErr((x as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(e: FormEvent | KeyboardEvent | MouseEvent, ask: boolean) {
     e.preventDefault();
@@ -69,7 +90,8 @@ export function Overseer({ signals, runs }: { signals: Signal[]; runs: AgentRunV
             <option value="opus">Opus</option>
           </select>
           <button type="button" className="ghost" disabled={busy || !text.trim()} onClick={(e) => submit(e, false)}>Capture</button>
-          <button type="submit" disabled={busy || !text.trim()}>Ask Overseer</button>
+          <button type="submit" className="ghost" disabled={busy || !text.trim()}>Ask Overseer</button>
+          <button type="button" disabled={busy || !text.trim()} onClick={build} title="Run the factory loop: plan, tests, build, fix, with two approval taps">Build it</button>
         </div>
         {err && <div className="err">{err}</div>}
       </form>

@@ -10,7 +10,17 @@ export type EventType =
   | "signal.captured"
   | "agent.run.started"
   | "agent.run.completed"
-  | "agent.run.failed";
+  | "agent.run.failed"
+  | "factory.run.started"
+  | "factory.run.finished"
+  | "factory.station"
+  | "factory.plan"
+  | "factory.files"
+  | "factory.tests"
+  | "factory.tests.locked"
+  | "factory.gate"
+  | "factory.visual"
+  | "factory.budget";
 
 export interface SfEvent<P = unknown> {
   id: number;
