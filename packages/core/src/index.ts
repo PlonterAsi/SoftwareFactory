@@ -25,3 +25,7 @@ export * from "./setup.js";
 export * from "./bridge/tables.js";
 export * from "./bridge/drop.js";
 export * from "./bridge/status.js";
+export * from "./projects/model.js";
+export * from "./projects/tables.js";
+export * from "./projects/service.js";
+export * from "./projects/routes.js";
