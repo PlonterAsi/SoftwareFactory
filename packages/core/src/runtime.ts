@@ -14,6 +14,8 @@ export interface AgentRequest {
   budgetUsd?: number;
   /** Plugin folders to load (your installed Claude Code plugins). */
   pluginDirs?: string[];
+  /** Tools the agent may use. Empty or absent in the lean profile: none (the agent answers in text). */
+  tools?: string[];
 }
 
 export interface AgentResult {
@@ -70,7 +72,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     if (req.budgetUsd !== undefined) args.push("--max-budget-usd", String(req.budgetUsd));
     if (req.systemPrompt) args.push("--append-system-prompt", req.systemPrompt);
     for (const dir of req.pluginDirs ?? []) args.push("--plugin-dir", dir);
-    if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", "");
+    if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", (req.tools ?? []).join(","));
+    else if (req.tools?.length) args.push("--tools", req.tools.join(","));
     return args;
   }
 
@@ -124,17 +127,35 @@ export class MockRuntime implements AgentRuntime {
     this.calls.push(req);
     if (this.opts.delayMs) await new Promise((r) => setTimeout(r, this.opts.delayMs));
     const role = req.systemPrompt ?? "";
-    const builds = this.calls.filter((c) => c.systemPrompt?.includes("You are the Builder")).length;
+    // Any agent can work any station: the station contract says which canned answer fits.
+    const station = role.match(/Station contract: (\w+)/)?.[1]
+      ?? (role.includes("You are the Planner") ? "plan" : role.includes("You are the Tester") ? "tests" : role.includes("You are the Builder") ? "build" : role.includes("You are the Fixer") ? "fix" : "");
+    const isBuild = (c: AgentRequest) => /Station contract: build/.test(c.systemPrompt ?? "") || !!c.systemPrompt?.includes("You are the Builder");
+    const builds = this.calls.filter(isBuild).length;
     let text = `Overseer (mock) received: ${req.prompt.slice(0, 80)}`;
-    if (role.includes("You are the Planner")) text = MOCK.plan;
-    else if (role.includes("You are the Tester")) text = MOCK.tests;
-    else if (role.includes("You are the Builder")) text = MOCK.build(this.opts.plantBug !== false && builds === 1);
-    else if (role.includes("You are the Fixer")) text = MOCK.build(false);
+    if (station === "plan") text = MOCK.plan;
+    else if (station === "tests") text = MOCK.tests;
+    else if (station === "build") text = MOCK.build(this.opts.plantBug !== false && builds === 1);
+    else if (station === "fix") text = MOCK.build(false);
+    else if (station === "council") text = MOCK.council(role);
+    else if (station === "review") text = MOCK.review;
+    else if (station === "order") text = MOCK.order(req.prompt);
     return { text, costUsd: role ? 0.0001 : 0, durationMs: this.opts.delayMs ?? 1, models: ["mock"], runtime: this.name, contextTokens: 0 };
   }
 }
 
 const MOCK = {
+  council: (role: string) => {
+    const seat = role.match(/You are the (\w+) on the SoftwareFactory Council/)?.[1] ?? "Seat";
+    const take = {
+      Visionary: { take: "Worth building: one command, instant answer.", proposals: ["read from a file or stdin", "print one number"], concerns: [], vote: "build", scope: "small" },
+      Architect: { take: "One pure function and a thin CLI.", proposals: ["pure countWords function in src", "read from a file or stdin"], concerns: ["unicode whitespace"], vote: "build", scope: "small" },
+      Skeptic: { take: "Fine if empty input is handled.", proposals: [], concerns: ["empty input must give 0", "unicode whitespace"], vote: "build", scope: "small" },
+    } as Record<string, unknown>;
+    return "```json\n" + JSON.stringify(take[seat] ?? { take: `${seat} agrees.`, proposals: [], concerns: [], vote: "build", scope: "small" }) + "\n```";
+  },
+  review: "```json\n" + JSON.stringify({ verdict: "pass", findings: [{ severity: "low", text: "README could show an example with a file argument" }] }) + "\n```",
+  order: (prompt: string) => "```json\n" + JSON.stringify({ nodes: [], fragments: [{ text: (prompt.match(/"""\n([\s\S]*?)\n"""/)?.[1] ?? prompt).slice(0, 200), kind: "note", important: false, node: null, confidence: 0.4, contradicts: [] }] }) + "\n```",
   plan: "```json\n" + JSON.stringify({
     name: "Word Counter", slug: "word-counter", summary: "Counts words in text from stdin or a file.",
     interface: "src/count.js exports countWords(text: string): number. bin/wc.js prints countWords of the file given as argv[2].",

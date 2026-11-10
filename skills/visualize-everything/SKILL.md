@@ -18,6 +18,8 @@ In the factory loop the check is code: `packages/core/src/factory/visualize.ts` 
 
 In the Order Engine the same check runs for every Signal it files (`packages/core/src/order/engine.ts`, `visualCheck`): each new node has a body on the star map, each filed fragment a particle to its node, each tray fragment an asteroid, each touched Canon a constellation, each conflict a red link and a card. It appends an `order.visual` event; the Order deck's Visuals tab lists them.
 
+In the Agent Bay the check runs after every change (`packages/core/src/bay/bay.ts`): each agent has a crew card (avatar, model, state, cost), each station its seats on the board, each test run a result card. It appends a `bay.visual` event. The Council and Review stations are checked like every factory station: the seats' takes around the table, the review's verdict card.
+
 ## What to check
 
 For each thing the station produced, confirm a visual exists and is fed from the event log, so it stays live:

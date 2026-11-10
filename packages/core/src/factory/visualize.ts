@@ -18,13 +18,22 @@ export function visualCheck(log: EventLog, run: number, station: StationId, roun
 
   need(`${station}: box on the factory floor`, of("factory.station", (p) => p.station === station && p.state === "active").length > 0);
 
-  const agentStation = ({ plan: "plan", tests: "tests", build: "build", fix: "fix" } as Record<string, string>)[station];
+  const agentStation = ({ council: "council", plan: "plan", tests: "tests", build: "build", fix: "fix", review: "review" } as Record<string, string>)[station];
   if (agentStation) {
     const started = log.list({ type: "agent.run.started", sinceId: run - 1, limit: 1e6 }).filter((e) => (e.payload as any).factoryRun === run && (e.payload as any).station === agentStation);
-    const doneIds = new Set(log.list({ type: "agent.run.completed", sinceId: run - 1, limit: 1e6 }).map((e) => (e.payload as any).runId));
+    // A failed call is drawn too (a red pulse), so it counts as visualized.
+    const doneIds = new Set([...log.list({ type: "agent.run.completed", sinceId: run - 1, limit: 1e6 }), ...log.list({ type: "agent.run.failed", sinceId: run - 1, limit: 1e6 })].map((e) => (e.payload as any).runId));
     need(`${station}: agent calls as timeline pulses (${started.length})`, started.length > 0 && started.every((s) => doneIds.has(s.id)));
   }
   if (station === "intake") need("idea: star on the star map", log.list({ type: "signal.captured", sinceId: run - 1, limit: 1e6 }).some((e) => (e.payload as any).source === "factory"));
+  if (station === "council") {
+    const c = of("factory.council", sameRound).at(-1)?.payload as any;
+    need(`council: seats around the table (${c?.seats?.length ?? 0} takes, round ${round ?? 1})`, !!c?.seats?.length && !!c?.brief);
+  }
+  if (station === "review") {
+    const r = of("factory.review", sameRound).at(-1)?.payload as any;
+    need(`review: verdict card (${r ? `${r.verdict}, ${r.findings.length} findings` : "none"})`, !!r);
+  }
   if (station === "plan") {
     const plan = of("factory.plan").at(-1)?.payload as any;
     need(`plan: task graph (${plan?.plan?.tasks?.length ?? 0} tasks)`, !!plan?.plan?.tasks?.length);

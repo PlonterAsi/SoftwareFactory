@@ -9,8 +9,11 @@ import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { Factory, type GateId } from "./factory/loop.js";
 import { OrderEngine, type OrderOptions } from "./order/engine.js";
 import { canonFor, type NodeKind } from "./order/model.js";
+import { AgentBay } from "./bay/bay.js";
+import { SLOTS, type Slot } from "./bay/agentfile.js";
 import { storeReport } from "./store/inspect.js";
 
+/** The built-in Overseer's prompt with its station contract (the live one comes from the Agent Bay). */
 export const OVERSEER_ROLE =
   "You are the Overseer, the manager AI of SoftwareFactory. Answer in at most 3 short sentences. Be concrete.";
 
@@ -27,8 +30,9 @@ export interface CoreOptions {
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
 export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts }: CoreOptions) {
-  const factory = new Factory(log, runtime, projectsDir);
-  const order = new OrderEngine(log, runtime, orderOpts);
+  const bay = new AgentBay(log, runtime);
+  const factory = new Factory(log, runtime, projectsDir, bay);
+  const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
   log.on("event", (e: SfEvent) => {
     if (e.type !== "signal.captured") return;
@@ -54,12 +58,15 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const body = await readJson(req);
         const prompt = String(body.prompt ?? "").trim();
         if (!prompt) return json(res, 400, { error: "prompt is required" });
-        const run = await runAgent(log, runtime, String(body.agent ?? "overseer"), {
+        // The Overseer is an agent like the others: its prompt, model and cap live in the Agent Bay.
+        const o = bay.crewFor("overseer")[0];
+        const run = await runAgent(log, runtime, o.id, {
           prompt,
-          model: body.model ? String(body.model) : undefined,
-          systemPrompt: OVERSEER_ROLE,
-          budgetUsd: typeof body.budgetUsd === "number" ? body.budgetUsd : budgetUsd,
-        });
+          model: body.model ? String(body.model) : o.model,
+          systemPrompt: o.role,
+          budgetUsd: typeof body.budgetUsd === "number" ? body.budgetUsd : Math.min(budgetUsd, o.budgetUsd),
+          pluginDirs: o.pluginDirs.length ? o.pluginDirs : undefined,
+        }, { agentVersion: o.version, station: "overseer" });
         return json(res, run.error ? 502 : 200, run);
       }
       if (req.method === "POST" && url.pathname === "/api/factory/runs") {
@@ -68,6 +75,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
           maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined,
           autoApprove: body.autoApprove === true,
           models: typeof body.models === "object" && body.models ? body.models as Record<string, string> : undefined,
+          council: body.council === "always" || body.council === "never" ? body.council : undefined,
         });
         return json(res, 202, { run });
       }
@@ -78,6 +86,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         return json(res, ok ? 200 : 409, ok ? { ok } : { error: "That run is not waiting at that gate" });
       }
       if (req.method === "GET" && url.pathname === "/api/cost") return json(res, 200, costSummary(log));
+      if (url.pathname.startsWith("/api/bay/")) {
+        const r = await bayRoute(bay, req, url);
+        if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
+      }
       if (req.method === "GET" && url.pathname === "/api/store") return json(res, 200, storeReport(log, projectsDir));
       if (req.method === "POST" && url.pathname === "/api/store/rebuild") {
         const body = await readJson(req);
@@ -102,7 +114,34 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 400, { error: (e as Error).message });
     }
   };
-  return Object.assign(handler, { factory, order });
+  return Object.assign(handler, { factory, order, bay });
+}
+
+/** The Agent Bay's API. Every write is an event, so the Bridge sees it on the stream. Status -1 = a plain-text file. */
+async function bayRoute(bay: AgentBay, req: IncomingMessage, url: URL): Promise<[number, unknown] | null> {
+  const path = url.pathname;
+  if (req.method === "GET" && path === "/api/bay/state") return [200, bay.state()];
+  let m = path.match(/^\/api\/bay\/agents\/([a-z0-9-]+)\/file$/);
+  if (req.method === "GET" && m) { const v = url.searchParams.get("version"); return [-1, bay.file(m[1], v ? Number(v) : undefined)]; }
+  m = path.match(/^\/api\/bay\/agents\/([a-z0-9-]+)\/versions\/(\d+)$/);
+  if (req.method === "GET" && m) { const v = bay.version(m[1], Number(m[2])); return v ? [200, v] : [404, { error: "no such version" }]; }
+  if (req.method !== "POST") return null;
+  const body = await readJson(req);
+  if (path === "/api/bay/agents") return [201, bay.create(body as any)];
+  if (path === "/api/bay/import") return [201, bay.importFile(String(body.text ?? ""))];
+  if (path === "/api/bay/draft") return [201, await bay.draft(String(body.description ?? ""))];
+  m = path.match(/^\/api\/bay\/agents\/([a-z0-9-]+)\/(save|clone|rollback|retire|test)$/);
+  if (m) {
+    const [, id, verb] = m;
+    if (verb === "save") return [200, bay.save(id, (body.def ?? {}) as any, { note: body.note ? String(body.note) : undefined, expectVersion: typeof body.expectVersion === "number" ? body.expectVersion : undefined })];
+    if (verb === "clone") return [201, bay.clone(id, body.name ? String(body.name) : undefined)];
+    if (verb === "rollback") return [200, bay.rollback(id, Number(body.version))];
+    if (verb === "retire") { bay.retire(id, body.retired !== false); return [200, { ok: true }]; }
+    if (verb === "test") return [200, await bay.test(id, body.task ? String(body.task) : undefined)];
+  }
+  m = path.match(/^\/api\/bay\/slots\/([a-z]+)$/);
+  if (m && SLOTS.includes(m[1] as Slot)) return [200, bay.assign(m[1] as Slot, (Array.isArray(body.agents) ? body.agents : []).map(String))];
+  return null;
 }
 
 /** The Order Engine's API. Every write is an event, so the Bridge sees it on the stream. */
@@ -129,6 +168,10 @@ async function orderRoute(order: OrderEngine, req: IncomingMessage, path: string
 
 function send(res: ServerResponse, e: SfEvent) { res.write(`id: ${e.id}\ndata: ${JSON.stringify(e)}\n\n`); }
 function end(res: ServerResponse, status: number) { res.writeHead(status); res.end(); }
+function text(res: ServerResponse, status: number, body: string) {
+  res.writeHead(status, { "content-type": "text/markdown; charset=utf-8" });
+  res.end(body);
+}
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));

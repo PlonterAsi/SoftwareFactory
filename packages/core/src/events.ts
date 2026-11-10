@@ -43,6 +43,14 @@ export type EventType =
   | "order.ingest"
   | "order.briefing"
   | "order.visual"
+  | "factory.council"
+  | "factory.review"
+  | "agent.verdict"
+  | "bay.agent.saved"
+  | "bay.agent.retired"
+  | "bay.assign"
+  | "bay.test"
+  | "bay.visual"
   | "store.migrated"
   | "store.rebuilt";
 

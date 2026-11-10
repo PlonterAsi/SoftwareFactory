@@ -4,9 +4,31 @@ A loop-engineered software factory with an AI crew. Drop a messy idea in; an Ord
 
 Plan: [SoftwareFactory: MVP plan and tech stack](https://claude.ai/artifact/9vnEmBfz1VaSGaB1KKwh9H)
 
-![The Bridge, milestone 3: the Order Engine's star map, Canon and conflict check](docs/img/bridge-m3.png)
+![The Bridge, milestone 4: the Agent Bay, with the station board, crew cards and an agent's test runs](docs/img/bridge-m4-bay.png)
 
-## Status: milestone 3 (the Order Engine)
+## Status: milestone 4 (the Agent Bay and the Council)
+
+Agents are workers you create, edit, test and put on stations. Every factory run now goes:
+
+```
+idea → Council (3 seats, skipped for small jobs) → plan → [you approve plan] → tests (locked)
+     → build → test ⇄ fix → Review (⇄ fix once) → [you accept build] → ship
+```
+
+- **Agent Bay** (`packages/core/src/bay`, Bridge tab *Agent Bay*): the built-in crew (Overseer, Archivist, Visionary, Architect, Skeptic, Planner, Tester, Builder, Reviewer, Fixer) are ordinary agents. Each has a name, avatar, model, cap per call, plugins (each agent loads only these; none = lean), skills, tools, a sample task and a prompt.
+  - **Create** one by describing it in a line (the Overseer drafts it; free heuristics on the mock), clone one, or **import** an agent file. Agent files are Markdown with a header that mirrors Claude Code subagent files, so plonter-kit agents import as they are; any agent downloads as `.agent.md`.
+  - **Every save is a version**; the Versions tab shows the prompt diff and rolls back (the restore is a new version, nothing is lost).
+  - **Test** an agent on a sample task: one capped call, checked by the verifier of the station it was made for.
+  - **Assign** by dragging a crew card onto a station seat (or the seat's picker). The Council takes three seats. The factory asks the Bay at the moment a station needs a worker, so an edit applies to the next call, and each call records the agent version that did it.
+  - **Stats** per agent and per version: calls, cost, verifier pass rate, rounds per run, live state (idle, thinking, blocked) on the crew card.
+  - **Station contracts**: an agent's prompt says who it is; the core appends the output contract of the station it works. Any agent can work any station, and editing an agent can never break the format the core parses.
+- **Council** (`packages/core/src/factory/council.ts`): three seats answer the idea in parallel (take, proposals, concerns, vote build / reshape / drop). No build majority: each seat reads the others and answers again (round 2). Plain code merges the takes into a brief for the Planner (what two seats agree on, proposals, concerns). A majority "drop" asks you once; otherwise it never stops the run. Short single-ask ideas skip it (`council: auto|always|never`).
+- **Review**: after the locked tests pass, the Reviewer checks the code against the spec. High-severity findings go to the Fixer once; the rest ride to the build gate as notes.
+- **Bridge**: the Council box on the factory floor shows the votes, the run deck's Council tab draws the round table (seats coloured by vote, agreeing seats linked) with the brief and each take, and a Review tab shows the findings.
+- **Storage**: agents, versions, slots, tests, verdicts, Council sessions and reviews are tables in the database (`bay_*`, `agent_verdicts`, `council_*`, `reviews`), derived from the event log like the rest.
+- **First real run**: [docs/milestone-4-run.md](docs/milestone-4-run.md). The Council cost $0.0025 and turned "sum a CSV" into money in cents with every row accounted for; the CLI shipped for $0.29.
+
+## Milestone 3 (the Order Engine)
 
 Say anything, in any order, in the Overseer channel. Every Signal is filed:
 
@@ -78,7 +100,7 @@ npm run order -- examples/order/messy-chat.json --mode agent --max-usd 0.2 --db 
 SF_DB=.sf-data/demo.db npm run dev -w @sf/core   # then open the Bridge to see it
 
 # Run the factory loop headless (real, capped model calls; gates auto-approved)
-SF_RUNTIME=claude-code npm run factory -- "a CLI that renames photos by the date they were taken" --max-usd 1.5
+SF_RUNTIME=claude-code npm run factory -- "a CLI that renames photos by the date they were taken" --max-usd 1.5   # add --council always to seat the Council
 
 # Re-run the runtime cost spike (makes a few real, capped model calls)
 npm run spike

@@ -1,6 +1,7 @@
 import type { EventLog, EventType } from "../events.js";
 import type { AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
+import type { CrewSource } from "../factory/crew.js";
 import {
   canonFor, descendants, isCanonKind, lineage, precedence,
   type Conflict, type Fragment, type NodeKind, type OrderState,
@@ -24,6 +25,8 @@ export interface OrderOptions {
   /** A node with this many live fragments since its last digest gets a digest. */
   digestAt?: number;
   now?: () => Date;
+  /** Who works the order station (the Agent Bay); without it, the built-in Archivist prompt on `model`. */
+  crew?: CrewSource;
 }
 
 export interface IngestResult { signalId: number; mode: "agent" | "heuristic"; fragments: Fragment[]; conflicts: Conflict[]; costUsd: number; note?: string }
@@ -37,7 +40,7 @@ export interface IngestResult { signalId: number; mode: "agent" | "heuristic"; f
  * undone; nothing you said is ever deleted or rewritten.
  */
 export class OrderEngine {
-  readonly opts: Required<Omit<OrderOptions, "now">> & { now: () => Date };
+  readonly opts: Required<Omit<OrderOptions, "now" | "crew">> & { now: () => Date; crew?: CrewSource };
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private log: EventLog, private runtime: AgentRuntime | null, opts: OrderOptions = {}) {
@@ -50,6 +53,7 @@ export class OrderEngine {
       questionDays: opts.questionDays ?? 7,
       digestAt: opts.digestAt ?? 12,
       now: opts.now ?? (() => new Date()),
+      crew: opts.crew,
     };
     // An ingest cut off by a restart would show as "filing…" forever; close it honestly.
     for (const r of this.state().ingests) if (r.state === "started") this.emit("order.ingest", { signalId: r.signalId, mode: r.mode, state: "done", costUsd: r.costUsd, fragments: [], note: "The core restarted while this Signal was being filed. Re-file it from the Unsorted tray." });
@@ -90,14 +94,18 @@ export class OrderEngine {
     let costUsd = 0;
     if (mode === "agent" && this.runtime) {
       const st = this.state();
-      const run = await runAgent(this.log, this.runtime, "archivist", {
-        prompt: archivistPrompt(signal.text, st), systemPrompt: ARCHIVIST_ROLE, model: this.opts.model, budgetUsd: this.opts.perCallUsd,
-      }, { station: "order" });
+      const m = this.opts.crew?.crewFor("order")[0];
+      const run = await runAgent(this.log, this.runtime, m?.id ?? "archivist", {
+        prompt: archivistPrompt(signal.text, st), systemPrompt: m?.role ?? ARCHIVIST_ROLE, model: m?.model ?? this.opts.model,
+        budgetUsd: Math.min(this.opts.perCallUsd, m?.budgetUsd ?? Infinity), pluginDirs: m?.pluginDirs.length ? m.pluginDirs : undefined,
+      }, { station: "order", agentVersion: m?.version });
       costUsd = run.result?.costUsd ?? 0;
       try {
         if (run.error) throw new Error(run.error);
         plan = parseArchivistPlan(run.result!.text, this.state());
+        this.log.append("agent.verdict", { agent: m?.id ?? "archivist", version: m?.version ?? 0, station: "order", pass: true });
       } catch (e) {
+        this.log.append("agent.verdict", { agent: m?.id ?? "archivist", version: m?.version ?? 0, station: "order", pass: false, note: (e as Error).message.slice(0, 300) });
         note = `The Archivist's answer could not be used (${(e as Error).message.slice(0, 160)}), so heuristics filed this Signal.`;
         mode = "heuristic";
       }

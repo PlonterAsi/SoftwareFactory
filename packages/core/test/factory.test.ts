@@ -68,8 +68,8 @@ describe("factory loop", () => {
     await f.wait(run);
 
     const fin = events(log, "factory.run.finished").at(-1);
-    expect(fin).toMatchObject({ run, outcome: "shipped", fixRounds: 1, agentCalls: 4 });
-    expect(fin.totalUsd).toBeCloseTo(0.0004);
+    expect(fin).toMatchObject({ run, outcome: "shipped", fixRounds: 1, agentCalls: 5 });
+    expect(fin.totalUsd).toBeCloseTo(0.0005);
     expect(existsSync(join(fin.dir, "SPEC.md"))).toBe(true);
     expect(git(fin.dir, "tag")).toBe("v0.1.0");
     expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Fix round 1", "Build: Word Counter", "Acceptance tests (locked)", "Spec and plan: Word Counter"]);
@@ -78,7 +78,13 @@ describe("factory loop", () => {
     expect(tests.map((t) => [t.round, t.passed, t.failed])).toEqual([[0, 2, 1], [1, 3, 0]]);
     const visuals = events(log, "factory.visual");
     expect(visuals.every((v) => v.pass)).toBe(true);
-    expect(visuals.map((v) => v.station)).toEqual(["intake", "plan", "tests", "build", "test", "fix", "ship"]);
+    expect(visuals.map((v) => v.station)).toEqual(["intake", "plan", "tests", "build", "test", "fix", "review", "ship"]);
+    // A short, single-ask idea skips the Council; the Reviewer passes with a note for the build gate.
+    expect(events(log, "factory.station").find((s) => s.station === "council")).toMatchObject({ state: "skipped" });
+    expect(events(log, "factory.review")[0]).toMatchObject({ verdict: "pass", agent: "reviewer" });
+    expect(events(log, "factory.gate").find((g) => g.gate === "gateB")?.question).toContain("1 note");
+    // Every agent's work got a verdict: the builder's first build failed a test, the fix made it green.
+    expect(events(log, "agent.verdict").map((v) => [v.agent, v.pass])).toEqual([["planner", true], ["tester", true], ["builder", false], ["fixer", true], ["reviewer", true]]);
     expect(events(log, "factory.gate").filter((g) => g.state === "approved").map((g) => g.gate)).toEqual(["gateA", "gateB"]);
     expect(events(log, "agent.run.completed").every((a) => a.factoryRun === run)).toBe(true);
   });

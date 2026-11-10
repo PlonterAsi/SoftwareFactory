@@ -3,23 +3,29 @@ import type { EventLog } from "../events.js";
 import type { AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
-import { CREW, type CrewMember } from "./crew.js";
+import { builtinCrew, type CrewMember, type CrewSource } from "./crew.js";
+import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
+import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
 } from "./workspace.js";
 
 /**
- * The thin factory loop (milestone 2): one idea becomes a tested git repo.
+ * The factory loop: one idea becomes a tested git repo.
  *
- *   intake → plan → [gate A: approve plan] → tests (locked) → build → test ⇄ fix → [gate B: accept build] → ship
+ *   intake → council (3 seats, skipped for small jobs) → plan → [gate A: approve plan]
+ *     → tests (locked) → build → test ⇄ fix → review (⇄ fix once) → [gate B: accept build] → ship
+ *
+ * Workers come from a CrewSource (the Agent Bay), asked at the moment each
+ * station needs them, so an edit in the Bay applies to the next call.
  *
  * Each station is a loop with a goal, a worker, a verifier, exit criteria and
  * a budget; its sixth field, its visual, is enforced by visualCheck before the
  * station may pass. All state is written to the event log; the Bridge draws
  * from it.
  */
-export type StationId = "intake" | "plan" | "gateA" | "tests" | "build" | "test" | "fix" | "gateB" | "ship";
+export type StationId = "intake" | "council" | "plan" | "gateA" | "tests" | "build" | "test" | "fix" | "review" | "gateB" | "ship";
 export type GateId = "gateA" | "gateB" | "escalation";
 
 export interface Plan {
@@ -40,8 +46,22 @@ export interface RunOptions {
   autoApprove?: boolean;
   /** With autoApprove: how many failed-station or fix escalations to retry automatically. Budget escalations are never automatic. */
   autoRetries?: number;
-  /** Override a crew member's model, for example { builder: "haiku" }. */
-  models?: Partial<Record<CrewMember["id"], string>>;
+  /** Override a model by agent id or station, for example { builder: "haiku" } or { build: "haiku" }. */
+  models?: Record<string, string>;
+  /** The Council: "auto" skips it for small jobs (the default), "always" or "never". */
+  council?: "auto" | "always" | "never";
+  /** The Review station after the tests pass (default on). */
+  review?: boolean;
+}
+
+export interface ReviewResult { verdict: "pass" | "fix"; findings: { severity: "high" | "low"; text: string }[] }
+
+export function parseReview(text: string): ReviewResult {
+  const j = parseJsonBlock<Partial<ReviewResult>>(text);
+  if (!j || typeof j !== "object" || !Array.isArray(j.findings)) throw new Error("The review has no findings list");
+  const findings = j.findings.map((f: any) => ({ severity: f?.severity === "high" ? "high" as const : "low" as const, text: String(f?.text ?? "").trim().slice(0, 300) })).filter((f) => f.text).slice(0, 5);
+  // "fix" needs a high finding to act on; a bare "fix" is read as pass with notes.
+  return { verdict: j.verdict === "fix" && findings.some((f) => f.severity === "high") ? "fix" : "pass", findings };
 }
 
 export interface GateDecision { approve: boolean; note?: string; by?: string }
@@ -54,7 +74,7 @@ export class Factory {
   private pending = new Map<number, Pending>();
   private active = new Map<number, Promise<void>>();
 
-  constructor(private log: EventLog, private runtime: AgentRuntime, readonly projectsDir: string) {
+  constructor(private log: EventLog, private runtime: AgentRuntime, readonly projectsDir: string, readonly crew: CrewSource = builtinCrew) {
     // Runs that were mid-flight when the core stopped cannot resume yet; close them honestly.
     const finished = new Set(log.list({ type: "factory.run.finished", limit: 1e6 }).map((e) => (e.payload as { run: number }).run));
     for (const e of log.list({ type: "factory.run.started", limit: 1e6 })) {
@@ -71,8 +91,8 @@ export class Factory {
   start(idea: string, opts: RunOptions = {}): number {
     const text = idea.trim();
     if (!text) throw new Error("An idea needs some text");
-    const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {} };
-    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, runtime: this.runtime.name });
+    const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: opts.review !== false };
+    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, runtime: this.runtime.name, council: o.council, review: o.review });
     const done = new Run(this, this.log, this.runtime, ev.id, text, o).go().finally(() => this.active.delete(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
@@ -105,11 +125,12 @@ class Run {
   private plan!: Plan;
   private lockedHash = "";
   private fixRounds = 0;
+  private brief: CouncilBrief | null = null;
 
   constructor(
     private f: Factory, private log: EventLog, private runtime: AgentRuntime,
     private id: number, private idea: string,
-    private o: Required<Omit<RunOptions, "models">> & { models: RunOptions["models"] },
+    private o: Required<Omit<RunOptions, "models">> & { models: Record<string, string> },
   ) {}
 
   async go() {
@@ -117,10 +138,12 @@ class Run {
       await this.station("intake", async () => {
         captureSignal(this.log, this.idea, "factory");
       });
+      await this.councilLoop();
       await this.planLoop();
       await this.station("tests", () => this.writeTests());
       await this.station("build", () => this.build());
       await this.testFixLoop();
+      await this.reviewLoop();
       await this.acceptLoop();
       const sha = await this.station("ship", () => this.ship());
       this.finish("shipped", `Shipped ${this.plan.name} to ${this.dir}`, sha);
@@ -132,11 +155,52 @@ class Run {
 
   // ---------- stations ----------
 
+  /** Three seats look at the idea; a second round only when no majority wants to build. */
+  private async councilLoop() {
+    const size = isSmallJob(this.idea);
+    if (this.o.council === "never" || (this.o.council === "auto" && size.small)) {
+      this.mark("council", "skipped", undefined, this.o.council === "never" ? "Council turned off for this run" : size.why);
+      return;
+    }
+    const seats: SeatResult[] = [];
+    let brief!: CouncilBrief;
+    for (let round = 1; round <= MAX_COUNCIL_ROUNDS; round++) {
+      const crew = this.f.crew.crewFor("council");
+      const prev = seats.filter((x) => x.round === round - 1);
+      brief = await this.station("council", async () => {
+        const results = await Promise.all(crew.map(async (m, seat) => {
+          const prompt = `Idea: ${this.idea}${round > 1 ? `\n\nRound ${round}. The other seats said:\n${othersText(prev, m.id)}\nAnswer again: keep what still holds, change what they convinced you of.` : ""}`;
+          const res: SeatResult = { agent: m.id, name: m.name, version: m.version, round, costUsd: 0 };
+          try {
+            const text = await this.ask(m, prompt, { seat, round });
+            res.take = parseSeatTake(text);
+          } catch (e) { res.error = (e as Error).message; }
+          this.verdict(m, "council", !!res.take, round, res.error);
+          return res;
+        }));
+        seats.push(...results);
+        const answered = results.filter((r) => r.take).length;
+        const b = synthesize(seats, round);
+        this.log.append("factory.council", { run: this.id, round, seats: results, brief: b });
+        if (answered < 2) throw new Error(`only ${answered} of ${crew.length} Council seats gave a usable take`);
+        return b;
+      }, round);
+      if (majority(votesOf(seats, round)) === "build" || round === MAX_COUNCIL_ROUNDS) break;
+    }
+    if (brief.outcome === "drop") {
+      const why = brief.concerns.concat(brief.agreed).slice(0, 3).join("; ");
+      const d = await this.gate("escalation", `The Council advises against building this${why ? ` (${why})` : ""}. Build it anyway?`);
+      if (!d.approve) throw new StopRun("The Council advised against building it, and you agreed.");
+    }
+    this.brief = brief;
+    function votesOf(all: SeatResult[], round: number) { return all.filter((s) => s.round === round && s.take).map((s) => s.take!.vote); }
+  }
+
   private async planLoop() {
     let feedback = "";
     for (;;) {
       await this.station("plan", async () => {
-        const text = await this.ask(CREW.planner, `Idea: ${this.idea}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
+        const text = await this.ask(this.one("plan"), `Idea: ${this.idea}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
         const plan = validatePlan(parseJsonBlock<Plan>(text));
         this.plan = plan;
         this.dir = resolve(join(this.f.projectsDir, `${plan.slug}-${this.id}`));
@@ -146,6 +210,7 @@ class Run {
         this.log.append("factory.plan", { run: this.id, plan, dir: this.dir, sha, written: spec.written });
       });
       const d = await this.gate("gateA", "Approve the spec and plan");
+      this.verdict(this.one("plan"), "plan", d.approve, undefined, d.note);
       if (d.approve) return;
       if (!d.note) throw new StopRun("You rejected the plan.");
       feedback = d.note;
@@ -159,18 +224,20 @@ class Run {
     let tests: typeof files = [];
     let res!: ReturnType<typeof writeFiles>;
     for (let attempt = 1; ; attempt++) {
-      const text = await this.ask(CREW.tester, `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${feedback}`);
+      const text = await this.ask(this.one("tests"), `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${feedback}`);
       files = parseFileBlocks(text);
-      tests = files.filter((f) => isLockedTest(f.path) && f.path.endsWith(".js"));
-      if (!tests.length) throw new Error("The Tester returned no test/*.js files");
+      // Fixtures (test/fixtures/*.csv and the like) belong to the locked suite too.
+      tests = files.filter((f) => isLockedTest(f.path));
+      if (!tests.some((f) => f.path.endsWith(".js"))) throw new Error("The Tester returned no test/*.js files");
       res = writeFiles(this.dir, tests, { lockTests: false });
-      const broken = syntaxErrors(this.dir, res.written.map((w) => w.path));
+      const broken = syntaxErrors(this.dir, res.written.map((w) => w.path).filter((p) => /\.[cm]?js$/.test(p)));
+      this.verdict(this.one("tests"), "tests", !broken.length, attempt, broken[0]);
       if (!broken.length) break;
       git(this.dir, "clean", "-fdq", "test");
       if (attempt >= 2) throw new Error(`The Tester's tests do not parse: ${broken.join("; ")}`);
       feedback = `\n\nYour previous tests did not parse, so they were discarded:\n${broken.join("\n")}\nWrite them again, each file complete and valid.`;
     }
-    for (const f of files.filter((x) => !tests.includes(x))) res.refused.push({ path: f.path, reason: "the Tester may only write test/*.js" });
+    for (const f of files.filter((x) => !tests.includes(x))) res.refused.push({ path: f.path, reason: "the Tester may only write under test/" });
     this.log.append("factory.files", { run: this.id, station: "tests", round: 1, ...res });
     const sha = commitAll(this.dir, "Acceptance tests (locked)");
     this.lockedHash = testsHash(this.dir);
@@ -178,7 +245,8 @@ class Run {
   }
 
   private async build() {
-    const text = await this.ask(CREW.builder, `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nLocked acceptance tests:\n${this.testsText()}`);
+    this.builder = this.one("build");
+    const text = await this.ask(this.builder, `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nLocked acceptance tests:\n${this.testsText()}`);
     const files = parseFileBlocks(text);
     if (!files.length) throw new Error("The Builder returned no files");
     const res = writeFiles(this.dir, files, { lockTests: true });
@@ -186,8 +254,11 @@ class Run {
     commitAll(this.dir, `Build: ${this.plan.name}`);
   }
 
-  private async testFixLoop(extraFeedback = "") {
+  private builder: CrewMember | null = null;
+
+  private async testFixLoop(extraFeedback = "", rerun = false) {
     let run = await this.station("test", () => this.runSuite(0));
+    if (!rerun && this.builder) this.verdict(this.builder, "build", run.failed === 0, 0, run.failed ? `${run.failed} failing` : undefined);
     let lastFailing = "";
     let budget = this.o.maxFixRounds;
     let feedback = extraFeedback;
@@ -209,27 +280,30 @@ class Run {
       const round = this.fixRounds;
       const note = feedback;
       feedback = "";
+      let fixer!: CrewMember;
       run = await this.station("fix", async () => {
-        await this.fix(run, round, note);
+        fixer = await this.fix(run, round, note);
         return this.runSuite(round);
       }, round);
+      this.verdict(fixer, "fix", run.failed === 0, round, run.failed ? `${run.failed} failing` : undefined);
       // The Test station shows the latest verdict, not only the first run's.
       if (run.failed === 0) this.mark("test", "pass", round, `green after fix round ${round}`);
     }
   }
 
-  private async fix(run: TestRun, round: number, note: string) {
+  private async fix(run: TestRun, round: number, note: string): Promise<CrewMember> {
     const failures = run.cases.filter((c) => !c.pass).map((c) => `- ${c.name} (${c.file}): ${c.error ?? "failed"}`).join("\n");
     const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md")
       .map(([p, c]) => `<<<FILE ${p}\n${c}FILE>>>`).join("\n");
     const prompt = [
       `Spec:\n${JSON.stringify(this.plan, null, 2)}`,
       failures ? `Failing tests:\n${failures}\n\nTest output (tail):\n${run.output.slice(-1500)}` : "All tests pass.",
-      note ? `The person reviewing the build asked for: ${note}` : "",
+      note ? `The reviewer of the build asked for: ${note}` : "",
       `Locked tests (read only):\n${this.testsText()}`,
       `Current code:\n${src}`,
     ].filter(Boolean).join("\n\n");
-    const files = parseFileBlocks(await this.ask(CREW.fixer, prompt));
+    const fixer = this.one("fix");
+    const files = parseFileBlocks(await this.ask(fixer, prompt, { round }));
     const res = writeFiles(this.dir, files, { lockTests: true });
     if (!res.written.length) {
       this.log.append("factory.files", { run: this.id, station: "fix", round, ...res });
@@ -237,14 +311,38 @@ class Run {
     }
     this.log.append("factory.files", { run: this.id, station: "fix", round, ...res });
     commitAll(this.dir, `Fix round ${round}`);
+    return fixer;
+  }
+
+  /** The Reviewer reads the green build against the spec. High findings go to the Fixer once; the rest ride to the build gate. */
+  private reviewNotes: ReviewResult | null = null;
+  private async reviewLoop() {
+    if (!this.o.review) { this.mark("review", "skipped", undefined, "review turned off for this run"); return; }
+    for (let round = 1; round <= 2; round++) {
+      const r = await this.station("review", async () => {
+        const m = this.one("review");
+        const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md").map(([p, c]) => `<<<FILE ${p}\n${c.length > 12000 ? c.slice(0, 12000) + "\n...(cut: file continues)\n" : c}FILE>>>`).join("\n");
+        const text = await this.ask(m, `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 48000)}`, { round });
+        let res: ReviewResult;
+        try { res = parseReview(text); } catch (e) { this.verdict(m, "review", false, round, (e as Error).message); throw e; }
+        this.verdict(m, "review", true, round);
+        this.log.append("factory.review", { run: this.id, round, agent: m.id, ...res });
+        return res;
+      }, round);
+      this.reviewNotes = r;
+      if (r.verdict === "pass" || round === 2) return;
+      const high = r.findings.filter((f) => f.severity === "high").map((f) => `- ${f.text}`).join("\n");
+      await this.testFixLoop(`The Reviewer found these problems; fix them without breaking the tests:\n${high}`, true);
+    }
   }
 
   private async acceptLoop() {
     for (;;) {
-      const d = await this.gate("gateB", "Accept the build");
+      const notes = this.reviewNotes?.findings.length ? ` (the Reviewer left ${this.reviewNotes.findings.length} note${this.reviewNotes.findings.length > 1 ? "s" : ""})` : "";
+      const d = await this.gate("gateB", `Accept the build${notes}`);
       if (d.approve) return;
       if (!d.note) throw new StopRun("You rejected the build.");
-      await this.testFixLoop(d.note);
+      await this.testFixLoop(d.note, true);
     }
   }
 
@@ -267,8 +365,20 @@ class Run {
     return Object.entries(readTree(this.dir)).filter(([p]) => isLockedTest(p)).map(([p, c]) => `<<<FILE ${p}\n${c}FILE>>>`).join("\n");
   }
 
+  /** The one agent working a single-seat station right now. */
+  private one(slot: Slot): CrewMember {
+    const m = this.f.crew.crewFor(slot)[0];
+    if (!m) throw new Error(`Nobody works the ${slot} station`);
+    return m;
+  }
+
+  /** The verifier's verdict on one agent's work: what the Agent Bay's pass rate is made of. */
+  private verdict(m: CrewMember, station: string, pass: boolean, round?: number, note?: string) {
+    this.log.append("agent.verdict", { agent: m.id, version: m.version, station, run: this.id, round, pass, note: note?.slice(0, 300) });
+  }
+
   /** One agent call, inside both its own cap and what is left of the run's cap. */
-  private async ask(m: CrewMember, prompt: string): Promise<string> {
+  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}): Promise<string> {
     const left = this.o.maxUsd - this.spent;
     if (left < 0.01) {
       const d = await this.gate("escalation", `The run's budget of $${this.o.maxUsd.toFixed(2)} is spent. Add 50% more?`, { neverAuto: true });
@@ -279,8 +389,9 @@ class Run {
     const cap = Math.max(0.01, Math.min(m.budgetUsd, this.o.maxUsd - this.spent));
     this.calls++;
     const r = await runAgent(this.log, this.runtime, m.id, {
-      prompt, model: this.o.models?.[m.id] ?? m.model, systemPrompt: m.role, budgetUsd: Number(cap.toFixed(4)),
-    }, { factoryRun: this.id, station: m.station });
+      prompt, model: this.o.models[m.id] ?? this.o.models[m.station] ?? m.model, systemPrompt: m.role, budgetUsd: Number(cap.toFixed(4)),
+      pluginDirs: m.pluginDirs.length ? m.pluginDirs : undefined, tools: m.tools.length ? m.tools : undefined,
+    }, { factoryRun: this.id, station: m.station, agentVersion: m.version, ...meta });
     this.spent += r.result?.costUsd ?? 0;
     if (r.error || !r.result) throw new Error(`${m.name} failed: ${r.error}`);
     return r.result.text;
@@ -311,7 +422,7 @@ class Run {
     }
   }
 
-  private mark(station: StationId, state: "active" | "pass" | "fail" | "incomplete" | "waiting", round?: number, note?: string) {
+  private mark(station: StationId, state: "active" | "pass" | "fail" | "incomplete" | "waiting" | "skipped", round?: number, note?: string) {
     this.log.append("factory.station", { run: this.id, station, state, round, note, spentUsd: Number(this.spent.toFixed(6)), maxUsd: this.o.maxUsd });
   }
 
@@ -341,7 +452,7 @@ class Run {
 }
 
 function stationName(id: StationId) {
-  return ({ intake: "Intake", plan: "Plan", gateA: "Plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", gateB: "Build gate", ship: "Ship" } as const)[id];
+  return ({ intake: "Intake", council: "Council", plan: "Plan", gateA: "Plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", review: "Review", gateB: "Build gate", ship: "Ship" } as const)[id];
 }
 
 export function validatePlan(p: Plan): Plan {
