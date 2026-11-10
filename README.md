@@ -24,6 +24,15 @@ daily sweep: fade stale notes · raise old questions · digest busy nodes · pro
 - **Bridge**: the star map is the real node tree (projects are systems, ideas planets, threads moons; size by activity, glow by important Canon, dim when stale), new fragments fly in as particles, conflicts are red links. The Order deck shows the Canon constellation of the selected body, the Unsorted tray, conflict cards, the briefing with undo, and every visual check.
 - **Headless**: `npm run order -- messages.json --mode agent --project Name` files a whole conversation and prints the tree, Canon, conflicts and cost. First real result: [docs/milestone-3-run.md](docs/milestone-3-run.md) (this project's own chat: 33 fragments, the planted conflict caught, $0.014).
 
+## Storage: database, files, cache
+
+The core runs on an organized SQLite database, not loose files. Details: [docs/storage.md](docs/storage.md).
+
+- **Database** (`factory.db`): the append-only event log is the source of truth; organized tables (`signals`, `agent_runs`, `factory_runs`, `artifacts`, `order_nodes`, `order_fragments`, `order_conflicts`) are kept current in the same transaction and can be rebuilt from the log at any time. Versioned migrations; an existing database is backed up before it is upgraded.
+- **Files**: only real files (the generated repos), each pointed at by an `artifacts` row with its SHA-256.
+- **Cache**: folded views in memory, keyed by the newest event, always safe to drop.
+- **Bridge**: the Data vault tab draws all three, flags lagging tables and missing files, and has a one-click rebuild from the log.
+
 ## Milestone 2 (thin factory loop)
 
 Type a one-line idea in the Overseer channel and press **Build it**. The factory runs:

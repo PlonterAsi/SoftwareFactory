@@ -57,7 +57,7 @@ export function safePath(root: string, p: string): string {
 
 export const isLockedTest = (p: string) => normalize(p).split(sep)[0] === "test";
 
-export interface WriteResult { written: { path: string; lines: number; bytes: number }[]; refused: { path: string; reason: string }[] }
+export interface WriteResult { written: { path: string; lines: number; bytes: number; sha256: string }[]; refused: { path: string; reason: string }[] }
 
 /**
  * Write agent files into the project. With `lockTests`, anything under test/
@@ -71,7 +71,7 @@ export function writeFiles(root: string, files: FileBlock[], opts: { lockTests: 
       const abs = safePath(root, f.path);
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, f.content);
-      res.written.push({ path: posixRel(root, abs), lines: f.content.split("\n").length - 1, bytes: Buffer.byteLength(f.content) });
+      res.written.push({ path: posixRel(root, abs), lines: f.content.split("\n").length - 1, bytes: Buffer.byteLength(f.content), sha256: createHash("sha256").update(f.content).digest("hex") });
     } catch (e) {
       res.refused.push({ path: f.path, reason: (e as Error).message });
     }

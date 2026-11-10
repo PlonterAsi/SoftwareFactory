@@ -2,10 +2,11 @@ import type { EventLog, EventType } from "../events.js";
 import type { AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import {
-  canonFor, descendants, foldOrder, isCanonKind, lineage, precedence,
+  canonFor, descendants, isCanonKind, lineage, precedence,
   type Conflict, type Fragment, type NodeKind, type OrderState,
 } from "./model.js";
 import { ARCHIVIST_ROLE, FILE_AT, archivistPrompt, heuristicArchivist, parseArchivistPlan, type ArchivistPlan } from "./archivist.js";
+import { ORDER_VIEW, orderView } from "../store/tables.js";
 import { polarity, replacesCue, similarity, tokens } from "./text.js";
 
 export interface OrderOptions {
@@ -38,7 +39,6 @@ export interface IngestResult { signalId: number; mode: "agent" | "heuristic"; f
 export class OrderEngine {
   readonly opts: Required<Omit<OrderOptions, "now">> & { now: () => Date };
   private queue: Promise<unknown> = Promise.resolve();
-  private cache: { lastId: number; state: OrderState } | null = null;
 
   constructor(private log: EventLog, private runtime: AgentRuntime | null, opts: OrderOptions = {}) {
     this.opts = {
@@ -55,14 +55,9 @@ export class OrderEngine {
     for (const r of this.state().ingests) if (r.state === "started") this.emit("order.ingest", { signalId: r.signalId, mode: r.mode, state: "done", costUsd: r.costUsd, fragments: [], note: "The core restarted while this Signal was being filed. Re-file it from the Unsorted tray." });
   }
 
-  /** Current state, folded from the log (cached until a new event lands). */
+  /** Current state, folded from the log (served from the store's cache until a new event lands). */
   state(): OrderState {
-    const last = this.log.list({ sinceId: this.cache?.lastId ?? 0, limit: 1 });
-    if (this.cache && !last.length) return this.cache.state;
-    const all = this.log.list({ limit: 1e7 });
-    const state = foldOrder(all);
-    this.cache = { lastId: all.at(-1)?.id ?? 0, state };
-    return state;
+    return this.log.view(ORDER_VIEW, orderView);
   }
 
   /** Archivist spend today (UTC); the daily cap applies to this. */
