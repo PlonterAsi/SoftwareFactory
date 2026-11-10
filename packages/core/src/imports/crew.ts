@@ -166,8 +166,9 @@ export function suggestionId(projectId: number, title: string): string {
  * What exploring will cost, before anything is spent. Claude Code headless has a
  * fixed price per call (loading its context) plus tokens; Haiku prices.
  */
-export function estimateUsd(calls: number, promptChars: number, outTokensPerCall = 700): number {
-  const FIXED = 0.004;
+export function estimateUsd(calls: number, promptChars: number, outTokensPerCall = 500): number {
+  // Measured on the first real import (SoftwareFactory, 6 Haiku calls): about $0.0023 per call.
+  const FIXED = 0.0025;
   const IN = 1 / 1e6;
   const OUT = 5 / 1e6;
   return Number((calls * FIXED + (promptChars / 4) * IN + calls * outTokensPerCall * OUT).toFixed(4));
