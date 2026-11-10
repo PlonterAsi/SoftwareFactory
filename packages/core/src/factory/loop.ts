@@ -53,6 +53,8 @@ export interface RunOptions {
   council?: "auto" | "always" | "never";
   /** The Review station after the tests pass (default on). */
   review?: boolean;
+  /** The project this run belongs to. Without one, the run becomes a project of its own. */
+  projectId?: number;
 }
 
 export interface ReviewResult { verdict: "pass" | "fix"; findings: { severity: "high" | "low"; text: string }[] }
@@ -152,7 +154,7 @@ export class Factory {
     const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: opts.review !== false };
     // A run keeps the crew it started with, even if you switch Practice/Real meanwhile.
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
-    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models });
+    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, ...(opts.projectId != null ? { projectId: opts.projectId } : {}) });
     const done = new Run(this, this.log, runtime, ev.id, text, o).go().finally(() => this.active.delete(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
@@ -190,7 +192,7 @@ class Run {
   constructor(
     private f: Factory, private log: EventLog, private runtime: AgentRuntime,
     private id: number, private idea: string,
-    private o: Required<Omit<RunOptions, "models">> & { models: Record<string, string> },
+    private o: Required<Omit<RunOptions, "models" | "projectId">> & { models: Record<string, string> },
   ) {}
 
   async go(from?: RestoredState) {
