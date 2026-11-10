@@ -11,3 +11,7 @@ export * from "./order/text.js";
 export * from "./order/model.js";
 export * from "./order/archivist.js";
 export * from "./order/engine.js";
+export * from "./factory/council.js";
+export * from "./bay/agentfile.js";
+export * from "./bay/builtin.js";
+export * from "./bay/bay.js";

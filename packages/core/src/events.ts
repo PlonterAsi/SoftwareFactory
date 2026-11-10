@@ -31,7 +31,15 @@ export type EventType =
   | "order.sweep.undone"
   | "order.ingest"
   | "order.briefing"
-  | "order.visual";
+  | "order.visual"
+  | "factory.council"
+  | "factory.review"
+  | "agent.verdict"
+  | "bay.agent.saved"
+  | "bay.agent.retired"
+  | "bay.assign"
+  | "bay.test"
+  | "bay.visual";
 
 export interface SfEvent<P = unknown> {
   id: number;
