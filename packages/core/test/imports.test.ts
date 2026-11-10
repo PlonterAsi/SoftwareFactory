@@ -231,6 +231,8 @@ describe("imports API", () => {
       expect(d.map.map.modules.length).toBe(5);
       expect(Object.keys(d.notes)).toContain("src/cart");
       expect(d.suggestions.length).toBeGreaterThan(2);
+      // The Improvement Council filed every suggestion in its queue.
+      expect(d.suggestions.every((s: any) => s.status === "proposed" && s.proposalId > 0)).toBe(true);
       expect(d.explores.some((e: any) => e.type === "repo.explore.finished")).toBe(true);
       const list = await (await fetch(`${base}/api/imports`)).json();
       expect(list.imports[0]).toMatchObject({ projectId, health: expect.any(Number) });

@@ -34,3 +34,6 @@ export * from "./imports/crew.js";
 export * from "./imports/tables.js";
 export * from "./imports/explorer.js";
 export * from "./imports/routes.js";
+export * from "./improve/lenses.js";
+export * from "./improve/council.js";
+export * from "./improve/tables.js";

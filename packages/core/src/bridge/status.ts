@@ -9,7 +9,7 @@ import { canonFor } from "../order/model.js";
  * Both are plain code over tables and events; no model call.
  */
 
-export interface SinceLine { kind: "shipped" | "failed" | "stopped" | "gate" | "conflict" | "filed" | "drop" | "spend" | "running"; text: string; ref?: number }
+export interface SinceLine { kind: "shipped" | "failed" | "stopped" | "gate" | "conflict" | "filed" | "drop" | "spend" | "running" | "improve"; text: string; ref?: number }
 export interface SinceReport { fromEvent: number; toEvent: number; leftAt: string | null; awayMinutes: number; lines: SinceLine[] }
 
 interface RunRow { id: number; idea: string; plan_name: string | null; outcome: string | null; reason: string | null; total_usd: number | null; dir: string | null; finished_at: string | null; resumed_from?: string | null }
@@ -68,6 +68,8 @@ export function sinceReport(log: EventLog, order: OrderState, from?: number, now
   }
   const drops = Number((log.db.prepare("SELECT count(*) AS n FROM drops WHERE id > ? AND status = 'filed'").get(fromEvent) as { n: number }).n);
   if (drops) lines.push({ kind: "drop", text: `${drops} note${drops > 1 ? "s" : ""} came in through the drop folder.` });
+  const ideas = countIfTable(log, "SELECT count(*) AS n FROM improve_proposals WHERE id > ? AND status = 'inbox'", fromEvent);
+  if (ideas) lines.push({ kind: "improve", text: `The Improvement Council has ${ideas} new proposal${ideas > 1 ? "s" : ""} for you in the Improve tab.` });
   const spend = Number((log.db.prepare("SELECT coalesce(sum(cost_usd), 0) AS s, count(*) AS n FROM agent_runs WHERE id > ? AND status = 'done'").get(fromEvent) as { s: number }).s);
   if (spend > 0) lines.push({ kind: "spend", text: `Agents spent $${spend.toFixed(4)} meanwhile.` });
   return { fromEvent, toEvent, leftAt, awayMinutes, lines };
@@ -90,6 +92,8 @@ export function statusDigest(log: EventLog, order: OrderState, runtimeName: stri
     const rules = canonFor(order, p.id).slice(0, 3).map((c) => c.fragment.text.slice(0, 90));
     out.push(`Project "${p.title}"${rules.length ? `; rules: ${rules.join(" | ")}` : ""}.`);
   }
+  const waiting = countIfTable(log, "SELECT count(*) AS n FROM improve_proposals WHERE status = 'inbox'");
+  if (waiting) out.push(`Improvement proposals waiting for the person (Improve tab): ${waiting}.`);
   const spend = (log.db.prepare("SELECT coalesce(sum(cost_usd), 0) AS s FROM agent_runs WHERE status = 'done' AND started_at >= ?").get(new Date(Date.now() - 86_400_000).toISOString()) as { s: number }).s;
   out.push(`Agent spend in the last 24 h: $${Number(spend).toFixed(4)}.`);
   return out.join("\n");
@@ -100,4 +104,9 @@ export function buildSuggestion(text: string): { text: string; build?: string } 
   const m = text.match(/^\s*BUILD:\s*(.+?)\s*$/m);
   if (!m) return { text };
   return { text: text.replace(m[0], "").trim(), build: m[1].slice(0, 300) };
+}
+
+/** A count from a table that a module may not have registered (the Improvement Council's), 0 when absent. */
+function countIfTable(log: EventLog, sql: string, ...args: number[]): number {
+  try { return Number((log.db.prepare(sql).get(...args) as { n: number }).n); } catch { return 0; }
 }

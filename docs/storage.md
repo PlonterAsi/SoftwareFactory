@@ -27,6 +27,7 @@ In the desktop app the data folder is the Tauri app data directory (on Windows `
 | `order_nodes`, `order_fragments`, `order_conflicts` | project/idea/thread, filed fragment, conflict | `order` (materialized from the Order Engine's fold) |
 | `settings` | setting you changed in the Bridge (crew mode, drop folder), newest value | `settings` |
 | `drops` | note picked up from the drop folder: file, size, SHA-256, the Signal it became | `drops` |
+| `improve_sessions`, `improve_proposals` | Improvement Council session, proposal with your answer ([improve.md](improve.md)) | `improve` |
 | `projects`, `project_links` | project, and each thing that belongs to it (see [projects.md](projects.md)) | `projects` |
 
 Open `factory.db` in any SQLite browser and query them directly, for example spend per agent:

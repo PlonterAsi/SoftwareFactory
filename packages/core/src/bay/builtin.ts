@@ -51,6 +51,13 @@ Tests failed, or a reviewer found a problem. Fix the code, never the tests (they
 ${TARGET}
 ${FILE_FORMAT}`,
   order: `Station contract: order.\n${ARCHIVIST_ROLE}`,
+  improve: `Station contract: improve.
+You hold one seat on the Improvement Council. It looks again at something that already exists (a project, an idea, a shipped app, or SoftwareFactory itself) and proposes how to make it better through your lens only.
+Read the subject, its notes and what was already proposed. Never repeat or reword an earlier proposal, and never bring back one the person rejected.
+Propose at most 2 changes, each concrete enough to act on (what to change, where), each worth doing. Zero is a fine answer when nothing is worth it.
+Answer with ONE fenced json block and nothing else, shaped exactly like:
+{"proposals": [{"title": "short imperative, under 12 words", "why": "one sentence: the problem or the gain", "change": "one or two sentences: exactly what to change", "impact": "high", "effort": "small"}]}
+impact is "high", "medium" or "low". effort is "small", "medium" or "large".`,
   overseer: `Station contract: overseer.
 Before the person's message you get a live status digest of the factory (runs, gates waiting, conflicts, projects and their rules). Use it; never invent runs or numbers that are not in it.
 Answer in at most 4 short sentences. Be concrete, say what happens next and what, if anything, the person must do.
@@ -130,6 +137,12 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     sample: "Failing test: slugify('A b') should be 'a-b'. Code: export const slugify = (t) => t.replace(/ /g, '-');",
     prompt: "You are the Fixer of SoftwareFactory. You read the failures, find the smallest change that fixes them and leave everything else alone.",
   },
+  ...lens("integrator", "Integrator", "⇄", "integrate", "Finds where this should connect to the person's other projects, ideas and tools: shared parts, data passed between them, one doing another's job.", "You look for connections: where two projects should share a part, pass data, or where one already solves the other's problem. You name both sides of every link."),
+  ...lens("automator", "Automator", "⟳", "automate", "Finds manual steps, repeats and waits that a loop or an agent could take over.", "You look for work a person still does by hand: repeated steps, copy and paste, checks, approvals that never say no. You propose the loop, trigger or agent that takes it over, and keep a human stop only where a mistake costs money or trust."),
+  ...lens("simplifier", "Simplifier", "◌", "simplify", "Finds what to cut, merge or hide so the thing does the same with less.", "You look for what to remove: steps, options, screens, files and concepts that cost more than they give. Your best proposal deletes something."),
+  ...lens("enricher", "Enricher", "✚", "enrich", "Finds where more depth would pay off: a richer model, a missing capability, a stronger core.", "You look for where the thing is too thin: a missing capability people will hit, a data model that cannot grow, a feature that would make it worth using daily. You add depth only where it pays off."),
+  ...lens("ux-lens", "UX Lens", "◐", "ux", "Looks at what the person sees and taps: clarity, feedback, visuals, first use.", "You look at the experience: what the person sees first, what is unclear, where feedback is missing, what should be visual, how many taps a common task takes."),
+  ...lens("flow-lens", "Flow Lens", "⇢", "flow", "Looks at the order of steps, handoffs, loops and waits.", "You look at the flow: the order of steps, handoffs between people and agents, loops that never end or end too early, and waits nobody notices."),
   {
     id: "cartographer", name: "Cartographer", avatar: "⌖", station: "map", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
     description: "Reads an imported repo module by module and says what each part is for.",
@@ -144,13 +157,24 @@ export const BUILTIN_AGENTS: AgentDef[] = [
   },
 ];
 
+/** An Improvement Council seat: an ordinary agent made for the improve station. */
+function lens(id: string, name: string, avatar: string, focus: string, description: string, how: string): AgentDef[] {
+  return [{
+    id, name, avatar, station: "improve", model: "haiku", budgetUsd: 0.03, plugins: [], skills: [], tools: [],
+    description: `Improvement Council seat (${focus}): ${description}`,
+    sample: "Subject: project \"Photo renamer\", a CLI that renames photos by the date they were taken. Shipped once; notes: wants a dry-run mode; runs by hand every week.",
+    prompt: `You are the ${name} on the SoftwareFactory Improvement Council. Your lens is "${focus}". ${how}`,
+  }];
+}
+
 /** Who works each station when nobody has been assigned. The Council takes three seats. */
 export const DEFAULT_SLOTS: Record<Slot, string[]> = {
   council: ["visionary", "architect", "skeptic"],
-  plan: ["planner"], tests: ["tester"], build: ["builder"], review: ["reviewer"], fix: ["fixer"], order: ["archivist"], overseer: ["overseer"], map: ["cartographer"], survey: ["surveyor"],
+  plan: ["planner"], tests: ["tester"], build: ["builder"], review: ["reviewer"], fix: ["fixer"], order: ["archivist"], overseer: ["overseer"],
+  improve: ["integrator", "automator", "simplifier", "enricher", "ux-lens", "flow-lens"], map: ["cartographer"], survey: ["surveyor"],
 };
 
-export const SLOT_SEATS: Record<Slot, number> = { council: 3, plan: 1, tests: 1, build: 1, review: 1, fix: 1, order: 1, overseer: 1, map: 1, survey: 1 };
+export const SLOT_SEATS: Record<Slot, number> = { council: 3, plan: 1, tests: 1, build: 1, review: 1, fix: 1, order: 1, overseer: 1, improve: 6, map: 1, survey: 1 };
 
 /** The system prompt an agent runs with on a station: its own prompt, then the station's contract. */
 export function systemPromptFor(agent: Pick<AgentDef, "prompt">, slot: Slot | "none"): string {

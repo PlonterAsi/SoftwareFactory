@@ -1,7 +1,8 @@
 import type { IncomingMessage } from "node:http";
 import type { EventLog } from "../events.js";
-import { registerProjectFacet } from "../projects/service.js";
-import { importDetail, importOf, latestMap, listImports, suggestionsOf, type RepoExplorer } from "./explorer.js";
+import { projectOf, registerProjectFacet } from "../projects/service.js";
+import { registerImproveContext } from "../improve/council.js";
+import { codeMapSummary, importDetail, importOf, latestMap, listImports, suggestionsOf, type RepoExplorer } from "./explorer.js";
 
 /**
  * The imports API. Every write is an event, so the Bridge sees it on the stream.
@@ -57,4 +58,11 @@ registerProjectFacet({
       suggestions: s.length, openSuggestions: s.filter((x) => x.status === "pending" || x.status === "proposed").length,
     };
   },
+});
+
+// The Improvement Council's lenses read the code map of an imported project before they propose anything.
+// A project target may carry the project id or its Order Engine root node id; both find the import.
+registerImproveContext("code-map", (log, t) => {
+  if (t.kind !== "project" || t.id == null) return null;
+  return codeMapSummary(log, Number(t.id)) ?? (() => { const p = projectOf(log, { kind: "order_node", ref: t.id }); return p == null ? null : codeMapSummary(log, p); })();
 });
