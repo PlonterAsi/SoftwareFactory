@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventLog, MockRuntime, Factory, AgentBay, Tickets, createCore, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal } from "../src/index.js";
+import { EventLog, MockRuntime, Factory, AgentBay, Tickets, createCore, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal, OrderEngine, ImproveCouncil, listSignals } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-tickets-"));
 
@@ -252,5 +252,25 @@ describe("tickets: the API", () => {
     } finally {
       server.close();
     }
+  });
+});
+
+describe("tickets with the real Improvement Council", () => {
+  it("an accepted proposal becomes a ticket, linked back to the proposal, and no task Signal is filed", async () => {
+    const log = new EventLog();
+    const rt = new MockRuntime();
+    const bay = new AgentBay(log, rt);
+    const order = new OrderEngine(log, null, { mode: "heuristic" });
+    const t = new Tickets(log, { runtime: rt });
+    const council = new ImproveCouncil(log, rt, bay, () => order.state(), {});
+    const s = captureSignal(log, "Project: Photo renamer. It renames photos by date.", "bridge");
+    await order.ingest({ id: s.id, text: s.text, source: "bridge" });
+    await council.run();
+    const p = council.proposals()[0];
+    const before = listSignals(log).length;
+    const acc = council.decide(p.id, "accepted");
+    expect(acc.ticketId).toBeTypeOf("number");
+    expect(listSignals(log)).toHaveLength(before);
+    expect(t.get(acc.ticketId!)).toMatchObject({ title: p.title, source: "improve", kind: "idea", status: "open" });
   });
 });

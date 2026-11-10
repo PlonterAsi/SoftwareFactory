@@ -22,6 +22,14 @@ The Bridge is now meant to be used every day, starting from a fresh Windows PC:
 - **When the core will not start**, the desktop app says why (Node missing, the core crashed), shows the core's log and has a *Restart the core* button. The core writes `core.log` in the data folder.
 - **Storage**: crew mode and drop folder are `settings` rows, picked-up notes are `drops` rows, and "seen up to here" is a `bridge.seen` event, all derived from the log like every other table.
 
+## Improvement Council (constant improvement)
+
+The **Improve** tab: six lens agents (integrate, automate, simplify, enrich, UX, flow) look again at your projects, ideas, shipped apps and SoftwareFactory itself, and queue ranked proposals you accept, park or reject with one tap. It remembers everything it proposed and never repeats itself or brings back what you rejected. Haiku, $0.20 a day cap with a live cost meter; on its own only on the real crew, when something changed. Accepting files a ticket or task; building takes a second tap. Details: [docs/improve.md](docs/improve.md).
+
+![The Improve tab: the lens wheel, the cost meter and the proposals queue](docs/img/bridge-improve.png)
+
+Every project also has an **Improvements** panel with only its own proposals; *Look now* there looks at that project.
+
 ## Milestone 4 (the Agent Bay and the Council)
 
 Agents are workers you create, edit, test and put on stations. Every factory run now goes:
