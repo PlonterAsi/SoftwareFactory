@@ -226,17 +226,18 @@ class Run {
     for (let attempt = 1; ; attempt++) {
       const text = await this.ask(this.one("tests"), `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${feedback}`);
       files = parseFileBlocks(text);
-      tests = files.filter((f) => isLockedTest(f.path) && f.path.endsWith(".js"));
-      if (!tests.length) throw new Error("The Tester returned no test/*.js files");
+      // Fixtures (test/fixtures/*.csv and the like) belong to the locked suite too.
+      tests = files.filter((f) => isLockedTest(f.path));
+      if (!tests.some((f) => f.path.endsWith(".js"))) throw new Error("The Tester returned no test/*.js files");
       res = writeFiles(this.dir, tests, { lockTests: false });
-      const broken = syntaxErrors(this.dir, res.written.map((w) => w.path));
+      const broken = syntaxErrors(this.dir, res.written.map((w) => w.path).filter((p) => /\.[cm]?js$/.test(p)));
       this.verdict(this.one("tests"), "tests", !broken.length, attempt, broken[0]);
       if (!broken.length) break;
       git(this.dir, "clean", "-fdq", "test");
       if (attempt >= 2) throw new Error(`The Tester's tests do not parse: ${broken.join("; ")}`);
       feedback = `\n\nYour previous tests did not parse, so they were discarded:\n${broken.join("\n")}\nWrite them again, each file complete and valid.`;
     }
-    for (const f of files.filter((x) => !tests.includes(x))) res.refused.push({ path: f.path, reason: "the Tester may only write test/*.js" });
+    for (const f of files.filter((x) => !tests.includes(x))) res.refused.push({ path: f.path, reason: "the Tester may only write under test/" });
     this.log.append("factory.files", { run: this.id, station: "tests", round: 1, ...res });
     const sha = commitAll(this.dir, "Acceptance tests (locked)");
     this.lockedHash = testsHash(this.dir);

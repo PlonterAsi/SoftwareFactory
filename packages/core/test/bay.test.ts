@@ -124,7 +124,7 @@ describe("Agent Bay", () => {
     expect(events(log, "factory.run.finished")[0].outcome).toBe("shipped");
 
     const s = bay.stats();
-    expect(s["fast-builder"]).toMatchObject({ calls: 1, verdicts: { pass: 0, total: 1 }, passRate: 0, runs: 1, state: "blocked" });
+    expect(s["fast-builder"]).toMatchObject({ calls: 1, verdicts: { pass: 0, total: 1 }, passRate: 0, runs: 1, state: "idle" });
     expect(s.fixer).toMatchObject({ calls: 1, verdicts: { pass: 1, total: 1 }, passRate: 1, avgRounds: 1, state: "idle" });
     expect(s["fast-builder"].byVersion[2]).toMatchObject({ calls: 1, total: 1 });
     expect(s.planner.costUsd).toBeCloseTo(0.0001);
@@ -194,6 +194,22 @@ describe("Council", () => {
     await f.wait(run);
     expect(events(log, "factory.run.finished")[0]).toMatchObject({ outcome: "stopped" });
     expect(events(log, "factory.council")).toHaveLength(2);
+  });
+});
+
+describe("Tester fixtures", () => {
+  it("writes fixture files under test/ with the tests, and locks them too", async () => {
+    const log = new EventLog();
+    const rt = new MockRuntime({ plantBug: false });
+    const base = rt.run.bind(rt);
+    rt.run = async (req) => { const r = await base(req); if (req.systemPrompt?.includes("Station contract: tests")) r.text += "\n<<<FILE test/fixtures/words.txt\na b c\nFILE>>>\n<<<FILE src/sneaky.js\nx\nFILE>>>"; return r; };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    await f.wait(f.start("count words", { autoApprove: true }));
+    const files = events(log, "factory.files").find((x) => x.station === "tests");
+    expect(files.written.map((w: any) => w.path).sort()).toEqual(["test/count.test.js", "test/fixtures/words.txt"]);
+    expect(files.refused).toEqual([{ path: "src/sneaky.js", reason: "the Tester may only write under test/" }]);
+    expect(events(log, "factory.tests.locked")[0].files).toContain("test/fixtures/words.txt");
+    expect(events(log, "factory.run.finished")[0].outcome).toBe("shipped");
   });
 });
 

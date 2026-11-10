@@ -169,7 +169,6 @@ export class AgentBay implements CrewSource {
         if (p.pass) st.verdicts.pass++;
         const bv = ver(st, p.version ?? 0);
         bv.total++; if (p.pass) bv.pass++;
-        if (!p.pass) lastOutcome.set(p.agent, "failed"); else lastOutcome.set(p.agent, "ok");
       }
     }
     for (const [, st0] of started) { const st = s(st0.agent); st.state = "thinking"; st.current = st0.test ? "test run" : st0.station ? `${st0.station}${st0.factoryRun ? ` · run #${st0.factoryRun}` : ""}` : "answering"; }
@@ -283,7 +282,7 @@ export class AgentBay implements CrewSource {
     if (!a) throw new Error(`No agent "${id}"`);
     if (!this.runtime) throw new Error("No agent runtime");
     const station = a.def.station;
-    const sample = (task ?? a.def.sample).trim() || "Say what you do, in one sentence.";
+    const sample = (task ?? a.def.sample).trim() || BUILTIN_AGENTS.find((b) => b.station === station)?.sample || "Say what you do, in one sentence.";
     const start = this.log.append("bay.test", { agent: id, version: a.version, station, task: sample, state: "running" });
     const prompt = samplePrompt(station, sample);
     const r = await runAgent(this.log, this.runtime, id, {
@@ -358,7 +357,7 @@ export function heuristicDraft(text: string): AgentDef {
   const avatar = ({ council: "✶", plan: "◇", tests: "⊘", build: "▣", review: "◎", fix: "⚒", order: "❖", overseer: "◈", none: "◆" } as const)[station];
   return normalizeAgent({
     name, avatar, station, model, budgetUsd: model === "haiku" ? 0.05 : model === "sonnet" ? 0.3 : 0.6,
-    description: text.slice(0, 300), sample: "",
+    description: text.slice(0, 300), sample: BUILTIN_AGENTS.find((b) => b.station === station)?.sample ?? "",
     prompt: `You are ${name}, an agent of SoftwareFactory. ${text.trim().replace(/([^.!?])$/, "$1.")} Be concise and concrete.`,
   } as any);
 }

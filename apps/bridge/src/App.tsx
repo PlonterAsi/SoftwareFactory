@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useFactory, useOrder } from "./api";
+import { useBay, useFactory, useOrder } from "./api";
+import { AgentBay } from "./AgentBay";
 import { RunDeck } from "./RunDeck";
 import { StarMap } from "./StarMap";
 import { FactoryFloor } from "./FactoryFloor";
@@ -10,9 +11,10 @@ import { OrderDeck } from "./OrderDeck";
 export function App() {
   const f = useFactory();
   const order = useOrder(f.events);
+  const bay = useBay(f.events);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
-  const [view, setView] = useState<"factory" | "order">(() => (location.hash === "#order" ? "order" : "factory"));
+  const [view, setView] = useState<"factory" | "order" | "bay">(() => (location.hash === "#order" ? "order" : location.hash === "#bay" ? "bay" : "factory"));
   // Follow the newest run unless one was picked.
   const selected = f.factoryRuns.find((r) => r.run === picked) ?? f.factoryRuns.at(-1);
   const open = order.conflicts.filter((c) => c.status === "open").length;
@@ -30,6 +32,7 @@ export function App() {
           <span className="sep">·</span> {f.signals.length} signals
           <span className="sep">·</span> {order.nodes.filter((n) => n.mergedInto == null).length} bodies
           {open > 0 && <><span className="sep">·</span><span className="alert-text">{open} conflict{open > 1 ? "s" : ""}</span></>}
+          <span className="sep">·</span> {bay.agents.filter((a) => !a.retired).length} agents
           <span className="sep">·</span> {f.factoryRuns.length} factory runs
           <span className="sep">·</span> {f.runs.length} agent calls
           <span className="sep">·</span> spend ${f.totalUsd.toFixed(4)}
@@ -40,12 +43,13 @@ export function App() {
         <div className={`center view-${view}`}>
           <nav className="viewbar" role="tablist" aria-label="Center view">
             <button role="tab" aria-selected={view === "factory"} className={view === "factory" ? "tab on" : "tab"} onClick={() => setView("factory")}>Factory floor</button>
+            <button role="tab" aria-selected={view === "bay"} className={view === "bay" ? "tab on" : "tab"} onClick={() => setView("bay")}>Agent Bay{Object.values(bay.stats).some((s) => s.state === "thinking") ? " · working" : ""}</button>
             <button role="tab" aria-selected={view === "order"} className={(view === "order" ? "tab on" : "tab") + (open ? " alert" : "")} onClick={() => setView("order")}>Order deck{open ? ` · ${open}` : ""}</button>
           </nav>
           {view === "factory" ? <>
             <FactoryFloor runs={f.runs} factoryRuns={f.factoryRuns} selected={selected} onSelect={setPicked} />
             <RunDeck run={selected} />
-          </> : <OrderDeck order={order} selected={node} onSelect={pickNode} />}
+          </> : view === "bay" ? <AgentBay bay={bay} /> : <OrderDeck order={order} selected={node} onSelect={pickNode} />}
           <Timeline runs={f.runs} totalUsd={f.totalUsd} />
         </div>
         <Overseer signals={f.signals} runs={f.runs} factoryRuns={f.factoryRuns} briefings={order.briefings} ingests={order.ingests} onRunStarted={setPicked} />

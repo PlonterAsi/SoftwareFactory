@@ -23,7 +23,7 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
     // A quiet receipt under each Signal: how it was filed.
     ...ingests.filter((r) => r.state === "done").map((r) => ({ key: "i" + r.signalId, ts: (signals.find((s) => s.id === r.signalId)?.ts ?? r.ts) + "~", kind: "filed" as const,
       text: `${r.fragments.length} fragment${r.fragments.length === 1 ? "" : "s"} filed by the ${r.mode === "agent" ? "Archivist" : "heuristics"}${r.costUsd ? ` · $${r.costUsd.toFixed(4)}` : ""}${r.note ? ` · ${r.note}` : ""}` })),
-    ...runs.filter((r) => r.state !== "running" && !r.factoryRun && r.agent !== "archivist").map((r) => ({
+    ...runs.filter((r) => r.state !== "running" && !r.factoryRun && !r.bayTest && (r.station === "overseer" || (!r.station && r.agent === "overseer"))).map((r) => ({
       key: "r" + r.runId,
       ts: r.startedAt,
       kind: r.state === "failed" ? ("error" as const) : ("reply" as const),

@@ -13,6 +13,7 @@ function Station({ data }: NodeProps<Node<StationData>>) {
       <div className="st-sub">{data.sub}</div>
       <Handle type="source" position={Position.Right} />
       <Handle id="b" type="source" position={Position.Bottom} />
+      <Handle id="r" type="target" position={Position.Right} />
       <Handle id="t" type="target" position={Position.Top} />
       <Handle id="tb" type="source" position={Position.Top} />
       {/* Offset pair for the test ⇄ fix loop, so the two edges run side by side. */}
@@ -24,23 +25,24 @@ function Station({ data }: NodeProps<Node<StationData>>) {
   );
 }
 
-const X = [0, 190, 380, 570];
+const X = [0, 190, 380, 570, 760];
 // id, label, what it does, x, y, gate?, later?
 const STATIONS: [string, string, string, number, number, boolean?, boolean?][] = [
   ["intake", "One-line idea", "saved as a Signal", X[0], 0],
-  ["council", "Council", "milestone 4, skipped", X[1], -95, false, true],
+  ["council", "Council", "3 seats · big ideas", X[1], -95],
   ["plan", "Spec and plan", "Planner", X[1], 0],
   ["gateA", "You approve plan", "one tap", X[2], 0, true],
   ["tests", "Acceptance tests", "Tester, then locked", X[0], 130],
   ["build", "Build", "Builder", X[1], 130],
   ["test", "Test", "node --test", X[2], 130],
-  ["gateB", "You accept build", "one tap", X[3], 130, true],
+  ["review", "Review", "Reviewer vs spec", X[3], 130],
+  ["gateB", "You accept build", "one tap", X[4], 130, true],
   ["fix", "Fix", "Fixer loop", X[2], 260],
-  ["ship", "Ship to disk", "git repo, tagged", X[3], 260],
+  ["ship", "Ship to disk", "git repo, tagged", X[4], 260],
 ];
 const EDGES: [string, string, string?, string?][] = [
   ["intake", "plan"], ["intake", "council", "tb"], ["council", "plan", undefined, "t"], ["plan", "gateA"], ["gateA", "tests", "b", "t"], ["tests", "build"],
-  ["build", "test"], ["test", "fix", "b1", "t1"], ["fix", "test", "t2", "b2"], ["test", "gateB"], ["gateB", "ship", "b", "t"],
+  ["build", "test"], ["test", "fix", "b1", "t1"], ["fix", "test", "t2", "b2"], ["test", "review"], ["review", "fix", "b", "r"], ["review", "gateB"], ["gateB", "ship", "b", "t"],
 ];
 
 function nodesFor(run?: FactoryRunView): Node<StationData>[] {
@@ -49,6 +51,8 @@ function nodesFor(run?: FactoryRunView): Node<StationData>[] {
     let badge: string | undefined;
     if (id === "fix" && run?.fixRounds) badge = `${run.fixRounds}/${run.maxFixRounds}`;
     if (id === "test" && run?.tests.length) { const t = run.tests.at(-1)!; badge = `${t.passed}/${t.passed + t.failed}`; }
+    if (id === "council" && run?.council.length) { const b = run.council.at(-1)!.brief; badge = `${Object.values(b.votes).filter((v) => v === b.outcome).length}× ${b.outcome}`; }
+    if (id === "review" && run?.reviews.length) { const r = run.reviews.at(-1)!; badge = r.findings.length ? `${r.findings.length} note${r.findings.length > 1 ? "s" : ""}` : "clean"; }
     return { id, type: "station", position: { x, y }, draggable: false, data: { label, sub, gate, later, state: later ? "idle" : s?.state ?? "idle", badge, note: s?.note } };
   });
 }
@@ -56,7 +60,7 @@ function nodesFor(run?: FactoryRunView): Node<StationData>[] {
 function edgesFor(run?: FactoryRunView): Edge[] {
   return EDGES.map(([s, t, sh, th]) => {
     const target = run?.stations[t]?.state;
-    const later = s === "council" || t === "council";
+    const later = (s === "council" || t === "council") && run?.stations.council?.state === "skipped";
     return {
       id: `${s}-${t}`, source: s, target: t, sourceHandle: sh, targetHandle: th, type: "smoothstep",
       animated: target === "active", className: `flow-edge${later ? " later" : ""}${run?.stations[s] && target ? " lit" : ""}`,

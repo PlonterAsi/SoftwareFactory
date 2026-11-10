@@ -8,6 +8,8 @@ export interface AgentRunView {
   agent: string;
   station?: string;
   factoryRun?: number;
+  /** A test run from the Agent Bay, not a conversation. */
+  bayTest?: boolean;
   prompt: string;
   model: string | null;
   startedAt: string;
@@ -47,7 +49,11 @@ export async function decideGate(run: number, gate: string, approve: boolean, no
   if (!r.ok) throw new Error((await r.json()).error ?? "gate failed");
 }
 
-export type StationState = "idle" | "active" | "pass" | "fail" | "incomplete" | "waiting";
+export type StationState = "idle" | "active" | "pass" | "fail" | "incomplete" | "waiting" | "skipped";
+export type Vote = "build" | "reshape" | "drop";
+export interface SeatView { agent: string; name: string; version: number; round: number; take?: { take: string; proposals: string[]; concerns: string[]; vote: Vote; scope: string }; error?: string }
+export interface CouncilBriefView { rounds: number; votes: Record<string, Vote>; outcome: Vote; agreed: string[]; proposals: string[]; concerns: string[] }
+export interface ReviewView { round: number; agent: string; verdict: "pass" | "fix"; findings: { severity: "high" | "low"; text: string }[] }
 export interface TestCaseView { name: string; file: string; pass: boolean; error?: string }
 export interface FactoryRunView {
   run: number;
@@ -65,6 +71,8 @@ export interface FactoryRunView {
   visuals: { station: string; round?: number; pass: boolean; items: string[]; missing: string[] }[];
   waiting?: { gate: string; question: string };
   fixRounds: number;
+  council: { round: number; seats: SeatView[]; brief: CouncilBriefView }[];
+  reviews: ReviewView[];
   finished?: { outcome: "shipped" | "stopped" | "failed"; reason: string; totalUsd: number | null; agentCalls?: number; sha?: string };
 }
 
@@ -74,7 +82,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
   for (const e of events) {
     const p = e.payload ?? {};
     if (e.type === "factory.run.started") {
-      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0 });
+      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], reviews: [] });
       continue;
     }
     const r = runs.get(p.run ?? p.factoryRun);
@@ -87,6 +95,8 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         if (p.station === "fix" && p.round) r.fixRounds = Math.max(r.fixRounds, p.round);
         break;
       case "factory.plan": r.plan = p.plan; r.dir = p.dir; break;
+      case "factory.council": r.council.push({ round: p.round, seats: p.seats, brief: p.brief }); break;
+      case "factory.review": r.reviews.push({ round: p.round, agent: p.agent, verdict: p.verdict, findings: p.findings }); break;
       case "factory.tests": r.tests.push({ round: p.round, passed: p.passed, failed: p.failed, cases: p.cases }); break;
       case "factory.files":
         for (const w of p.written ?? []) {
@@ -136,7 +146,7 @@ export function useFactory() {
     const byId = new Map<number, AgentRunView>();
     for (const e of events) {
       if (e.type === "agent.run.started") {
-        byId.set(e.id, { runId: e.id, agent: e.payload.agent, station: e.payload.station, factoryRun: e.payload.factoryRun, prompt: e.payload.prompt, model: e.payload.model, startedAt: e.ts, state: "running" });
+        byId.set(e.id, { runId: e.id, agent: e.payload.agent, station: e.payload.station, factoryRun: e.payload.factoryRun, bayTest: !!e.payload.bayTest, prompt: e.payload.prompt, model: e.payload.model, startedAt: e.ts, state: "running" });
       } else if (e.type === "agent.run.completed" && byId.has(e.payload.runId)) {
         Object.assign(byId.get(e.payload.runId)!, { state: "done", ...e.payload });
       } else if (e.type === "agent.run.failed" && byId.has(e.payload.runId)) {
@@ -226,4 +236,51 @@ export function useOrder(events: SfEvent[]) {
     return () => { stop = true; clearTimeout(t); };
   }, [lastId, firstLoad]);
   return { ...state, arrivals };
+}
+
+// ---- Agent Bay (milestone 4) ----
+
+export const SLOTS = ["council", "plan", "tests", "build", "review", "fix", "order", "overseer"] as const;
+export type Slot = (typeof SLOTS)[number];
+export const SLOT_LABEL: Record<Slot, string> = { council: "Council", plan: "Spec and plan", tests: "Acceptance tests", build: "Build", review: "Review", fix: "Fix", order: "Order Engine", overseer: "Overseer channel" };
+export interface AgentDef { id: string; name: string; avatar: string; description: string; station: Slot | "none"; model: string; budgetUsd: number; plugins: string[]; skills: string[]; tools: string[]; sample: string; prompt: string }
+export interface AgentView { def: AgentDef; version: number; builtin: boolean; retired: boolean; createdAt: string; updatedAt: string; versions: { version: number; ts: string; note: string; by: string }[] }
+export interface BayTest { id: number; ts: string; agent: string; version: number; station: string; task: string; state: "running" | "done"; pass?: boolean; checks?: { label: string; pass: boolean }[]; output?: string; error?: string; costUsd?: number }
+export interface AgentStats {
+  calls: number; failed: number; costUsd: number; avgUsd: number; verdicts: { pass: number; total: number }; passRate: number | null;
+  runs: number; avgRounds: number | null; lastAt: string | null; state: "idle" | "thinking" | "blocked"; current?: string;
+  byVersion: Record<number, { calls: number; costUsd: number; pass: number; total: number }>;
+}
+export interface BayState {
+  agents: AgentView[]; slots: Record<Slot, string[]>; seats: Record<Slot, number>; tests: BayTest[]; stats: Record<string, AgentStats>;
+  visuals: { id: number; ts: string; scope: string; pass: boolean; items: string[]; missing: string[] }[]; models: string[];
+}
+const EMPTY_BAY: BayState = { agents: [], slots: {} as Record<Slot, string[]>, seats: {} as Record<Slot, number>, tests: [], stats: {}, visuals: [], models: ["haiku", "sonnet", "opus"] };
+
+export const bayApi = {
+  create: (def: Partial<AgentDef>) => post(`/api/bay/agents`, def) as Promise<AgentView>,
+  save: (id: string, def: Partial<AgentDef>, expectVersion: number, note?: string) => post(`/api/bay/agents/${id}/save`, { def, expectVersion, note }) as Promise<AgentView>,
+  clone: (id: string, name?: string) => post(`/api/bay/agents/${id}/clone`, { name }) as Promise<AgentView>,
+  rollback: (id: string, version: number) => post(`/api/bay/agents/${id}/rollback`, { version }) as Promise<AgentView>,
+  retire: (id: string, retired = true) => post(`/api/bay/agents/${id}/retire`, { retired }),
+  test: (id: string, task?: string) => post(`/api/bay/agents/${id}/test`, { task }) as Promise<BayTest>,
+  assign: (slot: Slot, agents: string[]) => post(`/api/bay/slots/${slot}`, { agents }),
+  draft: (description: string) => post(`/api/bay/draft`, { description }) as Promise<AgentView>,
+  importFile: (text: string) => post(`/api/bay/import`, { text }) as Promise<AgentView>,
+  version: async (id: string, version: number) => (await fetch(`${API}/api/bay/agents/${id}/versions/${version}`)).json() as Promise<{ version: number; def: AgentDef; note: string }>,
+  fileUrl: (id: string, version?: number) => `${API}/api/bay/agents/${id}/file${version ? `?version=${version}` : ""}`,
+};
+
+/** The Bay's state is folded by the core; refetch whenever a Bay event or an agent call lands, so crew cards stay live. */
+export function useBay(events: SfEvent[]) {
+  const [state, setState] = useState<BayState>(EMPTY_BAY);
+  const lastId = events.filter((e) => e.type.startsWith("bay.") || e.type.startsWith("agent.")).at(-1)?.id ?? 0;
+  useEffect(() => {
+    let stop = false;
+    const t = setTimeout(() => {
+      fetch(`${API}/api/bay/state`).then((r) => r.json()).then((s: BayState) => { if (!stop) setState(s); }).catch(() => {});
+    }, 150);
+    return () => { stop = true; clearTimeout(t); };
+  }, [lastId]);
+  return state;
 }

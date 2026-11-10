@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { FactoryRunView } from "./api";
+import type { FactoryRunView, SeatView, Vote } from "./api";
 
-type Tab = "plan" | "tests" | "files" | "visuals";
+type Tab = "council" | "plan" | "tests" | "files" | "review" | "visuals";
 
 /** What the selected run produced, drawn instead of listed: task graph, test grid, file heat map, visual checks. */
 export function RunDeck({ run }: { run?: FactoryRunView }) {
@@ -9,10 +9,14 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
   const last = run?.tests.at(-1);
   const fileCount = run ? Object.keys(run.files).length : 0;
   const vFail = run?.visuals.filter((v) => !v.pass).length ?? 0;
+  const lastCouncil = run?.council.at(-1);
+  const lastReview = run?.reviews.at(-1);
   const tabs: [Tab, string][] = [
+    ["council", `Council${lastCouncil ? ` · ${lastCouncil.brief.outcome}` : run?.stations.council?.state === "skipped" ? " · skipped" : ""}`],
     ["plan", `Plan${run?.plan ? ` · ${run.plan.tasks.length}` : ""}`],
     ["tests", `Tests${last ? ` · ${last.passed}/${last.passed + last.failed}` : ""}`],
     ["files", `Files${fileCount ? ` · ${fileCount}` : ""}`],
+    ["review", `Review${lastReview ? ` · ${lastReview.findings.length}` : ""}`],
     ["visuals", `Visuals${run?.visuals.length ? (vFail ? ` · ${vFail} missing` : " · all") : ""}`],
   ];
   return (
@@ -29,6 +33,8 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
         {run && tab === "tests" && <TestGrid run={run} />}
         {run && tab === "files" && <HeatMap run={run} />}
         {run && tab === "visuals" && <Visuals run={run} />}
+        {run && tab === "council" && <CouncilView run={run} />}
+        {run && tab === "review" && <ReviewView run={run} />}
       </div>
     </section>
   );
@@ -126,5 +132,84 @@ function Visuals({ run }: { run: FactoryRunView }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+const VOTE_LABEL: Record<Vote, string> = { build: "build", reshape: "reshape", drop: "drop" };
+
+/** The Council as a round table: three seats, each coloured by its vote; a line joins seats that agree on a point. */
+function CouncilView({ run }: { run: FactoryRunView }) {
+  const st = run.stations.council;
+  const [round, setRound] = useState<number | null>(null);
+  if (!run.council.length) return <div className="empty">{st?.state === "skipped" ? `The Council was skipped: ${st.note ?? "small job"}.` : st?.state === "active" ? "The Council is sitting…" : "The Council sits before the Planner for bigger ideas."}</div>;
+  const r = run.council.find((c) => c.round === round) ?? run.council.at(-1)!;
+  const seats = r.seats;
+  const W = 300, H = 190, cx = W / 2, cy = H / 2, R = 62;
+  // Seats sit around an oval table: two above, one below (any count works).
+  const pos = seats.map((_, i) => { const a = -Math.PI / 2 - Math.PI / seats.length + (i * 2 * Math.PI) / Math.max(1, seats.length); return { x: cx + R * 1.55 * Math.cos(a), y: cy + R * 0.95 * Math.sin(a) }; });
+  // Seats that raised a point that ended up "agreed" are joined.
+  const raised = (s: SeatView, text: string) => [...(s.take?.proposals ?? []), ...(s.take?.concerns ?? [])].some((x) => overlap(x, text));
+  const links: [number, number][] = [];
+  for (let i = 0; i < seats.length; i++) for (let j = i + 1; j < seats.length; j++) if (r.brief.agreed.some((t) => raised(seats[i], t) && raised(seats[j], t))) links.push([i, j]);
+  return (
+    <div className="council">
+      <div className="council-top">
+        <svg className="table" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Council round ${r.round}: ${seats.map((s) => `${s.name} ${s.take?.vote ?? "no answer"}`).join(", ")}; majority ${r.brief.outcome}`}>
+          <ellipse className="tbl" cx={cx} cy={cy} rx={R * 1.05} ry={R * 0.5} />
+          <text className="tbl-out" x={cx} y={cy - 2} textAnchor="middle">{r.brief.outcome.toUpperCase()}</text>
+          <text className="tbl-sub" x={cx} y={cy + 13} textAnchor="middle">round {r.round} of {run.council.length}</text>
+          {links.map(([i, j]) => <line key={`${i}-${j}`} className="agree" x1={pos[i].x} y1={pos[i].y} x2={pos[j].x} y2={pos[j].y} />)}
+          {seats.map((s, i) => (
+            <g key={s.agent} className={`seat-g v-${s.take?.vote ?? "none"}`} transform={`translate(${pos[i].x},${pos[i].y})`}>
+              <circle r={17} />
+              <text y={4} textAnchor="middle">{s.name.slice(0, 1)}</text>
+              <text className="seat-lbl" y={pos[i].y < cy ? -23 : 31} textAnchor="middle">{s.name} · {s.take ? VOTE_LABEL[s.take.vote] : "no answer"}</text>
+            </g>
+          ))}
+        </svg>
+        <div className="brief">
+          {run.council.length > 1 && <div className="rounds">{run.council.map((c) => <button key={c.round} className={`tiny ${c.round === r.round ? "" : "ghost"}`} onClick={() => setRound(c.round)}>Round {c.round}</button>)}</div>}
+          <BriefList title="Agreed" cls="agreed" items={r.brief.agreed} />
+          <BriefList title="Proposals" cls="props" items={r.brief.proposals} />
+          <BriefList title="Concerns" cls="concerns" items={r.brief.concerns} />
+        </div>
+      </div>
+      <div className="takes">
+        {seats.map((s) => (
+          <div key={s.agent} className={`take v-${s.take?.vote ?? "none"}`}>
+            <div className="take-head"><strong>{s.name}</strong> <span className="mono muted">v{s.version}</span> <span className="vote">{s.take ? s.take.vote : "no answer"}</span>{s.take && <span className="mono muted">{s.take.scope}</span>}</div>
+            <div className="take-text">{s.take?.take ?? s.error}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function overlap(a: string, b: string) {
+  const t = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []);
+  const A = t(a), B = t(b);
+  let n = 0;
+  for (const x of A) if (B.has(x)) n++;
+  return A.size && B.size ? n / (A.size + B.size - n) >= 0.4 : false;
+}
+
+function BriefList({ title, cls, items }: { title: string; cls: string; items: string[] }) {
+  if (!items.length) return null;
+  return <div className={`brief-sec ${cls}`}><span className="kind">{title}</span><ul>{items.map((x, i) => <li key={i}>{x}</li>)}</ul></div>;
+}
+
+function ReviewView({ run }: { run: FactoryRunView }) {
+  const st = run.stations.review;
+  if (!run.reviews.length) return <div className="empty">{st?.state === "skipped" ? "Review was turned off for this run." : st?.state === "active" ? "The Reviewer is reading the build…" : "After the tests pass, the Reviewer checks the build against the spec."}</div>;
+  return (
+    <div className="reviews">
+      {run.reviews.map((r) => (
+        <div key={r.round} className={`review-card ${r.verdict}`}>
+          <div className="take-head"><strong>Round {r.round}</strong> <span className="mono muted">{r.agent}</span> <span className="vote">{r.verdict === "fix" ? "sent to the Fixer" : "pass"}</span></div>
+          {r.findings.length ? <ul>{r.findings.map((f, i) => <li key={i} className={`sev-${f.severity}`}><span className="kind">{f.severity}</span> {f.text}</li>)}</ul> : <div className="muted">No findings.</div>}
+        </div>
+      ))}
+    </div>
   );
 }

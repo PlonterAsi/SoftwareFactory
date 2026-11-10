@@ -34,7 +34,7 @@ Answer with ONE fenced json block and nothing else, shaped exactly like:
   tests: `Station contract: tests.
 Write acceptance tests from an approved spec BEFORE any code exists. The tests are then locked: nobody may edit them, so they must test exactly the spec's interface and acceptance criteria, nothing invented.
 ${TARGET}
-Use node:test and node:assert/strict. Put tests in test/*.test.js and import the code by relative path (for example ../src/x.js). Build any fixtures in code (Buffers, temp dirs from node:os tmpdir). One test per acceptance criterion where possible, named after it.
+Use node:test and node:assert/strict. Put tests in test/*.test.js and import the code by relative path (for example ../src/x.js). Build fixtures in code (Buffers, temp dirs from node:os tmpdir), or write small fixture files under test/fixtures/ as file blocks too; resolve their paths from the test file (new URL("./fixtures/x.csv", import.meta.url)), never from the working directory. One test per acceptance criterion where possible, named after it.
 ${FILE_FORMAT}`,
   build: `Station contract: build.
 Write the code that makes the locked acceptance tests pass and meets the spec.
