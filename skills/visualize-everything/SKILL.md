@@ -12,6 +12,10 @@ SoftwareFactory rule: **nothing exists only as text.** If it runs, thinks, costs
 - As the last step of every station in every loop (the loop engine calls it before a station can be marked done).
 - When any agent creates a new kind of thing: a project, an idea, a plan, a worker, a file, a test, a rule.
 
+## Where it is enforced
+
+In the factory loop the check is code: `packages/core/src/factory/visualize.ts` runs after every station and appends a `factory.visual` event. A station with a missing visual is marked incomplete and escalates; the Bridge's run deck lists every check.
+
 ## What to check
 
 For each thing the station produced, confirm a visual exists and is fed from the event log, so it stays live:

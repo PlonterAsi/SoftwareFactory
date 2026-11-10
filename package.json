@@ -13,6 +13,7 @@
     "test": "npm test -w @sf/core",
     "typecheck": "npm run typecheck -w @sf/core && npm run typecheck -w @sf/bridge",
     "spike": "npm run spike -w @sf/core",
+    "factory": "npm run factory -w @sf/core --",
     "app": "npm run build -w @sf/core && tauri dev",
     "app:build": "tauri build"
   },

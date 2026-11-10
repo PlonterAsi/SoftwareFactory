@@ -53,7 +53,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       command: opts.command ?? process.env.SF_CLAUDE_BIN ?? "claude",
       profile: opts.profile ?? "lean",
       defaultModel: opts.defaultModel ?? "haiku",
-      timeoutMs: opts.timeoutMs ?? 180_000,
+      timeoutMs: opts.timeoutMs ?? Number(process.env.SF_AGENT_TIMEOUT_MS ?? 600_000),
     };
     this.name = `claude-code:${this.opts.profile}`;
   }
@@ -104,26 +104,64 @@ export function parseClaudeJson(raw: string, runtime: string, wallMs: number): A
   };
 }
 
-/** Deterministic runtime for tests and offline UI work. Costs nothing. */
+/**
+ * Deterministic runtime for tests and offline UI work. Costs nothing.
+ * It plays each factory crew role with a canned tiny project, and its first
+ * build has a planted bug, so the fix loop is exercised too.
+ */
 export class MockRuntime implements AgentRuntime {
   readonly name = "mock";
   calls: AgentRequest[] = [];
+  constructor(private opts: { delayMs?: number; plantBug?: boolean } = {}) {}
   async run(req: AgentRequest): Promise<AgentResult> {
     this.calls.push(req);
-    return {
-      text: `Overseer (mock) received: ${req.prompt.slice(0, 80)}`,
-      costUsd: 0,
-      durationMs: 1,
-      models: ["mock"],
-      runtime: this.name,
-      contextTokens: 0,
-    };
+    if (this.opts.delayMs) await new Promise((r) => setTimeout(r, this.opts.delayMs));
+    const role = req.systemPrompt ?? "";
+    const builds = this.calls.filter((c) => c.systemPrompt?.includes("You are the Builder")).length;
+    let text = `Overseer (mock) received: ${req.prompt.slice(0, 80)}`;
+    if (role.includes("You are the Planner")) text = MOCK.plan;
+    else if (role.includes("You are the Tester")) text = MOCK.tests;
+    else if (role.includes("You are the Builder")) text = MOCK.build(this.opts.plantBug !== false && builds === 1);
+    else if (role.includes("You are the Fixer")) text = MOCK.build(false);
+    return { text, costUsd: role ? 0.0001 : 0, durationMs: this.opts.delayMs ?? 1, models: ["mock"], runtime: this.name, contextTokens: 0 };
   }
 }
+
+const MOCK = {
+  plan: "```json\n" + JSON.stringify({
+    name: "Word Counter", slug: "word-counter", summary: "Counts words in text from stdin or a file.",
+    interface: "src/count.js exports countWords(text: string): number. bin/wc.js prints countWords of the file given as argv[2].",
+    acceptance: ["empty text has 0 words", "words are split on any whitespace", "punctuation-only tokens still count"],
+    tasks: [{ id: "t1", title: "countWords", dependsOn: [] }, { id: "t2", title: "CLI wrapper", dependsOn: ["t1"] }, { id: "t3", title: "README", dependsOn: ["t2"] }],
+    files: ["package.json", "src/count.js", "bin/wc.js"],
+  }) + "\n```",
+  tests: `<<<FILE test/count.test.js
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { countWords } from "../src/count.js";
+test("empty text has 0 words", () => assert.equal(countWords(""), 0));
+test("words are split on any whitespace", () => assert.equal(countWords("a  b\\tc\\nd"), 4));
+test("punctuation-only tokens still count", () => assert.equal(countWords("hi - there"), 3));
+FILE>>>`,
+  build: (bug: boolean) => `<<<FILE package.json
+{ "name": "word-counter", "type": "module", "scripts": { "test": "node --test" } }
+FILE>>>
+<<<FILE src/count.js
+export function countWords(text) {
+  return text.split(${bug ? '" "' : "/\\s+/"}).filter(Boolean).length;
+}
+FILE>>>
+<<<FILE bin/wc.js
+#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { countWords } from "../src/count.js";
+console.log(countWords(readFileSync(process.argv[2] ?? 0, "utf8")));
+FILE>>>`,
+};
 
 export function runtimeFromEnv(env = process.env): AgentRuntime {
   const kind = env.SF_RUNTIME ?? "mock";
   if (kind === "claude-code" || kind === "claude-code:lean") return new ClaudeCodeRuntime({ profile: "lean" });
   if (kind === "claude-code:full") return new ClaudeCodeRuntime({ profile: "full" });
-  return new MockRuntime();
+  return new MockRuntime({ delayMs: Number(env.SF_MOCK_DELAY_MS ?? 700) });
 }

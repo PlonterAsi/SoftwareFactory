@@ -1,0 +1,16 @@
+{
+  "name": "photo-date-renamer",
+  "version": "1.0.0",
+  "description": "Rename JPEG photos to their EXIF capture date and time (dry run by default).",
+  "type": "module",
+  "bin": {
+    "photo-date-rename": "bin/photo-date-rename.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}
