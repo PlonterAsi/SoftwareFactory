@@ -37,6 +37,8 @@ export interface Fragment {
   nodeId: number | null;
   /** Where the Archivist would put it when it was not sure enough to file it. */
   suggestedNodeId: number | null;
+  /** Other homes that scored nearly as well: one-tap refiles on the Bridge. */
+  alternatives?: number[];
   confidence: number;
   /** Marked by its wording ("important", "must", "never") or pinned by you. */
   important: boolean;
@@ -157,12 +159,13 @@ export function foldOrder(events: SfEvent[]): OrderState {
         frags.set(e.id, {
           id: e.id, signalId: p.signalId, ts: e.ts, text: p.text, kind: p.kind, nodeId: p.nodeId ?? null, suggestedNodeId: p.suggestedNodeId ?? null,
           confidence: p.confidence ?? 0, important: !!p.important, pinned: false, origin: p.origin ?? "explicit", by: p.by ?? "archivist", state: "live", lastTouched: e.ts,
+          ...(Array.isArray(p.alternatives) && p.alternatives.length ? { alternatives: p.alternatives.map(Number) } : {}),
         });
         touchNode(p.nodeId, e.ts);
         break;
       case "order.fragment.moved": {
         const f = frags.get(p.fragmentId);
-        if (f) { f.nodeId = p.nodeId ?? null; f.confidence = 1; f.lastTouched = e.ts; touchNode(f.nodeId, e.ts); }
+        if (f) { f.nodeId = p.nodeId ?? null; f.confidence = 1; delete f.alternatives; f.lastTouched = e.ts; touchNode(f.nodeId, e.ts); }
         break;
       }
       case "order.fragment.pinned": {

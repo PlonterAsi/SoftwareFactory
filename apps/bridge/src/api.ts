@@ -44,6 +44,13 @@ export async function startFactoryRun(idea: string, maxUsd?: number) {
   return j.run as number;
 }
 
+export async function resumeRun(run: number) {
+  const r = await fetch(`${API}/api/factory/runs/${run}/resume`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? "could not resume the run");
+  return j as { run: number; from: string };
+}
+
 export async function decideGate(run: number, gate: string, approve: boolean, note?: string) {
   const r = await fetch(`${API}/api/factory/runs/${run}/gate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ gate, approve, note }) });
   if (!r.ok) throw new Error((await r.json()).error ?? "gate failed");
@@ -73,7 +80,9 @@ export interface FactoryRunView {
   fixRounds: number;
   council: { round: number; seats: SeatView[]; brief: CouncilBriefView }[];
   reviews: ReviewView[];
-  finished?: { outcome: "shipped" | "stopped" | "failed"; reason: string; totalUsd: number | null; agentCalls?: number; sha?: string };
+  finished?: { outcome: "shipped" | "stopped" | "failed"; reason: string; totalUsd: number | null; agentCalls?: number; sha?: string; resumable?: boolean };
+  /** Picked up again after the app closed: from which station, how many times, and whether on its own. */
+  resumed?: { from: string; auto: boolean; count: number; at: string };
 }
 
 /** Fold factory events into one view per run. */
@@ -107,7 +116,14 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         break;
       case "factory.visual": r.visuals.push({ station: p.station, round: p.round, pass: p.pass, items: p.items, missing: p.missing }); break;
       case "factory.gate": r.waiting = p.state === "waiting" ? { gate: p.gate, question: p.question } : undefined; break;
-      case "factory.run.finished": r.finished = { outcome: p.outcome, reason: p.reason, totalUsd: p.totalUsd, agentCalls: p.agentCalls, sha: p.sha }; r.waiting = undefined; if (p.totalUsd != null) r.spentUsd = p.totalUsd; break;
+      case "factory.run.finished": r.finished = { outcome: p.outcome, reason: p.reason, totalUsd: p.totalUsd, agentCalls: p.agentCalls, sha: p.sha, resumable: !!p.resumable || /^The core restarted/.test(p.reason ?? "") }; r.waiting = undefined; if (p.totalUsd != null) r.spentUsd = p.totalUsd; break;
+      case "factory.run.resumed":
+        r.finished = undefined;
+        r.resumed = { from: p.from, auto: !!p.auto, count: (r.resumed?.count ?? 0) + 1, at: e.ts };
+        if (p.spentUsd != null) r.spentUsd = p.spentUsd;
+        // Stations after the resume point start over: show them idle again, not as they were cut off.
+        for (const [k, v] of Object.entries(r.stations)) if (v.state === "active") r.stations[k] = { ...v, state: "idle", note: "cut off when the app closed" };
+        break;
     }
   }
   return [...runs.values()];
@@ -175,7 +191,7 @@ export function useFactory() {
 export type FragmentKind = "idea" | "rule" | "decision" | "question" | "task" | "note" | "noise";
 export interface OrderNode { id: number; kind: "project" | "idea" | "thread"; title: string; parentId: number | null; createdAt: string; signalId: number | null; by: string; mergedInto?: number; lastActive: string }
 export interface Fragment {
-  id: number; signalId: number; ts: string; text: string; kind: FragmentKind; nodeId: number | null; suggestedNodeId: number | null;
+  id: number; signalId: number; ts: string; text: string; kind: FragmentKind; nodeId: number | null; suggestedNodeId: number | null; alternatives?: number[];
   confidence: number; important: boolean; pinned: boolean; origin: "explicit" | "inferred"; by: string; state: "live" | "superseded" | "faded"; supersededBy?: number; lastTouched: string;
 }
 export interface Conflict {

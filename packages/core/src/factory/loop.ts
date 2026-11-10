@@ -1,6 +1,7 @@
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
-import type { AgentRuntime } from "../runtime.js";
+import { MockRuntime, type AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
 import { builtinCrew, type CrewMember, type CrewSource } from "./crew.js";
@@ -74,17 +75,74 @@ export class Factory {
   private pending = new Map<number, Pending>();
   private active = new Map<number, Promise<void>>();
 
+  /** Runs this core found in flight when it started (closed as stopped, resumable). */
+  readonly interrupted: number[] = [];
+
   constructor(private log: EventLog, private runtime: AgentRuntime, readonly projectsDir: string, readonly crew: CrewSource = builtinCrew) {
-    // Runs that were mid-flight when the core stopped cannot resume yet; close them honestly.
-    const finished = new Set(log.list({ type: "factory.run.finished", limit: 1e6 }).map((e) => (e.payload as { run: number }).run));
-    for (const e of log.list({ type: "factory.run.started", limit: 1e6 })) {
-      if (!finished.has(e.id)) log.append("factory.run.finished", { run: e.id, outcome: "stopped", reason: "The core restarted while this run was in flight.", totalUsd: null });
-    }
     // Agent calls cut off by the restart would otherwise pulse as "running" forever.
     const ended = new Set([...log.list({ type: "agent.run.completed", limit: 1e6 }), ...log.list({ type: "agent.run.failed", limit: 1e6 })].map((e) => (e.payload as { runId: number }).runId));
     for (const e of log.list({ type: "agent.run.started", limit: 1e6 })) {
       if (!ended.has(e.id)) log.append("agent.run.failed", { runId: e.id, agent: (e.payload as { agent: string }).agent, factoryRun: (e.payload as { factoryRun?: number }).factoryRun, error: "The core restarted during this call." });
     }
+    // Runs that were mid-flight when the app closed are closed honestly as stopped,
+    // marked resumable: resumeInterrupted() (or the Bridge's Resume) picks them up
+    // again from the last station they completed.
+    for (const id of unfinishedRuns(log)) {
+      log.append("factory.run.finished", { run: id, outcome: "stopped", reason: "The app closed while this run was in flight.", resumable: true, totalUsd: null });
+      this.interrupted.push(id);
+    }
+  }
+
+  /**
+   * Resume the runs the app left in flight, each from its last completed station.
+   * A run that keeps dying is resumed automatically at most MAX_AUTO_RESUMES times;
+   * after that it waits for the Resume button.
+   */
+  resumeInterrupted(): number[] {
+    const out: number[] = [];
+    for (const id of this.interrupted.splice(0)) {
+      const auto = this.log.list({ type: "factory.run.resumed", limit: 1e6 }).filter((e) => (e.payload as { run: number; auto?: boolean }).run === id && (e.payload as { auto?: boolean }).auto).length;
+      if (auto >= MAX_AUTO_RESUMES) continue;
+      try { this.resume(id, { auto: true }); out.push(id); } catch { /* not resumable (say, its folder is gone): it stays stopped */ }
+    }
+    return out;
+  }
+
+  /** Can this run be picked up again? Only runs stopped by the app closing, whose project folder still exists. */
+  resumable(run: number): { ok: boolean; why?: string; from?: StationId } {
+    if (this.active.has(run)) return { ok: false, why: "It is running." };
+    const started = this.log.get(run);
+    if (started?.type !== "factory.run.started") return { ok: false, why: "No such run." };
+    const life = this.log.list({ sinceId: run - 1, limit: 1e6 }).filter((e) => (e.type === "factory.run.finished" || e.type === "factory.run.resumed") && (e.payload as { run: number }).run === run).at(-1);
+    const fin = life?.type === "factory.run.finished" ? life.payload as { outcome: string; reason: string; resumable?: boolean } : null;
+    if (!fin) return { ok: false, why: "It has not stopped." };
+    // Runs closed before resume existed carry the older reason.
+    if (!(fin.resumable || /^The core restarted/.test(fin.reason))) return { ok: false, why: `It ${fin.outcome === "shipped" ? "already shipped" : `was ${fin.outcome} on purpose`}.` };
+    const st = restoreState(this.log, run);
+    if (st.dir && !existsSync(join(st.dir, ".git"))) return { ok: false, why: `Its project folder is gone (${st.dir}).` };
+    return { ok: true, from: st.from };
+  }
+
+  /** Pick a stopped run up again from its last completed station. Returns the run id. */
+  resume(run: number, opts: { auto?: boolean } = {}): number {
+    const ok = this.resumable(run);
+    if (!ok.ok) throw new Error(`Run #${run} cannot resume: ${ok.why}`);
+    const started = this.log.get(run)!.payload as { idea: string; maxUsd?: number; maxFixRounds?: number; autoApprove?: boolean; autoRetries?: number; runtime?: string; council?: "auto" | "always" | "never"; review?: boolean; models?: Record<string, string> };
+    const st = restoreState(this.log, run);
+    // A run keeps the crew it started with: a practice run stays on the free mock crew.
+    const current = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
+    const runtime = started.runtime === "mock" && current.name !== "mock" ? new MockRuntime({ delayMs: Number(process.env.SF_MOCK_DELAY_MS ?? 700) }) : current;
+    const o = { maxUsd: started.maxUsd ?? 1.5, maxFixRounds: started.maxFixRounds ?? 5, autoApprove: !!started.autoApprove, autoRetries: started.autoRetries ?? 1, models: started.models ?? {}, council: started.council ?? "auto", review: started.review !== false };
+    if (st.maxUsd) o.maxUsd = st.maxUsd;
+    // Partial writes from the station that was cut off are thrown away: back to its last commit.
+    if (st.dir && existsSync(join(st.dir, ".git"))) {
+      try { git(st.dir, "reset", "-q", "--hard"); git(st.dir, "clean", "-fdq"); } catch { /* a repo with no commit yet: the plan station runs again */ }
+    }
+    this.log.append("factory.run.resumed", { run, from: st.from, auto: !!opts.auto, spentUsd: Number(st.spent.toFixed(6)), runtime: runtime.name });
+    const r = new Run(this, this.log, runtime, run, started.idea, o);
+    const done = r.go(st).finally(() => this.active.delete(run));
+    this.active.set(run, done);
+    return run;
   }
 
   /** Start a run in the background; returns its id at once. */
@@ -94,7 +152,7 @@ export class Factory {
     const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: opts.review !== false };
     // A run keeps the crew it started with, even if you switch Practice/Real meanwhile.
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
-    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, runtime: runtime.name, council: o.council, review: o.review });
+    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models });
     const done = new Run(this, this.log, runtime, ev.id, text, o).go().finally(() => this.active.delete(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
@@ -135,23 +193,40 @@ class Run {
     private o: Required<Omit<RunOptions, "models">> & { models: Record<string, string> },
   ) {}
 
-  async go() {
+  async go(from?: RestoredState) {
     try {
-      await this.station("intake", async () => {
-        captureSignal(this.log, this.idea, "factory");
-      });
-      await this.councilLoop();
-      await this.planLoop();
-      await this.station("tests", () => this.writeTests());
-      await this.station("build", () => this.build());
-      await this.testFixLoop();
-      await this.reviewLoop();
-      await this.acceptLoop();
+      if (from) this.restore(from);
+      const done = from?.done ?? new Set<string>();
+      if (!done.has("intake")) await this.station("intake", async () => { captureSignal(this.log, this.idea, "factory"); });
+      if (!done.has("council")) await this.councilLoop();
+      if (!done.has("plan")) await this.planLoop(done.has("planWritten"));
+      if (!done.has("tests")) await this.station("tests", () => this.writeTests());
+      if (!done.has("build")) await this.station("build", () => this.build());
+      // On a resume the suite runs again first (free): it proves the repo is where the log says.
+      if (!done.has("reviewed")) {
+        await this.testFixLoop("", !!from && from.done.has("build"));
+        await this.reviewLoop();
+      } else if (!done.has("accepted")) await this.testFixLoop("", true);
+      if (!done.has("accepted")) await this.acceptLoop();
       const sha = await this.station("ship", () => this.ship());
       this.finish("shipped", `Shipped ${this.plan.name} to ${this.dir}`, sha);
     } catch (e) {
       const stopped = e instanceof StopRun;
       this.finish(stopped ? "stopped" : "failed", (e as Error).message);
+    }
+  }
+
+  /** Put back what the log says this run already had. */
+  private restore(st: RestoredState) {
+    this.spent = st.spent;
+    this.calls = st.calls;
+    this.fixRounds = st.fixRounds;
+    this.brief = st.brief;
+    this.reviewNotes = st.review;
+    if (st.plan) { this.plan = st.plan; this.dir = st.dir ?? ""; }
+    if (st.lockedHash) {
+      this.lockedHash = st.lockedHash;
+      if (testsHash(this.dir) !== st.lockedHash) throw new Error("The locked acceptance tests on disk differ from the ones this run locked. Refusing to resume.");
     }
   }
 
@@ -198,10 +273,12 @@ class Run {
     function votesOf(all: SeatResult[], round: number) { return all.filter((s) => s.round === round && s.take).map((s) => s.take!.vote); }
   }
 
-  private async planLoop() {
+  private async planLoop(written = false) {
     let feedback = "";
     for (;;) {
-      await this.station("plan", async () => {
+      // Resumed at the plan gate: the plan is already written, ask again.
+      if (written) written = false;
+      else await this.station("plan", async () => {
         const text = await this.ask(this.one("plan"), `Idea: ${this.idea}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
         const plan = validatePlan(parseJsonBlock<Plan>(text));
         this.plan = plan;
@@ -478,4 +555,76 @@ export function specMarkdown(idea: string, p: Plan): string {
     "## Tasks", "", ...p.tasks.map((t) => `- **${t.id}** ${t.title}${t.dependsOn.length ? ` (after ${t.dependsOn.join(", ")})` : ""}`), "",
     "Built by SoftwareFactory. The tests in `test/` were written from this spec before the code and were locked.", "",
   ].join("\n");
+}
+
+/** How many times one run is resumed on its own before it waits for the Resume button. */
+export const MAX_AUTO_RESUMES = 3;
+
+/** Runs whose newest lifecycle event is a start or a resume, not a finish. */
+export function unfinishedRuns(log: EventLog): number[] {
+  const open = new Set<number>();
+  const life = [...log.list({ type: "factory.run.started", limit: 1e7 }), ...log.list({ type: "factory.run.resumed", limit: 1e7 }), ...log.list({ type: "factory.run.finished", limit: 1e7 })].sort((a, b) => a.id - b.id);
+  for (const e of life) {
+    if (e.type === "factory.run.started") open.add(e.id);
+    else if (e.type === "factory.run.resumed") open.add((e.payload as { run: number }).run);
+    else if (e.type === "factory.run.finished") open.delete((e.payload as { run: number }).run);
+  }
+  return [...open];
+}
+
+export interface RestoredState {
+  /** Milestones already reached: intake, council, planWritten, plan, tests, build, reviewed, accepted. */
+  done: Set<string>;
+  /** The station a resume starts at. */
+  from: StationId;
+  spent: number;
+  calls: number;
+  maxUsd?: number;
+  fixRounds: number;
+  plan?: Plan;
+  dir?: string;
+  lockedHash?: string;
+  brief: CouncilBrief | null;
+  review: ReviewResult | null;
+}
+
+/**
+ * Where a run stands, from the event log alone (the source of truth): which
+ * stations it completed, what it spent, its plan, repo and locked tests.
+ */
+export function restoreState(log: EventLog, run: number): RestoredState {
+  const evs = log.list({ sinceId: run - 1, limit: 1e7 }).filter((e) => { const p = e.payload as { run?: number; factoryRun?: number }; return p?.run === run || p?.factoryRun === run; });
+  const of = (type: string) => evs.filter((e) => e.type === type).map((e) => e.payload as any);
+  const stations = of("factory.station");
+  const passed = (st: StationId) => stations.some((p) => p.station === st && (p.state === "pass" || p.state === "skipped"));
+  const done = new Set<string>();
+  const plan = of("factory.plan").at(-1);
+  const gates = of("factory.gate");
+  const lastPlanAt = evs.map((e) => e.type).lastIndexOf("factory.plan");
+  if (passed("intake")) done.add("intake");
+  const council = stations.filter((p) => p.station === "council").at(-1);
+  const brief = (of("factory.council").at(-1)?.brief ?? null) as CouncilBrief | null;
+  if (council?.state === "skipped" || plan || (council?.state === "pass" && brief && brief.outcome !== "drop")) done.add("council");
+  if (plan) done.add("planWritten");
+  if (lastPlanAt >= 0 && evs.slice(lastPlanAt).some((e) => e.type === "factory.gate" && (e.payload as any).gate === "gateA" && (e.payload as any).state === "approved")) done.add("plan");
+  const locked = of("factory.tests.locked").at(-1);
+  if (locked && done.has("plan")) done.add("tests");
+  if (done.has("tests") && stations.some((p) => p.station === "build" && p.state !== "active" && p.state !== "fail" && p.state !== "incomplete") && of("factory.files").some((p) => p.station === "build")) done.add("build");
+  const gateB = gates.filter((g) => g.gate === "gateB");
+  if (done.has("build") && gateB.length) done.add("reviewed");
+  if (done.has("reviewed") && gateB.at(-1)?.state === "approved") done.add("accepted");
+  const order: [string, StationId][] = [["intake", "intake"], ["council", "council"], ["planWritten", "plan"], ["plan", "gateA"], ["tests", "tests"], ["build", "build"], ["reviewed", "test"], ["accepted", "gateB"]];
+  const from = order.find(([k]) => !done.has(k))?.[1] ?? "ship";
+  const completed = of("agent.run.completed");
+  const reviews = of("factory.review");
+  const budget = of("factory.budget").at(-1);
+  return {
+    done, from,
+    spent: completed.reduce((a, p) => a + (Number(p.costUsd) || 0), 0),
+    calls: of("agent.run.started").length,
+    maxUsd: budget?.maxUsd,
+    fixRounds: Math.max(0, ...stations.filter((p) => p.station === "fix" && p.round).map((p) => Number(p.round))),
+    plan: plan?.plan, dir: plan?.dir, lockedHash: done.has("tests") ? locked?.hash : undefined,
+    brief, review: reviews.length ? { verdict: reviews.at(-1).verdict, findings: reviews.at(-1).findings } : null,
+  };
 }

@@ -30,11 +30,13 @@ export function OrderDeck({ order, selected, onSelect }: { order: OrderState; se
   const live = order.nodes.filter((n) => n.mergedInto == null);
   const nodeId = selected ?? live.find((n) => n.parentId == null)?.id ?? null;
   const tray = order.fragments.filter((f) => f.nodeId == null && f.kind !== "noise" && f.state === "live");
+  // Filed, but on a guess: shown with one-tap refiles until you confirm or move them.
+  const unsure = order.fragments.filter((f) => f.nodeId != null && f.kind !== "noise" && f.state === "live" && f.confidence < UNSURE_BELOW).slice(-40).reverse();
   const open = order.conflicts.filter((c) => c.status === "open");
   const vFail = order.visuals.filter((v) => !v.pass).length;
   const tabs: [Tab, string][] = [
     ["canon", `Canon${nodeId != null ? ` · ${order.canon[nodeId]?.length ?? 0}` : ""}`],
-    ["tray", `Unsorted · ${tray.length}`],
+    ["tray", `Unsorted · ${tray.length}${unsure.length ? ` · ${unsure.length} unsure` : ""}`],
     ["conflicts", `Conflicts${open.length ? ` · ${open.length} open` : ` · ${order.conflicts.length}`}`],
     ["briefing", "Briefing"],
     ["checks", `Visuals${order.visuals.length ? (vFail ? ` · ${vFail} missing` : " · all") : ""}`],
@@ -50,7 +52,7 @@ export function OrderDeck({ order, selected, onSelect }: { order: OrderState; se
       <div className="deck-body order-body">
         {err && <div className="err">{err}</div>}
         {tab === "canon" && <CanonView order={order} nodeId={nodeId} onSelect={onSelect} act={act} />}
-        {tab === "tray" && <Tray order={order} tray={tray} act={act} />}
+        {tab === "tray" && <><Unsure order={order} unsure={unsure} act={act} /><Tray order={order} tray={tray} act={act} /></>}
         {tab === "conflicts" && <Conflicts order={order} act={act} />}
         {tab === "briefing" && <BriefingView order={order} act={act} />}
         {tab === "checks" && <Checks order={order} />}
@@ -126,6 +128,38 @@ function CanonView({ order, nodeId, onSelect, act }: { order: OrderState; nodeId
         {kids.map((k) => <button key={k.id} className="ghost tiny" onClick={() => onSelect(k.id)}>{k.kind}: {k.title}</button>)}
         <form onSubmit={add} className="add-idea"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="new idea under this node" aria-label="New idea title" /><button className="ghost tiny" disabled={!title.trim()}>add</button></form>
       </div>
+    </div>
+  );
+}
+
+/** Below this the filer was guessing: the placement shows as unsure. Moving or confirming makes it 100%. */
+const UNSURE_BELOW = 0.7;
+
+function Unsure({ order, unsure, act }: { order: OrderState; unsure: Fragment[]; act: Act }) {
+  if (!unsure.length) return null;
+  const title = (id: number | null) => { const n = order.nodes.find((x) => x.id === id); return n ? n.title : "?"; };
+  const live = order.nodes.filter((n) => n.mergedInto == null);
+  return (
+    <div className="unsure">
+      <div className="muted b-sub">Filed on a guess. One tap confirms the place or moves it.</div>
+      <ul className="tray">
+        {unsure.map((f) => (
+          <li key={f.id} className="unsure-row">
+            <span className={`kind k-${f.kind}`}>{f.kind}</span>
+            <span className="rule-text">{f.text}</span>
+            <span className="rule-meta">
+              <span className="muted">under <b>{title(f.nodeId)}</b> · {Math.round(f.confidence * 100)}% sure · </span><Said order={order} f={f} />
+              <button className="ghost tiny" title="This is the right place" onClick={() => act(orderApi.move(f.id, f.nodeId))}>✓ right</button>
+              {(f.alternatives ?? []).map((a) => <button key={a} className="tiny" onClick={() => act(orderApi.move(f.id, a))}>→ {title(a)}</button>)}
+              <select value="" onChange={(e) => e.target.value && act(orderApi.move(f.id, e.target.value === "none" ? null : Number(e.target.value)))} aria-label="Move to">
+                <option value="">elsewhere…</option>
+                <option value="none">Unsorted</option>
+                {live.filter((n) => n.id !== f.nodeId).map((n) => <option key={n.id} value={n.id}>{n.kind}: {n.title}</option>)}
+              </select>
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

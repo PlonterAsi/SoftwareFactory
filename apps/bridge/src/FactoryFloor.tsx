@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ReactFlow, Background, useNodesState, type ReactFlowInstance, type Edge, type Node, Handle, Position, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { decideGate, setupApi, type AgentRunView, type CrewMode, type FactoryRunView, type StationState } from "./api";
+import { decideGate, resumeRun, setupApi, type AgentRunView, type CrewMode, type FactoryRunView, type StationState } from "./api";
 
 type Worker = { name: string; avatar: string; since: string };
 type StationData = { label: string; sub: string; gate?: boolean; later?: boolean; state: StationState; badge?: string; note?: string; workers?: Worker[] };
@@ -107,7 +107,7 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
         <span>Factory floor</span>
         {factoryRuns.length > 0 ? (
           <select className="run-pick" value={run?.run ?? ""} onChange={(e) => onSelect(Number(e.target.value))} aria-label="Factory run">
-            {[...factoryRuns].reverse().map((r) => <option key={r.run} value={r.run}>#{r.run} {r.plan?.name ?? r.idea.slice(0, 40)} · {r.finished?.outcome ?? "running"}</option>)}
+            {[...factoryRuns].reverse().map((r) => <option key={r.run} value={r.run}>#{r.run} {r.plan?.name ?? r.idea.slice(0, 40)} · {r.finished?.outcome ?? (r.resumed ? "resumed" : "running")}</option>)}
           </select>
         ) : <span className="muted">{overseerBusy ? "Overseer working…" : "no runs yet · type an idea in the Overseer and press Build it"}</span>}
       </header>
@@ -120,6 +120,7 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
         </div>
       )}
       {run?.waiting && <GateBar run={run} />}
+      {run?.resumed && !run.finished && <div className="run-result resumed" role="status">↻ Picked up again at <b>{STATION_LABEL[run.resumed.from] ?? run.resumed.from}</b> after the app closed{run.resumed.count > 1 ? ` (${run.resumed.count} times)` : ""}. Finished stations were kept; spend carries over.</div>}
       <div className="flow-wrap" ref={wrap}>
         <ReactFlow onInit={(i) => { flow.current = i; }} nodes={nodes} onNodesChange={onNodesChange} edges={edgesFor(run)} nodeTypes={{ station: Station }} fitView fitViewOptions={{ padding: 0.1 }} proOptions={{ hideAttribution: true }} nodesConnectable={false} panOnDrag zoomOnScroll={false}>
           <Background gap={24} size={1} color="var(--grid)" />
@@ -129,6 +130,8 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
       {run?.finished && (
         <div className={`run-result ${run.finished.outcome}`}>
           <span>{run.finished.reason}{run.finished.totalUsd != null && ` · total $${run.finished.totalUsd.toFixed(4)} · ${run.finished.agentCalls ?? 0} agent calls`}</span>
+          {run.finished.outcome === "stopped" && run.finished.resumable && <button className="sm" onClick={() => resumeRun(run.run).then(() => setOpenErr(null)).catch((e) => setOpenErr((e as Error).message))}>Resume from where it stopped</button>}
+          {run.finished.outcome === "shipped" && run.resumed && <span className="muted">resumed {run.resumed.count}× after the app closed</span>}
           {run.finished.outcome === "shipped" && <button className="ghost sm" onClick={() => setupApi.open("run", run.run).then(() => setOpenErr(null)).catch((e) => setOpenErr((e as Error).message))}>Open folder</button>}
           {openErr && <span className="err">{openErr}</span>}
         </div>
@@ -136,6 +139,8 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
     </section>
   );
 }
+
+const STATION_LABEL: Record<string, string> = { intake: "Intake", council: "Council", plan: "Plan", gateA: "the plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", review: "Review", gateB: "the build gate", ship: "Ship" };
 
 function GateBar({ run }: { run: FactoryRunView }) {
   const [note, setNote] = useState("");

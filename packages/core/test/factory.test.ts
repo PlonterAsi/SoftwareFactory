@@ -172,12 +172,106 @@ describe("factory loop", () => {
     expect(fin.reason).toContain("The Fixer changed nothing");
   });
 
-  it("closes runs left in flight when the core restarts", () => {
+  it("closes runs left in flight when the core restarts, as resumable", () => {
     const log = new EventLog();
     const started = log.append("factory.run.started", { idea: "x" });
     const call = log.append("agent.run.started", { agent: "builder", factoryRun: started.id });
-    new Factory(log, new MockRuntime(), tmp("sf-proj-"));
-    expect(events(log, "factory.run.finished")).toMatchObject([{ run: started.id, outcome: "stopped" }]);
+    const f = new Factory(log, new MockRuntime(), tmp("sf-proj-"));
+    expect(events(log, "factory.run.finished")).toMatchObject([{ run: started.id, outcome: "stopped", resumable: true }]);
     expect(events(log, "agent.run.failed")).toMatchObject([{ runId: call.id, error: "The core restarted during this call." }]);
+    expect(f.interrupted).toEqual([started.id]);
+  });
+});
+
+describe("resuming runs", () => {
+  /** A crew that never answers at one station: the app "closes" while it waits. */
+  const hangAt = (station: string): AgentRuntime => {
+    const rt = new MockRuntime();
+    return { name: "mock", run: (req) => (new RegExp(`Station contract: ${station}`).test(req.systemPrompt ?? "") ? new Promise(() => {}) : rt.run(req)) };
+  };
+  const until = async (pred: () => boolean) => { for (let i = 0; i < 400 && !pred(); i++) await new Promise((r) => setTimeout(r, 10)); expect(pred()).toBe(true); };
+
+  it("picks a run up at the station the app closed on, without redoing finished work", async () => {
+    const log = new EventLog();
+    const projects = tmp("sf-proj-");
+    const first = new Factory(log, hangAt("build"), projects);
+    const run = first.start("a CLI that counts words", { autoApprove: true });
+    await until(() => events(log, "agent.run.started").some((a) => a.station === "build"));
+
+    // The app closes and opens again: a new core on the same database.
+    const rt = new MockRuntime();
+    const second = new Factory(log, rt, projects);
+    expect(second.resumable(run)).toMatchObject({ ok: true, from: "build" });
+    expect(second.resumeInterrupted()).toEqual([run]);
+    await second.wait(run);
+
+    expect(events(log, "factory.run.resumed")).toMatchObject([{ run, from: "build", auto: true }]);
+    const fin = events(log, "factory.run.finished").at(-1);
+    expect(fin).toMatchObject({ run, outcome: "shipped" });
+    // Only the stations after the cut were worked again: no second plan or test-writing call.
+    expect(rt.calls.map((c) => c.systemPrompt?.match(/Station contract: (\w+)/)?.[1])).toEqual(["build", "fix", "review"]);
+    expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Fix round 1", "Build: Word Counter", "Acceptance tests (locked)", "Spec and plan: Word Counter"]);
+    // The organized table follows: stopped, then back in flight, then shipped.
+    expect(log.db.prepare("SELECT outcome, resumes, resumed_from FROM factory_runs WHERE id = ?").get(run)).toMatchObject({ outcome: "shipped", resumes: 1, resumed_from: "build" });
+    // Spend carries over: the calls before the cut still count.
+    expect(fin.agentCalls).toBe(6); // plan, tests, the cut-off build, then build, fix, review
+    expect(fin.totalUsd).toBeCloseTo(0.0005);
+  });
+
+  it("waits at the plan gate again when the app closed there, without re-planning", async () => {
+    const log = new EventLog();
+    const projects = tmp("sf-proj-");
+    const first = new Factory(log, new MockRuntime({ plantBug: false }), projects);
+    const run = first.start("count words");
+    await until(() => first.waitingGate(run) === "gateA");
+
+    const rt = new MockRuntime({ plantBug: false });
+    const second = new Factory(log, rt, projects);
+    expect(second.resumable(run).from).toBe("gateA");
+    second.resume(run);
+    await until(() => second.waitingGate(run) === "gateA");
+    expect(rt.calls.length).toBe(0);
+    second.decide(run, "gateA", { approve: true });
+    await until(() => second.waitingGate(run) === "gateB");
+    second.decide(run, "gateB", { approve: true });
+    await second.wait(run);
+    expect(events(log, "factory.run.finished").at(-1)).toMatchObject({ run, outcome: "shipped" });
+  });
+
+  it("throws away half-written files from the station that was cut off", async () => {
+    const log = new EventLog();
+    const projects = tmp("sf-proj-");
+    const first = new Factory(log, hangAt("build"), projects);
+    const run = first.start("count words", { autoApprove: true });
+    await until(() => events(log, "agent.run.started").some((a) => a.station === "build"));
+    const dir = events(log, "factory.plan").at(-1).dir;
+    writeFiles(dir, [{ path: "src/half.js", content: "export const x = " }], { lockTests: true });
+
+    const second = new Factory(log, new MockRuntime(), projects);
+    second.resumeInterrupted();
+    await second.wait(run);
+    expect(existsSync(join(dir, "src/half.js"))).toBe(false);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+  });
+
+  it("refuses runs that ended on purpose, and stops auto-resuming a run that keeps dying", async () => {
+    const log = new EventLog();
+    const projects = tmp("sf-proj-");
+    const f = new Factory(log, new MockRuntime(), projects);
+    const shipped = f.start("count words", { autoApprove: true });
+    await f.wait(shipped);
+    expect(f.resumable(shipped)).toMatchObject({ ok: false, why: "It already shipped." });
+    expect(() => f.resume(shipped)).toThrow(/cannot resume/);
+
+    const run = new Factory(log, hangAt("build"), projects).start("count words", { autoApprove: true });
+    await until(() => events(log, "agent.run.started").some((a) => a.station === "build" && a.factoryRun === run));
+    for (let i = 0; i < 3; i++) {
+      const g = new Factory(log, hangAt("build"), projects);
+      expect(g.resumeInterrupted()).toEqual([run]);
+      await until(() => events(log, "agent.run.started").filter((a) => a.station === "build" && a.factoryRun === run).length === i + 2);
+    }
+    const last = new Factory(log, new MockRuntime(), projects);
+    expect(last.resumeInterrupted()).toEqual([]);
+    expect(last.resumable(run).ok).toBe(true);
   });
 });

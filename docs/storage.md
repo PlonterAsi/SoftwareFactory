@@ -22,7 +22,7 @@ In the desktop app the data folder is the Tauri app data directory (on Windows `
 |---|---|---|
 | `signals` | thing you said or pasted, raw | `signals` |
 | `agent_runs` | agent call: agent, model, station, status, cost, time, context tokens, error | `agent_runs` |
-| `factory_runs` | factory run: idea, outcome, repo folder, commit, spend, fix rounds | `factory_runs` |
+| `factory_runs` | factory run: idea, outcome, repo folder, commit, spend, fix rounds, times resumed and from which station | `factory_runs` |
 | `artifacts` | file a run wrote: path, station, round, bytes, lines, SHA-256, versions | `factory_runs` |
 | `order_nodes`, `order_fragments`, `order_conflicts` | project/idea/thread, filed fragment, conflict | `order` (materialized from the Order Engine's fold) |
 | `settings` | setting you changed in the Bridge (crew mode, drop folder), newest value | `settings` |
@@ -39,6 +39,10 @@ SELECT agent, count(*) AS calls, round(sum(cost_usd), 4) AS usd FROM agent_runs 
 **Upgrades never lose data.** Before an existing database is migrated, a full copy is written next to it (`factory.db.v<old>-<time>.bak`, newest 3 kept) and a `store.migrated` event records it. Databases made by milestones 1 to 3 (just `events` and `signal_fts`) are adopted as they are and their tables are backfilled from their history.
 
 **A broken table never loses an event.** If a projection throws, only its own change is rolled back, the event is still stored, the error is recorded and the Data vault shows that table red. **Rebuild from log** (or `POST /api/store/rebuild`) drops every organized table and the cache and refills them from the log.
+
+## Resuming runs
+
+A factory run has no state outside the log, so a run the app closed on can be picked up again. On start the core closes each run still in flight as `stopped` with `resumable: true`, then (unless `SF_AUTO_RESUME=0`) resumes it: `restoreState()` in `packages/core/src/factory/loop.ts` reads the run's events back into its spend, plan, repo folder, locked-test hash, Council brief and review, and the run continues at the first station it had not completed (a run waiting at a gate waits there again; nothing finished is redone). Half-written files from the cut-off station are reset to the repo's last commit. A `factory.run.resumed` event records where it picked up; `factory_runs.resumes` counts them. One run resumes on its own at most 3 times; after that the Bridge shows **Resume from where it stopped** (`POST /api/factory/runs/:id/resume`).
 
 ## Adding your own tables
 

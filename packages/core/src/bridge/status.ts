@@ -12,13 +12,14 @@ import { canonFor } from "../order/model.js";
 export interface SinceLine { kind: "shipped" | "failed" | "stopped" | "gate" | "conflict" | "filed" | "drop" | "spend" | "running"; text: string; ref?: number }
 export interface SinceReport { fromEvent: number; toEvent: number; leftAt: string | null; awayMinutes: number; lines: SinceLine[] }
 
-interface RunRow { id: number; idea: string; plan_name: string | null; outcome: string | null; reason: string | null; total_usd: number | null; dir: string | null; finished_at: string | null }
+interface RunRow { id: number; idea: string; plan_name: string | null; outcome: string | null; reason: string | null; total_usd: number | null; dir: string | null; finished_at: string | null; resumed_from?: string | null }
 
 const runName = (r: RunRow) => r.plan_name ?? (r.idea.length > 50 ? r.idea.slice(0, 47) + "…" : r.idea);
 
 /** Runs that are waiting at a gate right now, from the events (gates are not a table). */
 export function waitingGates(log: EventLog): { run: number; gate: string; question: string }[] {
-  const finished = new Set(log.list({ type: "factory.run.finished", limit: 1e6 }).map((e) => (e.payload as { run: number }).run));
+  // Finished means finished now: a resumed run is back in flight.
+  const finished = new Set((log.db.prepare("SELECT id FROM factory_runs WHERE outcome IS NOT NULL").all() as { id: number }[]).map((r) => Number(r.id)));
   const last = new Map<number, { gate: string; state: string; question: string }>();
   for (const e of log.list({ type: "factory.gate", limit: 1e6 })) {
     const p = e.payload as { run: number; gate: string; state: string; question: string };
@@ -44,13 +45,13 @@ export function sinceReport(log: EventLog, order: OrderState, from?: number, now
   const lines: SinceLine[] = [];
   if (!fromEvent) return { fromEvent, toEvent, leftAt, awayMinutes, lines };
 
-  const runs = log.db.prepare("SELECT id, idea, plan_name, outcome, reason, total_usd, dir, finished_at FROM factory_runs WHERE id > ? OR (finished_at IS NOT NULL AND id IN (SELECT json_extract(payload, '$.run') FROM events WHERE type = 'factory.run.finished' AND id > ?)) ORDER BY id")
+  const runs = log.db.prepare("SELECT id, idea, plan_name, outcome, reason, total_usd, dir, finished_at, resumed_from FROM factory_runs WHERE id > ? OR (finished_at IS NOT NULL AND id IN (SELECT json_extract(payload, '$.run') FROM events WHERE type = 'factory.run.finished' AND id > ?)) ORDER BY id")
     .all(fromEvent, fromEvent) as unknown as RunRow[];
   for (const r of runs) {
     if (r.outcome === "shipped") lines.push({ kind: "shipped", text: `Shipped ${runName(r)}${r.total_usd != null ? ` for $${r.total_usd.toFixed(4)}` : ""}.`, ref: r.id });
     else if (r.outcome === "failed") lines.push({ kind: "failed", text: `Run #${r.id} (${runName(r)}) failed: ${(r.reason ?? "").slice(0, 140)}`, ref: r.id });
     else if (r.outcome === "stopped") lines.push({ kind: "stopped", text: `Run #${r.id} (${runName(r)}) stopped: ${(r.reason ?? "").slice(0, 140)}`, ref: r.id });
-    else if (!r.outcome) lines.push({ kind: "running", text: `Run #${r.id} (${runName(r)}) is still working.`, ref: r.id });
+    else if (!r.outcome) lines.push({ kind: "running", text: `Run #${r.id} (${runName(r)}) is still working${r.resumed_from ? `, picked up again at ${r.resumed_from} after the app closed` : ""}.`, ref: r.id });
   }
   for (const g of waitingGates(log)) lines.push({ kind: "gate", text: `Run #${g.run} is waiting for you: ${g.question}`, ref: g.run });
   const open = order.conflicts.filter((c) => c.status === "open" && c.id > fromEvent);

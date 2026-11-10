@@ -155,7 +155,9 @@ fn start_core(app: &tauri::AppHandle) {
         Err(_) => (Stdio::null(), Stdio::null()),
     };
     let mut cmd = Command::new(&node);
-    cmd.arg(&entry).current_dir(&dir).env("SF_DB", dir.join("factory.db")).stdout(out).stderr(err).stdin(Stdio::null());
+    // SF_PARENT_PID: the core exits on its own when this shell is gone, however it went
+    // (window closed, crash, Task Manager), so no orphan core keeps port 4317 busy.
+    cmd.arg(&entry).current_dir(&dir).env("SF_DB", dir.join("factory.db")).env("SF_PARENT_PID", std::process::id().to_string()).stdout(out).stderr(err).stdin(Stdio::null());
     // Real agents when Claude Code is installed; otherwise the free practice crew.
     // A crew picked in the Bridge is remembered in the database and wins over this.
     let runtime = match (std::env::var("SF_RUNTIME"), find_claude()) {

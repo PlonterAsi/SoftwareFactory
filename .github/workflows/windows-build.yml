@@ -1,7 +1,10 @@
-# Builds the SoftwareFactory desktop app for Windows.
-# - Every pull request: build and keep the installers as a workflow artifact (a check that the app still builds).
+# Builds the SoftwareFactory desktop app for Windows, then tests the installed app end to end.
+# - Every pull request: build, keep the installers as a workflow artifact, and run the smoke test
+#   (scripts/smoke/windows-smoke.mjs): silent install, old-database upgrade, launch, Bridge window
+#   reaches the core, one practice build to a tagged repo, Data vault, kill mid-run and resume,
+#   normal close, portable zip.
 # - Every push to main (or a manual run): also publish them to the rolling "latest" release,
-#   so the download links below always point at the newest main:
+#   only after the smoke test passed, so the download links below never hold a broken build:
 #   https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory-setup.exe
 #   https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory.msi
 #   https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory-portable.zip
@@ -79,12 +82,48 @@ jobs:
           name: SoftwareFactory-windows
           path: out/*
 
+  smoke:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: SoftwareFactory-windows
+          path: out
+
+      - name: Smoke test the installed app
+        run: node scripts/smoke/windows-smoke.mjs --installer out/SoftwareFactory-setup.exe --portable out/SoftwareFactory-portable.zip --out smoke-out
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-results
+          path: |
+            smoke-out/*.md
+            smoke-out/*.log
+            smoke-out/*.png
+
+  publish:
+    needs: [build, smoke]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: SoftwareFactory-windows
+          path: out
+
       - name: Publish to the "latest" release
-        if: github.event_name != 'pull_request'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          notes="Windows build of main at ${GITHUB_SHA::7} ($(date -u +%Y-%m-%d)). Ships its own Node.js. For real agents install Claude Code and sign in; Git is needed to ship apps. Unsigned: Windows SmartScreen will warn, choose More info, then Run anyway."
+          notes="Windows build of main at ${GITHUB_SHA::7} ($(date -u +%Y-%m-%d)), smoke-tested as an installed app on Windows before publishing. Ships its own Node.js. For real agents install Claude Code and sign in; Git is needed to ship apps. Unsigned: Windows SmartScreen will warn, choose More info, then Run anyway."
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest out/* --title "SoftwareFactory (latest main)" --notes "$notes" --prerelease --target "$GITHUB_SHA"
