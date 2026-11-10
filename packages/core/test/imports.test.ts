@@ -149,8 +149,8 @@ describe("importing and exploring", () => {
     const ex = new RepoExplorer(log, rt, join(tmp(), "imports"), new AgentBay(log, rt), { mode: "agent" });
     // Enough for one mapping call and the survey, not for everything.
     // Enough for the survey call, not for mapping as well.
-    const cap = 0.012;
-    expect(estimateUsd(1, 3000)).toBeLessThan(cap);
+    const cap = estimateUsd(1, 4000);
+    expect(estimateUsd(2, 4000)).toBeGreaterThan(cap);
     const { done } = ex.importRepo(dir, { maxUsd: cap });
     const r = await done;
     expect(r.outcome).toBe("partial");
