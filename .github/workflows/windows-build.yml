@@ -187,26 +187,29 @@ jobs:
         with:
           sparse-checkout: scripts
 
-      # Where downloads and updates live: this repo while it is public. With the RELEASES_TOKEN secret
-      # set, the public repo PlonterAsi/SoftwareFactory-releases instead (installers and latest.json
-      # only, no code), so this repo can be private and installed apps still update without a sign-in.
+      # Installed apps read latest.json from the `updates` branch through GitHub's API, and download the
+      # installer through the release asset API, so updates keep working when this repo is private
+      # (the app then sends the read token saved in Systems > Updates). See docs/updates.md.
       - name: Publish to the "latest" release
         shell: bash
         env:
-          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          if [ -n "$RELEASES_TOKEN" ]; then
-            export GH_TOKEN="$RELEASES_TOKEN" GH_REPO="${{ github.repository_owner }}/SoftwareFactory-releases"; target=()
-          else
-            export GH_TOKEN="${{ github.token }}" GH_REPO="${{ github.repository }}"; target=(--target "$GITHUB_SHA")
-          fi
-          echo "publishing to $GH_REPO"
           notes="SoftwareFactory v$SF_VERSION: Windows build of main at ${GITHUB_SHA::7} ($(date -u +%Y-%m-%d)), smoke-tested as an installed app on Windows before publishing. Ships its own Node.js. For real agents install Claude Code and sign in; Git is needed to ship apps. Unsigned: Windows SmartScreen will warn, choose More info, then Run anyway. Installed apps from v0.2 on update themselves (Systems, Updates)."
-          # The manifest installed apps read to update themselves; only for a signed build.
-          if [ -f out/SoftwareFactory-setup.exe.sig ]; then
-            node scripts/updates/manifest.mjs --version "$SF_VERSION" --sig out/SoftwareFactory-setup.exe.sig \
-              --url "https://github.com/$GH_REPO/releases/download/latest/SoftwareFactory-setup.exe" \
-              --notes "Build of main at ${GITHUB_SHA::7}: $(git log -1 --format=%s 2>/dev/null || echo latest changes)" --out out/latest.json
-          fi
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/* --title "SoftwareFactory v$SF_VERSION (latest main)" --notes "$notes" --prerelease "${target[@]}"
+          gh release create latest out/* --title "SoftwareFactory v$SF_VERSION (latest main)" --notes "$notes" --prerelease --target "$GITHUB_SHA"
+          # The update manifest, only for a signed build.
+          if [ -f out/SoftwareFactory-setup.exe.sig ]; then
+            asset=$(gh api "repos/$GH_REPO/releases/tags/latest" --jq '.assets[] | select(.name == "SoftwareFactory-setup.exe") | .url')
+            [ -n "$asset" ] || { echo "setup.exe asset not found on the release"; exit 1; }
+            mkdir -p updates
+            node scripts/updates/manifest.mjs --version "$SF_VERSION" --sig out/SoftwareFactory-setup.exe.sig --url "$asset" \
+              --notes "Build of main at ${GITHUB_SHA::7}: $(git log -1 --format=%s 2>/dev/null || echo latest changes)" --out updates/latest.json
+            cd updates
+            git init -q -b updates
+            git add latest.json
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Update manifest: v$SF_VERSION (${GITHUB_SHA::7})"
+            git push -q -f "https://x-access-token:$GH_TOKEN@github.com/$GH_REPO.git" updates
+            echo "published update manifest v$SF_VERSION -> $asset"
+          fi

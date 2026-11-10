@@ -13,7 +13,31 @@
 // app files and starts the new version, whose core resumes any interrupted run.
 use std::sync::Mutex;
 use tauri::Manager;
-use tauri_plugin_updater::{Update, UpdaterExt};
+use tauri_plugin_updater::{Update, Updater, UpdaterExt};
+
+// The repo can be private. Then GitHub answers only with a read token, which you
+// paste once in Systems > Updates. It is kept in the data folder (updater-token),
+// on this PC only, never in the database or the event log, and is sent only to
+// GitHub (the download's redirect to GitHub's file storage drops it).
+const TOKEN_FILE: &str = "updater-token";
+
+fn token_path(app: &tauri::AppHandle) -> std::path::PathBuf {
+    crate::data_dir(app).join(TOKEN_FILE)
+}
+
+fn token(app: &tauri::AppHandle) -> Option<String> {
+    std::fs::read_to_string(token_path(app)).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
+}
+
+/// The updater, with the token when there is one. The manifest is read through
+/// GitHub's contents API as raw JSON; the installer through the release asset API.
+fn updater(app: &tauri::AppHandle) -> Result<Updater, tauri_plugin_updater::Error> {
+    let mut b = app.updater_builder().header("Accept", "application/vnd.github.raw+json")?;
+    if let Some(t) = token(app) {
+        b = b.header("Authorization", format!("Bearer {t}"))?;
+    }
+    b.build()
+}
 
 #[derive(Clone, serde::Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -55,8 +79,8 @@ fn explain(e: &tauri_plugin_updater::Error) -> String {
         format!("The download did not carry a valid SoftwareFactory signature, so it was not installed ({raw}).")
     } else if raw.contains("error sending request") || raw.contains("dns") || raw.contains("connect") {
         "Could not reach GitHub to look for updates. Check the internet connection and try again.".into()
-    } else if raw.contains("404") || raw.contains("Could not fetch a valid release JSON") {
-        "No update information is published yet. The next build of main publishes it.".into()
+    } else if raw.contains("401") || raw.contains("403") || raw.contains("404") || raw.contains("Could not fetch a valid release JSON") {
+        "GitHub did not show the update information. If the repo is private, add a read token below (or check that it has not expired). If it is public, the next build of main publishes it.".into()
     } else {
         raw
     }
@@ -88,7 +112,7 @@ pub async fn update_check(app: tauri::AppHandle) -> UpdateStatus {
         s.current = current.clone();
         s.error = None;
     });
-    let result = match app.updater() {
+    let result = match updater(&app) {
         Ok(u) => u.check().await,
         Err(e) => Err(e),
     };
@@ -125,7 +149,7 @@ pub async fn update_check(app: tauri::AppHandle) -> UpdateStatus {
 #[tauri::command]
 pub async fn update_install(app: tauri::AppHandle) -> UpdateStatus {
     let pending = app.state::<Updates>().pending.lock().unwrap().clone();
-    let Some(update) = pending else {
+    let Some(mut update) = pending else {
         return set(&app, |s| {
             s.phase = "error".into();
             s.error = Some("There is no update to install. Press Check for updates first.".into());
@@ -137,6 +161,8 @@ pub async fn update_install(app: tauri::AppHandle) -> UpdateStatus {
         s.total = None;
         s.error = None;
     });
+    // The release asset API returns the file itself only for this Accept header.
+    update.headers.insert("Accept", "application/octet-stream".parse().unwrap());
     let progress = app.clone();
     let bytes = update
         .download(
@@ -177,4 +203,42 @@ pub async fn update_install(app: tauri::AppHandle) -> UpdateStatus {
             })
         }
     }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenState {
+    set: bool,
+    /// The first and last characters, so you can tell which token it is.
+    hint: Option<String>,
+}
+
+fn token_state(app: &tauri::AppHandle) -> TokenState {
+    let t = token(app);
+    TokenState {
+        set: t.is_some(),
+        hint: t.map(|t| if t.len() > 12 { format!("{}…{}", &t[..8], &t[t.len() - 4..]) } else { "saved".into() }),
+    }
+}
+
+#[tauri::command]
+pub fn update_token_status(app: tauri::AppHandle) -> TokenState {
+    token_state(&app)
+}
+
+/// Save (or, with an empty token, remove) the GitHub read token for a private repo.
+#[tauri::command]
+pub fn update_token_set(app: tauri::AppHandle, token: String) -> Result<TokenState, String> {
+    let path = token_path(&app);
+    let t = token.trim();
+    if t.is_empty() {
+        let _ = std::fs::remove_file(&path);
+    } else {
+        if t.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err("That does not look like a GitHub token (it has spaces in it).".into());
+        }
+        std::fs::create_dir_all(crate::data_dir(&app)).map_err(|e| e.to_string())?;
+        std::fs::write(&path, t).map_err(|e| format!("Could not save the token: {e}"))?;
+    }
+    Ok(token_state(&app))
 }

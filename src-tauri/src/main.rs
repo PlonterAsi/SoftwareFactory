@@ -264,7 +264,9 @@ fn main() {
             updates::app_version,
             updates::update_status,
             updates::update_check,
-            updates::update_install
+            updates::update_install,
+            updates::update_token_status,
+            updates::update_token_set
         ])
         .setup(|app| {
             start_core(app.handle());

@@ -292,17 +292,36 @@ async function updatePhase() {
   must("the test signature for this build exists", existsSync(args["update-sig"] ?? ""), args["update-sig"]);
   must("this build's version is known", /^\d+\.\d+\.\d+$/.test(NEW ?? ""), NEW);
 
-  // The update server the old build was built to ask: http://127.0.0.1:4399
+  // The update server the old build was built to ask: http://127.0.0.1:4399. It behaves like GitHub
+  // for a private repo: the manifest and the installer answer only with the read token (404 without),
+  // the installer only for Accept: application/octet-stream, and it is served from another host by
+  // redirect, where the token must not follow (GitHub's file storage refuses requests that carry it).
+  const TOKEN = "smoke-test-read-token";
   const hits = [];
+  const refused = [];
   const manifest = {
     version: NEW, notes: "Smoke test update", pub_date: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-    platforms: { "windows-x86_64": { signature: readFileSync(args["update-sig"], "utf8").trim(), url: "http://127.0.0.1:4399/SoftwareFactory-setup.exe" } },
+    platforms: { "windows-x86_64": { signature: readFileSync(args["update-sig"], "utf8").trim(), url: "http://127.0.0.1:4399/repos/x/y/releases/assets/1" } },
   };
   const server = createServer((req, res) => {
-    hits.push(req.url);
-    log("update server:", req.method, req.url);
-    if (req.url?.startsWith("/latest.json")) { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify(manifest)); }
-    if (req.url === "/SoftwareFactory-setup.exe") {
+    const path = req.url?.split("?")[0];
+    hits.push(path);
+    const auth = req.headers.authorization ?? "";
+    log("update server:", req.method, req.url, `host=${req.headers.host}`, auth ? "with token" : "no token", `accept=${req.headers.accept}`);
+    const deny = (why) => { refused.push(`${path}: ${why}`); res.writeHead(404); res.end(); };
+    if (path === "/latest.json") {
+      if (auth !== `Bearer ${TOKEN}`) return deny("no token");
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(manifest));
+    }
+    if (path === "/repos/x/y/releases/assets/1") {
+      if (auth !== `Bearer ${TOKEN}`) return deny("no token");
+      if (req.headers.accept !== "application/octet-stream") return deny(`accept ${req.headers.accept}`);
+      res.writeHead(302, { location: "http://localhost:4399/storage/SoftwareFactory-setup.exe" });
+      return res.end();
+    }
+    if (path === "/storage/SoftwareFactory-setup.exe") {
+      if (auth) { refused.push(`${path}: the token followed the redirect`); res.writeHead(400); return res.end(); }
       res.writeHead(200, { "content-type": "application/octet-stream", "content-length": statSync(newInstaller).size });
       return createReadStream(newInstaller).pipe(res);
     }
@@ -316,6 +335,8 @@ async function updatePhase() {
     const installDir = [join(process.env.LOCALAPPDATA ?? "", "SoftwareFactory"), join(process.env.ProgramFiles ?? "C:\\Program Files", "SoftwareFactory")].find((d) => findExe(d));
     const exe = findExe(installDir);
     exeName = basename(exe);
+    // The read token, as Systems > Updates saves it (the repo may be private).
+    writeFileSync(join(DATA, "updater-token"), TOKEN);
     launch(exe, "old-version");
     const h = await until("the old version's core", health, 120_000, 1000);
     must("the old version runs", h?.appVersion === "0.0.1", h ? `appVersion ${h.appVersion}` : readTail(join(DATA, "core.log")));
@@ -327,11 +348,11 @@ async function updatePhase() {
 
     // The Bridge checks 5 s after opening, finds NEW, counts down 15 s (factory idle), then installs.
     const found = await until("the old version to ask for updates", async () => hits.some((u) => u.startsWith("/latest.json")), 90_000, 500);
-    check("the old version looked for an update by itself", found, `requests: ${hits.join(", ") || "none"}`);
+    check("the old version looked for an update by itself, with its read token", found && !refused.some((r) => r.startsWith("/latest.json")), `requests: ${hits.join(", ") || "none"}; refused: ${refused.join("; ") || "none"}`);
     await sleep(8_000);
     screenshot("6-update-countdown");
-    const fetched = await until("the old version to download this build", async () => hits.includes("/SoftwareFactory-setup.exe"), 90_000, 500);
-    check("it downloaded the new installer after the idle countdown", fetched, `requests: ${hits.join(", ")}`);
+    const fetched = await until("the old version to download this build", async () => hits.includes("/storage/SoftwareFactory-setup.exe"), 90_000, 500);
+    check("it downloaded the new installer after the idle countdown, the way a private GitHub release serves it", fetched && refused.length === 0, `requests: ${hits.join(", ")}; refused: ${refused.join("; ") || "none"}`);
     const oldGone = await until("the old app to hand over", async () => !alive(app.child.pid), 90_000, 500);
     check("the old app closed itself to install", oldGone, oldGone ? "" : `pid ${app.child.pid} still running`);
     check("the old core stopped before the installer ran", !alive(oldCore), `core pid ${oldCore}`);

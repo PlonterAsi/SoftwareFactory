@@ -28,6 +28,15 @@ export interface UpdateStatus {
 }
 export interface UpdatesReport { auto: boolean; appVersion: string | null; activeRuns: number; history: { ts: string; from: string | null; to: string }[] }
 
+export interface TokenState { set: boolean; hint: string | null }
+
+/** A shell command with arguments; errors come back as text. */
+async function invoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
+  const t = (window as unknown as { __TAURI_INTERNALS__?: { invoke: (c: string, a?: unknown) => Promise<T> } }).__TAURI_INTERNALS__;
+  if (!t) throw new Error("Only in the desktop app.");
+  return t.invoke(cmd, args);
+}
+
 const COUNTDOWN_S = 15;
 const FIRST_CHECK_MS = 5_000;
 const EVERY_MS = 6 * 3_600_000;
@@ -38,6 +47,7 @@ export function useUpdates(online: boolean) {
   const [report, setReport] = useState<UpdatesReport | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [snoozed, setSnoozed] = useState<string | null>(null);
+  const [token, setTokenState] = useState<TokenState | null>(null);
 
   const loadReport = useCallback(async () => {
     try { setReport(await (await fetch(`${API}/api/updates`)).json()); } catch { /* core down: CoreDown speaks */ }
@@ -60,10 +70,18 @@ export function useUpdates(online: boolean) {
     if (r.ok) setReport(await r.json());
   }, []);
 
+  const setToken = useCallback(async (value: string) => {
+    const t = await invoke<TokenState>("update_token_set", { token: value });
+    setTokenState(t);
+    if (t.set) check();
+    return t;
+  }, [check]);
+
   // First look, then every few hours.
   useEffect(() => {
     if (!desktop) return;
     shell<UpdateStatus>("update_status").then((s) => s && setStatus(s));
+    shell<TokenState>("update_token_status").then((t) => t && setTokenState(t));
     const first = setTimeout(check, FIRST_CHECK_MS);
     const every = setInterval(check, EVERY_MS);
     return () => { clearTimeout(first); clearInterval(every); };
@@ -102,7 +120,7 @@ export function useUpdates(online: boolean) {
   }, [countdown, install]);
 
   return {
-    desktop, status, report, countdown, check, install, setAuto,
+    desktop, status, report, countdown, check, install, setAuto, token, setToken,
     snooze: () => { setSnoozed(status?.version ?? null); setCountdown(null); },
     version: status?.current ?? report?.appVersion ?? null,
   };
@@ -187,6 +205,7 @@ export function UpdatesSection({ u }: { u: Updates }) {
           {r && r.activeRuns > 0 && <p className="place-hint">{r.activeRuns} build{r.activeRuns > 1 ? "s are" : " is"} running. Installing now pauses {r.activeRuns > 1 ? "them" : "it"}; {r.activeRuns > 1 ? "they resume" : "it resumes"} from the last finished station when the new version starts.</p>}
         </>}
       </>}
+      {u.desktop && <TokenField u={u} />}
       {r && <label className="update-auto">
         <input type="checkbox" checked={r.auto} onChange={(e) => u.setAuto(e.target.checked)} />
         Install updates by themselves when the factory is idle (15 s warning, you can say Not now)
@@ -196,5 +215,34 @@ export function UpdatesSection({ u }: { u: Updates }) {
       </ol>}
       <p className="place-hint">Updates come from this project's GitHub releases and must carry the SoftwareFactory signature; anything else is refused. Your database, projects and settings stay in the data folder and are not touched.</p>
     </section>
+  );
+}
+
+/** GitHub read token, for when the repo is private. Kept on this PC only. */
+function TokenField({ u }: { u: Updates }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const save = async (v: string) => {
+    setErr(null);
+    try { await u.setToken(v); setEditing(false); setValue(""); } catch (e) { setErr(String(e)); }
+  };
+  const t = u.token;
+  return (
+    <div className="place update-token">
+      <div className="place-top">
+        <span className="place-label">GitHub access</span>
+        <span className="mono muted">{t?.set ? `token ${t.hint}` : "no token (fine while the repo is public)"}</span>
+        <span className="place-actions">
+          <button className="ghost sm" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : t?.set ? "Replace" : "Add token"}</button>
+          {t?.set && !editing && <button className="ghost sm" onClick={() => save("")}>Remove</button>}
+        </span>
+      </div>
+      {editing && <>
+        <div className="place-hint">The repo is private, so GitHub shows updates only with a read token. On github.com: Settings, Developer settings, Fine-grained tokens, Generate new token. Repository access: only SoftwareFactory. Permissions: Contents, Read-only. Paste it here. It stays on this PC and is sent only to GitHub.</div>
+        <div className="place-edit"><input type="password" value={value} onChange={(e) => setValue(e.target.value)} placeholder="github_pat_…" aria-label="GitHub read token" /><button className="sm" disabled={!value.trim()} onClick={() => save(value)}>Save and check</button></div>
+      </>}
+      {err && <p className="setup-blocker">{err}</p>}
+    </div>
   );
 }

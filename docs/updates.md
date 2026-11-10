@@ -28,7 +28,7 @@ Every merge to main runs `.github/workflows/windows-build.yml`:
 
 - The build gets its own version, `0.2.<workflow run number>`, so every build is newer than the one before.
 - With the `TAURI_SIGNING_PRIVATE_KEY` repository secret set, the installer is signed for the updater. CI checks the signature against the public key in `tauri.conf.json` (`scripts/updates/verify-sig.mjs`), so a mismatched secret fails the build and never ships an update nobody can install.
-- After the smoke test passes, the `latest` release gets `latest.json` (`scripts/updates/manifest.mjs`). With the `RELEASES_TOKEN` secret set, everything is published to the public repo `PlonterAsi/SoftwareFactory-releases` (installers and manifest only, no code), so this repo can be private. Otherwise it goes to this repo's own `latest` release. Installed apps try `SoftwareFactory-releases` first, then this repo.
+- After the smoke test passes, the installers go to the `latest` release, and `latest.json` (`scripts/updates/manifest.mjs`) is force-pushed to the `updates` branch. Installed apps read it through GitHub's API (`/repos/PlonterAsi/SoftwareFactory/contents/latest.json?ref=updates`), and download the installer through the release asset API.
 - Without the secret, builds still publish installers, but no `latest.json`, so no update is offered (a warning on the run says so).
 
 This updater signature is free and separate from Windows code signing. The installer is still not code-signed, so SmartScreen warns on a first manual install. Updates through the app do not go through SmartScreen.
@@ -41,6 +41,18 @@ The Windows smoke test (`scripts/smoke/windows-smoke.mjs`, step 9) proves the wh
 2. CI signs the real installer with the throwaway key.
 3. The test installs `0.0.1`, launches it, and writes a note. Then it waits: the old app must find the update by itself, count down, download it, close itself and its core, install it, and start again as the new version.
 4. The note, the version history and the database health are checked on the new version.
+
+## Private repo
+
+The repo can be private. GitHub then shows the manifest and the installer only with a token, so each PC needs one:
+
+1. On github.com: Settings, Developer settings, Personal access tokens, Fine-grained tokens, Generate new token.
+2. Repository access: only `SoftwareFactory`. Permissions: Contents, Read-only. Choose an expiry you are happy with.
+3. In the app: Systems, Updates, GitHub access, Add token, paste, Save and check.
+
+The token is kept in `updater-token` in the data folder. It stays on that PC only and never goes into the database or the event log. It is sent only to GitHub, and the download's redirect to GitHub's file storage drops it. When it expires, Updates says GitHub did not show the update information. Paste a new one.
+
+A private repo also means GitHub Actions minutes count: 2,000 a month free, and Windows runners use them at double rate. A self-hosted Windows runner is free. The smoke test installs and uninstalls the app and wipes its data folder, so it must not run under your everyday Windows account.
 
 ## The updater key
 
