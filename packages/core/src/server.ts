@@ -9,6 +9,7 @@ import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { Factory, type GateId } from "./factory/loop.js";
 import { OrderEngine, type OrderOptions } from "./order/engine.js";
 import { canonFor, type NodeKind } from "./order/model.js";
+import { storeReport } from "./store/inspect.js";
 
 export const OVERSEER_ROLE =
   "You are the Overseer, the manager AI of SoftwareFactory. Answer in at most 3 short sentences. Be concrete.";
@@ -77,6 +78,12 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         return json(res, ok ? 200 : 409, ok ? { ok } : { error: "That run is not waiting at that gate" });
       }
       if (req.method === "GET" && url.pathname === "/api/cost") return json(res, 200, costSummary(log));
+      if (req.method === "GET" && url.pathname === "/api/store") return json(res, 200, storeReport(log, projectsDir));
+      if (req.method === "POST" && url.pathname === "/api/store/rebuild") {
+        const body = await readJson(req);
+        log.rebuild(body.name ? String(body.name) : undefined);
+        return json(res, 200, storeReport(log, projectsDir));
+      }
       if (url.pathname.startsWith("/api/order/")) {
         const r = await orderRoute(order, req, url.pathname);
         if (r) return json(res, r[0], r[1]);

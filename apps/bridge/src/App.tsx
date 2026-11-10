@@ -6,13 +6,15 @@ import { FactoryFloor } from "./FactoryFloor";
 import { Timeline } from "./Timeline";
 import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
+import { DataDeck, useStore } from "./DataDeck";
 
 export function App() {
   const f = useFactory();
   const order = useOrder(f.events);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
-  const [view, setView] = useState<"factory" | "order">(() => (location.hash === "#order" ? "order" : "factory"));
+  const [view, setView] = useState<"factory" | "order" | "data">(() => (location.hash === "#order" ? "order" : location.hash === "#data" ? "data" : "factory"));
+  const store = useStore(f.events, view === "data");
   // Follow the newest run unless one was picked.
   const selected = f.factoryRuns.find((r) => r.run === picked) ?? f.factoryRuns.at(-1);
   const open = order.conflicts.filter((c) => c.status === "open").length;
@@ -41,11 +43,12 @@ export function App() {
           <nav className="viewbar" role="tablist" aria-label="Center view">
             <button role="tab" aria-selected={view === "factory"} className={view === "factory" ? "tab on" : "tab"} onClick={() => setView("factory")}>Factory floor</button>
             <button role="tab" aria-selected={view === "order"} className={(view === "order" ? "tab on" : "tab") + (open ? " alert" : "")} onClick={() => setView("order")}>Order deck{open ? ` · ${open}` : ""}</button>
+            <button role="tab" aria-selected={view === "data"} className={view === "data" ? "tab on" : "tab"} onClick={() => setView("data")}>Data vault</button>
           </nav>
           {view === "factory" ? <>
             <FactoryFloor runs={f.runs} factoryRuns={f.factoryRuns} selected={selected} onSelect={setPicked} />
             <RunDeck run={selected} />
-          </> : <OrderDeck order={order} selected={node} onSelect={pickNode} />}
+          </> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
           <Timeline runs={f.runs} totalUsd={f.totalUsd} />
         </div>
         <Overseer signals={f.signals} runs={f.runs} factoryRuns={f.factoryRuns} briefings={order.briefings} ingests={order.ingests} onRunStarted={setPicked} />

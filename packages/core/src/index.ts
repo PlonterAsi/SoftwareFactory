@@ -11,3 +11,8 @@ export * from "./order/text.js";
 export * from "./order/model.js";
 export * from "./order/archivist.js";
 export * from "./order/engine.js";
+export * from "./store/migrations.js";
+export * from "./store/projections.js";
+export * from "./store/tables.js";
+export * from "./store/cache.js";
+export * from "./store/inspect.js";

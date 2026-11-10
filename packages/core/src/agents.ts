@@ -29,9 +29,10 @@ export interface CostSummary {
   lastUsd: number | null;
 }
 
+/** Spend across every agent call, from the organized `agent_runs` table. */
 export function costSummary(log: EventLog): CostSummary {
-  const done = log.list({ type: "agent.run.completed", limit: 1e6 }).map((e) => e.payload as AgentResult);
-  const failed = log.list({ type: "agent.run.failed", limit: 1e6 }).length;
-  const totalUsd = done.reduce((s, r) => s + (r.costUsd || 0), 0);
-  return { runs: done.length, failed, totalUsd, lastUsd: done.length ? done[done.length - 1].costUsd : null };
+  const t = log.db.prepare(`SELECT count(*) FILTER (WHERE status = 'done') AS runs, count(*) FILTER (WHERE status = 'failed') AS failed,
+    coalesce(sum(cost_usd) FILTER (WHERE status = 'done'), 0) AS total FROM agent_runs`).get() as { runs: number; failed: number; total: number };
+  const last = log.db.prepare("SELECT cost_usd FROM agent_runs WHERE status = 'done' ORDER BY ended_at DESC, id DESC LIMIT 1").get() as { cost_usd: number } | undefined;
+  return { runs: Number(t.runs), failed: Number(t.failed), totalUsd: Number(t.total), lastUsd: last ? Number(last.cost_usd) : null };
 }
