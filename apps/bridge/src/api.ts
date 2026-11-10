@@ -37,8 +37,8 @@ export async function captureSignal(text: string) {
   return (await r.json()) as Signal;
 }
 
-export async function startFactoryRun(idea: string, maxUsd?: number) {
-  const r = await fetch(`${API}/api/factory/runs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idea, maxUsd }) });
+export async function startFactoryRun(idea: string, maxUsd?: number, projectId?: number) {
+  const r = await fetch(`${API}/api/factory/runs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idea, maxUsd, projectId }) });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error ?? "could not start the run");
   return j.run as number;
@@ -344,4 +344,86 @@ export interface CoreStatus { running: boolean; error: string | null; node: stri
 export function splitBuild(text: string): { text: string; build?: string } {
   const m = text.match(/^\s*BUILD:\s*(.+?)\s*$/m);
   return m ? { text: text.replace(m[0], "").trim(), build: m[1] } : { text };
+}
+
+// ---- Projects ----
+export type ProjectStatus = "active" | "paused" | "shipped" | "archived";
+export const PROJECT_STATUSES: ProjectStatus[] = ["active", "paused", "shipped", "archived"];
+export const PROJECT_KINDS = ["app", "tool", "library", "research", "general"];
+export interface ProjectRollup {
+  runs: number; shipped: number; failed: number; running: number; agentCalls: number; spendUsd: number;
+  nodes: number; fragments: number; important: number; openConflicts: number; linked: Record<string, number>; lastActive: string;
+}
+export interface ProjectSummary {
+  id: number; name: string; kind: string; status: ProjectStatus; summary: string; origin: "you" | "factory" | "order";
+  createdAt: string; updatedAt: string; rollup: ProjectRollup;
+}
+export interface ProjectLink { projectId: number; kind: string; ref: string; ts: string }
+export interface ProjectDetail extends ProjectSummary {
+  links: ProjectLink[]; nodeIds: number[]; rootNodeIds: number[]; runIds: number[]; runs: Record<string, any>[];
+  agents: { agent: string; calls: number; costUsd: number; lastAt: string }[];
+  artifacts: { files: number; bytes: number }; facets: Record<string, unknown>;
+}
+
+export const projectsApi = {
+  list: async () => { const r = await fetch(`${API}/api/projects`); if (!r.ok) throw new Error("could not list projects"); return (await r.json()) as ProjectSummary[]; },
+  get: async (id: number) => { const r = await fetch(`${API}/api/projects/${id}`); const j = await r.json(); if (!r.ok) throw new Error(j.error ?? "no such project"); return j as ProjectDetail; },
+  create: (name: string, kind?: string, summary?: string) => post(`/api/projects`, { name, kind, summary }) as Promise<ProjectDetail>,
+  update: (id: number, patch: Partial<Pick<ProjectSummary, "name" | "kind" | "summary" | "status">>) => post(`/api/projects/${id}`, patch) as Promise<ProjectDetail>,
+  link: (id: number, kind: string, ref: string | number) => post(`/api/projects/${id}/links`, { kind, ref: String(ref) }) as Promise<ProjectDetail>,
+  unlink: (id: number, kind: string, ref: string | number) => post(`/api/projects/${id}/unlink`, { kind, ref: String(ref) }) as Promise<ProjectDetail>,
+  build: (id: number, idea: string, maxUsd?: number) => post(`/api/projects/${id}/runs`, { idea, maxUsd }) as Promise<{ run: number; projectId: number }>,
+};
+
+/** Events that can change a project's list or numbers. */
+const PROJECT_EVENT = (t: string) => t.startsWith("project.") || t.startsWith("order.") || t.startsWith("factory.run.") || t === "agent.run.completed";
+
+/** Every project with its rollup, refetched (debounced) when something that changes them lands. */
+export function useProjects(events: SfEvent[], online: boolean) {
+  const [list, setList] = useState<ProjectSummary[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const at = events.filter((e) => PROJECT_EVENT(e.type) || e.type.includes(".linked")).at(-1)?.id ?? 0;
+  useEffect(() => {
+    if (!online) return;
+    let stop = false;
+    const t = setTimeout(() => {
+      projectsApi.list().then((l) => { if (!stop) { setList(l); setErr(null); } }).catch((x) => { if (!stop) setErr((x as Error).message); });
+    }, 150);
+    return () => { stop = true; clearTimeout(t); };
+  }, [at, online]);
+  return { list, err };
+}
+
+/** One project's detail, refetched when its numbers may have changed. */
+export function useProject(id: number | null, events: SfEvent[], online: boolean) {
+  const [detail, setDetail] = useState<ProjectDetail | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const at = events.filter((e) => PROJECT_EVENT(e.type) || e.type.includes(".linked")).at(-1)?.id ?? 0;
+  useEffect(() => { setDetail(null); setErr(null); }, [id]);
+  useEffect(() => {
+    if (!online || id == null) return;
+    let stop = false;
+    const t = setTimeout(() => {
+      projectsApi.get(id).then((d) => { if (!stop) { setDetail(d); setErr(null); } }).catch((x) => { if (!stop) setErr((x as Error).message); });
+    }, 150);
+    return () => { stop = true; clearTimeout(t); };
+  }, [id, at, online]);
+  return { detail, err };
+}
+
+/** Narrow the Order Engine's state to one project's nodes (and the unsorted notes it is the best guess for). */
+export function orderFor(order: OrderState & { arrivals?: Record<number, number> }, nodeIds: number[]): OrderState & { arrivals: Record<number, number> } {
+  const ids = new Set(nodeIds);
+  const fragments = order.fragments.filter((f) => (f.nodeId != null ? ids.has(f.nodeId) : f.suggestedNodeId != null && ids.has(f.suggestedNodeId)));
+  const fids = new Set(fragments.map((f) => f.id));
+  return {
+    ...order,
+    arrivals: order.arrivals ?? {},
+    nodes: order.nodes.filter((n) => ids.has(n.id)),
+    fragments,
+    conflicts: order.conflicts.filter((c) => (c.nodeId != null && ids.has(c.nodeId)) || fids.has(c.a) || fids.has(c.b)),
+    sweeps: order.sweeps.filter((s) => (s.nodeId != null && ids.has(s.nodeId)) || (s.fragmentId != null && fids.has(s.fragmentId))),
+    visuals: order.visuals,
+    canon: Object.fromEntries(Object.entries(order.canon).filter(([k]) => ids.has(Number(k)))),
+  };
 }
