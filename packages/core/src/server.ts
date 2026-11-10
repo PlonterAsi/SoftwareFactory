@@ -17,6 +17,8 @@ import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
 import { DropFolder } from "./bridge/drop.js";
+import { Tickets } from "./tickets/tickets.js";
+import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
 
@@ -52,6 +54,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   };
   const factory = new Factory(log, runtime, projectsDir, bay);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
+  const tickets = new Tickets(log, { runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1) });
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
   log.on("event", (e: SfEvent) => {
     if (e.type !== "signal.captured") return;
@@ -207,6 +210,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await projectsRoute({ log, order, factory, readJson, canBuild }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (url.pathname === "/api/tickets" || url.pathname.startsWith("/api/tickets/")) {
+        const r = await ticketRoute(tickets, req, url);
+        if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
+      }
       if (url.pathname.startsWith("/api/order/")) {
         const r = await orderRoute(order, req, url.pathname);
         if (r) return json(res, r[0], r[1]);
@@ -231,7 +238,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 400, { error: (e as Error).message });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop });
+  return Object.assign(handler, { factory, order, bay, drop, tickets });
 }
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
@@ -274,6 +281,48 @@ async function bayRoute(bay: AgentBay, req: IncomingMessage, url: URL): Promise<
   }
   m = path.match(/^\/api\/bay\/slots\/([a-z]+)$/);
   if (m && SLOTS.includes(m[1] as Slot)) return [200, bay.assign(m[1] as Slot, (Array.isArray(body.agents) ? body.agents : []).map(String))];
+  return null;
+}
+
+/** The tickets' API. Every write is an event, so the Bridge sees it on the stream. Status -1 = the work document as Markdown. */
+async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL): Promise<[number, unknown] | null> {
+  const path = url.pathname;
+  const q = url.searchParams;
+  const proj = q.get("project");
+  if (req.method === "GET" && path === "/api/tickets/meta") {
+    return [200, { kinds: KINDS.map((k) => ({ code: k, label: KIND_LABEL[k], questions: FORMS[k] })), statuses: STATUS_WORDS, priorities: PRIORITIES.map((p) => ({ code: p, label: PRIORITY_LABEL[p] })), severities: SEVERITIES, relations: RELATIONS }];
+  }
+  if (req.method === "GET" && path === "/api/tickets") {
+    const project = proj == null || proj === "" ? null : Number(proj);
+    const view = (q.get("view") ?? "open") as "open";
+    return [200, {
+      tickets: tickets.list({ project, view, kind: (q.get("kind") ?? undefined) as TicketKind | undefined, status: (q.get("status") ?? undefined) as TicketStatus | undefined, q: q.get("q") ?? undefined }),
+      counts: tickets.counts(project),
+    }];
+  }
+  let m = path.match(/^\/api\/tickets\/(\d+)(?:\/([a-z]+))?$/);
+  if (req.method === "GET" && m) {
+    const id = Number(m[1]);
+    if (m[2] === "document") return [-1, tickets.document(id)];
+    if (m[2]) return null;
+    const d = tickets.detail(id);
+    return d ? [200, d] : [404, { error: `No ticket #${id}` }];
+  }
+  if (req.method !== "POST") return null;
+  const body = await readJson(req);
+  if (path === "/api/tickets") return [201, tickets.open({ ...(body as object), by: "you", source: typeof body.source === "string" ? body.source : "you" } as any)];
+  m = path.match(/^\/api\/tickets\/(\d+)\/([a-z]+)$/);
+  if (!m) return null;
+  const id = Number(m[1]);
+  switch (m[2]) {
+    case "edit": return [200, tickets.edit(id, String(body.field), body.value, "you", body.key ? String(body.key) : undefined)];
+    case "say": return [200, tickets.say(id, String(body.text ?? ""), { status: body.status ? String(body.status) as TicketStatus : undefined })];
+    case "link": return [200, tickets.link(id, Number(body.to), String(body.relation ?? "related") as Relation, "you", body.removed === true)];
+    case "line": return [200, tickets.moveLine(id, body.dir === "up" ? "up" : "down")];
+    case "spawn": return [201, tickets.spawn(id, { ...(body as object), by: "you" } as any)];
+    case "work": return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true })];
+    case "ask": return [200, await tickets.ask(id, body.agent ? String(body.agent) : undefined)];
+  }
   return null;
 }
 

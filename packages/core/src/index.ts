@@ -29,3 +29,6 @@ export * from "./projects/model.js";
 export * from "./projects/tables.js";
 export * from "./projects/service.js";
 export * from "./projects/routes.js";
+export * from "./tickets/model.js";
+export * from "./tickets/tables.js";
+export * from "./tickets/tickets.js";

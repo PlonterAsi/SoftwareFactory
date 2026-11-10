@@ -10,6 +10,7 @@ import { Timeline } from "./Timeline";
 import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
 import { DataDeck, useStore } from "./DataDeck";
+import { Tickets, useTicketCounts } from "./Tickets";
 
 export function App() {
   const f = useFactory();
@@ -17,7 +18,8 @@ export function App() {
   const bay = useBay(f.events);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
-  const [view, setView] = useState<"factory" | "order" | "bay" | "data">(() => (location.hash === "#order" ? "order" : location.hash === "#bay" ? "bay" : location.hash === "#data" ? "data" : "factory"));
+  const [view, setView] = useState<"factory" | "order" | "bay" | "data" | "tickets">(() => (location.hash === "#order" ? "order" : location.hash === "#bay" ? "bay" : location.hash === "#data" ? "data" : location.hash === "#tickets" ? "tickets" : "factory"));
+  const ticketCounts = useTicketCounts(f.events);
   const store = useStore(f.events, view === "data");
   // Follow the newest run unless one was picked.
   const selected = f.factoryRuns.find((r) => r.run === picked) ?? f.factoryRuns.at(-1);
@@ -75,12 +77,15 @@ export function App() {
             <button role="tab" aria-selected={view === "factory"} className={view === "factory" ? "tab on" : "tab"} onClick={() => setView("factory")}>Factory floor</button>
             <button role="tab" aria-selected={view === "bay"} className={view === "bay" ? "tab on" : "tab"} onClick={() => setView("bay")}>Agent Bay{Object.values(bay.stats).some((s) => s.state === "thinking") ? " · working" : ""}</button>
             <button role="tab" aria-selected={view === "order"} className={(view === "order" ? "tab on" : "tab") + (open ? " alert" : "")} onClick={() => setView("order")}>Order deck{open ? ` · ${open}` : ""}</button>
+            <button role="tab" aria-selected={view === "tickets"} className={(view === "tickets" ? "tab on" : "tab") + (ticketCounts?.look ? " look" : "")} onClick={() => setView("tickets")}>Tickets{ticketCounts?.look ? ` · ${ticketCounts.look} for you` : ticketCounts?.open ? ` · ${ticketCounts.open}` : ""}</button>
             <button role="tab" aria-selected={view === "data"} className={view === "data" ? "tab on" : "tab"} onClick={() => setView("data")}>Data vault</button>
           </nav>
           {view === "factory" ? <>
             <FactoryFloor runs={f.runs} factoryRuns={f.factoryRuns} selected={selected} onSelect={setPicked} crew={crew} mode={f.mode} />
             <RunDeck run={selected} />
-          </> : view === "bay" ? <AgentBay bay={bay} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
+          </> : view === "bay" ? <AgentBay bay={bay} /> : view === "tickets" ? <Tickets events={f.events} onShowRun={showRun}
+            crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))}
+            projects={order.nodes.filter((n) => n.kind === "project" && n.mergedInto == null).map((n) => ({ id: n.id, title: n.title }))} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
           <Timeline runs={f.runs} totalUsd={f.totalUsd} />
         </div>
         <Overseer signals={f.signals} runs={f.runs} factoryRuns={f.factoryRuns} briefings={order.briefings} ingests={order.ingests} onRunStarted={(r) => { setPicked(r); setView("factory"); }}

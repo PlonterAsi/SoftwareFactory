@@ -141,11 +141,17 @@ export class MockRuntime implements AgentRuntime {
     else if (station === "review") text = MOCK.review;
     else if (station === "order") text = MOCK.order(req.prompt);
     else if (station === "overseer") text = MOCK.overseer(req.prompt);
+    else if (station === "ticket") text = MOCK.ticket(req.prompt);
     return { text, costUsd: role ? 0.0001 : 0, durationMs: this.opts.delayMs ?? 1, models: ["mock"], runtime: this.name, contextTokens: 0 };
   }
 }
 
 const MOCK = {
+  // The practice crew reads a ticket back and names the next step; it cannot judge, so it never says "ready".
+  ticket: (prompt: string) => {
+    const head = prompt.split("\n")[0].replace(/^#\s*/, "");
+    return [`Practice crew: I read ${head}.`, "Smallest next step: press Work it with the crew, or switch to the real crew in Systems for a real reading.", "STATUS: open"].join("\n");
+  },
   // The practice Overseer cannot think, but it can read the status digest back and offer the Build button.
   overseer: (prompt: string) => {
     const status = prompt.match(/Status of the factory right now:\n([\s\S]*?)\n\nThe person says:/)?.[1] ?? "";

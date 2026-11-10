@@ -161,6 +161,9 @@ export class Factory {
   }
 
   /** Wait for a run to finish (tests and the CLI). */
+  /** A run working right now in this core. */
+  isActive(run: number): boolean { return this.active.has(run); }
+
   wait(run: number): Promise<void> { return this.active.get(run) ?? Promise.resolve(); }
 
   waitingGate(run: number): GateId | null { return this.pending.get(run)?.gate ?? null; }
