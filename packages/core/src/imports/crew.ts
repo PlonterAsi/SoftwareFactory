@@ -127,10 +127,10 @@ export function heuristicNote(m: CodeModule): ModuleNote {
     /(^|\/)(tests?|__tests__|spec|e2e)$/.test(id) ? "test"
       : /(^|\/)(docs?|examples?)$/.test(id) ? "docs"
         : /(^|\/)(\.github|scripts?|ci|tools?|build)$/.test(id) ? "build"
-          : /(ui|web|frontend|client|components|pages|views|bridge|app)$/.test(id) || m.lang === "CSS" || m.lang === "HTML" ? "ui"
-            : /(api|server|routes|handlers|controllers)$/.test(id) ? "api"
-              : /(db|store|data|models?|migrations|schema|storage)$/.test(id) ? "data"
-                : /(cli|bin|cmd)$/.test(id) ? "cli"
+          : /(^|\/)(ui|web|frontend|client|components|pages|views|bridge|renderer)(\/|$)/.test(id) || m.lang === "CSS" || m.lang === "HTML" ? "ui"
+            : /(^|\/)(api|server|routes|handlers|controllers)(\/|$)/.test(id) ? "api"
+              : /(^|\/)(db|store|data|models?|migrations|schema|storage)(\/|$)/.test(id) ? "data"
+                : /(^|\/)(cli|bin|cmd)(\/|$)/.test(id) ? "cli"
                   : /(config|settings)$/.test(id) ? "config" : "core";
   const what = m.exports.length ? `; exports ${m.exports.slice(0, 4).join(", ")}${m.exports.length > 4 ? " and more" : ""}` : "";
   return { id: m.id, role, purpose: `${m.lang} ${role} module, ${m.files} files and ${m.lines} lines${what}.`, risks: [] };

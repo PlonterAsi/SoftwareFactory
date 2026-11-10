@@ -87,7 +87,7 @@ function ModuleNode({ data }: NodeProps<Node<ModData>>) {
   const hue = ROLE_HUE[note?.role ?? "other"] ?? ROLE_HUE.other;
   const fill = Math.max(0.08, m.lines / Math.max(1, maxLines));
   return (
-    <div className={`cm-node${picked ? " on" : ""}`} style={{ borderColor: hue, width: 150 + Math.round(fill * 70) }} title={note?.purpose ?? m.id}>
+    <div className={`cm-node${picked ? " on" : ""}`} style={{ borderColor: hue, width: 170 + Math.round(fill * 50) }} title={note?.purpose ?? m.id}>
       <Handle type="target" position={Position.Left} />
       <div className="cm-node-top"><span className="cm-role" style={{ color: hue }}>{note?.role ?? "…"}</span>{m.entry && <span className="cm-badge" title="has an entry point">▶</span>}<span className={`cm-badge ${m.tests || m.testedBy ? "ok" : "bad"}`} title={m.tests ? `${m.tests} test files` : m.testedBy ? "tested from another module" : "no tests"}>{m.tests || m.testedBy ? "✓" : "✗"} tests</span></div>
       <div className="cm-name">{m.id}</div>
@@ -101,21 +101,55 @@ const nodeTypes = { mod: ModuleNode };
 
 const CODE_LANGS = new Set(["TypeScript", "JavaScript", "Python", "Rust", "Go", "Java", "Kotlin", "C#", "C++", "C", "Ruby", "PHP", "Swift", "Dart", "Scala", "Lua", "Shell", "PowerShell", "SQL", "Vue", "Svelte", "HTML", "CSS"]);
 
-/** Dependents on the left, what they depend on to the right: column = longest chain of modules that lead to it. */
-function layout(mods: CodeModuleView[], edges: { from: string; to: string }[]) {
+/**
+ * Dependents on the left, what they depend on to the right. Cycles are broken
+ * where a depth-first walk finds them, the column is the longest chain that
+ * leads to a module, and a tall column wraps so the map stays readable.
+ */
+function layout(mods: CodeModuleView[], edges: { from: string; to: string; weight: number }[]) {
   const ids = new Set(mods.map((m) => m.id));
   const es = edges.filter((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to);
+  const out = new Map<string, string[]>();
+  for (const e of es) out.set(e.from, [...(out.get(e.from) ?? []), e.to]);
+  const state = new Map<string, 1 | 2>();
+  const back = new Set<string>();
+  const visit = (id: string) => {
+    state.set(id, 1);
+    for (const t of out.get(id) ?? []) {
+      if (state.get(t) === 1) back.add(`${id}>${t}`);
+      else if (!state.has(t)) visit(t);
+    }
+    state.set(id, 2);
+  };
+  // Start from modules nothing depends on (apps, tests, entry points), biggest first.
+  const indeg = new Map(mods.map((m) => [m.id, 0]));
+  for (const e of es) indeg.set(e.to, indeg.get(e.to)! + 1);
+  for (const m of [...mods].sort((a, b) => indeg.get(a.id)! - indeg.get(b.id)! || b.lines - a.lines)) if (!state.has(m.id)) visit(m.id);
+  const dag = es.filter((e) => !back.has(`${e.from}>${e.to}`));
   const level = new Map(mods.map((m) => [m.id, 0]));
   for (let i = 0; i < mods.length; i++) {
     let moved = false;
-    for (const e of es) { const want = Math.min(level.get(e.from)! + 1, 6); if (want > level.get(e.to)!) { level.set(e.to, want); moved = true; } }
+    for (const e of dag) if (level.get(e.from)! + 1 > level.get(e.to)!) { level.set(e.to, level.get(e.from)! + 1); moved = true; }
     if (!moved) break;
   }
-  const cols = new Map<number, string[]>();
-  for (const m of mods) cols.set(level.get(m.id)!, [...(cols.get(level.get(m.id)!) ?? []), m.id]);
+  const cols = new Map<number, CodeModuleView[]>();
+  for (const m of mods) cols.set(level.get(m.id)!, [...(cols.get(level.get(m.id)!) ?? []), m]);
+  // Columns of at most 6 modules; at most 4 columns side by side, then the next band starts below.
+  const PER = 6;
+  const BAND = 4;
+  const columns: CodeModuleView[][] = [];
+  for (const c of [...cols.keys()].sort((a, b) => a - b)) {
+    const list = cols.get(c)!.sort((a, b) => b.lines - a.lines);
+    for (let i = 0; i < list.length; i += PER) columns.push(list.slice(i, i + PER));
+  }
   const pos = new Map<string, { x: number; y: number }>();
-  for (const [c, list] of cols) list.forEach((id, i) => pos.set(id, { x: c * 270, y: i * 92 - (list.length - 1) * 46 }));
-  return { pos, edges: es };
+  let top = 0;
+  for (let b0 = 0; b0 < columns.length; b0 += BAND) {
+    const band = columns.slice(b0, b0 + BAND);
+    band.forEach((col, k) => col.forEach((m, row) => pos.set(m.id, { x: k * 270, y: top + row * 110 })));
+    top += Math.max(...band.map((c) => c.length)) * 110 + 70;
+  }
+  return { pos, edges: es, back };
 }
 
 export function CodeMapPanel({ projectId, events, onOpenCouncil }: { projectId: number; events: SfEvent[]; onOpenCouncil?: () => void }) {
@@ -126,13 +160,13 @@ export function CodeMapPanel({ projectId, events, onOpenCouncil }: { projectId: 
   const code = useMemo(() => (map?.modules ?? []).filter((m) => CODE_LANGS.has(m.lang) && m.lines > 0), [map]);
   const graph = useMemo(() => {
     if (!map) return { nodes: [] as Node<ModData>[], edges: [] as Edge[] };
-    const { pos, edges } = layout(code, map.edges);
+    const { pos, edges, back } = layout(code, map.edges);
     const maxLines = Math.max(1, ...code.map((m) => m.lines));
-    const maxW = Math.max(1, ...edges.map((e) => (e as any).weight ?? 1));
+    const maxW = Math.max(1, ...edges.map((e) => e.weight));
     return {
       nodes: code.map((m) => ({ id: m.id, type: "mod", position: pos.get(m.id)!, data: { m, note: detail?.notes[m.id], picked: mod === m.id, maxLines } })),
-      edges: edges.map((e: any) => ({ id: `${e.from}>${e.to}`, source: e.from, target: e.to, animated: mod != null && (e.from === mod || e.to === mod),
-        style: { stroke: mod != null && (e.from === mod || e.to === mod) ? "var(--accent)" : "#2c4566", strokeWidth: 1 + (2 * (e.weight ?? 1)) / maxW },
+      edges: edges.map((e) => ({ id: `${e.from}>${e.to}`, source: e.from, target: e.to, animated: mod != null && (e.from === mod || e.to === mod),
+        style: { stroke: mod != null && (e.from === mod || e.to === mod) ? "var(--accent)" : back.has(`${e.from}>${e.to}`) ? "#5a3a4a" : "#2c4566", strokeWidth: 1 + (2 * e.weight) / maxW, strokeDasharray: back.has(`${e.from}>${e.to}`) ? "4 3" : undefined, opacity: mod == null || e.from === mod || e.to === mod ? 1 : 0.25 },
         markerEnd: { type: MarkerType.ArrowClosed, color: "#2c4566" } })),
     };
   }, [map, code, detail?.notes, mod]);
@@ -186,7 +220,7 @@ export function CodeMapPanel({ projectId, events, onOpenCouncil }: { projectId: 
           <div className="cm-main">
             <div className="cm-graph">
               {map ? (
-                <ReactFlow key={`${projectId}-${detail.map?.explore}`} nodes={graph.nodes} edges={graph.edges} nodeTypes={nodeTypes} fitView proOptions={{ hideAttribution: true }} nodesConnectable={false} onNodeClick={(_, n) => setMod(n.id === mod ? null : n.id)} onPaneClick={() => setMod(null)} minZoom={0.2}>
+                <ReactFlow key={`${projectId}-${detail.map?.explore}`} nodes={graph.nodes} edges={graph.edges} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.08, maxZoom: 1.1 }} proOptions={{ hideAttribution: true }} nodesConnectable={false} onNodeClick={(_, n) => setMod(n.id === mod ? null : n.id)} onPaneClick={() => setMod(null)} minZoom={0.2}>
                   <Background color="#142034" gap={22} />
                 </ReactFlow>
               ) : <div className="empty">{detail.import.status === "failed" ? "The import failed; see above." : "Scanning…"}</div>}
@@ -208,7 +242,7 @@ export function CodeMapPanel({ projectId, events, onOpenCouncil }: { projectId: 
                 <div className="cm-card">
                   <h4><HealthRing score={map.health.score} /> Health {map.health.score}/100</h4>
                   {map.health.flags.length ? <ul className="cm-flags">{map.health.flags.map((f) => <li key={f.id} className={`lv-${f.level}`}><b>{f.level}</b> {f.text}{f.files?.length ? <span className="mono muted"> {f.files.slice(0, 3).join(", ")}</span> : null}</li>)}</ul> : <p className="muted">No health flags.</p>}
-                  {!!map.entryPoints.length && <div className="small"><b>Entry points</b><ul className="mono">{map.entryPoints.slice(0, 6).map((e, i) => <li key={i} title={e.why}>{e.path}</li>)}</ul></div>}
+                  {!!map.entryPoints.length && <div className="small"><b>Entry points</b><ul className="mono">{[...new Map(map.entryPoints.map((e) => [e.path, e])).values()].slice(0, 6).map((e) => <li key={e.path} title={e.why}>{e.path}</li>)}</ul></div>}
                   <div className="muted small">Click a module on the map to see what it does.</div>
                 </div>
               ) : null}

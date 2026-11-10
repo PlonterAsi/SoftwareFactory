@@ -149,7 +149,8 @@ export function scanRepo(root: string, opts: ScanOptions = {}): CodeMap {
     const j = readJsonSafe(contents.get(p));
     if (!j) continue;
     const dir = posix.dirname(p) === "." ? "" : posix.dirname(p) + "/";
-    const add = (rel: unknown, why: string) => { if (typeof rel === "string" && rel) entryPoints.push({ path: posix.normalize(dir + rel.replace(/^\.\//, "")), why }); };
+    // Only files that are in the repo (a "main" pointing at build output is not an entry point you can read).
+    const add = (rel: unknown, why: string) => { if (typeof rel === "string" && rel) { const path = posix.normalize(dir + rel.replace(/^\.\//, "")); if (have.has(path)) entryPoints.push({ path, why }); } };
     add(j.main, `${p}: main`);
     if (typeof j.bin === "string") add(j.bin, `${p}: bin`);
     else if (j.bin && typeof j.bin === "object") for (const [k, v] of Object.entries(j.bin)) add(v, `${p}: bin ${k}`);
