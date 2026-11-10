@@ -347,20 +347,20 @@ function resolveRel(from: string, spec: string, have: Set<string>): string | nul
 function gitInfo(root: string): { head: string | null; branch: string | null; files: string[] | null } {
   try {
     const run = (args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
-    const top = run(["rev-parse", "--show-toplevel"]).trim();
-    if (!samePath(top, root)) return { head: null, branch: null, files: null };
+    // Inside a work tree? (Comparing paths is unreliable on Windows: 8.3 short names, drive case, slashes.)
+    if (run(["rev-parse", "--is-inside-work-tree"]).trim() !== "true") return { head: null, branch: null, files: null };
     let head: string | null = null;
     let branch: string | null = null;
     try { head = run(["rev-parse", "HEAD"]).trim(); } catch { /* empty repo */ }
     try { branch = run(["rev-parse", "--abbrev-ref", "HEAD"]).trim(); } catch { /* none */ }
+    // Paths come back relative to `root`, so a folder inside a bigger repo works too.
     const files = run(["ls-files", "-co", "--exclude-standard", "-z"]).split("\0").filter(Boolean);
-    return { head, branch, files };
+    return { head, branch, files: files.length ? files : null };
   } catch {
     return { head: null, branch: null, files: null };
   }
 }
 
-const samePath = (a: string, b: string) => a.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() === b.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 
 function walk(root: string): string[] {
   const out: string[] = [];
