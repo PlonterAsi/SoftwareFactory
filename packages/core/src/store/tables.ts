@@ -73,7 +73,8 @@ export const agentRunsProjection: Projection = {
 
 export const factoryRunsProjection: Projection = {
   name: "factory_runs",
-  version: 1,
+  // v2: runs can resume (resumes, resumed_from).
+  version: 2,
   tables: ["factory_runs", "artifacts"],
   describe: "Factory runs and every file they wrote (the files live on disk; these rows point at them)",
   migrate(db) {
@@ -91,7 +92,9 @@ export const factoryRunsProjection: Projection = {
       sha         TEXT,
       total_usd   REAL,
       agent_calls INTEGER,
-      fix_rounds  INTEGER
+      fix_rounds  INTEGER,
+      resumes     INTEGER NOT NULL DEFAULT 0,
+      resumed_from TEXT
     );
     CREATE TABLE IF NOT EXISTS artifacts (
       run        INTEGER NOT NULL,
@@ -121,6 +124,10 @@ export const factoryRunsProjection: Projection = {
         db.prepare(`UPDATE factory_runs SET finished_at = ?, outcome = ?, reason = ?, dir = coalesce(?, dir), sha = coalesce(?, sha),
           plan_name = coalesce(?, plan_name), total_usd = ?, agent_calls = ?, fix_rounds = ? WHERE id = ?`)
           .run(e.ts, str(p.outcome), str(p.reason), str(p.dir), str(p.sha), str(p.plan), num(p.totalUsd), num(p.agentCalls), num(p.fixRounds), Number(p.run));
+        break;
+      case "factory.run.resumed":
+        // Back in flight: the stop that came before is history (still in the log).
+        db.prepare("UPDATE factory_runs SET finished_at = NULL, outcome = NULL, reason = NULL, resumes = resumes + 1, resumed_from = ? WHERE id = ?").run(str(p.from), Number(p.run));
         break;
       case "factory.files":
         upsertArtifacts(db, e, p);

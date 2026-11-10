@@ -28,6 +28,7 @@ export type EventType =
   | "agent.run.failed"
   | "factory.run.started"
   | "factory.run.finished"
+  | "factory.run.resumed"
   | "factory.station"
   | "factory.plan"
   | "factory.files"
@@ -130,6 +131,12 @@ export class EventLog extends EventEmitter {
     const sql = `SELECT id, ts, type, payload FROM events ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY id ASC LIMIT ?`;
     args.push(opts.limit ?? 1000);
     return (this.db.prepare(sql).all(...args) as Row[]).map(toEvent);
+  }
+
+  /** One event by id. */
+  get(id: number): SfEvent | undefined {
+    const row = this.db.prepare("SELECT id, ts, type, payload FROM events WHERE id = ?").get(id) as Row | undefined;
+    return row ? toEvent(row) : undefined;
   }
 
   /** Id of the newest event, 0 for an empty log. */

@@ -57,13 +57,23 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     const p = e.payload as { text: string; source: string };
     order.ingest({ id: e.id, text: p.text, source: p.source }).catch((err) => console.error("order ingest failed:", err));
   });
+  // Who is talking to the core: the desktop window sends its page origin (http://tauri.localhost
+  // on Windows). Kept in memory only; /api/health shows it, so a smoke test can prove the window
+  // reached the core, and the shell can tell a blank window from a dead core.
+  const clients = { origins: new Map<string, string>(), streams: new Map<string, number>() };
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
+    const origin = typeof req.headers.origin === "string" ? req.headers.origin.slice(0, 100) : null;
+    if (origin) clients.origins.set(origin, new Date().toISOString());
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") return end(res, 204);
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
-      if (req.method === "GET" && url.pathname === "/api/health") return json(res, 200, { ok: true, runtime: runtime.name, mode: runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime) });
+      if (req.method === "GET" && url.pathname === "/api/health") return json(res, 200, {
+        ok: true, runtime: runtime.name, mode: runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime),
+        pid: process.pid, node: process.version, schema: log.migration.to,
+        clients: { origins: Object.fromEntries(clients.origins), streams: Object.fromEntries(clients.streams) },
+      });
       if (req.method === "GET" && url.pathname === "/api/setup") {
         const fresh = url.searchParams.get("fresh") === "1";
         if (fresh) gitOk.at = 0;
@@ -156,6 +166,23 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         });
         return json(res, 202, { run });
       }
+      const runMatch = url.pathname.match(/^\/api\/factory\/runs\/(\d+)$/);
+      if (req.method === "GET" && runMatch) {
+        const id = Number(runMatch[1]);
+        const row = log.db.prepare("SELECT * FROM factory_runs WHERE id = ?").get(id);
+        if (!row) return json(res, 404, { error: "No such run" });
+        const station = log.db.prepare("SELECT payload FROM events WHERE type = 'factory.station' AND json_extract(payload, '$.run') = ? ORDER BY id DESC LIMIT 1").get(id) as { payload: string } | undefined;
+        return json(res, 200, { ...row, station: station ? JSON.parse(station.payload) : null, waiting: factory.waitingGate(id), resumable: factory.resumable(id) });
+      }
+      const resumeMatch = url.pathname.match(/^\/api\/factory\/runs\/(\d+)\/resume$/);
+      if (req.method === "POST" && resumeMatch) {
+        const id = Number(resumeMatch[1]);
+        const ok = factory.resumable(id);
+        if (!ok.ok) return json(res, 409, { error: `Run #${id} cannot resume: ${ok.why}` });
+        if (!gitReady()) return json(res, 409, { error: "Git is not installed, so the run cannot pick up its repo. Install Git for Windows (git-scm.com/download/win), then press Resume again." });
+        factory.resume(id);
+        return json(res, 202, { run: id, from: ok.from });
+      }
       const gateMatch = url.pathname.match(/^\/api\/factory\/runs\/(\d+)\/gate$/);
       if (req.method === "POST" && gateMatch) {
         const body = await readJson(req);
@@ -183,7 +210,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         for (const e of log.list({ sinceId: since, limit: 1e6 })) send(res, e);
         const onEvent = (e: SfEvent) => send(res, e);
         log.on("event", onEvent);
-        req.on("close", () => log.off("event", onEvent));
+        const who = origin ?? "none";
+        clients.streams.set(who, (clients.streams.get(who) ?? 0) + 1);
+        req.on("close", () => {
+          log.off("event", onEvent);
+          const n = (clients.streams.get(who) ?? 1) - 1;
+          if (n > 0) clients.streams.set(who, n); else clients.streams.delete(who);
+        });
         return;
       }
       return json(res, 404, { error: "not found" });
@@ -304,5 +337,10 @@ if (isMain) {
   };
   sweepIfDue();
   setInterval(sweepIfDue, 3_600_000).unref();
-  server.listen(port, "127.0.0.1", () =>console.log(`SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, db ${dbPath})`));
+  // Runs the app closed on pick up again from their last completed station (SF_AUTO_RESUME=0 leaves them for the Resume button).
+  if (process.env.SF_AUTO_RESUME !== "0" && core.factory.interrupted.length) {
+    if (!checkGit().found) console.log("Not resuming interrupted runs: Git is not installed.");
+    else for (const id of core.factory.resumeInterrupted()) console.log(`Resumed run #${id} where it left off`);
+  }
+  server.listen(port, "127.0.0.1", () => console.log(`SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, db ${dbPath})`));
 }
