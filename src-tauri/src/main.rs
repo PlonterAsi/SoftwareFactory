@@ -17,6 +17,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::Manager;
 
+mod updates;
+
 #[derive(Default)]
 struct CoreState {
     child: Option<Child>,
@@ -128,14 +130,22 @@ fn log_path(app: &tauri::AppHandle) -> PathBuf {
     data_dir(app).join("core.log")
 }
 
-/// Start the core (stopping any earlier one) and record how it went.
-fn start_core(app: &tauri::AppHandle) {
+/// Stop the core and wait until it is gone, so its files are free (an update replaces them).
+/// Runs it interrupted pick up again from their last completed station on the next start.
+fn stop_core(app: &tauri::AppHandle) {
     let state = app.state::<Core>();
     let mut st = state.0.lock().unwrap();
     if let Some(mut old) = st.child.take() {
         let _ = old.kill();
         let _ = old.wait();
     }
+}
+
+/// Start the core (stopping any earlier one) and record how it went.
+fn start_core(app: &tauri::AppHandle) {
+    stop_core(app);
+    let state = app.state::<Core>();
+    let mut st = state.0.lock().unwrap();
     let dir = data_dir(app);
     let (node, bundled) = node_bin(app);
     let entry = core_entry(app);
@@ -157,7 +167,7 @@ fn start_core(app: &tauri::AppHandle) {
     let mut cmd = Command::new(&node);
     // SF_PARENT_PID: the core exits on its own when this shell is gone, however it went
     // (window closed, crash, Task Manager), so no orphan core keeps port 4317 busy.
-    cmd.arg(&entry).current_dir(&dir).env("SF_DB", dir.join("factory.db")).env("SF_PARENT_PID", std::process::id().to_string()).stdout(out).stderr(err).stdin(Stdio::null());
+    cmd.arg(&entry).current_dir(&dir).env("SF_DB", dir.join("factory.db")).env("SF_PARENT_PID", std::process::id().to_string()).env("SF_APP_VERSION", app.package_info().version.to_string()).stdout(out).stderr(err).stdin(Stdio::null());
     // Real agents when Claude Code is installed; otherwise the free practice crew.
     // A crew picked in the Bridge is remembered in the database and wins over this.
     let runtime = match (std::env::var("SF_RUNTIME"), find_claude()) {
@@ -245,8 +255,17 @@ fn restart_core(app: tauri::AppHandle) -> CoreStatus {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Core(Mutex::new(CoreState::default())))
-        .invoke_handler(tauri::generate_handler![core_status, restart_core])
+        .manage(updates::Updates::default())
+        .invoke_handler(tauri::generate_handler![
+            core_status,
+            restart_core,
+            updates::app_version,
+            updates::update_status,
+            updates::update_check,
+            updates::update_install
+        ])
         .setup(|app| {
             start_core(app.handle());
             Ok(())

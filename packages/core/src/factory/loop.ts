@@ -159,6 +159,8 @@ export class Factory {
   }
 
   /** Wait for a run to finish (tests and the CLI). */
+  /** How many runs are working right now (an update waits for this to reach 0). */
+  activeCount(): number { return this.active.size; }
   wait(run: number): Promise<void> { return this.active.get(run) ?? Promise.resolve(); }
 
   waitingGate(run: number): GateId | null { return this.pending.get(run)?.gate ?? null; }

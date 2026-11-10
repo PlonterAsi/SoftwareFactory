@@ -8,6 +8,10 @@
 #   https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory-setup.exe
 #   https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory.msi
 #   https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory-portable.zip
+# - In-app updates (docs/updates.md): each build gets its own version, 0.2.<run number>. With the
+#   TAURI_SIGNING_PRIVATE_KEY secret set, the installer is signed for the updater and the release
+#   also carries latest.json, which installed apps read to update themselves. The smoke test also
+#   installs an older build and proves it updates itself to this one.
 name: Windows build
 
 on:
@@ -22,6 +26,10 @@ permissions:
 concurrency:
   group: windows-build-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # Every build is a new version, so the installed app can tell it is behind.
+  SF_VERSION: 0.2.${{ github.run_number }}
 
 jobs:
   build:
@@ -56,9 +64,22 @@ jobs:
           if (Test-Path $lic) { Copy-Item $lic src-tauri/node/LICENSE } else { Invoke-WebRequest "https://raw.githubusercontent.com/nodejs/node/v$((node -p 'process.versions.node'))/LICENSE" -OutFile src-tauri/node/LICENSE }
           node -p "'bundled node ' + process.version"
 
+      # This build's version; with the updater key, also the signed updater artifact (setup.exe.sig).
+      - name: Version and updater signing
+        shell: bash
+        env:
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" = "true" ]; then sign=true; else sign=false; echo "::warning title=Updates not signed::The TAURI_SIGNING_PRIVATE_KEY secret is not set, so this build publishes no update (latest.json). See docs/updates.md."; fi
+          echo "{\"version\": \"$SF_VERSION\", \"bundle\": {\"createUpdaterArtifacts\": $sign}}" > src-tauri/tauri.ci.json
+          cat src-tauri/tauri.ci.json
+
       # Runs `npm run build` first (beforeBuildCommand), then compiles and bundles.
       # tauri.ship-node.json adds the bundled Node.js to the installer's resources.
-      - run: npx tauri build --config src-tauri/tauri.ship-node.json
+      - run: npx tauri build --config src-tauri/tauri.ship-node.json --config src-tauri/tauri.ci.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Collect installers under stable names
         shell: pwsh
@@ -67,6 +88,14 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item (Get-ChildItem "$b/nsis/*-setup.exe" | Select-Object -First 1).FullName out/SoftwareFactory-setup.exe
           Copy-Item (Get-ChildItem "$b/msi/*.msi" | Select-Object -First 1).FullName out/SoftwareFactory.msi
+          # The updater signature, when this build was signed: the app checks it against the key in tauri.conf.json.
+          $sig = Get-ChildItem "$b/nsis/*-setup.exe.sig" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($sig) {
+            Copy-Item $sig.FullName out/SoftwareFactory-setup.exe.sig
+            node scripts/updates/verify-sig.mjs out/SoftwareFactory-setup.exe out/SoftwareFactory-setup.exe.sig src-tauri/tauri.conf.json
+            if ($LASTEXITCODE -ne 0) { throw "The TAURI_SIGNING_PRIVATE_KEY secret does not match the public key in tauri.conf.json, so installed apps would refuse this update." }
+          }
+          Set-Content -NoNewline out/version.txt $env:SF_VERSION
           # Portable: the exe finds its core in a "core" folder next to it.
           New-Item -ItemType Directory -Force portable/SoftwareFactory/core | Out-Null
           Copy-Item src-tauri/target/release/softwarefactory.exe portable/SoftwareFactory/SoftwareFactory.exe
@@ -82,6 +111,37 @@ jobs:
           name: SoftwareFactory-windows
           path: out/*
 
+      # For the smoke test only (never published): the same app as an older version, 0.0.1, that
+      # looks for updates on the test's own local server and trusts a throwaway key made right here.
+      # The smoke test signs this build's installer with that key and serves it, so the whole update
+      # path runs for real, with or without the project's own updater secret.
+      - name: Build an older version to update from
+        shell: bash
+        run: |
+          mkdir -p smoke-update
+          npx tauri signer generate --ci -p "" -w smoke-update/throwaway.key > /dev/null
+          pub=$(cat smoke-update/throwaway.key.pub)
+          cat > src-tauri/tauri.old.json <<JSON
+          {
+            "version": "0.0.1",
+            "build": { "beforeBuildCommand": "" },
+            "bundle": { "createUpdaterArtifacts": false },
+            "plugins": { "updater": { "pubkey": "$pub", "endpoints": ["http://127.0.0.1:4399/latest.json"], "dangerousInsecureTransportProtocol": true } }
+          }
+          JSON
+          npx tauri build --config src-tauri/tauri.ship-node.json --config src-tauri/tauri.old.json --bundles nsis
+          cp "$(ls src-tauri/target/release/bundle/nsis/*_0.0.1_*-setup.exe | head -1)" smoke-update/SoftwareFactory-old-setup.exe
+          npx tauri signer sign -f smoke-update/throwaway.key -p "" out/SoftwareFactory-setup.exe
+          mv out/SoftwareFactory-setup.exe.sig smoke-update/SoftwareFactory-setup.exe.testsig
+          [ -f smoke-update/SoftwareFactory-setup.exe.testsig ] && node scripts/updates/verify-sig.mjs out/SoftwareFactory-setup.exe smoke-update/SoftwareFactory-setup.exe.testsig "$pub"
+          rm smoke-update/throwaway.key
+          ls -la smoke-update
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-update
+          path: smoke-update/*
+
   smoke:
     needs: build
     runs-on: windows-latest
@@ -96,8 +156,13 @@ jobs:
           name: SoftwareFactory-windows
           path: out
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: smoke-update
+          path: smoke-update
+
       - name: Smoke test the installed app
-        run: node scripts/smoke/windows-smoke.mjs --installer out/SoftwareFactory-setup.exe --portable out/SoftwareFactory-portable.zip --out smoke-out
+        run: node scripts/smoke/windows-smoke.mjs --installer out/SoftwareFactory-setup.exe --portable out/SoftwareFactory-portable.zip --old-installer smoke-update/SoftwareFactory-old-setup.exe --update-sig smoke-update/SoftwareFactory-setup.exe.testsig --version ${{ env.SF_VERSION }} --out smoke-out
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -118,12 +183,22 @@ jobs:
           name: SoftwareFactory-windows
           path: out
 
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
       - name: Publish to the "latest" release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          notes="Windows build of main at ${GITHUB_SHA::7} ($(date -u +%Y-%m-%d)), smoke-tested as an installed app on Windows before publishing. Ships its own Node.js. For real agents install Claude Code and sign in; Git is needed to ship apps. Unsigned: Windows SmartScreen will warn, choose More info, then Run anyway."
+          notes="SoftwareFactory v$SF_VERSION: Windows build of main at ${GITHUB_SHA::7} ($(date -u +%Y-%m-%d)), smoke-tested as an installed app on Windows before publishing. Ships its own Node.js. For real agents install Claude Code and sign in; Git is needed to ship apps. Unsigned: Windows SmartScreen will warn, choose More info, then Run anyway. Installed apps from v0.2 on update themselves (Systems, Updates)."
+          # The manifest installed apps read to update themselves; only for a signed build.
+          if [ -f out/SoftwareFactory-setup.exe.sig ]; then
+            node scripts/updates/manifest.mjs --version "$SF_VERSION" --sig out/SoftwareFactory-setup.exe.sig \
+              --url "https://github.com/$GH_REPO/releases/download/latest/SoftwareFactory-setup.exe" \
+              --notes "Build of main at ${GITHUB_SHA::7}: $(git log -1 --format=%s 2>/dev/null || echo latest changes)" --out out/latest.json
+          fi
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/* --title "SoftwareFactory (latest main)" --notes "$notes" --prerelease --target "$GITHUB_SHA"
+          gh release create latest out/* --title "SoftwareFactory v$SF_VERSION (latest main)" --notes "$notes" --prerelease --target "$GITHUB_SHA"

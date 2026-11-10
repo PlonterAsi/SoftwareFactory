@@ -10,6 +10,7 @@ import { Timeline } from "./Timeline";
 import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
 import { DataDeck, useStore } from "./DataDeck";
+import { UpdateBanner, VersionChip, useUpdates } from "./Updates";
 
 export function App() {
   const f = useFactory();
@@ -29,6 +30,7 @@ export function App() {
   const pickNode = (id: number | null) => { setNode(id); if (id != null) setView("order"); };
   const showRun = (run: number) => { setPicked(run); setView("factory"); };
   const [setupOpen, setSetupOpen] = useState(false);
+  const updates = useUpdates(f.online);
   const lastEvent = f.events.at(-1)?.id ?? 0;
 
   // "Since you left": read once when the core first answers, before saying where we are now.
@@ -65,9 +67,11 @@ export function App() {
           <span className="sep">·</span> {f.factoryRuns.length} factory runs
           <span className="sep">·</span> {f.runs.length} agent calls
           <span className="sep">·</span> spend ${f.totalUsd.toFixed(4)}
+          <VersionChip u={updates} onOpen={() => setSetupOpen(true)} />
           <button className="ghost sm systems" onClick={() => setSetupOpen(true)} aria-label="Ship's systems: crew, checks and folders">Systems</button>
         </div>
       </header>
+      <UpdateBanner u={updates} />
       <main className="grid">
         <StarMap signals={f.signals} order={order} selected={node} onSelect={pickNode} factoryRuns={f.factoryRuns} onShowRun={showRun} />
         <div className={`center view-${view}`}>
@@ -86,7 +90,7 @@ export function App() {
         <Overseer signals={f.signals} runs={f.runs} factoryRuns={f.factoryRuns} briefings={order.briefings} ingests={order.ingests} onRunStarted={(r) => { setPicked(r); setView("factory"); }}
           mode={f.mode} since={since} onDismissSince={() => setSince(null)} onSetup={() => setSetupOpen(true)} onShowRun={showRun} />
       </main>
-      <Setup open={setupOpen} onClose={() => setSetupOpen(false)} dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />
+      <Setup open={setupOpen} onClose={() => setSetupOpen(false)} updates={updates} dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />
       <CoreDown online={f.online} />
     </div>
   );

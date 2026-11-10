@@ -57,7 +57,8 @@ export type EventType =
   | "bay.test"
   | "bay.visual"
   | "store.migrated"
-  | "store.rebuilt";
+  | "store.rebuilt"
+  | "app.updated";
 
 export interface SfEvent<P = unknown> {
   id: number;
