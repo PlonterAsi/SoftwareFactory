@@ -11,6 +11,7 @@ import { OrderEngine, type OrderOptions } from "./order/engine.js";
 import { canonFor, type NodeKind } from "./order/model.js";
 import { AgentBay } from "./bay/bay.js";
 import { SLOTS, type Slot } from "./bay/agentfile.js";
+import { storeReport } from "./store/inspect.js";
 
 /** The built-in Overseer's prompt with its station contract (the live one comes from the Agent Bay). */
 export const OVERSEER_ROLE =
@@ -88,6 +89,12 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (url.pathname.startsWith("/api/bay/")) {
         const r = await bayRoute(bay, req, url);
         if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
+      }
+      if (req.method === "GET" && url.pathname === "/api/store") return json(res, 200, storeReport(log, projectsDir));
+      if (req.method === "POST" && url.pathname === "/api/store/rebuild") {
+        const body = await readJson(req);
+        log.rebuild(body.name ? String(body.name) : undefined);
+        return json(res, 200, storeReport(log, projectsDir));
       }
       if (url.pathname.startsWith("/api/order/")) {
         const r = await orderRoute(order, req, url.pathname);

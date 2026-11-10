@@ -265,3 +265,25 @@ describe("Agent Bay API", () => {
     } finally { server.close(); }
   });
 });
+
+describe("Bay and Council tables", () => {
+  it("keeps agents, versions, slots, verdicts and Council sessions in organized tables", async () => {
+    const log = new EventLog();
+    const rt = new MockRuntime({ plantBug: false });
+    const bay = new AgentBay(log, rt);
+    bay.save("planner", { model: "sonnet" });
+    bay.assign("council", ["skeptic", "visionary", "architect"]);
+    await bay.test("tester");
+    const f = new Factory(log, rt, tmp("sf-proj-"), bay);
+    await f.wait(f.start("count words", { autoApprove: true, council: "always" }));
+    const q = (sql: string) => log.db.prepare(sql).all() as any[];
+    expect(q("SELECT id, version, model FROM bay_agents WHERE id = 'planner'")).toEqual([{ id: "planner", version: 2, model: "sonnet" }]);
+    expect(q("SELECT count(*) AS n FROM bay_agent_versions")[0].n).toBe(11);
+    expect(q("SELECT agent FROM bay_slots WHERE slot = 'council' ORDER BY seat").map((r) => r.agent)).toEqual(["skeptic", "visionary", "architect"]);
+    expect(q("SELECT status FROM bay_tests")).toEqual([{ status: "pass" }]);
+    expect(q("SELECT outcome, round FROM council_sessions")).toEqual([{ outcome: "build", round: 1 }]);
+    expect(q("SELECT agent, vote FROM council_seats ORDER BY seat").map((r) => r.agent)).toEqual(["skeptic", "visionary", "architect"]);
+    expect(q("SELECT verdict FROM reviews")).toEqual([{ verdict: "pass" }]);
+    expect(q("SELECT agent, version, pass FROM agent_verdicts WHERE agent = 'planner'")).toEqual([{ agent: "planner", version: 2, pass: 1 }]);
+  });
+});

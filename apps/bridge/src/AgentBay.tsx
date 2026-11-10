@@ -104,7 +104,7 @@ function StationBoard({ bay, onSelect, onAssign }: { bay: BayState; onSelect: (i
                     onDragOver={(e) => { e.preventDefault(); setOver(key); }} onDragLeave={() => setOver(null)}
                     onDrop={(e) => { e.preventDefault(); setOver(null); const id = e.dataTransfer.getData("text/agent"); if (id) put(slot, i, id); }}>
                     {a ? <button className="seat-agent" onClick={() => onSelect(a.def.id)} title={`${a.def.name} v${a.version} · ${a.def.model}`}><span className="seat-av">{a.def.avatar}</span>{a.def.name}</button> : <span className="muted">drop here</span>}
-                    <select className="seat-pick" aria-label={`${SLOT_LABEL[slot]} seat ${i + 1}`} value={a?.def.id ?? ""} onChange={(e) => e.target.value && put(slot, i, e.target.value)}>
+                    <select className="seat-pick" title="Choose who sits here" aria-label={`${SLOT_LABEL[slot]} seat ${i + 1}`} value={a?.def.id ?? ""} onChange={(e) => e.target.value && put(slot, i, e.target.value)}>
                       {!a && <option value="">choose…</option>}
                       {live.map((x) => <option key={x.def.id} value={x.def.id}>{x.def.name}</option>)}
                     </select>

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,7 +30,7 @@ describe("agent output parsing", () => {
     expect(() => safePath(root, ".git/config")).toThrow();
     const r = writeFiles(root, [{ path: "test/a.test.js", content: "x" }, { path: "src/a.js", content: "y\n" }], { lockTests: true });
     expect(r.refused.map((x) => x.path)).toEqual(["test/a.test.js"]);
-    expect(r.written).toEqual([{ path: "src/a.js", lines: 1, bytes: 2 }]);
+    expect(r.written).toEqual([{ path: "src/a.js", lines: 1, bytes: 2, sha256: createHash("sha256").update("y\n").digest("hex") }]);
   });
 
   it("cleans up a plan and drops unknown task links", () => {

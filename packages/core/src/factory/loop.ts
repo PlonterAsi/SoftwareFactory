@@ -205,9 +205,9 @@ class Run {
         this.plan = plan;
         this.dir = resolve(join(this.f.projectsDir, `${plan.slug}-${this.id}`));
         initRepo(this.dir);
-        writeFiles(this.dir, [{ path: "SPEC.md", content: specMarkdown(this.idea, plan) }], { lockTests: true });
+        const spec = writeFiles(this.dir, [{ path: "SPEC.md", content: specMarkdown(this.idea, plan) }], { lockTests: true });
         const sha = commitAll(this.dir, `Spec and plan: ${plan.name}`);
-        this.log.append("factory.plan", { run: this.id, plan, dir: this.dir, sha });
+        this.log.append("factory.plan", { run: this.id, plan, dir: this.dir, sha, written: spec.written });
       });
       const d = await this.gate("gateA", "Approve the spec and plan");
       this.verdict(this.one("plan"), "plan", d.approve, undefined, d.note);

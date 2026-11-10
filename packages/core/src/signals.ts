@@ -15,8 +15,10 @@ export function captureSignal(log: EventLog, text: string, source = "bridge"): S
   return toSignal(e);
 }
 
-export function listSignals(log: EventLog): Signal[] {
-  return log.list({ type: "signal.captured" }).map(toSignal);
+/** Every Signal, oldest first, read from the organized `signals` table. */
+export function listSignals(log: EventLog, limit = 1000): Signal[] {
+  return (log.db.prepare("SELECT id, ts, source, text FROM signals ORDER BY id ASC LIMIT ?").all(limit) as { id: number; ts: string; source: string; text: string }[])
+    .map((r) => ({ id: Number(r.id), ts: r.ts, text: r.text, source: r.source }));
 }
 
 function toSignal(e: SfEvent): Signal {

@@ -1,3 +1,4 @@
+import "./tables.js";
 import type { EventLog, SfEvent } from "../events.js";
 import type { AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
