@@ -84,8 +84,7 @@ export function App() {
             <FactoryFloor runs={f.runs} factoryRuns={f.factoryRuns} selected={selected} onSelect={setPicked} crew={crew} mode={f.mode} />
             <RunDeck run={selected} />
           </> : view === "bay" ? <AgentBay bay={bay} /> : view === "tickets" ? <Tickets events={f.events} onShowRun={showRun}
-            crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))}
-            projects={order.nodes.filter((n) => n.kind === "project" && n.mergedInto == null).map((n) => ({ id: n.id, title: n.title }))} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
+            crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
           <Timeline runs={f.runs} totalUsd={f.totalUsd} />
         </div>
         <Overseer signals={f.signals} runs={f.runs} factoryRuns={f.factoryRuns} briefings={order.briefings} ingests={order.ingests} onRunStarted={(r) => { setPicked(r); setView("factory"); }}

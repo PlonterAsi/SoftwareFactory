@@ -70,11 +70,25 @@ export function useTicketCounts(events: SfEvent[], project?: number | null) {
   return c;
 }
 
+/** Projects to file a ticket under, from the projects model (refetched when a project changes). */
+function useProjectList(events: SfEvent[]) {
+  const [list, setList] = useState<{ id: number; title: string }[]>([]);
+  const last = events.filter((e) => e.type.startsWith("project.") || e.type === "factory.run.started" || e.type === "order.node").at(-1)?.id ?? 0;
+  useEffect(() => {
+    fetch(`${API}/api/projects`).then((r) => r.json()).then((j) => {
+      const rows = (Array.isArray(j) ? j : j.projects ?? []) as { id: number; name: string; status?: string }[];
+      setList(rows.filter((p) => p.status !== "archived").map((p) => ({ id: p.id, title: p.name })));
+    }).catch(() => {});
+  }, [last]);
+  return list;
+}
+
 export interface CrewRef { id: string; name: string; avatar: string }
 
-export function Tickets({ events, projectId = null, crew = [], projects = [], onShowRun }: {
-  events: SfEvent[]; projectId?: number | null; crew?: CrewRef[]; projects?: { id: number; title: string }[]; onShowRun?: (run: number) => void;
+export function Tickets({ events, projectId = null, crew = [], onShowRun }: {
+  events: SfEvent[]; projectId?: number | null; crew?: CrewRef[]; onShowRun?: (run: number) => void;
 }) {
+  const projects = useProjectList(events);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [view, setView] = useState<View>("open");
   const [mode, setMode] = useState<"list" | "board">("list");

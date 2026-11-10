@@ -211,7 +211,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/tickets" || url.pathname.startsWith("/api/tickets/")) {
-        const r = await ticketRoute(tickets, req, url);
+        const r = await ticketRoute(tickets, req, url, gitReady);
         if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
       }
       if (url.pathname.startsWith("/api/order/")) {
@@ -285,7 +285,7 @@ async function bayRoute(bay: AgentBay, req: IncomingMessage, url: URL): Promise<
 }
 
 /** The tickets' API. Every write is an event, so the Bridge sees it on the stream. Status -1 = the work document as Markdown. */
-async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL): Promise<[number, unknown] | null> {
+async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, gitReady: () => boolean): Promise<[number, unknown] | null> {
   const path = url.pathname;
   const q = url.searchParams;
   const proj = q.get("project");
@@ -320,7 +320,9 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL): Pr
     case "link": return [200, tickets.link(id, Number(body.to), String(body.relation ?? "related") as Relation, "you", body.removed === true)];
     case "line": return [200, tickets.moveLine(id, body.dir === "up" ? "up" : "down")];
     case "spawn": return [201, tickets.spawn(id, { ...(body as object), by: "you" } as any)];
-    case "work": return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true })];
+    case "work":
+      if (!gitReady()) return [409, { error: "Git is not installed, so the crew has nowhere to keep what it builds. Install Git for Windows (git-scm.com/download/win), then press Work it again." }];
+      return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true })];
     case "ask": return [200, await tickets.ask(id, body.agent ? String(body.agent) : undefined)];
   }
   return null;
