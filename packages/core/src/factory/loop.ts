@@ -321,8 +321,8 @@ class Run {
     for (let round = 1; round <= 2; round++) {
       const r = await this.station("review", async () => {
         const m = this.one("review");
-        const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md").map(([p, c]) => `<<<FILE ${p}\n${c.slice(0, 6000)}FILE>>>`).join("\n");
-        const text = await this.ask(m, `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 30000)}`, { round });
+        const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md").map(([p, c]) => `<<<FILE ${p}\n${c.length > 12000 ? c.slice(0, 12000) + "\n...(cut: file continues)\n" : c}FILE>>>`).join("\n");
+        const text = await this.ask(m, `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 48000)}`, { round });
         let res: ReviewResult;
         try { res = parseReview(text); } catch (e) { this.verdict(m, "review", false, round, (e as Error).message); throw e; }
         this.verdict(m, "review", true, round);
