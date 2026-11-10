@@ -15,6 +15,7 @@
 //      from its last completed station and ship
 //   7. closes the app normally and expects the core to exit with it
 //   8. unpacks the portable zip and checks it starts too
+//   Safe by design: deletes nothing (an existing data folder is moved aside), and runs only on CI or with --test-machine.
 //   9. in-app update: installs an older version (0.0.1, built by CI to look for updates on this
 //      test's local server), launches it, and expects it to find this build, download and verify
 //      it, stop its core, install it and start again as the new version with the data intact
@@ -28,7 +29,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createReadStream, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -38,7 +39,23 @@ const API = "http://127.0.0.1:4317";
 const IDENT = "dev.plonter.softwarefactory";
 const DATA = join(process.env.APPDATA ?? join(process.env.HOME ?? ".", ".config"), IDENT);
 const APP_ENV = { ...process.env, SF_RUNTIME: "mock", SF_MOCK_DELAY_MS: args.delay ?? "400", SF_DROP: join(OUT, "drop") };
+// Safety: this test installs and uninstalls SoftwareFactory and starts from an empty data folder.
+// It deletes nothing (an existing data folder is moved aside to a dated backup), and it runs only
+// on a CI machine or when told this is a test machine, never by accident on a PC with real work.
+if (!process.env.CI && !args["test-machine"]) {
+  console.error("Refusing to run: this smoke test reinstalls SoftwareFactory and moves its data folder aside.\nRun it on CI, or on a test machine with --test-machine.");
+  process.exit(2);
+}
 mkdirSync(OUT, { recursive: true });
+const STAMP = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
+/** Move a folder out of the way instead of deleting it. */
+function moveAside(dir) {
+  if (!existsSync(dir)) return null;
+  const to = `${dir}.before-smoke-${STAMP}`;
+  renameSync(dir, to);
+  log("moved aside (nothing deleted):", dir, "->", to);
+  return to;
+}
 
 const results = [];
 let fatal = null;
@@ -132,7 +149,7 @@ async function main() {
   // ---------- 1. install ----------
   const installer = resolve(args.installer ?? "out/SoftwareFactory-setup.exe");
   must("installer exists", existsSync(installer), installer);
-  rmSync(DATA, { recursive: true, force: true });
+  moveAside(DATA);
   const inst = spawnSync(installer, ["/S"], { encoding: "utf8", timeout: 300_000 });
   check("silent install exits 0", inst.status === 0, `status ${inst.status} ${inst.error?.message ?? ""}`);
   const candidates = [join(process.env.LOCALAPPDATA ?? "", "SoftwareFactory"), join(process.env.ProgramFiles ?? "C:\\Program Files", "SoftwareFactory")];
@@ -245,7 +262,7 @@ console.log("seeded", db);
   check("closing the window exits the app", appGone, appGone ? "" : `app pid ${pid} still running`);
   const down = await waitDown(15_000);
   check("closing the window stops the core", down, down ? "" : `core pid ${corePid} still answers${alive(corePid) ? " (process alive)" : ""}`);
-  if (!down) { kill(pid, true); spawnSync("taskkill", ["/IM", "node.exe", "/F"]); await waitDown(10_000); }
+  if (!down) { kill(pid, true); if (corePid) kill(corePid, true); await waitDown(10_000); }
   saveLogs("closed");
 
   // ---------- 7b. the shell killed alone (crash, Task Manager): the core must not linger ----------
@@ -261,8 +278,7 @@ console.log("seeded", db);
   // ---------- 8. portable zip ----------
   if (args.portable) {
     const zip = resolve(args.portable);
-    const dir = join(OUT, "portable");
-    rmSync(dir, { recursive: true, force: true });
+    const dir = join(OUT, `portable-${STAMP}`);
     const x = ps(`Expand-Archive -Force -Path '${zip}' -DestinationPath '${dir}'`);
     must("portable zip unpacks", x.status === 0, x.stderr);
     const pexe = join(dir, "SoftwareFactory", "SoftwareFactory.exe");
