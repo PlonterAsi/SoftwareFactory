@@ -28,7 +28,7 @@ Every merge to main runs `.github/workflows/windows-build.yml`:
 
 - The build gets its own version, `0.2.<workflow run number>`, so every build is newer than the one before.
 - With the `TAURI_SIGNING_PRIVATE_KEY` repository secret set, the installer is signed for the updater. CI checks the signature against the public key in `tauri.conf.json` (`scripts/updates/verify-sig.mjs`), so a mismatched secret fails the build and never ships an update nobody can install.
-- After the smoke test passes, the `latest` release gets `latest.json` (`scripts/updates/manifest.mjs`). Installed apps read it from `https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/latest.json`.
+- After the smoke test passes, the `latest` release gets `latest.json` (`scripts/updates/manifest.mjs`). With the `RELEASES_TOKEN` secret set, everything is published to the public repo `PlonterAsi/SoftwareFactory-releases` (installers and manifest only, no code), so this repo can be private. Otherwise it goes to this repo's own `latest` release. Installed apps try `SoftwareFactory-releases` first, then this repo.
 - Without the secret, builds still publish installers, but no `latest.json`, so no update is offered (a warning on the run says so).
 
 This updater signature is free and separate from Windows code signing. The installer is still not code-signed, so SmartScreen warns on a first manual install. Updates through the app do not go through SmartScreen.

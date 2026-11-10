@@ -187,12 +187,20 @@ jobs:
         with:
           sparse-checkout: scripts
 
+      # Where downloads and updates live: this repo while it is public. With the RELEASES_TOKEN secret
+      # set, the public repo PlonterAsi/SoftwareFactory-releases instead (installers and latest.json
+      # only, no code), so this repo can be private and installed apps still update without a sign-in.
       - name: Publish to the "latest" release
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
+          if [ -n "$RELEASES_TOKEN" ]; then
+            export GH_TOKEN="$RELEASES_TOKEN" GH_REPO="${{ github.repository_owner }}/SoftwareFactory-releases"; target=()
+          else
+            export GH_TOKEN="${{ github.token }}" GH_REPO="${{ github.repository }}"; target=(--target "$GITHUB_SHA")
+          fi
+          echo "publishing to $GH_REPO"
           notes="SoftwareFactory v$SF_VERSION: Windows build of main at ${GITHUB_SHA::7} ($(date -u +%Y-%m-%d)), smoke-tested as an installed app on Windows before publishing. Ships its own Node.js. For real agents install Claude Code and sign in; Git is needed to ship apps. Unsigned: Windows SmartScreen will warn, choose More info, then Run anyway. Installed apps from v0.2 on update themselves (Systems, Updates)."
           # The manifest installed apps read to update themselves; only for a signed build.
           if [ -f out/SoftwareFactory-setup.exe.sig ]; then
@@ -201,4 +209,4 @@ jobs:
               --notes "Build of main at ${GITHUB_SHA::7}: $(git log -1 --format=%s 2>/dev/null || echo latest changes)" --out out/latest.json
           fi
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/* --title "SoftwareFactory v$SF_VERSION (latest main)" --notes "$notes" --prerelease --target "$GITHUB_SHA"
+          gh release create latest out/* --title "SoftwareFactory v$SF_VERSION (latest main)" --notes "$notes" --prerelease "${target[@]}"
