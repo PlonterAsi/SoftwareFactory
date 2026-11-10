@@ -15,6 +15,7 @@ import { AgentBay } from "./bay/bay.js";
 import { SLOTS, type Slot } from "./bay/agentfile.js";
 import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
+import { projectsRoute } from "./projects/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
@@ -174,6 +175,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
           autoApprove: body.autoApprove === true,
           models: typeof body.models === "object" && body.models ? body.models as Record<string, string> : undefined,
           council: body.council === "always" || body.council === "never" ? body.council : undefined,
+          projectId: typeof body.projectId === "number" ? body.projectId : undefined,
         });
         return json(res, 202, { run });
       }
@@ -210,6 +212,11 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const body = await readJson(req);
         log.rebuild(body.name ? String(body.name) : undefined);
         return json(res, 200, storeReport(log, projectsDir));
+      }
+      if (url.pathname === "/api/projects" || url.pathname.startsWith("/api/projects/")) {
+        const canBuild = () => gitReady() ? null : "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again.";
+        const r = await projectsRoute({ log, order, factory, readJson, canBuild }, req, url);
+        if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname.startsWith("/api/order/")) {
         const r = await orderRoute(order, req, url.pathname);

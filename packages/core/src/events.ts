@@ -58,7 +58,13 @@ export type EventType =
   | "bay.visual"
   | "store.migrated"
   | "store.rebuilt"
-  | "app.updated";
+  | "app.updated"
+  | "project.created"
+  | "project.updated"
+  | "project.linked"
+  | "project.unlinked"
+  // Other parts of the app (tickets, improvement proposals, ...) add their own types.
+  | (string & {});
 
 export interface SfEvent<P = unknown> {
   id: number;
