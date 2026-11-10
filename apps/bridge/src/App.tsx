@@ -14,6 +14,7 @@ import { Home } from "./projects/Home";
 import { Workspace } from "./projects/Workspace";
 import { href, useRoute, type FactoryView } from "./projects/router";
 import "./projects/builtin";
+import "./CodeMap";
 
 export function App() {
   const f = useFactory();
