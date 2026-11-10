@@ -70,7 +70,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
   run(req: AgentRequest): Promise<AgentResult> {
     const started = Date.now();
     return new Promise((resolve, reject) => {
-      const child = spawn(this.opts.command, this.buildArgs(req), { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(this.opts.command, this.buildArgs(req), { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
       let out = "";
       let err = "";
       const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error(`Agent timed out after ${this.opts.timeoutMs} ms`)); }, this.opts.timeoutMs);

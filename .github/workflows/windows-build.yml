@@ -1,0 +1,75 @@
+# Builds the SoftwareFactory desktop app for Windows.
+# - Every pull request: build and keep the installers as a workflow artifact (a check that the app still builds).
+# - Every push to main (or a manual run): also publish them to the rolling "latest" release,
+#   so the download links below always point at the newest main:
+#   https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory-setup.exe
+#   https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory.msi
+#   https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory-portable.zip
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - run: npm test
+
+      # Runs `npm run build` first (beforeBuildCommand), then compiles and bundles.
+      - run: npx tauri build
+
+      - name: Collect installers under stable names
+        shell: pwsh
+        run: |
+          $b = "src-tauri/target/release/bundle"
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item (Get-ChildItem "$b/nsis/*-setup.exe" | Select-Object -First 1).FullName out/SoftwareFactory-setup.exe
+          Copy-Item (Get-ChildItem "$b/msi/*.msi" | Select-Object -First 1).FullName out/SoftwareFactory.msi
+          # Portable: the exe finds its core in a "core" folder next to it.
+          New-Item -ItemType Directory -Force portable/SoftwareFactory/core | Out-Null
+          Copy-Item src-tauri/target/release/softwarefactory.exe portable/SoftwareFactory/SoftwareFactory.exe
+          Copy-Item -Recurse packages/core/dist/* portable/SoftwareFactory/core/
+          Copy-Item packages/core/package.json portable/SoftwareFactory/core/
+          Compress-Archive -Path portable/SoftwareFactory -DestinationPath out/SoftwareFactory-portable.zip
+          Get-ChildItem out | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SoftwareFactory-windows
+          path: out/*
+
+      - name: Publish to the "latest" release
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Windows build of main at ${GITHUB_SHA::7} ($(date -u +%Y-%m-%d)). Needs Node 22+ installed. Unsigned: Windows SmartScreen will warn, choose More info, then Run anyway."
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest out/* --title "SoftwareFactory (latest main)" --notes "$notes" --prerelease --target "$GITHUB_SHA"

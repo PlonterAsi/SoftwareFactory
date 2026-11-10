@@ -100,14 +100,14 @@ export function syntaxErrors(root: string, paths: string[]): string[] {
   const out: string[] = [];
   for (const p of paths.filter((x) => /\.(c|m)?js$/.test(x))) {
     // Through stdin as an ES module: `node --check file.js` lets some broken files pass when it cannot tell the module type.
-    const r = spawnSync(process.execPath, ["--input-type=module", "--check"], { input: readFileSync(safePath(root, p)), encoding: "utf8" });
+    const r = spawnSync(process.execPath, ["--input-type=module", "--check"], { input: readFileSync(safePath(root, p)), encoding: "utf8", windowsHide: true });
     if (r.status !== 0) out.push(`${p}: ${(r.stderr.split("\n").find((l) => /Error/.test(l)) ?? r.stderr).trim().slice(0, 300)}`);
   }
   return out;
 }
 
 export function git(root: string, ...args: string[]): string {
-  const r = spawnSync("git", ["-c", "user.name=SoftwareFactory", "-c", "user.email=factory@softwarefactory.local", "-c", "commit.gpgsign=false", ...args], { cwd: root, encoding: "utf8" });
+  const r = spawnSync("git", ["-c", "user.name=SoftwareFactory", "-c", "user.email=factory@softwarefactory.local", "-c", "commit.gpgsign=false", ...args], { cwd: root, encoding: "utf8", windowsHide: true });
   if (r.status !== 0) throw new Error(`git ${args[0]} failed: ${r.stderr || r.stdout}`);
   return r.stdout.trim();
 }
@@ -165,7 +165,7 @@ export function runTests(root: string, timeoutMs = 60_000): Promise<TestRun> {
   return new Promise((resolve) => {
     // Agents' code runs with a scrubbed environment: no keys or tokens leak in.
     const env = { PATH: process.env.PATH ?? "", HOME: root, NODE_ENV: "test" };
-    const child = spawn(process.execPath, ["--test", `--test-reporter=${reporter()}`, "--test-reporter-destination=stdout"], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, ["--test", `--test-reporter=${reporter()}`, "--test-reporter-destination=stdout"], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let out = "";
     let err = "";
     let timedOut = false;

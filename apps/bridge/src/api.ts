@@ -20,9 +20,14 @@ export interface AgentRunView {
   contextTokens?: number;
 }
 
-/** In the browser the dev server proxies /api; inside Tauri the core listens on localhost. */
+/**
+ * In the browser the dev server proxies /api. Inside the desktop app the page is served
+ * from tauri://localhost (macOS/Linux) or http://tauri.localhost (Windows), so talk to the
+ * core on 127.0.0.1 directly; `tauri dev` loads the Vite server, whose proxy also works.
+ */
+const inTauriBundle = "__TAURI_INTERNALS__" in window && !location.host.startsWith("127.0.0.1");
 export const API: string =
-  import.meta.env.VITE_SF_API ?? (location.protocol.startsWith("http") ? "" : "http://127.0.0.1:4317");
+  import.meta.env.VITE_SF_API ?? (inTauriBundle || !location.protocol.startsWith("http") ? "http://127.0.0.1:4317" : "");
 
 export async function captureSignal(text: string) {
   const r = await fetch(`${API}/api/signals`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
