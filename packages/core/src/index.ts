@@ -29,3 +29,6 @@ export * from "./projects/model.js";
 export * from "./projects/tables.js";
 export * from "./projects/service.js";
 export * from "./projects/routes.js";
+export * from "./improve/lenses.js";
+export * from "./improve/council.js";
+export * from "./improve/tables.js";

@@ -8,13 +8,13 @@ import { useEffect, useState } from "react";
  *   #/factory[/view]       the whole factory (floor, bay, order, data), as before projects
  * The old #order, #bay and #data still open the factory views.
  */
-export type FactoryView = "factory" | "order" | "bay" | "data";
+export type FactoryView = "factory" | "order" | "bay" | "data" | "improve";
 export type Route =
   | { page: "home" }
   | { page: "project"; id: number; panel?: string; run?: number }
   | { page: "factory"; view: FactoryView };
 
-const VIEWS: FactoryView[] = ["factory", "order", "bay", "data"];
+const VIEWS: FactoryView[] = ["factory", "order", "bay", "data", "improve"];
 
 export function parse(hash: string): Route {
   const h = hash.replace(/^#/, "");
