@@ -10,14 +10,17 @@ import { Timeline } from "./Timeline";
 import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
 import { DataDeck, useStore } from "./DataDeck";
+import { ImproveDeck, useImprove } from "./ImproveDeck";
 
 export function App() {
   const f = useFactory();
   const order = useOrder(f.events);
   const bay = useBay(f.events);
+  const improve = useImprove(f.events);
+  const waiting = improve.proposals.filter((p) => p.status === "inbox").length;
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
-  const [view, setView] = useState<"factory" | "order" | "bay" | "data">(() => (location.hash === "#order" ? "order" : location.hash === "#bay" ? "bay" : location.hash === "#data" ? "data" : "factory"));
+  const [view, setView] = useState<"factory" | "order" | "bay" | "data" | "improve">(() => (location.hash === "#order" ? "order" : location.hash === "#bay" ? "bay" : location.hash === "#data" ? "data" : location.hash === "#improve" ? "improve" : "factory"));
   const store = useStore(f.events, view === "data");
   // Follow the newest run unless one was picked.
   const selected = f.factoryRuns.find((r) => r.run === picked) ?? f.factoryRuns.at(-1);
@@ -75,12 +78,13 @@ export function App() {
             <button role="tab" aria-selected={view === "factory"} className={view === "factory" ? "tab on" : "tab"} onClick={() => setView("factory")}>Factory floor</button>
             <button role="tab" aria-selected={view === "bay"} className={view === "bay" ? "tab on" : "tab"} onClick={() => setView("bay")}>Agent Bay{Object.values(bay.stats).some((s) => s.state === "thinking") ? " · working" : ""}</button>
             <button role="tab" aria-selected={view === "order"} className={(view === "order" ? "tab on" : "tab") + (open ? " alert" : "")} onClick={() => setView("order")}>Order deck{open ? ` · ${open}` : ""}</button>
+            <button role="tab" aria-selected={view === "improve"} className={view === "improve" ? "tab on" : "tab"} onClick={() => setView("improve")}>Improve{improve.busy ? " · looking" : waiting ? ` · ${waiting}` : ""}</button>
             <button role="tab" aria-selected={view === "data"} className={view === "data" ? "tab on" : "tab"} onClick={() => setView("data")}>Data vault</button>
           </nav>
           {view === "factory" ? <>
             <FactoryFloor runs={f.runs} factoryRuns={f.factoryRuns} selected={selected} onSelect={setPicked} crew={crew} mode={f.mode} />
             <RunDeck run={selected} />
-          </> : view === "bay" ? <AgentBay bay={bay} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
+          </> : view === "bay" ? <AgentBay bay={bay} /> : view === "improve" ? <ImproveDeck improve={improve} crew={bay.agents} onRunStarted={(r) => { setPicked(r); setView("factory"); }} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
           <Timeline runs={f.runs} totalUsd={f.totalUsd} />
         </div>
         <Overseer signals={f.signals} runs={f.runs} factoryRuns={f.factoryRuns} briefings={order.briefings} ingests={order.ingests} onRunStarted={(r) => { setPicked(r); setView("factory"); }}
