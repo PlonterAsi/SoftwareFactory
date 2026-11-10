@@ -236,9 +236,9 @@ console.log("seeded", db);
   const closed = ps(`$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { [void]$p.CloseMainWindow(); 'sent' } else { 'gone' }`);
   log("asked the window to close:", closed.stdout.trim(), closed.stderr.trim());
   const appGone = await until("the app to exit", async () => !alive(pid), 30_000, 300);
-  check("closing the window exits the app", appGone, `app pid ${pid} still running`);
+  check("closing the window exits the app", appGone, appGone ? "" : `app pid ${pid} still running`);
   const down = await waitDown(15_000);
-  check("closing the window stops the core", down, `core pid ${corePid} still answers${alive(corePid) ? " (process alive)" : ""}`);
+  check("closing the window stops the core", down, down ? "" : `core pid ${corePid} still answers${alive(corePid) ? " (process alive)" : ""}`);
   if (!down) { kill(pid, true); spawnSync("taskkill", ["/IM", "node.exe", "/F"]); await waitDown(10_000); }
   saveLogs("closed");
 
@@ -248,7 +248,7 @@ console.log("seeded", db);
   if (h3) {
     spawnSync("taskkill", ["/PID", String(app.child.pid), "/F"]);
     const gone = await waitDown(15_000);
-    check("the core exits when the app is killed alone (no orphan on port 4317)", gone, `core pid ${h3.pid} ${alive(h3.pid) ? "still running" : "gone but port busy"}`);
+    check("the core exits when the app is killed alone (no orphan on port 4317)", gone, gone ? "" : `core pid ${h3.pid} ${alive(h3.pid) ? "still running" : "gone but port busy"}`);
     if (!gone && h3.pid) { spawnSync("taskkill", ["/PID", String(h3.pid), "/F"]); await waitDown(10_000); }
   }
 
@@ -269,7 +269,8 @@ console.log("seeded", db);
     check("the portable Bridge window reached the core", await waitBridge(60_000), "");
     screenshot("4-portable");
     ps(`$p = Get-Process -Id ${app.child.pid} -ErrorAction SilentlyContinue; if ($p) { [void]$p.CloseMainWindow() }`);
-    check("closing the portable app stops its core", await waitDown(30_000), "the core outlived the window");
+    const pdown = await waitDown(30_000);
+    check("closing the portable app stops its core", pdown, pdown ? "" : "the core outlived the window");
     kill(app.child.pid, true);
     await waitDown(10_000);
     saveLogs("portable");
