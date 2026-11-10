@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #070b12;
   --panel: #0c1320;
   --panel-2: #101a2b;
@@ -411,3 +412,99 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
 /* The station board stays in view while the crew list scrolls, so any card can be dragged onto any seat. */
 .bay-left { padding-top: 0; }
 .board { position: sticky; top: 0; z-index: 2; background: var(--panel); padding: 10px 0 8px; border-bottom: 1px solid var(--line); }
+
+/* ---- Milestone 5: systems, welcome, since you left, live floor ---- */
+button.sm { padding: 4px 10px; font-size: 12px; }
+button.sm.gate { background: var(--gate); }
+.grow { flex: 1; }
+.composer-row select { margin-right: 0; }
+.composer-row button { white-space: nowrap; }
+.composer-note { font-size: 12px; color: var(--muted); }
+.composer-note button.link { font-size: 12px; }
+
+.crew-chip { padding: 2px 9px; border-radius: 999px; font: 600 11px var(--mono); letter-spacing: 0.04em; background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.crew-chip.practice { color: var(--gate); border-color: rgba(242, 179, 75, 0.55); background: var(--gate-dim); }
+.crew-chip.real { color: var(--accent); border-color: rgba(79, 214, 232, 0.55); background: var(--accent-dim); }
+.systems { margin-left: 8px; }
+
+.msg-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.msg.gate { align-self: stretch; max-width: none; background: var(--gate-dim); border: 1px solid var(--gate); }
+.msg.since { align-self: stretch; max-width: none; background: linear-gradient(180deg, rgba(79, 214, 232, 0.10), rgba(79, 214, 232, 0.03)); border: 1px solid rgba(79, 214, 232, 0.4); white-space: normal; }
+.since-head { display: flex; justify-content: space-between; align-items: baseline; font: 600 12px var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.msg.since ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.since-shipped { color: var(--good); }
+.since-failed, .since-stopped, .since-conflict { color: var(--bad); }
+.since-gate { color: var(--gate); }
+
+.welcome { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: radial-gradient(ellipse at 0% 0%, rgba(79, 214, 232, 0.10), transparent 60%), var(--panel-2); }
+.welcome h3 { margin: 4px 0 8px; font: 600 17px var(--display); letter-spacing: 0.02em; }
+.welcome ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.welcome-note { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
+.setup-kicker { color: var(--accent); letter-spacing: 0.18em; font-size: 11px; }
+
+.scrim { position: fixed; inset: 0; background: rgba(3, 6, 11, 0.6); backdrop-filter: blur(2px); display: flex; justify-content: flex-end; z-index: 50; }
+.scrim.solid { justify-content: center; align-items: center; background: rgba(3, 6, 11, 0.85); }
+.setup { width: min(560px, 100%); height: 100%; overflow: auto; background: var(--panel); border-left: 1px solid var(--line); padding: 18px 20px 28px; display: flex; flex-direction: column; gap: 18px; animation: slidein 0.18s ease-out; }
+@keyframes slidein { from { transform: translateX(24px); opacity: 0; } }
+.setup-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.setup h2, .coredown h2 { margin: 4px 0 0; font: 600 20px var(--display); letter-spacing: 0.02em; }
+.setup-sec h3 { margin: 0 0 10px; font: 600 12px var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); display: flex; gap: 12px; align-items: baseline; }
+.setup-sec h3 button.link { font: 12px var(--body); letter-spacing: 0; text-transform: none; }
+.crew-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mode-card { text-align: left; display: flex; flex-direction: column; gap: 6px; padding: 12px; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; font-weight: 400; }
+.mode-card.on { border-color: var(--gate); box-shadow: 0 0 0 1px var(--gate) inset; }
+.mode-card.real.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.mode-card:disabled { opacity: 0.55; }
+.mode-name { font: 600 15px var(--display); }
+.mode-tag { color: var(--muted); font-size: 11px; }
+.mode-body { font-size: 12.5px; color: #b7c5d8; line-height: 1.45; }
+.mode-need { font-size: 12px; color: var(--gate); }
+.check { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--grid); }
+.check-mark { font-weight: 700; text-align: center; }
+.check.ok .check-mark { color: var(--good); }
+.check.no .check-mark { color: var(--bad); }
+.check-hint { font-size: 12.5px; color: var(--muted); }
+.setup-blocker { color: var(--gate); font-size: 13px; margin: 10px 0 0; }
+.place { padding: 10px 0; border-bottom: 1px solid var(--grid); display: flex; flex-direction: column; gap: 4px; }
+.place-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.place-label { font-weight: 600; }
+.place-actions { display: flex; gap: 6px; }
+.place-hint { font-size: 12.5px; color: var(--muted); }
+.place-path { font: 12px var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; word-break: break-all; }
+.place-edit { display: flex; gap: 6px; }
+.place-edit input { flex: 1; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: 12px var(--mono); }
+.drops { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; display: flex; flex-direction: column; gap: 3px; }
+.drops .filed { color: var(--ink); }
+.drops .skipped { color: var(--muted); }
+
+.coredown { width: min(560px, calc(100% - 32px)); background: var(--panel); border: 1px solid var(--bad); border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 0 40px rgba(255, 107, 107, 0.15); }
+.coredown p { margin: 0; color: #b7c5d8; }
+.coredown pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow: auto; }
+.coredown-actions { display: flex; gap: 8px; }
+
+/* Live factory floor: the agent at work docks on its station, a scan line sweeps it. */
+.station { position: relative; overflow: visible; }
+.st-crew { position: absolute; left: 50%; top: -13px; transform: translateX(-50%); display: flex; align-items: center; gap: 3px; padding: 1px 8px 1px 3px; border-radius: 999px; background: var(--bg); border: 1px solid var(--accent); font: 600 10px var(--mono); color: var(--accent); white-space: nowrap; box-shadow: 0 0 10px rgba(79, 214, 232, 0.35); }
+.st-avatar { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: var(--accent-dim); font-size: 9px; animation: bob 1.1s ease-in-out infinite; }
+.st-avatar:nth-child(2) { animation-delay: 0.2s; }
+.st-avatar:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bob { 50% { transform: translateY(-2px); } }
+.st-scan { position: absolute; inset: 0; border-radius: 8px; pointer-events: none; overflow: hidden; }
+.st-scan::after { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; left: -40%; background: linear-gradient(90deg, transparent, rgba(79, 214, 232, 0.22), transparent); animation: sweep 1.4s linear infinite; }
+@keyframes sweep { to { left: 100%; } }
+.react-flow__edge.animated path { stroke: var(--accent) !important; stroke-width: 1.6; filter: drop-shadow(0 0 3px rgba(79, 214, 232, 0.7)); }
+.run-result { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.run-result.note { color: var(--gate); }
+
+/* Star map: a shipyard ring around a project the factory is building. */
+.yard-ring { fill: none; stroke-width: 0.45; }
+.yard-ring.y-building { stroke: var(--accent); stroke-dasharray: 1.4 1; animation: spin 3s linear infinite; transform-box: fill-box; transform-origin: center; }
+.yard-ring.y-waiting { stroke: var(--gate); animation: ringpulse 1.2s ease-in-out infinite; }
+@keyframes ringpulse { 50% { stroke-opacity: 0.3; } }
+.yard-ring.y-shipped { stroke: var(--good); }
+.yard-ring.y-failed, .yard-ring.y-stopped { stroke: var(--bad); stroke-dasharray: 0.6 0.8; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .st-avatar, .st-scan::after, .yard-ring, .station.s-active, .station.s-waiting { animation: none !important; }
+}
+.msg.since.pinned { margin: 10px 14px 0; flex: none; max-height: 40%; overflow: auto; }

@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { ReactFlow, Background, useNodesState, type ReactFlowInstance, type Edge, type Node, Handle, Position, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { decideGate, type AgentRunView, type FactoryRunView, type StationState } from "./api";
+import { decideGate, setupApi, type AgentRunView, type CrewMode, type FactoryRunView, type StationState } from "./api";
 
-type StationData = { label: string; sub: string; gate?: boolean; later?: boolean; state: StationState; badge?: string; note?: string };
+type Worker = { name: string; avatar: string; since: string };
+type StationData = { label: string; sub: string; gate?: boolean; later?: boolean; state: StationState; badge?: string; note?: string; workers?: Worker[] };
+export type CrewIndex = Record<string, { name: string; avatar: string }>;
 
 function Station({ data }: NodeProps<Node<StationData>>) {
+  const w = data.workers ?? [];
   return (
-    <div className={`station s-${data.state}${data.gate ? " gate" : ""}${data.later ? " later" : ""}`} title={data.note}>
+    <div className={`station s-${data.state}${data.gate ? " gate" : ""}${data.later ? " later" : ""}${w.length ? " manned" : ""}`} title={data.note}>
       <Handle type="target" position={Position.Left} />
+      {/* The agent working this station right now, docked on its top edge. */}
+      {w.length > 0 && <div className="st-crew" aria-label={`${w.map((x) => x.name).join(", ")} working`}>{w.map((x, i) => <span key={i} className="st-avatar" title={x.name}>{x.avatar}</span>)}<span className="st-crew-name">{w.length === 1 ? w[0].name : `${w.length} seats`}</span></div>}
       <div className="st-name">{data.label}{data.badge && <span className="st-badge mono">{data.badge}</span>}</div>
       <div className="st-sub">{data.sub}</div>
+      {data.state === "active" && <div className="st-scan" aria-hidden />}
       <Handle type="source" position={Position.Right} />
       <Handle id="b" type="source" position={Position.Bottom} />
       <Handle id="r" type="target" position={Position.Right} />
@@ -45,15 +51,20 @@ const EDGES: [string, string, string?, string?][] = [
   ["build", "test"], ["test", "fix", "b1", "t1"], ["fix", "test", "t2", "b2"], ["test", "review"], ["review", "fix", "b", "r"], ["review", "gateB"], ["gateB", "ship", "b", "t"],
 ];
 
-function nodesFor(run?: FactoryRunView): Node<StationData>[] {
+// Agent-call stations ("tests" is the Tester; the floor's "test" box is node --test).
+const CALL_STATION: Record<string, string> = { council: "council", plan: "plan", tests: "tests", build: "build", fix: "fix", review: "review" };
+
+function nodesFor(run?: FactoryRunView, runs: AgentRunView[] = [], crew: CrewIndex = {}): Node<StationData>[] {
+  const working = runs.filter((r) => r.state === "running" && run && r.factoryRun === run.run);
   return STATIONS.map(([id, label, sub, x, y, gate, later]) => {
+    const workers = working.filter((r) => CALL_STATION[id] && r.station === CALL_STATION[id]).map((r) => ({ name: crew[r.agent]?.name ?? r.agent, avatar: crew[r.agent]?.avatar ?? "◆", since: r.startedAt }));
     const s = run?.stations[id];
     let badge: string | undefined;
     if (id === "fix" && run?.fixRounds) badge = `${run.fixRounds}/${run.maxFixRounds}`;
     if (id === "test" && run?.tests.length) { const t = run.tests.at(-1)!; badge = `${t.passed}/${t.passed + t.failed}`; }
     if (id === "council" && run?.council.length) { const b = run.council.at(-1)!.brief; badge = `${Object.values(b.votes).filter((v) => v === b.outcome).length}× ${b.outcome}`; }
     if (id === "review" && run?.reviews.length) { const r = run.reviews.at(-1)!; badge = r.findings.length ? `${r.findings.length} note${r.findings.length > 1 ? "s" : ""}` : "clean"; }
-    return { id, type: "station", position: { x, y }, draggable: false, data: { label, sub, gate, later, state: later ? "idle" : s?.state ?? "idle", badge, note: s?.note } };
+    return { id, type: "station", position: { x, y }, draggable: false, data: { label, sub, gate, later, state: later ? "idle" : s?.state ?? "idle", badge, note: s?.note, workers } };
   });
 }
 
@@ -69,13 +80,16 @@ function edgesFor(run?: FactoryRunView): Edge[] {
 }
 
 /** The factory floor: the selected run's stations light up as agents work, the fix loop counts rounds, gates wait for a tap. */
-export function FactoryFloor({ runs, factoryRuns, selected, onSelect }: { runs: AgentRunView[]; factoryRuns: FactoryRunView[]; selected?: FactoryRunView; onSelect: (id: number) => void }) {
+const NO_CREW: CrewIndex = {};
+
+export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_CREW, mode }: { runs: AgentRunView[]; factoryRuns: FactoryRunView[]; selected?: FactoryRunView; onSelect: (id: number) => void; crew?: CrewIndex; mode?: CrewMode | null }) {
   const run = selected;
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<StationData>>(nodesFor(run));
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<StationData>>(nodesFor(run, runs, crew));
+  const [openErr, setOpenErr] = useState<string | null>(null);
   // Controlled through useNodesState so React Flow keeps the measured node and handle sizes between events.
   useEffect(() => {
-    setNodes((ns) => { const next = nodesFor(run); return ns.map((n) => ({ ...n, data: next.find((x) => x.id === n.id)!.data })); });
-  }, [run, setNodes]);
+    setNodes((ns) => { const next = nodesFor(run, runs, crew); return ns.map((n) => ({ ...n, data: next.find((x) => x.id === n.id)!.data })); });
+  }, [run, runs, crew, setNodes]);
   // Refit the floor whenever its pane changes size, so every station stays in view.
   const wrap = useRef<HTMLDivElement>(null);
   const flow = useRef<ReactFlowInstance<Node<StationData>> | null>(null);
@@ -95,7 +109,7 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect }: { runs: 
           <select className="run-pick" value={run?.run ?? ""} onChange={(e) => onSelect(Number(e.target.value))} aria-label="Factory run">
             {[...factoryRuns].reverse().map((r) => <option key={r.run} value={r.run}>#{r.run} {r.plan?.name ?? r.idea.slice(0, 40)} · {r.finished?.outcome ?? "running"}</option>)}
           </select>
-        ) : <span className="muted">{overseerBusy ? "Overseer working…" : "no runs yet · type an idea and press Build it"}</span>}
+        ) : <span className="muted">{overseerBusy ? "Overseer working…" : "no runs yet · type an idea in the Overseer and press Build it"}</span>}
       </header>
       {run && (
         <div className="fuel" title={`Run budget: $${run.spentUsd.toFixed(4)} of $${run.maxUsd.toFixed(2)} spent`}>
@@ -111,7 +125,14 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect }: { runs: 
           <Background gap={24} size={1} color="var(--grid)" />
         </ReactFlow>
       </div>
-      {run?.finished && <div className={`run-result ${run.finished.outcome}`}>{run.finished.reason}{run.finished.totalUsd != null && ` · total $${run.finished.totalUsd.toFixed(4)} · ${run.finished.agentCalls ?? 0} agent calls`}</div>}
+      {run && !run.finished && mode === "practice" && run.stations.plan == null && <div className="run-result note">Practice crew at work: it builds the sample word counter whatever the idea, so you can watch the loop for free.</div>}
+      {run?.finished && (
+        <div className={`run-result ${run.finished.outcome}`}>
+          <span>{run.finished.reason}{run.finished.totalUsd != null && ` · total $${run.finished.totalUsd.toFixed(4)} · ${run.finished.agentCalls ?? 0} agent calls`}</span>
+          {run.finished.outcome === "shipped" && <button className="ghost sm" onClick={() => setupApi.open("run", run.run).then(() => setOpenErr(null)).catch((e) => setOpenErr((e as Error).message))}>Open folder</button>}
+          {openErr && <span className="err">{openErr}</span>}
+        </div>
+      )}
     </section>
   );
 }

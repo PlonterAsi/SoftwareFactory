@@ -18,6 +18,10 @@ import { ViewCache } from "./store/cache.js";
  *             safe to drop.
  */
 export type EventType =
+  | "settings.changed"
+  | "drop.filed"
+  | "drop.skipped"
+  | "bridge.seen"
   | "signal.captured"
   | "agent.run.started"
   | "agent.run.completed"

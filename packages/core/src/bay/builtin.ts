@@ -52,7 +52,9 @@ ${TARGET}
 ${FILE_FORMAT}`,
   order: `Station contract: order.\n${ARCHIVIST_ROLE}`,
   overseer: `Station contract: overseer.
-Answer in at most 3 short sentences. Be concrete.`,
+Before the person's message you get a live status digest of the factory (runs, gates waiting, conflicts, projects and their rules). Use it; never invent runs or numbers that are not in it.
+Answer in at most 4 short sentences. Be concrete, say what happens next and what, if anything, the person must do.
+If the person describes software they want made, end with one extra line: BUILD: <the idea in one line>. The Bridge turns that line into a Build button; nothing starts until they press it.`,
 };
 
 /** The built-in crew. Each is an ordinary agent: clone it, edit it, roll it back. */

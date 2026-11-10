@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
-import { orderApi, type Fragment, type OrderNode, type OrderState, type Signal } from "./api";
+import { orderApi, type FactoryRunView, type Fragment, type OrderNode, type OrderState, type Signal } from "./api";
 
 /** Deterministic noise from an id, so a body never jumps around between renders. */
 function hash(id: number, salt = 1) {
@@ -50,7 +50,7 @@ function layout(o: OrderState, now: number): Map<number, Body> {
  * in the Unsorted belt until you drag them onto a body, important Canon glows,
  * stale bodies dim, and a conflict is a red link.
  */
-export function StarMap({ signals, order, selected, onSelect }: { signals: Signal[]; order: OrderState & { arrivals: Record<number, number> }; selected: number | null; onSelect: (id: number | null) => void }) {
+export function StarMap({ signals, order, selected, onSelect, factoryRuns = [], onShowRun }: { signals: Signal[]; order: OrderState & { arrivals: Record<number, number> }; selected: number | null; onSelect: (id: number | null) => void; factoryRuns?: FactoryRunView[]; onShowRun?: (run: number) => void }) {
   const [hover, setHover] = useState<{ title: string; body: string } | null>(null);
   const [drag, setDrag] = useState<{ id: number; x: number; y: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -81,6 +81,16 @@ export function StarMap({ signals, order, selected, onSelect }: { signals: Signa
     try { await orderApi.move(id, nodeId); setErr(null); } catch (x) { setErr((x as Error).message); }
   };
   const fragTip = (f: Fragment) => ({ title: `${f.kind} · ${Math.round(f.confidence * 100)}% sure${f.suggestedNodeId ? ` · maybe "${order.nodes.find((n) => n.id === f.suggestedNodeId)?.title}"` : ""}`, body: f.text });
+  // A factory run's idea is its own system: find the run behind each body by its intake Signal.
+  const runOf = useMemo(() => {
+    const m = new Map<number, FactoryRunView>();
+    for (const r of factoryRuns) {
+      const sig = signals.find((s) => s.source === "factory" && s.id > r.run && s.text === r.idea);
+      const body = sig && order.nodes.find((n) => n.signalId === sig.id && n.parentId == null);
+      if (body) m.set(body.id, r);
+    }
+    return m;
+  }, [factoryRuns, signals, order.nodes]);
   const conflictLinks = order.conflicts.filter((c) => c.status === "open").map((c) => {
     const a = order.fragments.find((f) => f.id === c.a), b = order.fragments.find((f) => f.id === c.b);
     return { id: c.id, a: a?.nodeId != null ? bodies.get(a.nodeId) : undefined, b: b?.nodeId != null ? bodies.get(b.nodeId) : undefined };
@@ -107,13 +117,19 @@ export function StarMap({ signals, order, selected, onSelect }: { signals: Signa
             const hot = conflictLinks.some((l) => l.a === b || l.b === b);
             return (
               <g key={b.node.id} className={`body k-${b.node.kind}${b.stale ? " stale" : ""}${sel ? " sel" : ""}${drag ? " droppable" : ""}`}
-                onClick={(e) => { e.stopPropagation(); onSelect(b.node.id); }} onPointerUp={() => drop(b.node.id)}
-                onMouseEnter={() => setHover({ title: `${b.node.kind} · ${b.count} fragments${(order.canon[b.node.id]?.length ?? 0) ? ` · ${order.canon[b.node.id].length} in Canon` : ""}`, body: b.node.title })} onMouseLeave={() => setHover(null)}>
+                onClick={(e) => { e.stopPropagation(); onSelect(b.node.id); }} onDoubleClick={() => { const r = runOf.get(b.node.id); if (r) onShowRun?.(r.run); }} onPointerUp={() => drop(b.node.id)}
+                onMouseEnter={() => { const r = runOf.get(b.node.id); setHover({ title: `${b.node.kind} · ${b.count} fragments${(order.canon[b.node.id]?.length ?? 0) ? ` · ${order.canon[b.node.id].length} in Canon` : ""}${r ? ` · factory run #${r.run}: ${r.finished?.outcome ?? (r.waiting ? "waiting for you" : "building")} (double-click to watch)` : ""}`, body: b.node.title }); }} onMouseLeave={() => setHover(null)}>
                 {b.glow && <circle cx={b.x} cy={b.y} r={b.r * 2.6} fill="url(#glow)" className="halo" />}
                 {hot && <circle cx={b.x} cy={b.y} r={b.r + 1.6} className="hot-ring" />}
+                {runOf.has(b.node.id) && (() => {
+                  const r = runOf.get(b.node.id)!;
+                  const st = r.finished?.outcome ?? (r.waiting ? "waiting" : "building");
+                  // A shipyard ring: spinning while the crew builds, solid when shipped, red when it stopped.
+                  return <circle cx={b.x} cy={b.y} r={b.r + 2.4} className={`yard-ring y-${st}`} />;
+                })()}
                 <circle cx={b.x} cy={b.y} r={b.r} className="planet" />
                 {sel && <circle cx={b.x} cy={b.y} r={b.r + 1} className="sel-ring" />}
-                {(b.depth <= 1 || sel) && <text x={b.x} y={b.y + b.r + (b.depth === 0 ? 4.2 : 3.2)} className={b.depth === 0 ? "body-label big" : "body-label"}>{b.node.title.length > 22 ? b.node.title.slice(0, 21) + "…" : b.node.title}</text>}
+                {(b.depth <= 1 || sel) && <text x={b.x} y={b.y + b.r + (b.depth === 0 ? 4.2 : 3.2) + (runOf.has(b.node.id) ? 2.6 : 0)} className={b.depth === 0 ? "body-label big" : "body-label"}>{b.node.title.length > 22 ? b.node.title.slice(0, 21) + "…" : b.node.title}</text>}
               </g>
             );
           })}
