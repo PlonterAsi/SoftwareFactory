@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+/** Project-relative path with forward slashes on every OS, as agents and the Bridge use them. */
+const posixRel = (root: string, abs: string) => relative(root, abs).split(sep).join("/");
 
 export interface FileBlock { path: string; content: string }
 
@@ -67,7 +71,7 @@ export function writeFiles(root: string, files: FileBlock[], opts: { lockTests: 
       const abs = safePath(root, f.path);
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, f.content);
-      res.written.push({ path: relative(root, abs), lines: f.content.split("\n").length - 1, bytes: Buffer.byteLength(f.content) });
+      res.written.push({ path: posixRel(root, abs), lines: f.content.split("\n").length - 1, bytes: Buffer.byteLength(f.content) });
     } catch (e) {
       res.refused.push({ path: f.path, reason: (e as Error).message });
     }
@@ -82,7 +86,7 @@ export function readTree(root: string, dir = root, out: Record<string, string> =
     if (name === ".git" || name === "node_modules") continue;
     const abs = join(dir, name);
     if (statSync(abs).isDirectory()) readTree(root, abs, out);
-    else if (statSync(abs).size < 200_000) out[relative(root, abs)] = readFileSync(abs, "utf8");
+    else if (statSync(abs).size < 200_000) out[posixRel(root, abs)] = readFileSync(abs, "utf8");
   }
   return out;
 }
@@ -100,14 +104,14 @@ export function syntaxErrors(root: string, paths: string[]): string[] {
   const out: string[] = [];
   for (const p of paths.filter((x) => /\.(c|m)?js$/.test(x))) {
     // Through stdin as an ES module: `node --check file.js` lets some broken files pass when it cannot tell the module type.
-    const r = spawnSync(process.execPath, ["--input-type=module", "--check"], { input: readFileSync(safePath(root, p)), encoding: "utf8" });
+    const r = spawnSync(process.execPath, ["--input-type=module", "--check"], { input: readFileSync(safePath(root, p)), encoding: "utf8", windowsHide: true });
     if (r.status !== 0) out.push(`${p}: ${(r.stderr.split("\n").find((l) => /Error/.test(l)) ?? r.stderr).trim().slice(0, 300)}`);
   }
   return out;
 }
 
 export function git(root: string, ...args: string[]): string {
-  const r = spawnSync("git", ["-c", "user.name=SoftwareFactory", "-c", "user.email=factory@softwarefactory.local", "-c", "commit.gpgsign=false", ...args], { cwd: root, encoding: "utf8" });
+  const r = spawnSync("git", ["-c", "user.name=SoftwareFactory", "-c", "user.email=factory@softwarefactory.local", "-c", "commit.gpgsign=false", ...args], { cwd: root, encoding: "utf8", windowsHide: true });
   if (r.status !== 0) throw new Error(`git ${args[0]} failed: ${r.stderr || r.stdout}`);
   return r.stdout.trim();
 }
@@ -164,8 +168,10 @@ function reporter(): string {
 export function runTests(root: string, timeoutMs = 60_000): Promise<TestRun> {
   return new Promise((resolve) => {
     // Agents' code runs with a scrubbed environment: no keys or tokens leak in.
-    const env = { PATH: process.env.PATH ?? "", HOME: root, NODE_ENV: "test" };
-    const child = spawn(process.execPath, ["--test", `--test-reporter=${reporter()}`, "--test-reporter-destination=stdout"], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
+    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? "", HOME: root, NODE_ENV: "test" };
+    // Windows processes need these to start at all (no secrets in them).
+    if (process.platform === "win32") for (const k of ["SystemRoot", "SystemDrive", "windir", "TEMP", "TMP", "PATHEXT", "ComSpec"]) if (process.env[k]) env[k] = process.env[k];
+    const child = spawn(process.execPath, ["--test", `--test-reporter=${pathToFileURL(reporter()).href}`, "--test-reporter-destination=stdout"], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let out = "";
     let err = "";
     let timedOut = false;
@@ -180,7 +186,7 @@ export function runTests(root: string, timeoutMs = 60_000): Promise<TestRun> {
         if (!line.startsWith("{")) continue;
         try {
           const j = JSON.parse(line);
-          if (j.kind === "case") cases.push({ name: j.name, file: j.file ? relative(root, j.file) : "", pass: j.pass, error: j.error, durationMs: j.durationMs ?? 0 });
+          if (j.kind === "case") cases.push({ name: j.name, file: j.file ? posixRel(root, j.file.startsWith("file:") ? fileURLToPath(j.file) : j.file) : "", pass: j.pass, error: j.error, durationMs: j.durationMs ?? 0 });
           else if (j.kind === "stderr" || j.kind === "stdout") notes.push(j.message);
         } catch { /* not ours */ }
       }

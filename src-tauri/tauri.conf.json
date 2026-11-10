@@ -10,12 +10,32 @@
     "frontendDist": "../apps/bridge/dist"
   },
   "app": {
-    "windows": [{ "title": "SoftwareFactory · Bridge", "width": 1440, "height": 900, "minWidth": 960, "minHeight": 600 }],
-    "security": { "csp": null }
+    "windows": [
+      {
+        "title": "SoftwareFactory · Bridge",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"]
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "resources": {
+      "../packages/core/dist/": "core/",
+      "../packages/core/package.json": "core/package.json"
+    }
   }
 }
