@@ -55,6 +55,17 @@ ${FILE_FORMAT}`,
 Before the person's message you get a live status digest of the factory (runs, gates waiting, conflicts, projects and their rules). Use it; never invent runs or numbers that are not in it.
 Answer in at most 4 short sentences. Be concrete, say what happens next and what, if anything, the person must do.
 If the person describes software they want made, end with one extra line: BUILD: <the idea in one line>. The Bridge turns that line into a Build button; nothing starts until they press it.`,
+  map: `Station contract: map.
+You read digests of modules of an EXISTING codebase that was imported into the factory: file list with line counts, exported names, and the start of its key files. You only read; nothing you say changes the code.
+For every module given, say what it is for. Answer with ONE fenced json block and nothing else, shaped exactly like:
+{"modules": [{"id": "exact module id as given", "purpose": "one sentence, at most 25 words", "role": "core", "risks": ["short, only a real risk visible in the digest"]}]}
+One entry per module given, with the same ids. role is one of ui, core, api, data, cli, test, config, build, docs, other. At most 2 risks per module; none is fine.`,
+  survey: `Station contract: survey.
+You get the code map of an EXISTING repo that was imported into the factory: its modules and what each is for, dependencies, entry points, tests, health flags, the largest files and TODO markers. Suggest the improvements and fixes that would matter most to the person who owns it. Nothing is changed until they accept a suggestion.
+Ground every suggestion in the map: name real modules or files from it, never invent any. Prefer fixes over polish. No style-only changes.
+Answer with ONE fenced json block and nothing else, shaped exactly like:
+{"suggestions": [{"title": "imperative, at most 10 words", "body": "two or three sentences: what, why it matters, where", "kind": "fix", "lens": "tests", "severity": "high", "effort": "small", "files": ["path or module id"]}]}
+At most 8 suggestions, most important first. kind is fix or improvement. lens is one of tests, reliability, security, structure, docs, performance, dx. severity is critical, high, medium or low. effort is small, medium or large.`,
 };
 
 /** The built-in crew. Each is an ordinary agent: clone it, edit it, roll it back. */
@@ -119,15 +130,27 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     sample: "Failing test: slugify('A b') should be 'a-b'. Code: export const slugify = (t) => t.replace(/ /g, '-');",
     prompt: "You are the Fixer of SoftwareFactory. You read the failures, find the smallest change that fixes them and leave everything else alone.",
   },
+  {
+    id: "cartographer", name: "Cartographer", avatar: "⌖", station: "map", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
+    description: "Reads an imported repo module by module and says what each part is for.",
+    sample: "## module: src/auth\nTypeScript, 3 files, 240 lines. Exports: login, logout, requireUser.\nFiles: src/auth/login.ts (120), src/auth/session.ts (90), src/auth/index.ts (30)",
+    prompt: "You are the Cartographer of SoftwareFactory. You map existing code: short, exact, and only what the digest shows.",
+  },
+  {
+    id: "surveyor", name: "Surveyor", avatar: "⌕", station: "survey", model: "haiku", budgetUsd: 0.1, plugins: [], skills: [], tools: [],
+    description: "Reads the code map of an imported repo and suggests the fixes and improvements that matter most.",
+    sample: "Repo: 40 files, 3 modules (src/api 900 lines, src/db 400 lines, web 1200 lines). Health: no tests, no CI, .env committed.",
+    prompt: "You are the Surveyor of SoftwareFactory. You look at a code map like a senior engineer joining the team: what is risky, what is missing, what would pay off first.",
+  },
 ];
 
 /** Who works each station when nobody has been assigned. The Council takes three seats. */
 export const DEFAULT_SLOTS: Record<Slot, string[]> = {
   council: ["visionary", "architect", "skeptic"],
-  plan: ["planner"], tests: ["tester"], build: ["builder"], review: ["reviewer"], fix: ["fixer"], order: ["archivist"], overseer: ["overseer"],
+  plan: ["planner"], tests: ["tester"], build: ["builder"], review: ["reviewer"], fix: ["fixer"], order: ["archivist"], overseer: ["overseer"], map: ["cartographer"], survey: ["surveyor"],
 };
 
-export const SLOT_SEATS: Record<Slot, number> = { council: 3, plan: 1, tests: 1, build: 1, review: 1, fix: 1, order: 1, overseer: 1 };
+export const SLOT_SEATS: Record<Slot, number> = { council: 3, plan: 1, tests: 1, build: 1, review: 1, fix: 1, order: 1, overseer: 1, map: 1, survey: 1 };
 
 /** The system prompt an agent runs with on a station: its own prompt, then the station's contract. */
 export function systemPromptFor(agent: Pick<AgentDef, "prompt">, slot: Slot | "none"): string {

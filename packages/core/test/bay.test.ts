@@ -47,7 +47,7 @@ describe("Agent Bay", () => {
     const log = new EventLog();
     const bay = new AgentBay(log);
     new AgentBay(log);
-    expect(bay.agents().map((a) => a.def.id)).toEqual(["overseer", "archivist", "visionary", "architect", "skeptic", "planner", "tester", "builder", "reviewer", "fixer"]);
+    expect(bay.agents().map((a) => a.def.id)).toEqual(["overseer", "archivist", "visionary", "architect", "skeptic", "planner", "tester", "builder", "reviewer", "fixer", "cartographer", "surveyor"]);
     expect(bay.slots().council).toEqual(["visionary", "architect", "skeptic"]);
     const [planner] = bay.crewFor("plan");
     expect(planner).toMatchObject({ id: "planner", version: 1, model: "haiku" });
@@ -257,7 +257,7 @@ describe("Agent Bay API", () => {
       const [s3, imported] = await post("/api/bay/import", { text: file.replace("name: Pinch", "name: Pinch Two") });
       expect([s3, imported.def.id]).toEqual([201, "pinch-2"]);
       const st = await (await fetch(`${base}/api/bay/state`)).json();
-      expect(st.agents).toHaveLength(12);
+      expect(st.agents).toHaveLength(14);
       expect(st.stats.pinch.calls).toBe(1);
       // The Overseer answers with its Bay prompt.
       const [, ans] = await post("/api/agent/run", { prompt: "hi" });
@@ -278,7 +278,7 @@ describe("Bay and Council tables", () => {
     await f.wait(f.start("count words", { autoApprove: true, council: "always" }));
     const q = (sql: string) => log.db.prepare(sql).all() as any[];
     expect(q("SELECT id, version, model FROM bay_agents WHERE id = 'planner'")).toEqual([{ id: "planner", version: 2, model: "sonnet" }]);
-    expect(q("SELECT count(*) AS n FROM bay_agent_versions")[0].n).toBe(11);
+    expect(q("SELECT count(*) AS n FROM bay_agent_versions")[0].n).toBe(13);
     expect(q("SELECT agent FROM bay_slots WHERE slot = 'council' ORDER BY seat").map((r) => r.agent)).toEqual(["skeptic", "visionary", "architect"]);
     expect(q("SELECT status FROM bay_tests")).toEqual([{ status: "pass" }]);
     expect(q("SELECT outcome, round FROM council_sessions")).toEqual([{ outcome: "build", round: 1 }]);

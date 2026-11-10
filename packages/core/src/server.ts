@@ -16,6 +16,8 @@ import { SLOTS, type Slot } from "./bay/agentfile.js";
 import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
+import { RepoExplorer } from "./imports/explorer.js";
+import { importsRoute } from "./imports/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
@@ -52,6 +54,8 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   };
   const factory = new Factory(log, runtime, projectsDir, bay);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
+  // Imported repos are cloned next to the factory's own projects, in imports/.
+  const explorer = new RepoExplorer(log, runtime, join(dirname(projectsDir), "imports"), bay, { createNode: (title) => order.createNode("project", title) });
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
   log.on("event", (e: SfEvent) => {
     if (e.type !== "signal.captured") return;
@@ -207,6 +211,11 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await projectsRoute({ log, order, factory, readJson, canBuild }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (url.pathname === "/api/imports" || url.pathname.startsWith("/api/imports/")) {
+        const canImport = () => gitReady() ? null : "Git is not installed, so a repo cannot be imported. Install Git for Windows (git-scm.com/download/win), then import again.";
+        const r = await importsRoute({ log, explorer, readJson, canImport }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
       if (url.pathname.startsWith("/api/order/")) {
         const r = await orderRoute(order, req, url.pathname);
         if (r) return json(res, r[0], r[1]);
@@ -231,7 +240,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 400, { error: (e as Error).message });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop });
+  return Object.assign(handler, { factory, order, bay, drop, explorer });
 }
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */

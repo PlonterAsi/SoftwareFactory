@@ -141,11 +141,22 @@ export class MockRuntime implements AgentRuntime {
     else if (station === "review") text = MOCK.review;
     else if (station === "order") text = MOCK.order(req.prompt);
     else if (station === "overseer") text = MOCK.overseer(req.prompt);
+    else if (station === "map") text = MOCK.map(req.prompt);
+    else if (station === "survey") text = MOCK.survey(req.prompt);
     return { text, costUsd: role ? 0.0001 : 0, durationMs: this.opts.delayMs ?? 1, models: ["mock"], runtime: this.name, contextTokens: 0 };
   }
 }
 
 const MOCK = {
+  // The practice Cartographer echoes each module it was given with a canned purpose.
+  map: (prompt: string) => "```json\n" + JSON.stringify({ modules: [...prompt.matchAll(/^## module: (.+)$/gm)].map((m) => ({ id: m[1].trim(), purpose: `Mock purpose of ${m[1].trim()}.`, role: /test/.test(m[1]) ? "test" : "core", risks: [] })) }) + "\n```",
+  survey: (prompt: string) => {
+    const mod = prompt.match(/^- (\S+) \[/m)?.[1] ?? "src";
+    return "```json\n" + JSON.stringify({ suggestions: [
+      { title: `Add tests for ${mod}`, body: `${mod} is the largest module and has no direct tests.`, kind: "improvement", lens: "tests", severity: "high", effort: "medium", files: [mod] },
+      { title: "Document how to run the project", body: "The README does not say how to start it.", kind: "improvement", lens: "docs", severity: "low", effort: "small", files: ["README.md"] },
+    ] }) + "\n```";
+  },
   // The practice Overseer cannot think, but it can read the status digest back and offer the Build button.
   overseer: (prompt: string) => {
     const status = prompt.match(/Status of the factory right now:\n([\s\S]*?)\n\nThe person says:/)?.[1] ?? "";
