@@ -37,18 +37,29 @@ fn core_entry(app: &tauri::App) -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../packages/core/dist/server.js"))
 }
 
-/// Find a Claude Code binary that can be spawned directly. On Windows the npm
-/// shim (`claude.cmd`) cannot be, so look for the native `claude.exe`.
-fn find_claude() -> Option<PathBuf> {
+/// Find Claude Code in a form the core can spawn directly, as (env var, path).
+/// The native install is `claude.exe`. An npm install on Windows is a `claude.cmd`
+/// shim that cannot be spawned, so its `cli.js` is run with Node instead.
+fn find_claude() -> Option<(&'static str, PathBuf)> {
     if let Ok(p) = std::env::var("SF_CLAUDE_BIN") {
-        return Some(PathBuf::from(p));
+        return Some(("SF_CLAUDE_BIN", PathBuf::from(p)));
     }
-    let exe = if cfg!(windows) { "claude.exe" } else { "claude" };
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
     if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
         dirs.push(PathBuf::from(home).join(".local").join("bin"));
     }
-    dirs.into_iter().map(|d| d.join(exe)).find(|p| p.is_file())
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        dirs.push(PathBuf::from(appdata).join("npm"));
+    }
+    let exe = if cfg!(windows) { "claude.exe" } else { "claude" };
+    if let Some(p) = dirs.iter().map(|d| d.join(exe)).find(|p| p.is_file()) {
+        return Some(("SF_CLAUDE_BIN", p));
+    }
+    dirs.iter()
+        .filter(|d| d.join("claude.cmd").is_file())
+        .map(|d| d.join("node_modules").join("@anthropic-ai").join("claude-code").join("cli.js"))
+        .find(|p| p.is_file())
+        .map(|p| ("SF_CLAUDE_JS", p))
 }
 
 fn start_core(app: &tauri::App, data_dir: PathBuf) -> std::io::Result<Child> {
@@ -60,11 +71,11 @@ fn start_core(app: &tauri::App, data_dir: PathBuf) -> std::io::Result<Child> {
     // Real agents when Claude Code is installed; otherwise the free mock crew.
     let runtime = match (std::env::var("SF_RUNTIME"), find_claude()) {
         (Ok(r), claude) => {
-            if let Some(c) = claude { cmd.env("SF_CLAUDE_BIN", c); }
+            if let Some((key, path)) = claude { cmd.env(key, path); }
             r
         }
-        (Err(_), Some(c)) => {
-            cmd.env("SF_CLAUDE_BIN", c);
+        (Err(_), Some((key, path))) => {
+            cmd.env(key, path);
             "claude-code".into()
         }
         (Err(_), None) => "mock".into(),

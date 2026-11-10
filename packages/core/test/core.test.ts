@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
-import { writeFileSync, chmodSync, mkdtempSync } from "node:fs";
+import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventLog, captureSignal, listSignals, MockRuntime, ClaudeCodeRuntime, parseClaudeJson, runAgent, costSummary, createCore } from "../src/index.js";
@@ -59,10 +59,10 @@ describe("agent runtime", () => {
 
   it("runs a real child process end to end (fake claude binary)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sf-bin-"));
-    const bin = join(dir, "claude");
-    writeFileSync(bin, `#!/usr/bin/env node\nconst p=process.argv[process.argv.indexOf('-p')+1];console.log(JSON.stringify({result:'echo:'+p,total_cost_usd:0.002,duration_ms:5,usage:{input_tokens:1},modelUsage:{'fake-model':{}}}))\n`);
-    chmodSync(bin, 0o755);
-    const r = await new ClaudeCodeRuntime({ command: bin }).run({ prompt: "ping" });
+    // A Node script run by this Node, the same way SF_CLAUDE_JS runs an npm install of Claude Code (also on Windows).
+    const bin = join(dir, "claude.js");
+    writeFileSync(bin, `const p=process.argv[process.argv.indexOf('-p')+1];console.log(JSON.stringify({result:'echo:'+p,total_cost_usd:0.002,duration_ms:5,usage:{input_tokens:1},modelUsage:{'fake-model':{}}}))\n`);
+    const r = await new ClaudeCodeRuntime({ command: process.execPath, commandArgs: [bin] }).run({ prompt: "ping" });
     expect(r.text).toBe("echo:ping");
     expect(r.costUsd).toBe(0.002);
   });

@@ -35,6 +35,12 @@ export interface ClaudeCodeOptions {
   /** Path to the claude CLI. */
   command?: string;
   /**
+   * Arguments put before the CLI's own, e.g. the script when `command` is node.
+   * On Windows an npm install of Claude Code is a `claude.cmd` shim that cannot be
+   * spawned directly, so SF_CLAUDE_JS runs its `cli.js` with this Node instead.
+   */
+  commandArgs?: string[];
+  /**
    * "lean" skips MCP servers and built-in tools, so only what the agent needs is
    * loaded. "full" loads everything installed (all plugins, skills, MCP servers).
    */
@@ -50,7 +56,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
 
   constructor(opts: ClaudeCodeOptions = {}) {
     this.opts = {
-      command: opts.command ?? process.env.SF_CLAUDE_BIN ?? "claude",
+      command: opts.command ?? (process.env.SF_CLAUDE_JS ? process.execPath : process.env.SF_CLAUDE_BIN ?? "claude"),
+      commandArgs: opts.commandArgs ?? (opts.command === undefined && process.env.SF_CLAUDE_JS ? [process.env.SF_CLAUDE_JS] : []),
       profile: opts.profile ?? "lean",
       defaultModel: opts.defaultModel ?? "haiku",
       timeoutMs: opts.timeoutMs ?? Number(process.env.SF_AGENT_TIMEOUT_MS ?? 600_000),
@@ -70,7 +77,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
   run(req: AgentRequest): Promise<AgentResult> {
     const started = Date.now();
     return new Promise((resolve, reject) => {
-      const child = spawn(this.opts.command, this.buildArgs(req), { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...this.buildArgs(req)], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
       let out = "";
       let err = "";
       const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error(`Agent timed out after ${this.opts.timeoutMs} ms`)); }, this.opts.timeoutMs);
