@@ -4,7 +4,7 @@ A loop-engineered software factory with an AI crew. Drop a messy idea in; an Ord
 
 Plan: [SoftwareFactory: MVP plan and tech stack](https://claude.ai/artifact/9vnEmBfz1VaSGaB1KKwh9H)
 
-![The Bridge, milestone 1](docs/img/bridge-m1.png)
+![The Bridge, milestone 2: a real factory run](docs/img/bridge-m2.png)
 
 ## Status: milestone 2 (thin factory loop)
 

@@ -168,7 +168,9 @@ describe("factory loop", () => {
   it("closes runs left in flight when the core restarts", () => {
     const log = new EventLog();
     const started = log.append("factory.run.started", { idea: "x" });
+    const call = log.append("agent.run.started", { agent: "builder", factoryRun: started.id });
     new Factory(log, new MockRuntime(), tmp("sf-proj-"));
     expect(events(log, "factory.run.finished")).toMatchObject([{ run: started.id, outcome: "stopped" }]);
+    expect(events(log, "agent.run.failed")).toMatchObject([{ runId: call.id, error: "The core restarted during this call." }]);
   });
 });

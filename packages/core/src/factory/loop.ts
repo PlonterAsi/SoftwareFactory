@@ -60,6 +60,11 @@ export class Factory {
     for (const e of log.list({ type: "factory.run.started", limit: 1e6 })) {
       if (!finished.has(e.id)) log.append("factory.run.finished", { run: e.id, outcome: "stopped", reason: "The core restarted while this run was in flight.", totalUsd: null });
     }
+    // Agent calls cut off by the restart would otherwise pulse as "running" forever.
+    const ended = new Set([...log.list({ type: "agent.run.completed", limit: 1e6 }), ...log.list({ type: "agent.run.failed", limit: 1e6 })].map((e) => (e.payload as { runId: number }).runId));
+    for (const e of log.list({ type: "agent.run.started", limit: 1e6 })) {
+      if (!ended.has(e.id)) log.append("agent.run.failed", { runId: e.id, agent: (e.payload as { agent: string }).agent, factoryRun: (e.payload as { factoryRun?: number }).factoryRun, error: "The core restarted during this call." });
+    }
   }
 
   /** Start a run in the background; returns its id at once. */
