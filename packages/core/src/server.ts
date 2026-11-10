@@ -54,7 +54,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   };
   const factory = new Factory(log, runtime, projectsDir, bay);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
-  const tickets = new Tickets(log, { runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1) });
+  const tickets = new Tickets(log, { runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1), workRoot: join(dirname(projectsDir), "ticket-work") });
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
   log.on("event", (e: SfEvent) => {
     if (e.type !== "signal.captured") return;
@@ -322,7 +322,7 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
     case "spawn": return [201, tickets.spawn(id, { ...(body as object), by: "you" } as any)];
     case "work":
       if (!gitReady()) return [409, { error: "Git is not installed, so the crew has nowhere to keep what it builds. Install Git for Windows (git-scm.com/download/win), then press Work it again." }];
-      return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true })];
+      return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true, where: body.where === "repo" || body.where === "new" ? body.where : "auto" })];
     case "ask": return [200, await tickets.ask(id, body.agent ? String(body.agent) : undefined)];
   }
   return null;

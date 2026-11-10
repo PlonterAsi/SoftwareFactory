@@ -150,6 +150,9 @@ export interface TicketView {
   openedBy: string;
   fingerprint: string | null;
   run: number | null;
+  /** The branch the crew made for it in an imported repo's clone, and that clone's folder. */
+  branch: string | null;
+  branchDir: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;

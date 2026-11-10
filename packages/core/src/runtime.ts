@@ -16,6 +16,11 @@ export interface AgentRequest {
   pluginDirs?: string[];
   /** Tools the agent may use. Empty or absent in the lean profile: none (the agent answers in text). */
   tools?: string[];
+  /**
+   * Run inside this folder (a working copy the agent may edit with its tools).
+   * File edits there are accepted without a prompt; nothing outside it is.
+   */
+  cwd?: string;
 }
 
 export interface AgentResult {
@@ -74,13 +79,15 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     for (const dir of req.pluginDirs ?? []) args.push("--plugin-dir", dir);
     if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", (req.tools ?? []).join(","));
     else if (req.tools?.length) args.push("--tools", req.tools.join(","));
+    // Headless edits in a working copy: accept file edits there, nothing else is allowed to prompt.
+    if (req.cwd && req.tools?.some((t) => t === "Edit" || t === "Write")) args.push("--permission-mode", "acceptEdits");
     return args;
   }
 
   run(req: AgentRequest): Promise<AgentResult> {
     const started = Date.now();
     return new Promise((resolve, reject) => {
-      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...this.buildArgs(req)], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...this.buildArgs(req)], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, ...(req.cwd ? { cwd: req.cwd } : {}) });
       let out = "";
       let err = "";
       const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error(`Agent timed out after ${this.opts.timeoutMs} ms`)); }, this.opts.timeoutMs);
@@ -142,11 +149,22 @@ export class MockRuntime implements AgentRuntime {
     else if (station === "order") text = MOCK.order(req.prompt);
     else if (station === "overseer") text = MOCK.overseer(req.prompt);
     else if (station === "ticket") text = MOCK.ticket(req.prompt);
+    else if (station === "repo") text = MOCK.repo(req.prompt);
     return { text, costUsd: role ? 0.0001 : 0, durationMs: this.opts.delayMs ?? 1, models: ["mock"], runtime: this.name, contextTokens: 0 };
   }
 }
 
 const MOCK = {
+  // The practice crew cannot read a codebase; it leaves a note file on the branch so the whole path can be tried for free.
+  repo: (prompt: string) => {
+    const id = prompt.match(/^# #(\d+)/m)?.[1] ?? "0";
+    const title = prompt.match(/^# #\d+ (.*)$/m)?.[1] ?? "the ticket";
+    return [
+      `<<<FILE docs/softwarefactory/ticket-${id}.md`,
+      `# Ticket #${id}: ${title}`, "", "Practice crew: this note stands in for the change. Switch to the real crew in Systems to have the Builder edit the code.", "FILE>>>",
+      "Practice crew: left a note file for the ticket on the branch.",
+    ].join("\n");
+  },
   // The practice crew reads a ticket back and names the next step; it cannot judge, so it never says "ready".
   ticket: (prompt: string) => {
     const head = prompt.split("\n")[0].replace(/^#\s*/, "");

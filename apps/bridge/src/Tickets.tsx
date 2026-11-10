@@ -15,13 +15,15 @@ export type TicketStatus = "open" | "ready" | "in_progress" | "built" | "closed"
 export interface TicketView {
   id: number; kind: TicketKind; title: string; body: string; answers: Record<string, string>; project: number | null; status: TicketStatus;
   priority: string | null; severity: string | null; assignee: string | null; parentId: number | null; lineOrder: number | null; tags: string[];
-  source: string; openedBy: string; run: number | null; createdAt: string; updatedAt: string; closedAt: string | null; lastNote: string | null;
+  source: string; openedBy: string; run: number | null; branch: string | null; branchDir: string | null; createdAt: string; updatedAt: string; closedAt: string | null; lastNote: string | null;
 }
 interface NoteView { eventId: number; ts: string; by: string; kind: "note" | "reply" | "status" | "event"; text: string; status: TicketStatus | null; costUsd: number | null }
 interface LinkView { to: number; relation: string; title?: string; status?: TicketStatus }
 interface Detail {
   ticket: TicketView; notes: NoteView[]; links: LinkView[]; lines: TicketView[]; parent: TicketView | null; moves: { to: TicketStatus; label: string }[]; document: string;
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
+  repo: { source: string; dir: string; branch: string | null } | null;
+  working: boolean;
 }
 interface Question { key: string; label: string; short?: boolean; required?: boolean; choices?: string[] }
 interface Meta { kinds: { code: TicketKind; label: string; questions: Question[] }[]; statuses: { code: TicketStatus; label: string; closed?: boolean; wantsLook?: boolean }[]; priorities: { code: string; label: string }[]; severities: string[]; relations: string[] }
@@ -58,7 +60,7 @@ export const ticketsApi = {
   say: (id: number, text: string, status?: TicketStatus) => call<TicketView>("POST", `/api/tickets/${id}/say`, { text, status }),
   link: (id: number, to: number, relation: string) => call<TicketView>("POST", `/api/tickets/${id}/link`, { to, relation }),
   line: (id: number, dir: "up" | "down") => call<TicketView[]>("POST", `/api/tickets/${id}/line`, { dir }),
-  work: (id: number, maxUsd?: number) => call<{ run: number }>("POST", `/api/tickets/${id}/work`, { maxUsd }),
+  work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number) => call<{ run: number | null; branch?: string }>("POST", `/api/tickets/${id}/work`, { maxUsd, where }),
   ask: (id: number, agent?: string) => call<{ reply?: string; error?: string }>("POST", `/api/tickets/${id}/ask`, { agent }),
 };
 
@@ -305,9 +307,16 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
       {d.parent && <div className="muted tk-parent">Line of plan <button className="link" onClick={() => onSelect(d.parent!.id)}>#{d.parent.id} {d.parent.title}</button></div>}
 
       <div className="tk-crew">
-        <button disabled={closed || busy != null} onClick={() => act("work", () => ticketsApi.work(id))} title="The factory loop builds it: Council, plan, locked tests, build, review, fix, ship. The run writes back here.">
-          {busy === "work" ? "Starting…" : d.run && !d.run.outcome ? "Crew at work" : "Work it with the crew"}
-        </button>
+        {d.repo ? (
+          <button disabled={closed || busy != null || d.working} onClick={() => act("work", () => ticketsApi.work(id, "repo"))}
+            title={`The Builder works it on a new branch of a clone of ${d.repo.source}. The original repo is not touched and nothing is pushed.`}>
+            {busy === "work" ? "Starting…" : d.working ? "Builder at work in the repo" : t.branch ? "Work it again in the repo" : "Work it in the repo"}
+          </button>
+        ) : (
+          <button disabled={closed || busy != null} onClick={() => act("work", () => ticketsApi.work(id))} title="The factory loop builds it: Council, plan, locked tests, build, review, fix, ship. The run writes back here.">
+            {busy === "work" ? "Starting…" : d.run && !d.run.outcome ? "Crew at work" : "Work it with the crew"}
+          </button>
+        )}
         <button className="ghost" disabled={busy != null} onClick={() => act("ask", () => ticketsApi.ask(id))} title="One short, capped call: the assignee (or the Overseer) reads the ticket and replies on the thread.">
           {busy === "ask" ? "Asking…" : `Ask ${t.assignee && crewById[t.assignee] ? crewById[t.assignee].name : "the Overseer"}`}
         </button>
@@ -320,6 +329,13 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
             {STATION_ORDER.map((s, i) => <span key={s} title={s} className={`tk-st ${d.run!.outcome === "shipped" || i < stationAt ? "done" : i === stationAt ? `now ${d.run!.state ?? ""}` : ""}`} />)}
           </div>
           <span className="muted mono">{d.run.outcome ?? `${d.run.station ?? "starting"} ${d.run.state ?? ""}`}{d.run.spentUsd != null ? ` · $${Number(d.run.spentUsd).toFixed(4)}` : ""}</span>
+        </div>
+      )}
+      {t.branch && (
+        <div className="tk-runstrip tk-branch" aria-label="Branch">
+          <span className="mono">⑂ {t.branch}</span>
+          <span className="muted mono tk-branch-dir" title={t.branchDir ?? ""}>{t.branchDir}</span>
+          <button className="ghost tiny" onClick={() => navigator.clipboard?.writeText(`git fetch "${t.branchDir}" ${t.branch}`)} title="Copy the git command that brings this branch into your own repo">Copy fetch</button>
         </div>
       )}
       {showDoc && <pre className="tk-doc">{d.document}</pre>}

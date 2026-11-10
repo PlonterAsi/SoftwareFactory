@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { createServer } from "node:http";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventLog, MockRuntime, Factory, AgentBay, Tickets, createCore, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal } from "../src/index.js";
+import { EventLog, MockRuntime, ClaudeCodeRuntime, Factory, AgentBay, Tickets, createCore, git, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-tickets-"));
 
@@ -217,6 +217,63 @@ describe("tickets: inside projects", () => {
     t.edit(a.id, "project", other);
     expect(projectOf(log, { kind: "ticket", ref: a.id })).toBe(other);
   }, 30_000);
+});
+
+describe("tickets: working inside an imported repo", () => {
+  it("works the ticket on a new branch of a clone, never touching the original, and leaves it built for your look", async () => {
+    const log = new EventLog();
+    const rt = new MockRuntime();
+    const bay = new AgentBay(log, rt);
+    const src = tmp();
+    git(src, "init", "-q", "-b", "main");
+    writeFileSync(join(src, "README.md"), "# Legacy app\n");
+    git(src, "add", "-A"); git(src, "commit", "-q", "-m", "first");
+    const head = git(src, "rev-parse", "HEAD");
+    const proj = createProject(log, { name: "Legacy app" });
+    log.append("project.linked", { projectId: proj, kind: "repo", ref: src });
+    const work = tmp();
+    const t = new Tickets(log, { runtime: rt, bay, workRoot: work, factory: new Factory(log, rt, tmp(), bay) });
+    const a = t.open({ kind: "bug", title: "Login button does nothing", project: proj, answers: { expected: "It logs in" } });
+    expect(t.detail(a.id)!.repo).toMatchObject({ dir: src });
+    const r = t.work(a.id);
+    expect(r.run).toBeNull();
+    expect(t.get(a.id)!.status).toBe("in_progress");
+    expect(() => t.work(a.id)).toThrow(/already working/);
+    await t.waitRepo(a.id);
+    const done = t.get(a.id)!;
+    expect(done.status).toBe("built");
+    expect(done.branch).toMatch(/^sf\/ticket-1-login-button-does-nothing$/);
+    const clone = done.branchDir!;
+    expect(clone.startsWith(work)).toBe(true);
+    expect(git(clone, "branch", "--show-current")).toBe(done.branch);
+    expect(existsSync(join(clone, "docs/softwarefactory/ticket-1.md"))).toBe(true);
+    // The original: same head, same branches, no new file, nothing pushed into it.
+    expect(git(src, "rev-parse", "HEAD")).toBe(head);
+    expect(git(src, "branch", "--list")).toBe("* main");
+    expect(existsSync(join(src, "docs"))).toBe(false);
+    expect(rt.calls.at(-1)!.cwd).toBe(clone);
+    expect(rt.calls.at(-1)!.tools).toEqual(["Read", "Edit", "Write", "Glob", "Grep"]);
+    expect(t.notes(a.id).at(-1)!.text).toMatch(/git fetch ".*" sf\/ticket-1/);
+    // A bug worked in a repo never closes by rule: no locked tests ran.
+    expect(t.notes(a.id).some((n) => n.by === "qa-rule")).toBe(false);
+    // Working it again reuses the clone and its branch.
+    t.say(a.id, "Not yet", { status: "open" });
+    t.work(a.id);
+    await t.waitRepo(a.id);
+    expect(t.get(a.id)!.branchDir).toBe(clone);
+    // "new" still builds a fresh repo through the factory.
+    expect(t.work(a.id, { where: "new", autoApprove: true }).run).toBeGreaterThan(0);
+  }, 30_000);
+});
+
+describe("tickets: the real runtime in a working copy", () => {
+  it("accepts file edits only when it runs in a folder with edit tools", () => {
+    const rt = new ClaudeCodeRuntime({ command: "claude" });
+    const a = rt.buildArgs({ prompt: "x", tools: ["Read", "Edit"], cwd: "/tmp/clone" });
+    expect(a.join(" ")).toMatch(/--tools Read,Edit --permission-mode acceptEdits/);
+    expect(rt.buildArgs({ prompt: "x", tools: ["Read", "Edit"] })).not.toContain("--permission-mode");
+    expect(rt.buildArgs({ prompt: "x", cwd: "/tmp/clone" })).not.toContain("--permission-mode");
+  });
 });
 
 describe("tickets: the API", () => {

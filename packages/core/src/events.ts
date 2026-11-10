@@ -63,6 +63,7 @@ export type EventType =
   | "ticket.run"
   | "ticket.line.moved"
   | "ticket.requested"
+  | "ticket.branch"
   | "store.migrated"
   | "store.rebuilt"
   | "project.created"

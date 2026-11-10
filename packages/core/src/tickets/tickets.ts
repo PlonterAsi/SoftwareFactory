@@ -6,6 +6,7 @@ import type { AgentBay } from "../bay/bay.js";
 import "./tables.js";
 import { projectOf, registerProjectFacet } from "../projects/service.js";
 import { EDITABLE } from "./tables.js";
+import { branchFor, repoOfProject, workInRepo, type RepoRef } from "./repowork.js";
 import {
   FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, SEVERITIES, STATUSES, TASTE_KINDS,
   ideaFromTicket, isClosed, nextMoves, refuseMove, titleFrom, workDocument,
@@ -54,6 +55,10 @@ export interface TicketDetail {
   moves: { to: TicketStatus; label: string }[];
   document: string;
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
+  /** The imported repo this ticket's project came from: "Work it" works there, on a branch of a clone. */
+  repo: RepoRef | null;
+  /** The Builder is working it in the repo right now. */
+  working: boolean;
 }
 
 type Row = Record<string, any>;
@@ -61,7 +66,7 @@ const toView = (r: Row): TicketView => ({
   id: Number(r.id), kind: r.kind, title: r.title, body: r.body ?? "", answers: JSON.parse(r.answers ?? "{}"), project: r.project == null ? null : Number(r.project),
   status: r.status, priority: r.priority ?? null, severity: r.severity ?? null, assignee: r.assignee ?? null, parentId: r.parent_id == null ? null : Number(r.parent_id),
   lineOrder: r.line_order == null ? null : Number(r.line_order), tags: JSON.parse(r.tags ?? "[]"), source: r.source, openedBy: r.opened_by, fingerprint: r.fingerprint ?? null,
-  run: r.run == null ? null : Number(r.run), createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at ?? null, lastNote: r.last_note ?? null,
+  run: r.run == null ? null : Number(r.run), branch: r.branch ?? null, branchDir: r.branch_dir ?? null, createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at ?? null, lastNote: r.last_note ?? null,
 });
 
 /** The contract appended to any agent asked about a ticket. The practice crew answers it too. */
@@ -75,8 +80,10 @@ export const TICKET_CONTRACT = "Station contract: ticket. You are reading one ti
 export class Tickets {
   /** Ticket ids being asked of an agent right now (one call at a time per ticket). */
   private asking = new Set<number>();
+  /** Tickets the Builder is working in a repo clone right now. */
+  private inRepo = new Map<number, Promise<void>>();
 
-  constructor(private log: EventLog, private opts: { runtime?: AgentRuntime; factory?: Factory; bay?: AgentBay; budgetUsd?: number } = {}) {
+  constructor(private log: EventLog, private opts: { runtime?: AgentRuntime; factory?: Factory; bay?: AgentBay; budgetUsd?: number; workRoot?: string } = {}) {
     log.on("event", (e: SfEvent) => {
       try { this.react(e); } catch (err) { console.error("tickets: reacting to", e.type, "failed:", err); }
     });
@@ -164,6 +171,7 @@ export class Tickets {
     return {
       ticket: t, notes, links, lines, parent: t.parentId != null ? this.get(t.parentId) ?? null : null,
       moves: nextMoves(t.status, t.kind), document: workDocument(t, notes, links, lines), run,
+      repo: repoOfProject(this.log, t.project), working: this.inRepo.has(id),
     };
   }
 
@@ -282,16 +290,56 @@ export class Tickets {
    * work document, the ticket moves to in progress, and the run writes back
    * onto the ticket when it ends (see react()).
    */
-  work(id: number, o: { maxUsd?: number; autoApprove?: boolean } = {}): { ticket: TicketView; run: number } {
-    const factory = this.opts.factory;
-    if (!factory) throw new Error("The factory is not running in this core.");
+  work(id: number, o: { maxUsd?: number; autoApprove?: boolean; where?: "auto" | "repo" | "new" } = {}): { ticket: TicketView; run: number | null; branch?: string } {
     const t = this.must(id);
     if (isClosed(t.status)) throw new Error("This ticket is closed; reopen it first.");
+    const repo = o.where === "new" ? null : repoOfProject(this.log, t.project);
+    if (o.where === "repo" && !repo) throw new Error("This ticket's project has no imported repo to work in.");
+    if (repo) return this.workRepo(t, repo, o.maxUsd);
+    const factory = this.opts.factory;
+    if (!factory) throw new Error("The factory is not running in this core.");
     if (t.run != null && factory.isActive(t.run)) throw new Error(`Run #${t.run} is already working this ticket.`);
     const run = factory.start(ideaFromTicket(t, this.document(id)), { maxUsd: o.maxUsd, autoApprove: o.autoApprove, ...(t.project != null ? { projectId: t.project } : {}) });
     this.log.append("ticket.run", { id, run, by: "you" });
     if (t.status !== "in_progress") this.log.append("ticket.noted", { id, by: "factory", status: "in_progress", text: `The crew took it: factory run #${run}` });
     return { ticket: this.get(id)!, run };
+  }
+
+  /** Wait for a ticket's repo work to finish (tests, the CLI). */
+  waitRepo(id: number): Promise<void> { return this.inRepo.get(id) ?? Promise.resolve(); }
+
+  /**
+   * The ticket's project is an imported repo: the Builder works it on a new
+   * branch of a clone (never main, never the original, never pushed) and the
+   * ticket says where the branch is. It stays built for your look.
+   */
+  private workRepo(t: TicketView, repo: RepoRef, maxUsd?: number): { ticket: TicketView; run: null; branch: string } {
+    const { runtime, bay, workRoot } = this.opts;
+    if (!runtime || !workRoot) throw new Error("No crew or work folder in this core.");
+    if (this.inRepo.has(t.id)) throw new Error("The Builder is already working this ticket in the repo.");
+    const doc = this.document(t.id);
+    const branch = branchFor(t.id, t.title);
+    const by = bay?.crewFor("build")[0]?.id ?? "builder";
+    this.log.append("ticket.noted", { id: t.id, by, status: t.status === "in_progress" ? undefined : "in_progress", text: `Working it in a clone of ${repo.source}, on a new branch. The original repo is not touched and nothing is pushed.` });
+    const job = workInRepo(this.log, runtime, bay, { id: t.id, title: t.title, document: doc, repo, workRoot, maxUsd: Math.min(maxUsd ?? 0.6, 1.5) })
+      .then((r) => {
+        if (!r.ok) {
+          this.log.append("ticket.noted", { id: t.id, by, status: "open", text: `The Builder could not work it: ${r.error}` });
+          return;
+        }
+        this.log.append("ticket.branch", { id: t.id, by, source: repo.source, dir: r.dir, branch: r.branch, base: r.base, sha: r.sha, files: r.files.slice(0, 200), costUsd: r.costUsd });
+        const now = this.get(t.id)!;
+        if (isClosed(now.status)) return;
+        const take = `To take it into your repo: git fetch "${r.dir}" ${r.branch}, then review and merge it yourself.`;
+        this.log.append("ticket.noted", {
+          id: t.id, by, kind: "reply", costUsd: r.costUsd, status: r.sha && now.status !== "built" ? "built" : r.sha ? undefined : "open",
+          text: r.sha ? `${r.summary || "Done."}\n\nChanged ${r.files.length} file(s) on ${r.branch} (from ${r.base}). ${take}` : `${r.summary || "No change was made."}\n\nNothing changed on ${r.branch}.`,
+        });
+      })
+      .catch((e) => { this.log.append("ticket.noted", { id: t.id, by, status: "open", text: `Working it in the repo failed: ${(e as Error).message}` }); })
+      .finally(() => this.inRepo.delete(t.id));
+    this.inRepo.set(t.id, job);
+    return { ticket: this.get(t.id)!, run: null, branch };
   }
 
   /**

@@ -32,3 +32,4 @@ export * from "./projects/routes.js";
 export * from "./tickets/model.js";
 export * from "./tickets/tables.js";
 export * from "./tickets/tickets.js";
+export * from "./tickets/repowork.js";

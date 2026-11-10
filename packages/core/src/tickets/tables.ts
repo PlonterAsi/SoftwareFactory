@@ -18,7 +18,7 @@ export const EDITABLE: Record<string, string> = {
 
 export const ticketsProjection: Projection = {
   name: "tickets",
-  version: 1,
+  version: 2,
   tables: ["tickets", "ticket_notes", "ticket_links"],
   describe: "Tickets: units of work per project, their append-only thread (notes, agent replies, status moves, events) and links",
   migrate(db) {
@@ -41,6 +41,8 @@ export const ticketsProjection: Projection = {
       opened_by   TEXT NOT NULL,
       fingerprint TEXT,
       run         INTEGER,
+      branch      TEXT,
+      branch_dir  TEXT,
       created_at  TEXT NOT NULL,
       updated_at  TEXT NOT NULL,
       closed_at   TEXT,
@@ -122,6 +124,9 @@ export const ticketsProjection: Projection = {
     } else if (e.type === "ticket.run") {
       db.prepare("UPDATE tickets SET run = ? WHERE id = ?").run(Number(p.run), Number(p.id));
       note("event", `Factory run #${p.run} started on this ticket`);
+    } else if (e.type === "ticket.branch") {
+      db.prepare("UPDATE tickets SET branch = ?, branch_dir = ? WHERE id = ?").run(String(p.branch), String(p.dir), Number(p.id));
+      note("event", p.sha ? `Branch ${p.branch} at ${String(p.sha).slice(0, 7)}: ${(p.files ?? []).length} file(s) changed in ${p.dir}. Not pushed.` : `Branch ${p.branch} in ${p.dir}: nothing changed.`);
     } else if (e.type === "ticket.line.moved") {
       // Swap with the neighbour above or below in the plan.
       const t = db.prepare("SELECT parent_id, line_order FROM tickets WHERE id = ?").get(Number(p.id)) as { parent_id: number | null; line_order: number | null } | undefined;

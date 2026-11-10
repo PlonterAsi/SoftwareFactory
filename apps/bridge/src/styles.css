@@ -743,3 +743,4 @@ button.chip.on { color: var(--ink); border-color: var(--accent); background: var
   .hull-nums { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .seg-running { animation: none; } }
+.tk-branch .tk-branch-dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
