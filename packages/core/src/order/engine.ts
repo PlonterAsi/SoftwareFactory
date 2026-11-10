@@ -151,6 +151,7 @@ export class OrderEngine {
       const e = this.emit("order.fragment", {
         signalId: signal.id, text: f.text, kind: f.kind, nodeId: file ? target : null, suggestedNodeId: file ? null : target,
         confidence: Number(f.confidence.toFixed(2)), important: f.important, origin, by,
+        ...(f.alternatives?.length ? { alternatives: f.alternatives.filter((id) => id !== target).slice(0, 2) } : {}),
       });
       ids.push(e.id);
       if (f.contradicts.length) hints.set(e.id, f.contradicts);

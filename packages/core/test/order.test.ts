@@ -87,6 +87,37 @@ describe("Order Engine: on every Signal", () => {
     expect(order.state().fragments.find((x) => x.id === f.id)).toMatchObject({ nodeId: order.state().nodes[1].id, confidence: 1 });
   });
 
+  it("does not file a wordless drop note under whichever project was active last", async () => {
+    const { order, say } = setup();
+    await say("Project: SoftwareFactory");
+    await say("Project: RoadToMill");
+    const st = order.state();
+    // Nothing in this note names either project: it waits in Unsorted, with the guess offered first.
+    const r = await say("Maybe add a dark mode.", "drop");
+    expect(r.fragments[0].nodeId).toBeNull();
+    expect(st.nodes.map((n) => n.id)).toContain(r.fragments[0].suggestedNodeId);
+    // With a single project there is no doubt, and it is filed straight away.
+    const one = setup();
+    await one.say("Project: SoftwareFactory");
+    expect((await one.say("Maybe add a dark mode.", "drop")).fragments[0].nodeId).toBe(one.order.state().nodes[0].id);
+  });
+
+  it("marks a placement as a guess when another project fits nearly as well, and offers it as a one-tap refile", async () => {
+    const { order, say } = setup();
+    await say("Project: Photo renamer\nThe photo renamer reads dates from photos.");
+    await say("Project: Photo backup\nThe photo backup copies photos nightly.");
+    const [renamer, backup] = order.state().nodes.filter((n) => n.kind === "project");
+    const r = await say("Photos need a progress bar.", "drop");
+    const f = r.fragments[0];
+    expect(f.nodeId).not.toBeNull();
+    expect(f.confidence).toBeLessThan(0.7);
+    expect(f.alternatives).toEqual([f.nodeId === renamer.id ? backup.id : renamer.id]);
+    order.moveFragment(f.id, f.alternatives![0]);
+    const moved = order.state().fragments.find((x) => x.id === f.id)!;
+    expect(moved).toMatchObject({ nodeId: f.alternatives![0], confidence: 1 });
+    expect(moved.alternatives).toBeUndefined();
+  });
+
   it("routes by vocabulary to the right idea", async () => {
     const { order, say } = setup();
     await say("Project: SoftwareFactory");

@@ -20,6 +20,8 @@ export interface ProposedFragment {
   confidence: number;
   /** Ids of Canon fragments this one contradicts or replaces. */
   contradicts: number[];
+  /** Other homes that scored nearly as well, best first (in other projects): offered as one-tap refiles. */
+  alternatives?: number[];
 }
 export interface ArchivistPlan { nodes: ProposedNode[]; fragments: ProposedFragment[] }
 
@@ -95,22 +97,43 @@ export function heuristicArchivist(text: string, state: OrderState): ArchivistPl
     if (kind === "noise") return { text: piece, kind, important: false, node: null, confidence: 0.9, contradicts };
     if (forced != null) return { text: piece, kind, important, node: forced, confidence: 0.9, contradicts };
     const ts = [...new Set(tokens(piece))];
-    let best: { id: number; score: number } | null = null;
+    const scored: { id: number; score: number }[] = [];
     for (const n of live) {
       const v = vocab.get(n.id)!;
       const weight = ts.reduce((s, t) => s + idf(t), 0) || 1;
       const hit = ts.filter((t) => v.has(t)).reduce((s, t) => s + idf(t), 0) / weight;
       const titleHit = coverage(tokens(n.title), new Set(ts));
-      const score = hit * 0.7 + titleHit * 0.5 + depthOf(n.id) * 0.03;
-      if (!best || score > best.score) best = { id: n.id, score };
+      scored.push({ id: n.id, score: hit * 0.7 + titleHit * 0.5 + depthOf(n.id) * 0.03 });
     }
+    scored.sort((a, b) => b.score - a.score);
+    const best = scored[0] ?? null;
+    // The best home in each *other* project: a close runner-up there means the filer is guessing.
+    const projectOf = (id: number) => { let n = live.find((x) => x.id === id); while (n?.parentId != null) n = live.find((x) => x.id === n!.parentId); return n?.id ?? id; };
+    const rivals = (home: number | null) => {
+      const seen = new Set<number>(home != null ? [projectOf(home)] : []);
+      const out: { id: number; score: number }[] = [];
+      for (const c of scored) { const p = projectOf(c.id); if (seen.has(p) || c.score < 0.15) continue; seen.add(p); out.push(c); }
+      return out.slice(0, 2);
+    };
+    const projects = live.filter((n) => n.kind === "project");
+    const alternativesFor = (home: number | null) => rivals(home).map((c) => c.id);
     if (current != null) return { text: piece, kind, important, node: current, confidence: 0.7, contradicts };
-    if (best && best.score >= 0.35) return { text: piece, kind, important, node: best.id, confidence: Math.min(0.95, 0.5 + best.score / 2), contradicts };
+    if (best && best.score >= 0.35) {
+      const rival = rivals(best.id)[0];
+      // Nearly as good a match in another project: file it, but say it is a guess and offer the other one.
+      const close = rival && best.score - rival.score < 0.12;
+      return { text: piece, kind, important, node: best.id, confidence: close ? 0.55 : Math.min(0.95, 0.5 + best.score / 2), contradicts, alternatives: alternativesFor(best.id) };
+    }
     // Said in the same breath as something already filed: it most likely belongs with it.
-    if (lastFiled != null) return { text: piece, kind, important, node: lastFiled, confidence: 0.55, contradicts };
+    if (lastFiled != null) return { text: piece, kind, important, node: lastFiled, confidence: 0.55, contradicts, alternatives: alternativesFor(lastFiled) };
     const f = focus();
-    if (f != null && kind !== "question") return { text: piece, kind, important, node: f, confidence: isCanonKind(kind) || kind === "idea" ? 0.55 : 0.45, contradicts };
-    return { text: piece, kind, important, node: best?.id ?? f ?? null, confidence: best ? Math.min(0.45, best.score) : 0.1, contradicts };
+    // No words tie it anywhere. With one project that is still the obvious home; with several, the
+    // most recently active one is only a guess, so it waits in Unsorted with that guess on top
+    // instead of landing under the wrong project.
+    const onlyHome = projects.length <= 1 || typeof f === "string";
+    if (f != null && kind !== "question" && onlyHome) return { text: piece, kind, important, node: f, confidence: isCanonKind(kind) || kind === "idea" ? 0.55 : 0.45, contradicts };
+    const guess = best && best.score > 0 ? best.id : f;
+    return { text: piece, kind, important, node: guess ?? null, confidence: best ? Math.min(0.45, best.score) : 0.1, contradicts, alternatives: alternativesFor(typeof guess === "number" ? guess : null) };
   }
 }
 

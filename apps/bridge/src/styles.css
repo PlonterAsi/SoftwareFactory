@@ -495,6 +495,7 @@ button.sm.gate { background: var(--gate); }
 .react-flow__edge.animated path { stroke: var(--accent) !important; stroke-width: 1.6; filter: drop-shadow(0 0 3px rgba(79, 214, 232, 0.7)); }
 .run-result { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .run-result.note { color: var(--gate); }
+.run-result.resumed { color: var(--gate); }
 
 /* Star map: a shipyard ring around a project the factory is building. */
 .yard-ring { fill: none; stroke-width: 0.45; }
