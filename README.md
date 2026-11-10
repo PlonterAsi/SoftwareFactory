@@ -28,6 +28,8 @@ The **Improve** tab: six lens agents (integrate, automate, simplify, enrich, UX,
 
 ![The Improve tab: the lens wheel, the cost meter and the proposals queue](docs/img/bridge-improve.png)
 
+Every project also has an **Improvements** panel with only its own proposals; *Look now* there looks at that project.
+
 ## Milestone 4 (the Agent Bay and the Council)
 
 Agents are workers you create, edit, test and put on stations. Every factory run now goes:

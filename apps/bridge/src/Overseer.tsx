@@ -4,9 +4,11 @@ import { askOverseer, captureSignal, setupApi, splitBuild, startFactoryRun, type
 type Item = { key: string; ts: string; kind: "signal" | "reply" | "error" | "factory" | "briefing" | "filed" | "gate"; text: string; meta?: string; build?: string; run?: number; open?: boolean };
 
 /** The one voice you talk to. Every message is saved as a Signal first; asking also runs the Overseer agent. */
-export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRunStarted, mode, since, onDismissSince, onSetup, onShowRun }: {
+export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRunStarted, mode, since, onDismissSince, onSetup, onShowRun, projectId, projectName }: {
   signals: Signal[]; runs: AgentRunView[]; factoryRuns: FactoryRunView[]; briefings: OrderState["briefings"]; ingests: OrderState["ingests"]; onRunStarted: (run: number) => void;
   mode: CrewMode | null; since: SinceView | null; onDismissSince: () => void; onSetup: () => void; onShowRun: (run: number) => void;
+  /** Inside a project's workspace: builds start in that project. */
+  projectId?: number; projectName?: string;
 }) {
   const [text, setText] = useState("");
   const [model, setModel] = useState("haiku");
@@ -48,7 +50,7 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
     setBusy(true);
     setErr(null);
     try {
-      onRunStarted(await startFactoryRun(t));
+      onRunStarted(await startFactoryRun(t, undefined, projectId));
       if (!idea) setText("");
     } catch (x) {
       setErr((x as Error).message);
@@ -76,7 +78,7 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
 
   return (
     <section className="pane overseer" aria-label="Overseer channel">
-      <header className="pane-head"><span>Overseer</span><span className="muted">{busy ? "thinking…" : "online"}</span></header>
+      <header className="pane-head"><span>Overseer</span><span className="muted">{busy ? "thinking…" : projectName ? `builds go to ${projectName}` : "online"}</span></header>
       {since && since.lines.length > 0 && (
         <div className="msg since pinned" role="status">
           <div className="since-head"><span>Since you left{since.awayMinutes ? ` · ${away(since.awayMinutes)}` : ""}</span><button className="link" onClick={onDismissSince}>Got it</button></div>

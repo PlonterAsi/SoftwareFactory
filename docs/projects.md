@@ -55,3 +55,17 @@ POST /api/projects/:id/runs           { idea, maxUsd? }   start a factory run in
 
 - **Core facets**: `registerProjectFacet({ id, compute(log, project, links) })` adds a section to every `GET /api/projects/:id` under `facets[id]`.
 - **Bridge panels**: `registerProjectPanel({ id, title, order, render })` in `apps/bridge/src/projects/panels.tsx` adds a tab to every project's workspace. `appliesTo(project)` limits it to some kinds.
+
+## On the Bridge
+
+The Bridge opens on **Projects**: every project, most recently active first, with a hull bar of its runs (green shipped, cyan running, grey stopped, red failed), its notes, open conflicts, linked things and spend. Name a new one at the top, or press **Build it** in the Overseer: a build started outside a project becomes a project of its own.
+
+![Projects](img/bridge-projects-home.png)
+
+Opening a project shows its **workspace**: a rail of panels and the chosen panel. Built in: **Overview** (what it is for, a Build box that starts runs inside the project, its numbers, latest activity), **Ideas** (the project's own star map and Order deck), **Runs** (the factory floor with only this project's runs), **Agents** (who worked here and what it cost), **History**, **Settings** (name, kind, status, folders). While a project is open, the Overseer's Build it starts runs in that project.
+
+![A project's overview](img/bridge-project-overview.png)
+
+**Whole factory** in the top bar is the cross-project view from before (star map, factory floor, Agent Bay, Order deck, Data vault).
+
+Addresses: `#/` projects, `#/p/12/runs/57` project 12's Runs panel showing run 57, `#/factory/bay` the Agent Bay. The old `#order`, `#bay`, `#data` still work.
