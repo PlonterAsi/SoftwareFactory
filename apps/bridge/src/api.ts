@@ -265,9 +265,9 @@ export function useOrder(events: SfEvent[]) {
 
 // ---- Agent Bay (milestone 4) ----
 
-export const SLOTS = ["council", "plan", "tests", "build", "review", "fix", "order", "overseer", "improve"] as const;
+export const SLOTS = ["council", "plan", "tests", "build", "review", "fix", "order", "overseer", "improve", "map", "survey"] as const;
 export type Slot = (typeof SLOTS)[number];
-export const SLOT_LABEL: Record<Slot, string> = { council: "Council", plan: "Spec and plan", tests: "Acceptance tests", build: "Build", review: "Review", fix: "Fix", order: "Order Engine", overseer: "Overseer channel", improve: "Improvement Council" };
+export const SLOT_LABEL: Record<Slot, string> = { council: "Council", plan: "Spec and plan", tests: "Acceptance tests", build: "Build", review: "Review", fix: "Fix", order: "Order Engine", overseer: "Overseer channel", improve: "Improvement Council", map: "Code map", survey: "Code survey" };
 export interface AgentDef { id: string; name: string; avatar: string; description: string; station: Slot | "none"; model: string; budgetUsd: number; plugins: string[]; skills: string[]; tools: string[]; sample: string; prompt: string }
 export interface AgentView { def: AgentDef; version: number; builtin: boolean; retired: boolean; createdAt: string; updatedAt: string; versions: { version: number; ts: string; note: string; by: string }[] }
 export interface BayTest { id: number; ts: string; agent: string; version: number; station: string; task: string; state: "running" | "done"; pass?: boolean; checks?: { label: string; pass: boolean }[]; output?: string; error?: string; costUsd?: number }

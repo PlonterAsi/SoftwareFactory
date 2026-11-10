@@ -16,6 +16,8 @@ import { SLOTS, type Slot } from "./bay/agentfile.js";
 import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
+import { RepoExplorer } from "./imports/explorer.js";
+import { importsRoute } from "./imports/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { ImproveCouncil, type Target } from "./improve/council.js";
@@ -55,6 +57,8 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   };
   const factory = new Factory(log, runtime, projectsDir, bay);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
+  // Imported repos are cloned next to the factory's own projects, in imports/.
+  const explorer = new RepoExplorer(log, runtime, join(dirname(projectsDir), "imports"), bay, { createNode: (title) => order.createNode("project", title) });
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
   const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
     maxUsd: settings.improveMaxUsd ?? improveOpts?.maxUsd, everyHours: settings.improveEveryHours ?? improveOpts?.everyHours,
@@ -216,6 +220,11 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await projectsRoute({ log, order, factory, readJson, canBuild }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (url.pathname === "/api/imports" || url.pathname.startsWith("/api/imports/")) {
+        const canImport = () => gitReady() ? null : "Git is not installed, so a repo cannot be imported. Install Git for Windows (git-scm.com/download/win), then import again.";
+        const r = await importsRoute({ log, explorer, readJson, canImport }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
       if (url.pathname.startsWith("/api/improve/")) {
         const r = await improveRoute(improve, req, url.pathname, log, (idea) => {
           if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");
@@ -247,7 +256,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 400, { error: (e as Error).message });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop, improve });
+  return Object.assign(handler, { factory, order, bay, drop, improve, explorer });
 }
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
