@@ -4,9 +4,27 @@ A loop-engineered software factory with an AI crew. Drop a messy idea in; an Ord
 
 Plan: [SoftwareFactory: MVP plan and tech stack](https://claude.ai/artifact/9vnEmBfz1VaSGaB1KKwh9H)
 
-![The Bridge, milestone 2: a real factory run](docs/img/bridge-m2.png)
+![The Bridge, milestone 3: the Order Engine's star map, Canon and conflict check](docs/img/bridge-m3.png)
 
-## Status: milestone 2 (thin factory loop)
+## Status: milestone 3 (the Order Engine)
+
+Say anything, in any order, in the Overseer channel. Every Signal is filed:
+
+```
+Signal (raw, never edited) → Archivist: split · classify · route → Fragments under Project ▸ Idea ▸ Thread
+   → emphasize (rules and decisions enter the node's Canon) · filter (noise hidden)
+   → conflict check against the Canon (plain-code precedence) → visualizeEverything
+daily sweep: fade stale notes · raise old questions · digest busy nodes · propose merges → one briefing
+```
+
+- **Archivist** (`packages/core/src/order`): Haiku in the lean profile, about $0.001 per Signal, with a per-call cap and a daily cap. It only proposes; the core checks the proposal and files it. A free heuristic Archivist takes over when the agent's answer is unusable, the cap is spent, or the runtime is the mock.
+- **Canon is code, not a summary**: the rules and decisions on a node and its parents, each linked to the Signal it came from. Conflicts are resolved by the plan's order: your words beat inferred ones, the more specific node wins there only, newer beats older, important beats unmarked. It asks with a one-tap card when it is still tied, when an unmarked line would override a marked rule, or when a marked rule on a project itself would change.
+- **Unsure placements never block**: under 50% confidence a fragment drifts in the Unsorted belt until you drag it onto a body.
+- **Sweep and briefing**: every sweep action is an undoable event; pinned items, rules and decisions are never faded. Non-urgent items arrive as one Overseer briefing.
+- **Bridge**: the star map is the real node tree (projects are systems, ideas planets, threads moons; size by activity, glow by important Canon, dim when stale), new fragments fly in as particles, conflicts are red links. The Order deck shows the Canon constellation of the selected body, the Unsorted tray, conflict cards, the briefing with undo, and every visual check.
+- **Headless**: `npm run order -- messages.json --mode agent --project Name` files a whole conversation and prints the tree, Canon, conflicts and cost. First real result: [docs/milestone-3-run.md](docs/milestone-3-run.md) (this project's own chat: 33 fragments, the planted conflict caught, $0.014).
+
+## Milestone 2 (thin factory loop)
 
 Type a one-line idea in the Overseer channel and press **Build it**. The factory runs:
 
@@ -46,6 +64,10 @@ npm run dev -w @sf/bridge
 # As a desktop app
 npm run app
 
+# File a conversation through the Order Engine (agent Archivist, capped)
+npm run order -- examples/order/messy-chat.json --mode agent --max-usd 0.2 --db .sf-data/demo.db
+SF_DB=.sf-data/demo.db npm run dev -w @sf/core   # then open the Bridge to see it
+
 # Run the factory loop headless (real, capped model calls; gates auto-approved)
 SF_RUNTIME=claude-code npm run factory -- "a CLI that renames photos by the date they were taken" --max-usd 1.5
 
@@ -53,4 +75,4 @@ SF_RUNTIME=claude-code npm run factory -- "a CLI that renames photos by the date
 npm run spike
 ```
 
-`SF_RUNTIME=mock` (the default for the Bridge) runs without any model calls: its crew builds a tiny word counter with a planted bug, so you can watch the whole loop, fix round included, for free. `SF_RUNTIME=claude-code:full` loads every installed plugin.
+`SF_ORDER_MODE=heuristic|agent` picks the Archivist (default: agent on a real runtime, heuristics on the mock) and `SF_ORDER_MAX_USD` its daily cap (default $0.50). `SF_RUNTIME=mock` (the default for the Bridge) runs without any model calls: its crew builds a tiny word counter with a planted bug, so you can watch the whole loop, fix round included, for free. `SF_RUNTIME=claude-code:full` loads every installed plugin.

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
-import { askOverseer, captureSignal, startFactoryRun, type AgentRunView, type FactoryRunView, type Signal } from "./api";
+import { askOverseer, captureSignal, startFactoryRun, type AgentRunView, type FactoryRunView, type OrderState, type Signal } from "./api";
 
-type Item = { key: string; ts: string; kind: "signal" | "reply" | "error" | "factory"; text: string; meta?: string };
+type Item = { key: string; ts: string; kind: "signal" | "reply" | "error" | "factory" | "briefing" | "filed"; text: string; meta?: string };
 
 /** The one voice you talk to. Every message is saved as a Signal first; asking also runs the Overseer agent. */
-export function Overseer({ signals, runs, factoryRuns, onRunStarted }: { signals: Signal[]; runs: AgentRunView[]; factoryRuns: FactoryRunView[]; onRunStarted: (run: number) => void }) {
+export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRunStarted }: { signals: Signal[]; runs: AgentRunView[]; factoryRuns: FactoryRunView[]; briefings: OrderState["briefings"]; ingests: OrderState["ingests"]; onRunStarted: (run: number) => void }) {
   const [text, setText] = useState("");
   const [model, setModel] = useState("haiku");
   const [busy, setBusy] = useState(false);
@@ -18,7 +18,12 @@ export function Overseer({ signals, runs, factoryRuns, onRunStarted }: { signals
       key: "fd" + r.run, ts: r.startedAt + "~", kind: (r.finished!.outcome === "shipped" ? "factory" : "error") as Item["kind"],
       text: r.finished!.reason, meta: r.finished!.totalUsd != null ? `run #${r.run} · $${r.finished!.totalUsd.toFixed(4)} · ${r.finished!.agentCalls ?? 0} agent calls · ${r.fixRounds} fix rounds` : undefined,
     })),
-    ...runs.filter((r) => r.state !== "running" && !r.factoryRun).map((r) => ({
+    // The Order Engine's daily briefing: everything non-urgent, batched into one message.
+    ...briefings.map((b) => ({ key: "b" + b.id, ts: b.ts, kind: "briefing" as const, text: b.lines.map((l) => "• " + l.text).join("\n"), meta: "Order Engine briefing" })),
+    // A quiet receipt under each Signal: how it was filed.
+    ...ingests.filter((r) => r.state === "done").map((r) => ({ key: "i" + r.signalId, ts: (signals.find((s) => s.id === r.signalId)?.ts ?? r.ts) + "~", kind: "filed" as const,
+      text: `${r.fragments.length} fragment${r.fragments.length === 1 ? "" : "s"} filed by the ${r.mode === "agent" ? "Archivist" : "heuristics"}${r.costUsd ? ` · $${r.costUsd.toFixed(4)}` : ""}${r.note ? ` · ${r.note}` : ""}` })),
+    ...runs.filter((r) => r.state !== "running" && !r.factoryRun && r.agent !== "archivist").map((r) => ({
       key: "r" + r.runId,
       ts: r.startedAt,
       kind: r.state === "failed" ? ("error" as const) : ("reply" as const),

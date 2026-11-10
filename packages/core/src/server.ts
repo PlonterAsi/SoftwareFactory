@@ -7,6 +7,8 @@ import { captureSignal, listSignals } from "./signals.js";
 import { costSummary, runAgent } from "./agents.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { Factory, type GateId } from "./factory/loop.js";
+import { OrderEngine, type OrderOptions } from "./order/engine.js";
+import { canonFor, type NodeKind } from "./order/model.js";
 
 export const OVERSEER_ROLE =
   "You are the Overseer, the manager AI of SoftwareFactory. Answer in at most 3 short sentences. Be concrete.";
@@ -18,11 +20,20 @@ export interface CoreOptions {
   budgetUsd?: number;
   /** Where factory runs create their project repos. */
   projectsDir?: string;
+  /** Order Engine options; by default the agent Archivist runs on any real runtime, heuristics on the mock. */
+  order?: OrderOptions;
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects") }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts }: CoreOptions) {
   const factory = new Factory(log, runtime, projectsDir);
+  const order = new OrderEngine(log, runtime, orderOpts);
+  // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
+  log.on("event", (e: SfEvent) => {
+    if (e.type !== "signal.captured") return;
+    const p = e.payload as { text: string; source: string };
+    order.ingest({ id: e.id, text: p.text, source: p.source }).catch((err) => console.error("order ingest failed:", err));
+  });
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "content-type");
@@ -66,6 +77,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         return json(res, ok ? 200 : 409, ok ? { ok } : { error: "That run is not waiting at that gate" });
       }
       if (req.method === "GET" && url.pathname === "/api/cost") return json(res, 200, costSummary(log));
+      if (url.pathname.startsWith("/api/order/")) {
+        const r = await orderRoute(order, req, url.pathname);
+        if (r) return json(res, r[0], r[1]);
+      }
       if (req.method === "GET" && url.pathname === "/api/events") {
         const since = Number(url.searchParams.get("since") ?? 0);
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -80,7 +95,29 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 400, { error: (e as Error).message });
     }
   };
-  return Object.assign(handler, { factory });
+  return Object.assign(handler, { factory, order });
+}
+
+/** The Order Engine's API. Every write is an event, so the Bridge sees it on the stream. */
+async function orderRoute(order: OrderEngine, req: IncomingMessage, path: string): Promise<[number, unknown] | null> {
+  const id = (re: RegExp) => { const m = path.match(re); return m ? Number(m[1]) : null; };
+  if (req.method === "GET" && path === "/api/order/state") {
+    const st = order.state();
+    const canon = Object.fromEntries(st.nodes.map((n) => [n.id, canonFor(st, n.id).map((c) => ({ id: c.fragment.id, inheritedFrom: c.inheritedFrom, rank: c.rank }))]));
+    return [200, { ...st, canon, spentUsd: order.spentUsd(), mode: order.opts.mode, maxUsd: order.opts.maxUsd }];
+  }
+  if (req.method !== "POST") return null;
+  const body = await readJson(req);
+  if (path === "/api/order/nodes") return [201, { id: order.createNode(String(body.kind ?? "project") as NodeKind, String(body.title ?? ""), body.parentId == null ? null : Number(body.parentId)) }];
+  if (path === "/api/order/sweep") return [200, order.sweep()];
+  if (path === "/api/order/briefing") return [200, order.briefing()];
+  let n: number | null;
+  if ((n = id(/^\/api\/order\/fragments\/(\d+)\/move$/)) != null) return [200, { conflicts: order.moveFragment(n, body.nodeId == null ? null : Number(body.nodeId)) }];
+  if ((n = id(/^\/api\/order\/fragments\/(\d+)\/pin$/)) != null) { order.pin(n, body.pinned !== false); return [200, { ok: true }]; }
+  if ((n = id(/^\/api\/order\/conflicts\/(\d+)\/resolve$/)) != null) { order.resolveConflict(n, Number(body.winner)); return [200, { ok: true }]; }
+  if ((n = id(/^\/api\/order\/sweeps\/(\d+)\/undo$/)) != null) { order.undoSweep(n); return [200, { ok: true }]; }
+  if ((n = id(/^\/api\/order\/sweeps\/(\d+)\/accept$/)) != null) return [200, { id: order.acceptMerge(n) }];
+  return null;
 }
 
 function send(res: ServerResponse, e: SfEvent) { res.write(`id: ${e.id}\ndata: ${JSON.stringify(e)}\n\n`); }
@@ -103,6 +140,17 @@ if (isMain) {
   const port = Number(process.env.SF_PORT ?? 4317);
   const runtime = runtimeFromEnv();
   const projectsDir = process.env.SF_PROJECTS ?? resolve(dbPath === ":memory:" ? process.cwd() : dirname(dbPath), "projects");
-  const server = createServer(createCore({ log: new EventLog(dbPath), runtime, projectsDir }));
-  server.listen(port, "127.0.0.1", () => console.log(`SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, db ${dbPath})`));
+  const orderMode = process.env.SF_ORDER_MODE as "agent" | "heuristic" | undefined;
+  const orderMax = process.env.SF_ORDER_MAX_USD ? Number(process.env.SF_ORDER_MAX_USD) : undefined;
+  const core = createCore({ log: new EventLog(dbPath), runtime, projectsDir, order: { mode: orderMode, maxUsd: orderMax } });
+  const server = createServer(core);
+  // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.
+  const { order } = core;
+  const sweepIfDue = () => {
+    const last = order.state().briefings.at(-1);
+    if (!last || Date.now() - Date.parse(last.ts) >= 86_400_000) order.sweep();
+  };
+  sweepIfDue();
+  setInterval(sweepIfDue, 3_600_000).unref();
+  server.listen(port, "127.0.0.1", () =>console.log(`SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, db ${dbPath})`));
 }

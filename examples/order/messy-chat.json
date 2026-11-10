@@ -1,0 +1,35 @@
+[
+ {
+  "text": "Project: Garden Planner\nok so a garden planner app. maybe it tells you when to water based on the weather. Important: it must work offline."
+ },
+ {
+  "text": "lol my tomatoes died again"
+ },
+ {
+  "text": "Idea: a plant photo log where you snap a picture every week and it makes a timelapse"
+ },
+ {
+  "text": "For the photo log, photos must never leave the phone."
+ },
+ {
+  "text": "We decided to store everything in SQLite on the device."
+ },
+ {
+  "text": "Project: Recipe Box\nA recipe box that scales ingredients for the number of guests."
+ },
+ {
+  "text": "Recipes should be shareable with a link. Also what about importing recipes from websites?"
+ },
+ {
+  "text": "garden planner: watering reminders could also use soil moisture sensors"
+ },
+ {
+  "text": "thanks!"
+ },
+ {
+  "text": "Actually the photo log should upload photos to the cloud so they sync across devices."
+ },
+ {
+  "text": "The garden planner may need the network for weather, so it must not work offline only."
+ }
+]

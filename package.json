@@ -2,7 +2,7 @@
   "name": "softwarefactory",
   "private": true,
   "version": "0.1.0",
-  "description": "SoftwareFactory: loop-engineered software factory with an AI crew. Milestone 1: skeleton and agent runtime spike.",
+  "description": "SoftwareFactory: loop-engineered software factory with an AI crew. Milestone 3: the Order Engine.",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -15,7 +15,8 @@
     "spike": "npm run spike -w @sf/core",
     "factory": "npm run factory -w @sf/core --",
     "app": "npm run build -w @sf/core && tauri dev",
-    "app:build": "tauri build"
+    "app:build": "tauri build",
+    "order": "npm run order -w @sf/core --"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0"

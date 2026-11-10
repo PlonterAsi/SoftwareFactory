@@ -20,7 +20,18 @@ export type EventType =
   | "factory.tests.locked"
   | "factory.gate"
   | "factory.visual"
-  | "factory.budget";
+  | "factory.budget"
+  | "order.node"
+  | "order.fragment"
+  | "order.fragment.moved"
+  | "order.fragment.pinned"
+  | "order.conflict"
+  | "order.conflict.resolved"
+  | "order.sweep"
+  | "order.sweep.undone"
+  | "order.ingest"
+  | "order.briefing"
+  | "order.visual";
 
 export interface SfEvent<P = unknown> {
   id: number;
