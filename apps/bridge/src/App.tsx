@@ -18,6 +18,7 @@ import { Tickets, useTicketCounts } from "./Tickets";
 import "./TicketsPanel";
 import { ImproveDeck, useImprove } from "./ImproveDeck";
 import "./projects/improvePanel";
+import "./CodeMap";
 
 export function App() {
   const f = useFactory();
