@@ -103,7 +103,7 @@ try {
     const panels = await page.$$eval('a[href^="#/p/"]', (as) => [...new Set(as.map((a) => a.getAttribute("href")))]);
     for (const h of panels.filter((h) => h.split("/").length === 4)) await visit(h, `${tag}-${h.split("/")[3]}`);
   }
-  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/factory", "factory-floor"], ["#/factory/bay", "agent-bay"], ["#/factory/order", "order"], ["#/factory/improve", "improve"], ["#/factory/data", "data-vault"]]) await visit(h, n);
+  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/bases", "bases"], ["#/factory", "factory-floor"], ["#/factory/bay", "agent-bay"], ["#/factory/order", "order"], ["#/factory/improve", "improve"], ["#/factory/data", "data-vault"]]) await visit(h, n);
   current = "systems";
   await page.goto(`${BRIDGE}/#/`);
   await page.waitForTimeout(800);

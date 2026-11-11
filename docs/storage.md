@@ -12,6 +12,8 @@ SoftwareFactory keeps its data in three tiers, each with one job. The Bridge's *
 
 In the desktop app the data folder is the Tauri app data directory (on Windows `%APPDATA%\dev.plonter.softwarefactory\`); in dev it is `.sf-data/`. `SF_DB` and `SF_PROJECTS` override both.
 
+Each **base** (see [bases.md](bases.md)) has all three tiers in its own folder; the data folder above holds Main factory and `bases.db`, the list of bases.
+
 ## The database
 
 **Source of truth: `events`.** Every Signal, agent call, factory step, Order Engine change and store action is one row: id, time, type, JSON payload. Nothing is updated or deleted, which gives history, replay and undo. Full-text search over Signals lives in `signal_fts`.
