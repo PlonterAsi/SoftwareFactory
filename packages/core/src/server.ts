@@ -22,6 +22,8 @@ import { Launcher } from "./launch/launcher.js";
 import { launchRoute } from "./launch/routes.js";
 import { Integrations } from "./integrations/service.js";
 import { integrationsRoute, serveExtension } from "./integrations/routes.js";
+import { PluginHost } from "./plugins/host.js";
+import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { ImproveCouncil, type Target } from "./improve/council.js";
@@ -67,7 +69,9 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   // Imported repos are cloned next to the factory's own projects, in imports/.
   const explorer = new RepoExplorer(log, runtime, join(dirname(projectsDir), "imports"), bay, { createNode: (title) => order.createNode("project", title) });
   // Finished projects added into SoftwareFactory: their frozen copies live in extensions/, next to projects/.
-  const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"));
+  // Plugins: folders with a plugin.json, copied into plugins/ next to projects/, each backend in its own locked-down process.
+  const plugins = new PluginHost(log, join(dirname(projectsDir), "plugins"), { bay });
+  const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"), plugins);
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
   const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
     maxUsd: settings.improveMaxUsd ?? improveOpts?.maxUsd, everyHours: settings.improveEveryHours ?? improveOpts?.everyHours,
@@ -93,6 +97,9 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") return end(res, 204);
     const url = new URL(req.url ?? "/", "http://localhost");
+    // Plugin pages run in sandboxed frames (origin "null"): they reach the core only through the
+    // Bridge, which checks their permissions, never by calling the API themselves.
+    if (origin === "null" && url.pathname.startsWith("/api/")) return json(res, 403, { error: "Plugin pages talk to SoftwareFactory through sf.js, not the API" });
     try {
       if (req.method === "GET" && url.pathname === "/api/health") return json(res, 200, {
         ok: true, runtime: runtime.name, mode: runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime),
@@ -254,6 +261,11 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname.startsWith("/ext/") && serveExtension(integrations, req, res, url)) return;
+      if (url.pathname === "/api/plugins" || url.pathname.startsWith("/api/plugins/")) {
+        const r = await pluginsRoute({ plugins, readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
+      if (url.pathname.startsWith("/plugins/") && servePluginFile(plugins, req, res, url)) return;
       if (url.pathname.startsWith("/api/improve/")) {
         const r = await improveRoute(improve, req, url.pathname, log, (idea) => {
           if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");
@@ -285,7 +297,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 400, { error: (e as Error).message });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop, improve, explorer, launcher, integrations });
+  return Object.assign(handler, { factory, order, bay, drop, improve, explorer, launcher, integrations, plugins });
 }
 
 /**
@@ -476,6 +488,9 @@ if (isMain) {
   setTimeout(improveTick, 3 * 60_000).unref();
   setInterval(improveTick, 15 * 60_000).unref();
   // Runs the app closed on pick up again from their last completed station (SF_AUTO_RESUME=0 leaves them for the Resume button).
+  // Plugins you turned on start with the core and stop with it.
+  for (const id of core.plugins.startAll()) console.log(`Plugin ${id} started`);
+  process.on("exit", () => core.plugins.stopAll());
   if (process.env.SF_AUTO_RESUME !== "0" && core.factory.interrupted.length) {
     if (!checkGit().found) console.log("Not resuming interrupted runs: Git is not installed.");
     else for (const id of core.factory.resumeInterrupted()) console.log(`Resumed run #${id} where it left off`);

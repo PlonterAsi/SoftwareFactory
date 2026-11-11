@@ -35,7 +35,8 @@
     ],
     "resources": {
       "../packages/core/dist/": "core/",
-      "../packages/core/package.json": "core/package.json"
+      "../packages/core/package.json": "core/package.json",
+      "../packages/core/plugin-examples/": "plugin-examples/"
     }
   },
   "plugins": {
