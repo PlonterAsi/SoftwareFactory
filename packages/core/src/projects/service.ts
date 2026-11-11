@@ -225,3 +225,25 @@ export function unlinkFromProject(log: EventLog, id: number, kind: string, ref: 
     : kind === "order_node" ? (log.db.prepare("SELECT title FROM order_nodes WHERE id = ?").get(Number(ref)) as Row | undefined)?.title : undefined;
   log.append("project.unlinked", { projectId: id, kind, ref: String(ref), ...(name ? { name: String(name).slice(0, 60) } : {}) });
 }
+
+/**
+ * Merge a project into another: every run, idea, ticket and other thing linked to it moves over,
+ * and its project goes away. One made by the factory or the Order Engine disappears on its own once
+ * empty; one you made is archived, so nothing you named is lost. Returns the project kept.
+ */
+export function mergeProject(log: EventLog, from: number, into: number): number {
+  if (!Number.isInteger(into) || into <= 0) throw new Error("Say which project to merge into");
+  if (from === into) throw new Error("A project cannot merge into itself");
+  mustExist(log, from);
+  mustExist(log, into);
+  const links = log.db.prepare("SELECT kind, ref FROM project_links WHERE project_id = ? ORDER BY ts").all(from) as Row[];
+  for (const l of links) {
+    const kind = String(l.kind);
+    const ref = String(l.ref);
+    // A non-root node follows its root; only roots carry an owner link, so this is a guard, not a skip of real work.
+    try { linkToProject(log, into, kind, ref); } catch (e) { if (kind !== "order_node") throw e; }
+  }
+  const left = log.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(from);
+  if (left) log.append("project.updated", { projectId: from, status: "archived", mergedInto: into });
+  return into;
+}

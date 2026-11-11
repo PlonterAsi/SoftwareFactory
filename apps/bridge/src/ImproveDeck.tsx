@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { API, post, type AgentView, type SfEvent } from "./api";
+import { API, duplicateOf, post, type AgentView, type DuplicateRun, type SfEvent } from "./api";
+import { DuplicateNotice } from "./DuplicateNotice";
 
 /** Mirror of the core's ImproveState (packages/core/src/improve/council.ts). */
 type Impact = "high" | "medium" | "low";
@@ -26,7 +27,7 @@ const EMPTY: ImproveState = { sessions: [], proposals: [], candidates: [], budge
 export const improveApi = {
   run: (target?: Target) => post(`/api/improve/run`, { target }),
   decide: (id: number, decision: Status, note?: string) => post(`/api/improve/proposals/${id}/decide`, { decision, note }) as Promise<Proposal>,
-  build: (id: number) => post(`/api/improve/proposals/${id}/build`) as Promise<{ run: number }>,
+  build: (id: number, again?: boolean) => post(`/api/improve/proposals/${id}/build`, again ? { again } : {}) as Promise<{ run: number }>,
   settings: (s: { auto?: boolean; maxUsd?: number; everyHours?: number }) => post(`/api/improve/settings`, s) as Promise<ImproveState>,
 };
 
@@ -59,6 +60,7 @@ export function ImproveDeck({ improve, crew, projectId, onRunStarted }: { improv
   const [pick, setPick] = useState<string>("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | "run" | null>(null);
+  const [dup, setDup] = useState<{ d: DuplicateRun; id: number } | null>(null);
   const mine = (t: Target) => projectId == null || (t.kind === "project" && t.id === projectId);
   const proposals = improve.proposals.filter((p) => mine(p.target));
   const counts = { inbox: 0, accepted: 0, parked: 0, rejected: 0 } as Record<Status, number>;
@@ -116,7 +118,12 @@ export function ImproveDeck({ improve, crew, projectId, onRunStarted }: { improv
         {!shown.length && <div className="empty">{tab === "inbox" ? "Nothing waits for you. Press Look now, or let the council look on its own when something changes." : `Nothing ${tab} yet.`}</div>}
         {shown.map((p) => <Card key={p.id} p={p} busy={busy === p.id} showTarget={projectId == null}
           onDecide={(d) => act(p.id, () => improveApi.decide(p.id, d))}
-          onBuild={() => act(p.id, async () => { const r = await improveApi.build(p.id); onRunStarted?.(r.run); })} />)}
+          onBuild={() => act(p.id, async () => {
+            try { const r = await improveApi.build(p.id); onRunStarted?.(r.run); }
+            catch (x) { const d = duplicateOf(x); if (d) setDup({ d, id: p.id }); else throw x; }
+          })} />)}
+        {dup && <DuplicateNotice dup={dup.d} busy={busy === dup.id} onShow={(r) => onRunStarted?.(r)} onDismiss={() => setDup(null)}
+          onAgain={() => act(dup.id, async () => { const r = await improveApi.build(dup.id, true); setDup(null); onRunStarted?.(r.run); })} />}
       </div>
       <SessionLog sessions={improve.sessions.filter((s) => mine(s.target))} />
     </section>
