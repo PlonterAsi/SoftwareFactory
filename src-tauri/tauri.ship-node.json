@@ -4,7 +4,8 @@
       "../packages/core/dist/": "core/",
       "../packages/core/package.json": "core/package.json",
       "node/node.exe": "node/node.exe",
-      "node/LICENSE": "node/LICENSE"
+      "node/LICENSE": "node/LICENSE",
+      "../packages/core/plugin-examples/": "plugin-examples/"
     }
   }
 }

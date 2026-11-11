@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Run stats</title>
+  <link rel="stylesheet" href="/plugins/_sdk/sf.css">
+  <script src="/plugins/_sdk/sf.js"></script>
+  <style>
+    .bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--panel-2); margin: 10px 0 4px; }
+    .bar span { display: block; }
+    .s-shipped { color: var(--good); } .s-failed { color: var(--bad); } .s-running { color: var(--accent); } .s-stopped { color: var(--gate); }
+    section { margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>Run stats</h1>
+  <p class="muted" id="sub">Reading this project's runs…</p>
+  <div class="grid">
+    <div class="card"><h3>Runs</h3><div class="big" id="runs">–</div></div>
+    <div class="card"><h3>Shipped</h3><div class="big good" id="shipped">–</div></div>
+    <div class="card"><h3>Failed or stopped</h3><div class="big bad" id="failed">–</div></div>
+    <div class="card"><h3>Spend</h3><div class="big" id="spend">–</div></div>
+  </div>
+  <div class="bar" id="bar" aria-hidden="true"></div>
+  <section>
+    <h2>Latest runs</h2>
+    <table><thead><tr><th>Run</th><th>Idea</th><th>Outcome</th><th>When</th></tr></thead><tbody id="rows"></tbody></table>
+  </section>
+  <section class="card">
+    <h3>Whole factory, since this plugin was turned on</h3>
+    <div id="totals" class="muted">Asking the plugin's backend…</div>
+  </section>
+  <script>
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    let events = [];
+    function draw() {
+      const runs = new Map();
+      let spend = 0;
+      for (const e of events) {
+        const p = e.payload || {};
+        if (e.type === "factory.run.started") runs.set(e.id, { id: e.id, idea: p.idea || "", outcome: "running", ts: e.ts });
+        else if (e.type === "factory.run.finished" && runs.has(p.run)) Object.assign(runs.get(p.run), { outcome: p.outcome, ts: e.ts });
+        else if (e.type === "agent.run.completed") spend += Number(p.costUsd || 0);
+      }
+      const list = [...runs.values()];
+      const count = (o) => list.filter((r) => r.outcome === o).length;
+      const shipped = count("shipped"), running = count("running"), failed = list.length - shipped - running;
+      document.getElementById("runs").textContent = list.length;
+      document.getElementById("shipped").textContent = shipped;
+      document.getElementById("failed").textContent = failed;
+      document.getElementById("spend").textContent = "$" + spend.toFixed(4);
+      document.getElementById("sub").textContent = list.length ? `${shipped} of ${list.length} builds shipped${running ? `, ${running} running now` : ""}.` : "No builds in this project yet.";
+      const pct = (n) => list.length ? (100 * n / list.length) + "%" : "0";
+      document.getElementById("bar").innerHTML = `<span style="width:${pct(shipped)};background:var(--good)"></span><span style="width:${pct(running)};background:var(--accent)"></span><span style="width:${pct(failed)};background:var(--bad)"></span>`;
+      document.getElementById("rows").innerHTML = list.slice(-8).reverse().map((r) =>
+        `<tr><td class="mono">#${r.id}</td><td>${esc(r.idea.slice(0, 80))}</td><td class="s-${esc(r.outcome)}">${esc(r.outcome)}</td><td class="muted">${new Date(r.ts).toLocaleString()}</td></tr>`).join("") ||
+        `<tr><td colspan="4" class="muted">Nothing yet.</td></tr>`;
+    }
+    async function totals() {
+      try {
+        const t = await sf.call("totals");
+        document.getElementById("totals").innerHTML = `<span class="good">${t.shipped} shipped</span> · <span class="bad">${t.failed} failed</span> · ${t.other} other`;
+      } catch (e) { document.getElementById("totals").textContent = e.message; }
+    }
+    const TYPES = ["factory.run.started", "factory.run.finished", "agent.run.completed"];
+    sf.events({ types: TYPES, limit: 2000 }).then((list) => { events = list; draw(); }).catch((e) => { document.getElementById("sub").textContent = e.message; });
+    sf.onEvent((e) => { if (!TYPES.includes(e.type)) return; events.push(e); draw(); if (e.type === "factory.run.finished") setTimeout(totals, 300); });
+    totals();
+  </script>
+</body>
+</html>

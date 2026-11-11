@@ -1,0 +1,13 @@
+{
+  "id": "run-stats",
+  "name": "Run stats",
+  "version": "1.0.0",
+  "description": "A Run stats tab in every project: shipped and failed builds, spend, and the latest runs, updating live. An example of every part a plugin can add.",
+  "permissions": ["events:read", "events:write", "agents"],
+  "main": "main.mjs",
+  "subscribe": ["factory.run.finished"],
+  "panels": [
+    { "id": "stats", "title": "Run stats", "entry": "ui/index.html", "where": "project", "order": 85 }
+  ],
+  "agents": ["agents/run-critic.md"]
+}
