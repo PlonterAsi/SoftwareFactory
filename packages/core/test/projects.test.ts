@@ -162,6 +162,21 @@ describe("projects", () => {
       const { run } = await r.json();
       core.factory.wait(run).catch(() => {});
       expect(projectOf(log, { kind: "factory_run", ref: run })).toBe(created.id);
+      // Add a screen: nothing shipped yet, so it says why; once a build ships it works in the same project.
+      r = await post(`/api/projects/${created.id}/screen`, {});
+      expect(r.status).toBe(409);
+      expect((await r.json()).error).toMatch(/no finished factory build/);
+      const gate = async (id: number, g: string) => { for (let i = 0; i < 500 && core.factory.waitingGate(id) !== g; i++) await new Promise((res) => setTimeout(res, 10)); core.factory.decide(id, g as any, { approve: true }); };
+      await gate(run, "gateA"); await gate(run, "gateB");
+      await core.factory.wait(run);
+      r = await post(`/api/projects/${created.id}/screen`, {});
+      expect(r.status).toBe(202);
+      const screen = await r.json();
+      expect(screen.baseRun).toBe(run);
+      expect(projectOf(log, { kind: "factory_run", ref: screen.run })).toBe(created.id);
+      await gate(screen.run, "gateB");
+      await core.factory.wait(screen.run);
+      expect(log.list({ type: "factory.run.finished", limit: 1e6 }).map((e) => e.payload as any).at(-1)).toMatchObject({ run: screen.run, outcome: "shipped" });
     } finally {
       server.close();
     }

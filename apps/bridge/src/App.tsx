@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { API, setupApi, useBay, useFactory, useOrder, useProjects, type SinceView } from "./api";
+import { API, setupApi, useBay, useChatRoutes, useFactory, useOrder, useProjects, type SinceView } from "./api";
 import { Setup } from "./Setup";
 import { BugReport, ErrorBoundary } from "./BugReport";
 import { CoreDown } from "./CoreDown";
@@ -11,6 +11,7 @@ import { Timeline } from "./Timeline";
 import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
 import { DataDeck, useStore } from "./DataDeck";
+import { UpdateBanner, VersionChip, useUpdates } from "./Updates";
 import { Home } from "./projects/Home";
 import { Workspace } from "./projects/Workspace";
 import { href, useRoute, type FactoryView } from "./projects/router";
@@ -19,7 +20,9 @@ import { Tickets, useTicketCounts } from "./Tickets";
 import "./TicketsPanel";
 import { ImproveDeck, useImprove } from "./ImproveDeck";
 import "./projects/improvePanel";
+import "./projects/runPanel";
 import "./CodeMap";
+import { FeaturesPage, useIntegrations } from "./Features";
 
 export function App() {
   const f = useFactory();
@@ -28,7 +31,10 @@ export function App() {
   const improve = useImprove(f.events);
   const waiting = improve.proposals.filter((p) => p.status === "inbox").length;
   const [route, go] = useRoute();
+  const features = useIntegrations(f.events);
+  const featuresWaiting = features.data?.integrations.filter((i) => i.status === "awaiting").length ?? 0;
   const projects = useProjects(f.events, f.online);
+  const chatRoutes = useChatRoutes(f.events, f.online);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
   const view: FactoryView = route.page === "factory" ? route.view : "factory";
@@ -56,6 +62,7 @@ export function App() {
   };
   const [setupOpen, setSetupOpen] = useState(false);
   const [bugOpen, setBugOpen] = useState(false);
+  const updates = useUpdates(f.online);
   const lastEvent = f.events.at(-1)?.id ?? 0;
 
   // "Since you left": read once when the core first answers, before saying where we are now.
@@ -80,9 +87,9 @@ export function App() {
   }, [f.online]);
   const overseer = (
     <Overseer signals={f.signals} runs={f.runs} factoryRuns={f.factoryRuns} briefings={order.briefings} ingests={order.ingests}
-      onRunStarted={(r) => (projectId != null ? go({ page: "project", id: projectId, panel: "runs", run: r }) : showRun(r))}
+      onRunStarted={(r, pid) => (pid != null ? go({ page: "project", id: pid, panel: "runs", run: r }) : showRun(r))}
       mode={f.mode} since={since} onDismissSince={() => setSince(null)} onSetup={() => setSetupOpen(true)} onShowRun={showRun}
-      projectId={projectId} projectName={projectName} />
+      projectId={projectId} projectName={projectName} projects={projects.list} routes={chatRoutes} />
   );
   return (
     <div className="bridge">
@@ -90,7 +97,10 @@ export function App() {
         <div className="brand-nav">
           <a className="brand" href={href({ page: "home" })}><span className="logo" aria-hidden>◈</span> SOFTWAREFACTORY</a>
           <nav className="topnav" aria-label="Main">
-            <a href={href({ page: "home" })} aria-current={route.page !== "factory" ? "page" : undefined}>Projects</a>
+            <a href={href({ page: "home" })} aria-current={route.page === "home" || route.page === "project" ? "page" : undefined}>Projects</a>
+            <a href={href({ page: "features" })} aria-current={route.page === "features" ? "page" : undefined} className={featuresWaiting ? "alert-text" : undefined}>
+              Features{features.data?.installed.length ? ` · ${features.data.installed.length}` : ""}{featuresWaiting ? ` · ${featuresWaiting} to approve` : ""}
+            </a>
             <a href={href({ page: "factory", view })} aria-current={route.page === "factory" ? "page" : undefined}>Whole factory</a>
           </nav>
         </div>
@@ -105,9 +115,11 @@ export function App() {
           <span className="sep">·</span> {f.runs.length} agent calls
           <span className="sep">·</span> spend ${f.totalUsd.toFixed(4)}
           <button className="ghost sm bug-btn" onClick={() => setBugOpen(true)} aria-label="Report a bug" title="Report a bug: what went wrong, with the screen attached">Bug</button>
+          <VersionChip u={updates} onOpen={() => setSetupOpen(true)} />
           <button className="ghost sm systems" onClick={() => setSetupOpen(true)} aria-label="Ship's systems: crew, checks and folders">Systems</button>
         </div>
       </header>
+      <UpdateBanner u={updates} />
       {route.page === "factory" ? (
         <main className="grid">
           <StarMap signals={f.signals} order={order} selected={node} onSelect={pickNode} factoryRuns={f.factoryRuns} onShowRun={showRun} />
@@ -134,15 +146,17 @@ export function App() {
         </main>
       ) : (
         <main className="grid projects-grid">
-          <ErrorBoundary key={route.page === "project" ? `p${route.id}` : "home"} where={`bridge ${href(route)}`}>
-            {route.page === "project"
-              ? <Workspace id={route.id} panel={route.panel} run={route.run} factory={f} order={order} bay={bay} go={go} />
-              : <Home list={projects.list} err={projects.err} onOpen={(id) => go({ page: "project", id })} />}
+          <ErrorBoundary key={route.page === "project" ? `p${route.id}` : route.page} where={`bridge ${href(route)}`}>
+          {route.page === "features"
+            ? <FeaturesPage events={f.events} id={route.id} onOpenProject={(id) => go({ page: "project", id, panel: "integrate" })} />
+            : route.page === "project"
+            ? <Workspace id={route.id} panel={route.panel} run={route.run} factory={f} order={order} bay={bay} go={go} />
+            : <Home list={projects.list} err={projects.err} onOpen={(id) => go({ page: "project", id })} />}
           </ErrorBoundary>
           {overseer}
         </main>
       )}
-      <Setup open={setupOpen} onClose={() => setSetupOpen(false)} dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />
+      <Setup open={setupOpen} onClose={() => setSetupOpen(false)} updates={updates} dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />
       <BugReport open={bugOpen} onClose={() => setBugOpen(false)} />
       <CoreDown online={f.online} />
     </div>

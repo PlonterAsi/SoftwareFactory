@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { setupApi, type CrewMode, type SetupView, type ToolCheck } from "./api";
+import { UpdatesSection, type Updates } from "./Updates";
 
 /**
  * Ship's systems: which crew works (free practice crew or real Claude Code
  * agents), what this computer has, and where everything lands on disk.
  * Every check is free; nothing here calls a model.
  */
-export function Setup({ open, onClose, dropsAt }: { open: boolean; onClose: () => void; dropsAt: number }) {
+export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onClose: () => void; dropsAt: number; updates?: Updates }) {
   const [s, setS] = useState<SetupView | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -97,6 +98,7 @@ export function Setup({ open, onClose, dropsAt }: { open: boolean; onClose: () =
             </div>
             <Place label="Database" hint="factory.db: the event log and every table. Open it in any SQLite browser." path={s.paths.data} onOpen={() => open_("data")} />
           </section>
+          {updates && <UpdatesSection u={updates} />}
           {err && <div className="err">{err}</div>}
         </>}
       </aside>
