@@ -105,7 +105,7 @@ idea → Planner (spec + task graph) → [you approve plan] → Tester (acceptan
 
 ## Run it
 
-**Just use it (Windows)**: download [SoftwareFactory-setup.exe](https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory-setup.exe), run it (SmartScreen: *More info*, *Run anyway*), and start SoftwareFactory. For real agents install [Claude Code](https://claude.com/claude-code) and sign in once (`claude` in a terminal); for shipping apps install [Git](https://git-scm.com/download/win). The *Systems* panel checks both.
+**Just use it (Windows)**: download [SoftwareFactory-setup.exe](https://github.com/PlonterAsi/SoftwareFactory/releases/download/latest/SoftwareFactory-setup.exe), run it (SmartScreen: *More info*, *Run anyway*), and start SoftwareFactory. For real agents install [Claude Code](https://claude.com/claude-code) and sign in once (`claude` in a terminal); for shipping apps install [Git](https://git-scm.com/download/win). The *Systems* panel checks both. After that one install the app keeps itself up to date: it installs each new build when the factory is idle, or on *Systems → Updates → Check for updates* (see [docs/updates.md](docs/updates.md)).
 
 **From source**: needs Node 22.5+ (and the Claude Code CLI signed in for real agents). For the desktop app, also Rust and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 

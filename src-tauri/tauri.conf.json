@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SoftwareFactory · Bridge",
+        "title": "SoftwareFactory \u00b7 Bridge",
         "width": 1440,
         "height": 900,
         "minWidth": 960,
@@ -36,6 +36,17 @@
     "resources": {
       "../packages/core/dist/": "core/",
       "../packages/core/package.json": "core/package.json"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE3NjA4RUQ2OTBDMTcyRTEKUldUaGNzR1ExbzVncDVGUDVhNFdXQ3NWV2RLOVMwWEdqKzZTRXZXYnJkeEMwYTBhaWQ2b0RjSlIK",
+      "endpoints": [
+        "https://api.github.com/repos/PlonterAsi/SoftwareFactory/contents/latest.json?ref=updates"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

@@ -10,6 +10,7 @@ import { Timeline } from "./Timeline";
 import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
 import { DataDeck, useStore } from "./DataDeck";
+import { UpdateBanner, VersionChip, useUpdates } from "./Updates";
 import { Home } from "./projects/Home";
 import { Workspace } from "./projects/Workspace";
 import { href, useRoute, type FactoryView } from "./projects/router";
@@ -51,6 +52,7 @@ export function App() {
     go({ page: "factory", view: "factory" });
   };
   const [setupOpen, setSetupOpen] = useState(false);
+  const updates = useUpdates(f.online);
   const lastEvent = f.events.at(-1)?.id ?? 0;
 
   // "Since you left": read once when the core first answers, before saying where we are now.
@@ -99,9 +101,11 @@ export function App() {
           <span className="sep">·</span> {f.factoryRuns.length} factory runs
           <span className="sep">·</span> {f.runs.length} agent calls
           <span className="sep">·</span> spend ${f.totalUsd.toFixed(4)}
+          <VersionChip u={updates} onOpen={() => setSetupOpen(true)} />
           <button className="ghost sm systems" onClick={() => setSetupOpen(true)} aria-label="Ship's systems: crew, checks and folders">Systems</button>
         </div>
       </header>
+      <UpdateBanner u={updates} />
       {route.page === "factory" ? (
         <main className="grid">
           <StarMap signals={f.signals} order={order} selected={node} onSelect={pickNode} factoryRuns={f.factoryRuns} onShowRun={showRun} />
@@ -129,7 +133,7 @@ export function App() {
           {overseer}
         </main>
       )}
-      <Setup open={setupOpen} onClose={() => setSetupOpen(false)} dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />
+      <Setup open={setupOpen} onClose={() => setSetupOpen(false)} updates={updates} dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />
       <CoreDown online={f.online} />
     </div>
   );

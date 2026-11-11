@@ -765,3 +765,21 @@ button.chip.on { color: var(--ink); border-color: var(--accent); background: var
 .cm-import-err { flex-basis: 100%; color: var(--bad); }
 .cm-mode { align-self: center; }
 .code-deck .cm-body { padding-top: 12px; }
+/* In-app updates: top-bar version chip, a strip under the top bar, and the Updates section in Ship's systems. */
+.version-chip { margin-left: 10px; padding: 2px 9px; border-radius: 999px; font: 600 11px var(--mono); background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.version-chip.ready { color: var(--accent); border-color: rgba(79, 214, 232, 0.55); background: var(--accent-dim); animation: pulse 1.6s ease-in-out infinite; }
+.update-banner { display: flex; align-items: center; gap: 12px; padding: 7px 16px; font-size: 13px; background: var(--accent-dim); border-bottom: 1px solid rgba(79, 214, 232, 0.35); }
+.update-banner.quiet { background: transparent; color: var(--muted); }
+.update-banner > span:first-child { flex: 1; }
+.update-bar { display: block; width: 100%; max-width: 360px; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 8px; }
+.update-banner .update-bar { margin-top: 0; }
+.update-bar span { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+.update-bar span.indeterminate { background: linear-gradient(90deg, transparent, var(--accent), transparent); background-size: 200% 100%; animation: scan 1s linear infinite; }
+.updates .update-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; font-size: 13px; }
+.update-state.current { color: var(--accent); }
+.update-state.available { color: var(--gate); font-weight: 600; }
+.update-state.error { color: var(--gate); }
+.updates > button { margin-top: 10px; }
+.update-auto { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin-top: 12px; }
+.update-history { list-style: none; padding: 0; margin: 10px 0 0; font-size: 12.5px; display: grid; gap: 3px; border-left: 2px solid var(--line); padding-left: 10px; }
+.update-history li:first-child .mono { color: var(--accent); }
