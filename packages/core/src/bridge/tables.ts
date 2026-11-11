@@ -54,5 +54,26 @@ export const dropsProjection: Projection = {
   },
 };
 
+export const appVersionsProjection: Projection = {
+  name: "app_versions",
+  version: 1,
+  tables: ["app_versions"],
+  describe: "Each version of the app this install ran, and when it updated",
+  migrate(db) {
+    db.exec(`CREATE TABLE IF NOT EXISTS app_versions (
+      id           INTEGER PRIMARY KEY,
+      ts           TEXT NOT NULL,
+      from_version TEXT,
+      to_version   TEXT NOT NULL
+    )`);
+  },
+  apply(db, e) {
+    if (e.type !== "app.updated") return;
+    const p = e.payload as P;
+    db.prepare("INSERT OR REPLACE INTO app_versions (id, ts, from_version, to_version) VALUES (?, ?, ?, ?)").run(e.id, e.ts, p.from ?? null, String(p.to));
+  },
+};
+
 registerProjection(settingsProjection);
+registerProjection(appVersionsProjection);
 registerProjection(dropsProjection);

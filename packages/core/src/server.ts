@@ -44,10 +44,12 @@ export interface CoreOptions {
   dataDir?: string;
   /** Improvement Council caps: daily USD and hours between automatic sessions. */
   improve?: { maxUsd?: number; everyHours?: number };
+  /** The installed app's version, from the shell (SF_APP_VERSION). A new one is recorded as `app.updated`. */
+  appVersion?: string;
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion }: CoreOptions) {
   const bay = new AgentBay(log, runtime);
   const settings = readSettings(log);
   const drop = new DropFolder(log, settings.dropDir ?? dropDir ?? join(homedir(), "SoftwareFactory", "Drop"));
@@ -58,6 +60,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     return gitOk.ok;
   };
   const factory = new Factory(log, runtime, projectsDir, bay);
+  recordAppVersion(log, appVersion);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
   // Imported repos are cloned next to the factory's own projects, in imports/.
   const explorer = new RepoExplorer(log, runtime, join(dirname(projectsDir), "imports"), bay, { createNode: (title) => order.createNode("project", title) });
@@ -90,8 +93,16 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (req.method === "GET" && url.pathname === "/api/health") return json(res, 200, {
         ok: true, runtime: runtime.name, mode: runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime),
         pid: process.pid, node: process.version, schema: log.migration.to,
+        appVersion: appVersion ?? null, activeRuns: factory.activeCount(),
         clients: { origins: Object.fromEntries(clients.origins), streams: Object.fromEntries(clients.streams) },
       });
+      if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeCount()));
+      if (req.method === "POST" && url.pathname === "/api/updates") {
+        const body = await readJson(req);
+        if (typeof body.auto !== "boolean") return json(res, 400, { error: "Send { auto: true } or { auto: false }." });
+        log.append("settings.changed", { key: "autoUpdate", value: body.auto });
+        return json(res, 200, updatesReport(log, appVersion, factory.activeCount()));
+      }
       if (req.method === "GET" && url.pathname === "/api/setup") {
         const fresh = url.searchParams.get("fresh") === "1";
         if (fresh) gitOk.at = 0;
@@ -268,8 +279,35 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   return Object.assign(handler, { factory, order, bay, drop, improve, explorer });
 }
 
+/**
+ * Note the installed version once per change, so the timeline shows each update
+ * (from, to) and the Bridge can say "Updated to 0.2.41". The first version seen
+ * is recorded with from = null.
+ */
+export function recordAppVersion(log: EventLog, version: string | undefined) {
+  if (!version) return;
+  const last = log.db.prepare("SELECT to_version FROM app_versions ORDER BY id DESC LIMIT 1").get() as { to_version: string } | undefined;
+  if (last?.to_version === version) return;
+  log.append("app.updated", { from: last?.to_version ?? null, to: version });
+}
+
+export interface UpdatesReport {
+  /** Install updates on its own when the factory is idle (default on). */
+  auto: boolean;
+  appVersion: string | null;
+  activeRuns: number;
+  /** Versions this install has run, newest first. */
+  history: { ts: string; from: string | null; to: string }[];
+}
+
+export function updatesReport(log: EventLog, appVersion: string | undefined, activeRuns: number): UpdatesReport {
+  const history = (log.db.prepare("SELECT ts, from_version, to_version FROM app_versions ORDER BY id DESC LIMIT 10").all() as { ts: string; from_version: string | null; to_version: string }[])
+    .map((r) => ({ ts: r.ts, from: r.from_version, to: r.to_version }));
+  return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns, history };
+}
+
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
-export function readSettings(log: EventLog): { crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number } {
+export function readSettings(log: EventLog): { crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean } {
   const rows = log.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]));
 }
@@ -411,7 +449,7 @@ if (isMain) {
   const orderMax = process.env.SF_ORDER_MAX_USD ? Number(process.env.SF_ORDER_MAX_USD) : undefined;
   const improveMax = process.env.SF_IMPROVE_MAX_USD ? Number(process.env.SF_IMPROVE_MAX_USD) : undefined;
   const improveEvery = process.env.SF_IMPROVE_EVERY_H ? Number(process.env.SF_IMPROVE_EVERY_H) : undefined;
-  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir: process.env.SF_DROP, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery } });
+  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir: process.env.SF_DROP, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
   core.drop.start();
   const server = createServer(core);
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.
