@@ -40,10 +40,20 @@ export async function captureSignal(text: string, projectId?: number) {
   return (await r.json()) as Signal;
 }
 
-export async function startFactoryRun(idea: string, maxUsd?: number, projectId?: number) {
-  const r = await fetch(`${API}/api/factory/runs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idea, maxUsd, projectId }) });
+/** A Build the core held back because a run already does that idea. "Build again anyway" sends { again: true }. */
+export interface DuplicateRun { duplicateOf: number; state: "running" | "shipped" | "stopped"; projectId: number | null }
+/** The run a failed Build points at instead, if that is why it failed. */
+export const duplicateOf = (e: unknown): DuplicateRun | null => {
+  const d = (e as { data?: Partial<DuplicateRun> } | null)?.data;
+  return d && typeof d.duplicateOf === "number" ? (d as DuplicateRun) : null;
+};
+/** Ideas compared the way the core compares them: case, spacing and closing punctuation do not matter. */
+export const normIdea = (idea: string) => idea.toLowerCase().replace(/\s+/g, " ").trim().replace(/[.!?\s]+$/, "");
+
+export async function startFactoryRun(idea: string, maxUsd?: number, projectId?: number, again?: boolean) {
+  const r = await fetch(`${API}/api/factory/runs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idea, maxUsd, projectId, ...(again ? { again } : {}) }) });
   const j = await r.json();
-  if (!r.ok) throw new Error(j.error ?? "could not start the run");
+  if (!r.ok) throw Object.assign(new Error(j.error ?? "could not start the run"), { data: j });
   return j.run as number;
 }
 
@@ -225,7 +235,7 @@ const EMPTY: OrderState = { nodes: [], fragments: [], conflicts: [], sweeps: [],
 export async function post(path: string, body: unknown = {}) {
   const r = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json();
-  if (!r.ok) throw new Error(j.error ?? "request failed");
+  if (!r.ok) throw Object.assign(new Error(j.error ?? "request failed"), { data: j });
   return j;
 }
 
@@ -383,7 +393,9 @@ export const projectsApi = {
   update: (id: number, patch: Partial<Pick<ProjectSummary, "name" | "kind" | "summary" | "status">>) => post(`/api/projects/${id}`, patch) as Promise<ProjectDetail>,
   link: (id: number, kind: string, ref: string | number) => post(`/api/projects/${id}/links`, { kind, ref: String(ref) }) as Promise<ProjectDetail>,
   unlink: (id: number, kind: string, ref: string | number) => post(`/api/projects/${id}/unlink`, { kind, ref: String(ref) }) as Promise<ProjectDetail>,
-  build: (id: number, idea: string, maxUsd?: number) => post(`/api/projects/${id}/runs`, { idea, maxUsd }) as Promise<{ run: number; projectId: number }>,
+  build: (id: number, idea: string, maxUsd?: number, again?: boolean) => post(`/api/projects/${id}/runs`, { idea, maxUsd, ...(again ? { again } : {}) }) as Promise<{ run: number; projectId: number }>,
+  /** Move everything of this project into another; this one goes away (archived if you made it). */
+  merge: (id: number, into: number) => post(`/api/projects/${id}/merge`, { into }) as Promise<ProjectDetail>,
 };
 
 /** Events that can change a project's list or numbers. */

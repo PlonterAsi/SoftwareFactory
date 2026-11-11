@@ -1120,3 +1120,9 @@ button.tool-raw { font-size: 12px; margin-left: auto; }
 .chat-badge.gate { background: var(--gate); color: #1a1205; }
 .chat-pick { max-width: 160px; padding: 3px 6px; font-size: 12px; }
 .chat-empty { margin: auto 0; padding: 10px 4px; color: var(--muted); font-size: 13px; line-height: 1.5; white-space: normal; }
+
+/* A Build held back because a run already does that idea */
+.dup-notice { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--warn, #c9a227); border-radius: 6px; font-size: 12.5px; background: color-mix(in srgb, var(--warn, #c9a227) 10%, transparent); }
+.dup-notice .dup-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.hull-twin { align-self: flex-start; font-size: 11px; color: var(--warn, #c9a227); cursor: pointer; text-decoration: underline dotted; }
+.pj-merge select { min-width: 0; flex: 1; }

@@ -8,7 +8,7 @@ import { EventLog, type SfEvent } from "./events.js";
 import { captureSignal, listSignals } from "./signals.js";
 import { costSummary, runAgent } from "./agents.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
-import { Factory, type GateId } from "./factory/loop.js";
+import { duplicateReply, Factory, type GateId } from "./factory/loop.js";
 import { OrderEngine, type OrderOptions } from "./order/engine.js";
 import { canonFor, type NodeKind } from "./order/model.js";
 import { AgentBay } from "./bay/bay.js";
@@ -16,6 +16,7 @@ import { SLOTS, type Slot } from "./bay/agentfile.js";
 import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
+import { projectOf } from "./projects/service.js";
 import { chatRoutes, projectHome } from "./chat/routes.js";
 import { RepoExplorer } from "./imports/explorer.js";
 import { importsRoute } from "./imports/routes.js";
@@ -228,6 +229,8 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (req.method === "POST" && url.pathname === "/api/factory/runs") {
         const body = await readJson(req);
         if (!gitReady()) return json(res, 409, { error: "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again." });
+        const dup = duplicateReply(factory, String(body.idea ?? ""), body.again);
+        if (dup) return json(res, dup[0], dup[1]);
         const run = factory.start(String(body.idea ?? ""), {
           maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined,
           autoApprove: body.autoApprove === true,
@@ -301,9 +304,9 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (url.pathname.startsWith("/plugins/") && servePluginFile(plugins, req, res, url)) return;
       if (url.pathname.startsWith("/api/improve/")) {
-        const r = await improveRoute(improve, req, url.pathname, log, (idea) => {
+        const r = await improveRoute(improve, req, url.pathname, log, factory, (idea, projectId) => {
           if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");
-          return factory.start(idea, {});
+          return factory.start(idea, projectId != null ? { projectId } : {});
         });
         if (r) return json(res, r[0], r[1]);
       }
@@ -449,7 +452,7 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
 }
 
 /** The Improvement Council's API. Every write is an event, so the Bridge sees it on the stream. */
-async function improveRoute(improve: ImproveCouncil, req: IncomingMessage, path: string, log: EventLog, build: (idea: string) => number): Promise<[number, unknown] | null> {
+async function improveRoute(improve: ImproveCouncil, req: IncomingMessage, path: string, log: EventLog, factory: Pick<Factory, "duplicateOf">, build: (idea: string, projectId?: number) => number): Promise<[number, unknown] | null> {
   if (req.method === "GET" && path === "/api/improve/state") return [200, improve.state()];
   if (req.method !== "POST") return null;
   const body = await readJson(req);
@@ -486,8 +489,17 @@ async function improveRoute(improve: ImproveCouncil, req: IncomingMessage, path:
     }
     const p = improve.proposals().find((x) => x.id === id);
     if (!p) return [404, { error: `No proposal #${id}` }];
+    const idea = improve.buildIdea(id);
+    const dup = duplicateReply(factory, idea, body.again);
+    if (dup) return dup;
     if (p.status !== "accepted") improve.decide(id, "accepted");
-    try { return [202, { run: build(improve.buildIdea(id)) }]; } catch (e) { return [409, { error: (e as Error).message }]; }
+    // A proposal about a project builds in that project, not as a new one beside it.
+    // (Proposal targets name Order Engine nodes and factory runs; the project is whoever owns that.)
+    const owner = p.target.id == null ? null
+      : p.target.kind === "run" ? projectOf(log, { kind: "factory_run", ref: p.target.id })
+      : p.target.kind === "project" || p.target.kind === "idea" ? projectOf(log, { kind: "order_node", ref: p.target.id }) : null;
+    const projectId = owner ?? undefined;
+    try { return [202, { run: build(idea, projectId) }]; } catch (e) { return [409, { error: (e as Error).message }]; }
   }
   return null;
 }

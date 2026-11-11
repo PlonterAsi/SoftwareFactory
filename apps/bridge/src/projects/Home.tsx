@@ -23,6 +23,12 @@ export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err
       .filter((p) => !s || p.name.toLowerCase().includes(s) || p.summary.toLowerCase().includes(s));
   }, [list, filter, q]);
   const archived = (list ?? []).filter((p) => p.status === "archived").length;
+  // Live projects sharing a name are usually copies (one idea built twice): each row says so.
+  const twins = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of list ?? []) if (p.status !== "archived") m.set(p.name, (m.get(p.name) ?? 0) + 1);
+    return m;
+  }, [list]);
   const totals = useMemo(() => (list ?? []).reduce((t, p) => ({ runs: t.runs + p.rollup.runs, usd: t.usd + p.rollup.spendUsd, conflicts: t.conflicts + p.rollup.openConflicts }), { runs: 0, usd: 0, conflicts: 0 }), [list]);
 
   async function create(e: FormEvent) {
@@ -64,7 +70,7 @@ export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err
         </div>
       ) : (
         <ul className="manifest">
-          {shown.map((p) => <Row key={p.id} p={p} onOpen={onOpen} />)}
+          {shown.map((p) => <Row key={p.id} p={p} onOpen={onOpen} twins={(twins.get(p.name) ?? 1) - 1} />)}
           {list && !shown.length && <li className="empty">Nothing matches.</li>}
         </ul>
       )}
@@ -72,7 +78,7 @@ export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err
   );
 }
 
-function Row({ p, onOpen }: { p: ProjectSummary; onOpen: (id: number) => void }) {
+function Row({ p, onOpen, twins }: { p: ProjectSummary; onOpen: (id: number) => void; twins: number }) {
   const r = p.rollup;
   const other = Math.max(0, r.runs - r.shipped - r.failed - r.running);
   const linked = Object.entries(r.linked);
@@ -82,6 +88,7 @@ function Row({ p, onOpen }: { p: ProjectSummary; onOpen: (id: number) => void })
         <span className="lamp" aria-label={p.status} title={p.status} />
         <span className="hull-main">
           <span className="hull-name">{p.name}</span>
+          {twins > 0 && <span className="hull-twin" role="link" tabIndex={0} onClick={(e) => { e.preventDefault(); e.stopPropagation(); location.hash = href({ page: "project", id: p.id, panel: "settings" }); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); location.hash = href({ page: "project", id: p.id, panel: "settings" }); } }} title="Same name as another project: probably the same idea built more than once. Open Settings to merge.">{twins === 1 ? "same name as 1 other" : `same name as ${twins} others`} · merge</span>}
           <span className="hull-sub">{p.summary || (p.origin === "factory" ? "Started from a build" : p.origin === "order" ? "Grown from your notes" : "No description yet")}</span>
         </span>
         <span className="hull-kind">{p.kind}</span>
