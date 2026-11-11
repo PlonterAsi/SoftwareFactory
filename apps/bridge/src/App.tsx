@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { API, setupApi, useBay, useFactory, useOrder, useProjects, type SinceView } from "./api";
+import { API, setupApi, useBay, useChatRoutes, useFactory, useOrder, useProjects, type SinceView } from "./api";
 import { Setup } from "./Setup";
 import { CoreDown } from "./CoreDown";
 import { AgentBay } from "./AgentBay";
@@ -36,6 +36,7 @@ export function App() {
   // Enabled plugins' tabs join every project before the workspace renders.
   syncPluginPanels(plugins.data?.plugins, f.events);
   const pluginsOn = plugins.data?.plugins.filter((p) => p.status === "enabled").length ?? 0;
+  const chatRoutes = useChatRoutes(f.events, f.online);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
   const view: FactoryView = route.page === "factory" ? route.view : "factory";
@@ -86,9 +87,9 @@ export function App() {
   }, [f.online]);
   const overseer = (
     <Overseer signals={f.signals} runs={f.runs} factoryRuns={f.factoryRuns} briefings={order.briefings} ingests={order.ingests}
-      onRunStarted={(r) => (projectId != null ? go({ page: "project", id: projectId, panel: "runs", run: r }) : showRun(r))}
+      onRunStarted={(r, pid) => (pid != null ? go({ page: "project", id: pid, panel: "runs", run: r }) : showRun(r))}
       mode={f.mode} since={since} onDismissSince={() => setSince(null)} onSetup={() => setSetupOpen(true)} onShowRun={showRun}
-      projectId={projectId} projectName={projectName} />
+      projectId={projectId} projectName={projectName} projects={projects.list} routes={chatRoutes} />
   );
   return (
     <div className="bridge">

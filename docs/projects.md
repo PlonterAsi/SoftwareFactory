@@ -67,6 +67,21 @@ Opening a project shows its **workspace**: a rail of panels and the chosen panel
 
 ![A project's overview](img/bridge-project-overview.png)
 
+## Project chats
+
+The Overseer pane is split into chats: **General** plus one chat per project. Opening a project opens its chat; the tabs at the top of the pane switch by hand, and "Other chats…" opens any other project's chat.
+
+- **A project's chat** shows only that project: what you said there, notes from General that the Order Engine filed into it (marked "from General"), the Overseer's answers to questions asked there, its builds, and its gates. Words said there are filed under the project (the Archivist is told where they were said, and heuristics send words with no clearer home there instead of to Unsorted). A new topic opened from a project's chat becomes an idea in that project, never a stray project of its own. Asking there gives the Overseer that project's name, summary and latest runs first. Build it starts runs in that project.
+- **General** is for cross-project talk and anything not yet tied to a project, plus the Order Engine's daily briefing and each project's headlines only: what shipped, what failed, and what waits for you, each tagged with its project.
+
+Nothing new is stored. A Signal carries `projectId` when said in a project's chat, an Overseer call carries `projectId` in `agent.run.started`, and everything else is read from `project_links` and the Order Engine's fragments (`packages/core/src/chat/routes.ts`):
+
+```
+POST /api/signals     { text, projectId? }            404 when that project is gone
+POST /api/agent/run   { prompt, model?, projectId? }
+GET  /api/chat/routes                                  { filed: { signalId: [projectId] }, factoryRuns: { runId: projectId } }
+```
+
 **Whole factory** in the top bar is the cross-project view from before (star map, factory floor, Agent Bay, Order deck, Data vault).
 
 Addresses: `#/` projects, `#/p/12/runs/57` project 12's Runs panel showing run 57, `#/factory/bay` the Agent Bay. The old `#order`, `#bay`, `#data` still work.
