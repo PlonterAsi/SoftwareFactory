@@ -43,7 +43,7 @@ function chatItems({ signals, runs, factoryRuns, briefings, ingests, routes }: {
       key: "r" + r.runId,
       ts: r.startedAt,
       kind: r.state === "failed" ? ("error" as const) : ("reply" as const),
-      ...(r.state === "failed" ? { text: r.error ?? "The Overseer could not answer." } : splitBuild(r.text ?? "")),
+      ...(r.state === "failed" ? { text: r.error ?? "The Assistant could not answer." } : splitBuild(r.text ?? "")),
       meta: r.state === "done" ? (r.models?.[0] ?? "") + " · $" + (r.costUsd ?? 0).toFixed(4) : undefined,
       home: r.projectId ?? null,
     })),
@@ -161,8 +161,8 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
   }
 
   return (
-    <section className="pane overseer" aria-label="Overseer channel">
-      <header className="pane-head"><span>Overseer</span><span className="muted">{busy ? "thinking…" : channel === "general" ? "general chat" : `${channelName}'s chat`}</span></header>
+    <section className="pane overseer" aria-label="Assistant">
+      <header className="pane-head"><span>Assistant</span><span className="muted">{busy ? "thinking…" : channel === "general" ? "general chat" : `${channelName}'s chat`}</span></header>
       <nav className="chat-tabs" aria-label="Chats">
         <button className={channel === "general" ? "chat-tab on" : "chat-tab"} aria-pressed={channel === "general"} onClick={() => setPicked("general")}
           title="Cross-project talk, the daily briefing, and each project's headlines (what shipped, failed, or waits for you)">
@@ -194,7 +194,7 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
         {(signals.length > 0 || factoryRuns.length > 0) && !items.length && (
           channel === "general"
             ? <p className="chat-empty">Nothing in General yet. Talk here about more than one project or nothing in particular; each project's own talk stays in its chat.</p>
-            : <p className="chat-empty">This is <strong>{channelName}</strong>'s chat. What you say here is filed under this project, the Overseer answers about it, and Build it starts runs in it. Notes from General that the Order Engine files here show up too.</p>
+            : <p className="chat-empty">This is <strong>{channelName}</strong>'s chat. What you say here is filed under this project, the Assistant answers about it, and Build it starts runs in it. Notes from General that the Order Engine files here show up too.</p>
         )}
         {items.map((i) => (
           <div key={i.key} className={"msg " + i.kind}>
@@ -226,14 +226,14 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(e, true); }}
         />
         <div className="composer-row">
-          <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Overseer model" title="Model the Overseer answers with">
+          <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Assistant model" title="Model the Assistant answers with">
             <option value="haiku">Haiku</option>
             <option value="sonnet">Sonnet</option>
             <option value="opus">Opus</option>
           </select>
           <span className="grow" />
           <button type="button" className="ghost" disabled={busy || !text.trim()} onClick={(e) => submit(e, false)} title="Save it as a note; the Order Engine files it. No answer, no cost.">Capture</button>
-          <button type="submit" className="ghost" disabled={busy || !text.trim()} title="Save it and ask the Overseer (Ctrl+Enter)">Ask</button>
+          <button type="submit" className="ghost" disabled={busy || !text.trim()} title="Save it and ask the Assistant (Ctrl+Enter)">Ask</button>
           <button type="button" disabled={busy || !text.trim()} onClick={(e) => build(e)} title="Run the factory loop: plan, tests, build, fix, with two approval taps">Build it</button>
         </div>
         {mode === "practice" && <div className="composer-note">Practice crew: Build it makes a sample word counter, free. <button type="button" className="link" onClick={onSetup}>Use real agents</button></div>}

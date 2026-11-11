@@ -21,3 +21,13 @@ Tokens live at the top of `apps/bridge/src/styles.css`. Use them; do not add raw
 
 ## Rollout
 0. UI tour and bundled fonts (done, PR #32). 1. Tokens, type and hover on the current layout. 2. Shared components and plain words. 3. New shell behind a Systems switch. 4. Project cards, short names, five sections. 5. Approval screen, motion, shortcuts. 6. Retire Whole factory and the old shell.
+
+## Shared components (phase 2)
+
+All in `apps/bridge/src/ui/`, shown in every state at `#/_kit` (not linked; the UI tour shoots it).
+
+- **GateBar**: the one approval bar. Knows nothing about runs: give it `question` and `onDecide(approve, note) => Promise`. Failed-step mode with `failed`, `error`, `attempt`, `same`. `GateActions` wires it to a factory run. The game's Dock should use `GateBar` directly.
+- **StatusGlyph / StatusTag**: one mark per state, readable by shape alone: working (spinning ring), needs (amber diamond), done (check), failed (cross), idle (dashed ring), agent (violet dot).
+- **EmptyState**: title, one or two lines on what will appear, and optionally the one action that gets there.
+
+Words people see: Assistant (not Overseer), note (not Signal), Loose ideas (not Unsorted), Project rules (not Canon), Your OK: plan / Your OK: build (not gate A/B), Budget (not fuel), Agents (not Agent Bay), Systems (not Ship's systems). Code names stay as they are.

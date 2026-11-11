@@ -35,8 +35,8 @@ export function OrderDeck({ order, selected, onSelect }: { order: OrderState; se
   const open = order.conflicts.filter((c) => c.status === "open");
   const vFail = order.visuals.filter((v) => !v.pass).length;
   const tabs: [Tab, string][] = [
-    ["canon", `Canon${nodeId != null ? ` · ${order.canon[nodeId]?.length ?? 0}` : ""}`],
-    ["tray", `Unsorted · ${tray.length}${unsure.length ? ` · ${unsure.length} unsure` : ""}`],
+    ["canon", `Project rules${nodeId != null ? ` · ${order.canon[nodeId]?.length ?? 0}` : ""}`],
+    ["tray", `Loose ideas · ${tray.length}${unsure.length ? ` · ${unsure.length} unsure` : ""}`],
     ["conflicts", `Conflicts${open.length ? ` · ${open.length} open` : ` · ${order.conflicts.length}`}`],
     ["briefing", "Briefing"],
     ["checks", `Visuals${order.visuals.length ? (vFail ? ` · ${vFail} missing` : " · all") : ""}`],
@@ -70,7 +70,7 @@ function Said({ order, f }: { order: OrderState; f: Fragment }) {
 
 function CanonView({ order, nodeId, onSelect, act }: { order: OrderState; nodeId: number | null; onSelect: (id: number | null) => void; act: Act }) {
   const [title, setTitle] = useState("");
-  if (nodeId == null) return <div className="empty">No projects yet. Type "Project: name" in the Overseer channel, or anything at all: the Archivist opens one when it needs to.</div>;
+  if (nodeId == null) return <div className="empty">No projects yet. Type "Project: name" to the Assistant, or anything at all: the Archivist opens one when it needs to.</div>;
   const byId = new Map(order.nodes.map((n) => [n.id, n]));
   const line: number[] = [];
   for (let n = byId.get(nodeId); n; n = n.parentId != null ? byId.get(n.parentId) : undefined) line.unshift(n.id);
@@ -92,7 +92,7 @@ function CanonView({ order, nodeId, onSelect, act }: { order: OrderState; nodeId
         {line.map((id, i) => <span key={id}>{i > 0 && <span className="muted"> ▸ </span>}<button className="link" onClick={() => onSelect(id)}>{byId.get(id)?.title}</button></span>)}
         <span className="muted mono"> · {node.kind} · {Object.entries(counts).map(([k, n]) => `${n} ${k}`).join(", ") || "empty"}</span>
       </div>
-      <svg viewBox="0 0 320 140" className="constellation" role="img" aria-label={`Canon constellation of ${node.title}`}>
+      <svg viewBox="0 0 320 140" className="constellation" role="img" aria-label={`Project rules constellation of ${node.title}`}>
         {pts.length > 1 && pts.map((p, i) => {
           const a = pos.get(p.f.id)!, b = pos.get(pts[(i + 1) % pts.length].f.id)!;
           return p.ghost ? null : <line key={"l" + p.f.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="c-line" />;
@@ -153,7 +153,7 @@ function Unsure({ order, unsure, act }: { order: OrderState; unsure: Fragment[];
               {(f.alternatives ?? []).map((a) => <button key={a} className="tiny" onClick={() => act(orderApi.move(f.id, a))}>→ {title(a)}</button>)}
               <select value="" onChange={(e) => e.target.value && act(orderApi.move(f.id, e.target.value === "none" ? null : Number(e.target.value)))} aria-label="Move to">
                 <option value="">elsewhere…</option>
-                <option value="none">Unsorted</option>
+                <option value="none">Loose ideas</option>
                 {live.filter((n) => n.id !== f.nodeId).map((n) => <option key={n.id} value={n.id}>{n.kind}: {n.title}</option>)}
               </select>
             </span>
@@ -166,7 +166,7 @@ function Unsure({ order, unsure, act }: { order: OrderState; unsure: Fragment[];
 
 function Tray({ order, tray, act }: { order: OrderState; tray: Fragment[]; act: Act }) {
   const live = order.nodes.filter((n) => n.mergedInto == null);
-  if (!tray.length) return <div className="empty">The Unsorted tray is empty. When the Archivist is not sure where something goes, it lands here instead of blocking you.</div>;
+  if (!tray.length) return <div className="empty">No loose ideas. When the Archivist is not sure where something goes, it lands here instead of blocking you.</div>;
   return (
     <ul className="tray">
       {tray.map((f) => (
@@ -209,7 +209,7 @@ function Conflicts({ order, act }: { order: OrderState; act: Act }) {
       </li>
     );
   };
-  if (!order.conflicts.length) return <div className="empty">No conflicts. Each new rule is checked against the Canon of its node, its parents and its children.</div>;
+  if (!order.conflicts.length) return <div className="empty">No conflicts. Each new rule is checked against the project rules of its node, its parents and its children.</div>;
   return <ul className="conflicts">{[...order.conflicts].sort((x, y) => (x.status === y.status ? y.id - x.id : x.status === "open" ? -1 : 1)).map(card)}</ul>;
 }
 
@@ -248,7 +248,7 @@ function BriefingView({ order, act }: { order: OrderState; act: Act }) {
 }
 
 function Checks({ order }: { order: OrderState }) {
-  if (!order.visuals.length) return <div className="empty">Every Signal the Order Engine files gets a visualizeEverything check here.</div>;
+  if (!order.visuals.length) return <div className="empty">Every note the Order Engine files gets a visualizeEverything check here.</div>;
   const ingest = new Map(order.ingests.map((r) => [r.signalId, r]));
   return (
     <ul className="visuals">

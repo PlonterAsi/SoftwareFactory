@@ -1,4 +1,4 @@
-import { GateActions } from "./GateActions";
+import { GateActions, STEP } from "./GateActions";
 import { useEffect, useRef, useState } from "react";
 import { ReactFlow, Background, useNodesState, type ReactFlowInstance, type Edge, type Node, Handle, Position, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -35,15 +35,15 @@ function Station({ data }: NodeProps<Node<StationData>>) {
 const X = [0, 190, 380, 570, 760];
 // id, label, what it does, x, y, gate?, later?
 const STATIONS: [string, string, string, number, number, boolean?, boolean?][] = [
-  ["intake", "One-line idea", "saved as a Signal", X[0], 0],
+  ["intake", "One-line idea", "saved as a note", X[0], 0],
   ["council", "Council", "3 seats · big ideas", X[1], -95],
   ["plan", "Spec and plan", "Planner", X[1], 0],
-  ["gateA", "You approve plan", "one tap", X[2], 0, true],
+  ["gateA", "Your OK: plan", "one tap", X[2], 0, true],
   ["tests", "Acceptance tests", "Tester, then locked", X[0], 130],
   ["build", "Build", "Builder", X[1], 130],
   ["test", "Test", "node --test", X[2], 130],
   ["review", "Review", "Reviewer vs spec", X[3], 130],
-  ["gateB", "You accept build", "one tap", X[4], 130, true],
+  ["gateB", "Your OK: build", "one tap", X[4], 130, true],
   ["fix", "Fix", "Fixer loop", X[2], 260],
   ["ship", "Ship to disk", "git repo, tagged", X[4], 260],
 ];
@@ -110,11 +110,11 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
           <select className="run-pick" value={run?.run ?? ""} onChange={(e) => onSelect(Number(e.target.value))} aria-label="Factory run">
             {[...factoryRuns].reverse().map((r) => <option key={r.run} value={r.run}>#{r.run} {r.plan?.name ?? r.idea.slice(0, 40)} · {r.finished?.outcome ?? (r.resumed ? "resumed" : "running")}</option>)}
           </select>
-        ) : <span className="muted">{overseerBusy ? "Overseer working…" : "no runs yet · type an idea in the Overseer and press Build it"}</span>}
+        ) : <span className="muted">{overseerBusy ? "Assistant working…" : "no runs yet · type an idea to the Assistant and press Build it"}</span>}
       </header>
       {run && (
         <div className="fuel" title={`Run budget: $${run.spentUsd.toFixed(4)} of $${run.maxUsd.toFixed(2)} spent`}>
-          <span className="mono muted">fuel</span>
+          <span className="muted">Budget</span>
           <span className="fuel-bar"><span style={{ width: `${Math.max(0, Math.min(100, (left / run.maxUsd) * 100))}%` }} /></span>
           <span className="mono">${run.spentUsd.toFixed(4)} / ${run.maxUsd.toFixed(2)}</span>
           {run.finished && <span className={`outcome ${run.finished.outcome}`}>{run.finished.outcome}</span>}
@@ -142,7 +142,7 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
   );
 }
 
-const STATION_LABEL: Record<string, string> = { intake: "Intake", council: "Council", plan: "Plan", gateA: "the plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", review: "Review", gateB: "the build gate", ship: "Ship" };
+const STATION_LABEL = STEP;
 
 function GateBar({ run }: { run: FactoryRunView }) {
   return <GateActions run={run} label={STATION_LABEL} />;
