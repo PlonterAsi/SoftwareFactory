@@ -16,7 +16,8 @@
     "factory": "npm run factory -w @sf/core --",
     "app": "npm run build -w @sf/core && tauri dev",
     "app:build": "tauri build",
-    "order": "npm run order -w @sf/core --"
+    "order": "npm run order -w @sf/core --",
+    "ui:tour": "node scripts/ui-tour/tour.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0"
