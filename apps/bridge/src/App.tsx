@@ -16,11 +16,15 @@ import { href, useRoute, type FactoryView } from "./projects/router";
 import "./projects/builtin";
 import { Tickets, useTicketCounts } from "./Tickets";
 import "./TicketsPanel";
+import { ImproveDeck, useImprove } from "./ImproveDeck";
+import "./projects/improvePanel";
 
 export function App() {
   const f = useFactory();
   const order = useOrder(f.events);
   const bay = useBay(f.events);
+  const improve = useImprove(f.events);
+  const waiting = improve.proposals.filter((p) => p.status === "inbox").length;
   const [route, go] = useRoute();
   const projects = useProjects(f.events, f.online);
   const [picked, setPicked] = useState<number | null>(null);
@@ -109,13 +113,15 @@ export function App() {
               <button role="tab" aria-selected={view === "bay"} className={view === "bay" ? "tab on" : "tab"} onClick={() => setView("bay")}>Agent Bay{Object.values(bay.stats).some((s) => s.state === "thinking") ? " · working" : ""}</button>
               <button role="tab" aria-selected={view === "order"} className={(view === "order" ? "tab on" : "tab") + (open ? " alert" : "")} onClick={() => setView("order")}>Order deck{open ? ` · ${open}` : ""}</button>
               <button role="tab" aria-selected={view === "tickets"} className={(view === "tickets" ? "tab on" : "tab") + (ticketCounts?.look ? " look" : "")} onClick={() => setView("tickets")}>Tickets{ticketCounts?.look ? ` · ${ticketCounts.look} for you` : ticketCounts?.open ? ` · ${ticketCounts.open}` : ""}</button>
+              <button role="tab" aria-selected={view === "improve"} className={view === "improve" ? "tab on" : "tab"} onClick={() => setView("improve")}>Improve{improve.busy ? " · looking" : waiting ? ` · ${waiting}` : ""}</button>
               <button role="tab" aria-selected={view === "data"} className={view === "data" ? "tab on" : "tab"} onClick={() => setView("data")}>Data vault</button>
             </nav>
             {view === "factory" ? <>
               <FactoryFloor runs={f.runs} factoryRuns={f.factoryRuns} selected={selected} onSelect={setPicked} crew={crew} mode={f.mode} />
               <RunDeck run={selected} />
             </> : view === "bay" ? <AgentBay bay={bay} /> : view === "tickets" ? <Tickets events={f.events} onShowRun={showRun}
-                crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
+                crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))} />
+              : view === "improve" ? <ImproveDeck improve={improve} crew={bay.agents} onRunStarted={showRun} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
             <Timeline runs={f.runs} totalUsd={f.totalUsd} />
           </div>
           {overseer}

@@ -150,6 +150,7 @@ export class MockRuntime implements AgentRuntime {
     else if (station === "overseer") text = MOCK.overseer(req.prompt);
     else if (station === "ticket") text = MOCK.ticket(req.prompt);
     else if (station === "repo") text = MOCK.repo(req.prompt);
+    else if (station === "improve") text = MOCK.improve(role, req.prompt);
     return { text, costUsd: role ? 0.0001 : 0, durationMs: this.opts.delayMs ?? 1, models: ["mock"], runtime: this.name, contextTokens: 0 };
   }
 }
@@ -190,6 +191,23 @@ const MOCK = {
       Skeptic: { take: "Fine if empty input is handled.", proposals: [], concerns: ["empty input must give 0", "unicode whitespace"], vote: "build", scope: "small" },
     } as Record<string, unknown>;
     return "```json\n" + JSON.stringify(take[seat] ?? { take: `${seat} agrees.`, proposals: [], concerns: [], vote: "build", scope: "small" }) + "\n```";
+  },
+  // The practice lenses cannot think either: one canned proposal per lens, about the subject they were given.
+  improve: (role: string, prompt: string) => {
+    const lens = role.match(/You are the (.+?) on the SoftwareFactory Improvement Council/)?.[1] ?? "Lens";
+    const subject = prompt.match(/^Subject: [^"\n]*"([^"]+)"/m)?.[1] ?? (prompt.includes("SoftwareFactory itself") ? "SoftwareFactory" : "this");
+    const said = new Set([...prompt.matchAll(/^- \[\w+\] (.+)$/gm)].map((m) => m[1].trim()));
+    const canned: Record<string, [string, string, string, string, string]> = {
+      Integrator: [`Share one settings file between ${subject} and your other tools`, "Each tool keeps its own copy of the same settings.", `Read shared settings from one file that ${subject} and the other apps both use.`, "medium", "small"],
+      Automator: [`Run ${subject} on a schedule instead of by hand`, "It is started by hand every time.", `Add a scheduled run of ${subject} with a log of what it did.`, "high", "small"],
+      Simplifier: [`Cut the least used option from ${subject}`, "Options nobody uses make every run harder to read.", `Remove the least used flag of ${subject} and keep its default behaviour.`, "medium", "small"],
+      Enricher: [`Add a dry-run mode to ${subject}`, "Nobody can see what it will do before it does it.", `A --dry-run flag in ${subject} that prints every change and touches nothing.`, "high", "medium"],
+      "UX Lens": [`Show a one-line summary when ${subject} finishes`, "The result is hard to see at a glance.", `End every run of ${subject} with one line: what changed, what was skipped.`, "medium", "small"],
+      "Flow Lens": [`Ask once up front in ${subject}, then never stop`, "The flow stops in the middle to ask.", `Collect every choice of ${subject} at the start so the rest runs without a stop.`, "medium", "medium"],
+    };
+    const c = canned[lens];
+    const proposals = c && !said.has(c[0]) ? [{ title: c[0], why: c[1], change: c[2], impact: c[3], effort: c[4] }] : [];
+    return "```json\n" + JSON.stringify({ proposals }) + "\n```";
   },
   review: "```json\n" + JSON.stringify({ verdict: "pass", findings: [{ severity: "low", text: "README could show an example with a file argument" }] }) + "\n```",
   order: (prompt: string) => "```json\n" + JSON.stringify({ nodes: [], fragments: [{ text: (prompt.match(/"""\n([\s\S]*?)\n"""/)?.[1] ?? prompt).slice(0, 200), kind: "note", important: false, node: null, confidence: 0.4, contradicts: [] }] }) + "\n```",
