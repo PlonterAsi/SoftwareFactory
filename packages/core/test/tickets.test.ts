@@ -545,6 +545,9 @@ describe("tickets: an ask is not a project", () => {
       expect(v.body).toMatchObject({ verdict: "ask", projectName: "SoftwareFactory" });
       const self = (await call("GET", "/api/tickets/self")).body.projectId;
       expect(v.body.projectId).toBe(self);
+      // Filed once, the same ask says where it already is.
+      await call("POST", "/api/tickets", { kind: "request", title: "Error handling and logs for all projects", project: self });
+      expect((await call("POST", "/api/tickets/intake", { text: "error handling and logs for all projects" })).body.existing).toMatchObject({ status: "open" });
       const made = await call("POST", "/api/projects", { name: "Error handling and logs for all projects" });
       const turned = await call("POST", `/api/tickets/from-project/${made.body.id}`, {});
       expect(turned.status).toBe(201);

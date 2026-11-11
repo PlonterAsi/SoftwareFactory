@@ -29,7 +29,7 @@ import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { Tickets } from "./tickets/tickets.js";
 import { ErrorCapture, isFault } from "./tickets/capture.js";
-import { classifyIntake, ensureSelfProject, projectToTicket } from "./tickets/intake.js";
+import { classifyIntake, ensureSelfProject, filedAlready, projectToTicket } from "./tickets/intake.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { ImproveCouncil, type Target } from "./improve/council.js";
@@ -300,6 +300,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const b = await readJson(req);
         const v = classifyIntake(log, String(b.text ?? ""), typeof b.exclude === "number" ? b.exclude : undefined);
         if (v.verdict === "ask" && v.projectId == null) v.projectId = ensureSelf();
+        if (v.verdict === "ask" && v.projectId != null) { const x = filedAlready(log, v.projectId, String(b.text ?? "")); if (x) v.existing = x; }
         return json(res, 200, v);
       }
       if (req.method === "GET" && url.pathname === "/api/tickets/self") return json(res, 200, { projectId: ensureSelf() });
