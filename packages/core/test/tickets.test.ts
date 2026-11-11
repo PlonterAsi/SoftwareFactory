@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventLog, MockRuntime, ClaudeCodeRuntime, Factory, AgentBay, Tickets, createCore, git, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal, OrderEngine, ImproveCouncil, listSignals, RepoExplorer, ErrorCapture, errorFingerprint, scrub, isFault } from "../src/index.js";
+import { EventLog, MockRuntime, ClaudeCodeRuntime, Factory, AgentBay, Tickets, createCore, git, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal, OrderEngine, ImproveCouncil, listSignals, RepoExplorer, ErrorCapture, errorFingerprint, scrub, isFault, classifyIntake, ensureSelfProject, selfProject, projectToTicket, linkToProject } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-tickets-"));
 
@@ -441,6 +441,92 @@ describe("tickets: errors become bugs", () => {
       expect(core.tickets.get(r.body.ticket)!.title).toBe("Error in GET /api/tickets: TypeError: Cannot read properties of null (reading 'open')");
       const b = await call("POST", "/api/tickets/capture", { message: "ReferenceError: foo is not defined", stack: "at Board (Tickets.tsx:3:1)", where: "bridge #/factory/tickets", context: { screen: "#/factory/tickets" }, project: null });
       expect(core.tickets.get(b.body.ticket)).toMatchObject({ kind: "bug", tags: ["error", "bridge"] });
+    } finally { server.close(); }
+  });
+});
+
+describe("tickets: an ask is not a project", () => {
+  const setup = () => {
+    const log = new EventLog();
+    const order = new OrderEngine(log, null, { mode: "heuristic" });
+    const node = (name: string) => order.createNode("project", name);
+    const t = new Tickets(log);
+    const make = (name: string, summary = "") => { const id = createProject(log, { name, kind: "app", summary }); linkToProject(log, id, "order_node", node(name)); return id; };
+    return { log, order, node, t, make };
+  };
+
+  it("SoftwareFactory gets one project of its own, made once", () => {
+    const { log, node } = setup();
+    expect(selfProject(log)).toBeNull();
+    const a = ensureSelfProject(log, node);
+    expect(ensureSelfProject(log, node)).toBe(a);
+    expect(projectDetail(log, a)).toMatchObject({ name: "SoftwareFactory", kind: "app", origin: "you" });
+    expect(projectDetail(log, a)!.links.map((l) => l.kind).sort()).toEqual(["order_node", "self"]);
+  });
+
+  it("tells a new project from an ask about one you have, by words alone", () => {
+    const { log, node, make } = setup();
+    const self = ensureSelfProject(log, node);
+    const garden = make("Garden planner");
+    expect(classifyIntake(log, "UI/UX improvement of SoftwareFactory")).toMatchObject({ verdict: "ask", projectId: self, kind: "request", confidence: "high" });
+    expect(classifyIntake(log, "Error handling and logs for all projects")).toMatchObject({ verdict: "ask", projectId: self, confidence: "high" });
+    expect(classifyIntake(log, "The garden planner crashes when I add a bed")).toMatchObject({ verdict: "ask", projectId: garden, kind: "bug", confidence: "high" });
+    expect(classifyIntake(log, "Improve the onboarding screens")).toMatchObject({ verdict: "ask", projectId: self, confidence: "low" });
+    expect(classifyIntake(log, "a CLI that renames photos by the date they were taken")).toEqual({ verdict: "project" });
+    expect(classifyIntake(log, "Build a new app that tracks my running, with better charts")).toEqual({ verdict: "project" });
+    expect(classifyIntake(log, "Recipe box")).toEqual({ verdict: "project" });
+    // A project read by its own name is not an ask about itself.
+    const logs = make("Error handling and logs for all projects");
+    expect(classifyIntake(log, "Error handling and logs for all projects")).toMatchObject({ projectId: logs });
+    expect(classifyIntake(log, "Error handling and logs for all projects", logs)).toMatchObject({ verdict: "ask", projectId: self });
+  });
+
+  it("turns a project into a ticket on another: notes come along, things move, the project is archived", () => {
+    const { log, order, node, t, make } = setup();
+    const self = ensureSelfProject(log, node);
+    const ux = make("UI/UX improvement of SoftwareFactory", "Make the Bridge easier to read");
+    const uxNode = Number(projectDetail(log, ux)!.links.find((l) => l.kind === "order_node")!.ref);
+    const sig = captureSignal(log, "bigger fonts on the star map", "bridge");
+    log.append("order.fragment", { signalId: sig.id, text: "bigger fonts on the star map", kind: "note", nodeId: uxNode, confidence: 0.9 });
+    const old = t.open({ kind: "bug", title: "Tabs wrap on a small window", project: ux });
+    const r = projectToTicket(log, t, order.state(), ux, { to: self });
+    expect(r.ticket).toMatchObject({ kind: "request", title: "UI/UX improvement of SoftwareFactory", project: self, status: "open" });
+    expect(r.ticket.answers.need).toBe("Make the Bridge easier to read");
+    expect(r.ticket.body).toContain("- bigger fonts on the star map");
+    expect(r.ticket.body).toContain(`from the project "UI/UX improvement of SoftwareFactory" (#${ux})`);
+    expect(t.get(old.id)!.project).toBe(self);
+    // Its idea node folded into SoftwareFactory's, notes and all: one body on the star map.
+    const selfNode = projectDetail(log, self)!.rootNodeIds[0];
+    expect(order.state().nodes.find((n) => n.id === uxNode)!.mergedInto).toBe(selfNode);
+    expect(order.state().fragments.find((f) => f.text === "bigger fonts on the star map")!.nodeId).toBe(selfNode);
+    const was = projectDetail(log, ux)!;
+    expect(was.status).toBe("archived");
+    expect(was.summary).toMatch(new RegExp(`^Turned into ticket #${r.ticket.id} on SoftwareFactory`));
+    // Twice is refused, and SoftwareFactory's own project stays a project.
+    expect(() => projectToTicket(log, t, order.state(), ux, { to: self })).toThrow(/archived/);
+    expect(() => projectToTicket(log, t, order.state(), self, { to: ux })).toThrow(/stays a project/);
+  });
+
+  it("over HTTP: the intake check, turning a project into a ticket, and errors filed under SoftwareFactory", async () => {
+    const log = new EventLog();
+    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp() });
+    const server = createServer(core).listen(0);
+    const port = (server.address() as { port: number }).port;
+    const call = async (method: string, path: string, body?: unknown) => {
+      const r = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      return { status: r.status, body: await r.json() };
+    };
+    try {
+      const v = await call("POST", "/api/tickets/intake", { text: "Error handling and logs for all projects" });
+      expect(v.body).toMatchObject({ verdict: "ask", projectName: "SoftwareFactory" });
+      const self = (await call("GET", "/api/tickets/self")).body.projectId;
+      expect(v.body.projectId).toBe(self);
+      const made = await call("POST", "/api/projects", { name: "Error handling and logs for all projects" });
+      const turned = await call("POST", `/api/tickets/from-project/${made.body.id}`, {});
+      expect(turned.status).toBe(201);
+      expect(turned.body.ticket).toMatchObject({ project: self, kind: "request" });
+      const bug = await call("POST", "/api/tickets/capture", { message: "TypeError: x is undefined", where: "bridge #/" });
+      expect(core.tickets.get(bug.body.ticket)!.project).toBe(self);
     } finally { server.close(); }
   });
 });

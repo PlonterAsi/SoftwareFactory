@@ -35,6 +35,7 @@ export * from "./tickets/tables.js";
 export * from "./tickets/tickets.js";
 export * from "./tickets/repowork.js";
 export * from "./tickets/capture.js";
+export * from "./tickets/intake.js";
 export * from "./chat/routes.js";
 export * from "./imports/scan.js";
 export * from "./imports/crew.js";

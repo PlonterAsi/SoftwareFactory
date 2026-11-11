@@ -32,6 +32,14 @@ Questions are data in `packages/core/src/tickets/model.ts` (`FORMS`): adding one
 - **Tickets open themselves**: a factory run that fails on its own opens a bug; a task or question the Order Engine files from what you say opens a ticket under its project; an accepted Improvement Council proposal opens an idea (a code suggestion from an imported repo opens a task). A `fingerprint` makes each of these idempotent: seen again adds a note, never a second ticket.
 - **Any other module** can ask for a ticket by appending `ticket.requested { title, kind?, body?, project?, priority?, severity?, source, by?, fingerprint?, ref? }`; the ticket service opens it and its `ticket.opened` carries `request` and `ref`.
 
+## An ask is not a project
+
+Not every idea is a project. "UI/UX improvement of SoftwareFactory" or "Error handling and logs for all projects" are asks about things that exist, so they belong on a ticket there.
+
+- **SoftwareFactory has a project of its own** (linked `self:softwarefactory`), made at the first start. Asks about the app itself land there, and so do the errors it catches.
+- **The intake reads an idea before it becomes a project.** "Create project" on the Projects page and "Build it" in the General chat ask the core first (`POST /api/tickets/intake`). The check is a word check, so it is free and instant. When the idea names a project you have, or is about SoftwareFactory or "all projects", or reads like a change to something that exists rather than a new thing to build, a card offers "File as a request on X" (the kind can be changed) next to "Start a new project anyway". It only offers; you choose. A project's own chat never asks: Build it there builds in that project.
+- **Turn into ticket.** A project whose name reads like an ask shows a banner on its Overview, and every project but SoftwareFactory's has Settings › Turn into a ticket. The ticket gets the project's name, description, notes and runs. The project's idea node folds into the other project's home node (one body on the star map), and its runs, tickets and chats move along. The project is archived, with "Turned into ticket #N on X" as its description. "Keep it a project" hides the banner for good on that computer.
+
 ## Errors become bugs
 
 Nothing that goes wrong is lost in a log nobody reads, and nothing is sent to an outside service.
@@ -70,5 +78,8 @@ POST /api/tickets/:id/line             { dir: "up" | "down" }   reorder a plan l
 POST /api/tickets/:id/spawn            { kind, title, ... }     a new ticket, linked derived from
 POST /api/tickets/:id/work             { maxUsd?, where?: "auto" | "repo" | "new" }   in the project's repo when it has one, else a factory run
 POST /api/tickets/:id/ask              { agent? }               one capped agent reply on the thread
+POST /api/tickets/intake               { text, exclude? }       is it a new project, or an ask about one you have? { verdict, projectId, projectName, kind, why, confidence }
+GET  /api/tickets/self                 SoftwareFactory's own project id (made when first needed)
+POST /api/tickets/from-project/:id     { to?, kind? }           turn a project into a ticket on another (default SoftwareFactory)
 POST /api/tickets/capture              { message, stack?, where, from?: "bridge" | "shell", context?, project? }   file an error as a bug (or "Seen again")
 ```

@@ -1100,3 +1100,12 @@ button.tool-raw { font-size: 12px; margin-left: auto; }
 .chat-badge.gate { background: var(--gate); color: #1a1205; }
 .chat-pick { max-width: 160px; padding: 3px 6px; font-size: 12px; }
 .chat-empty { margin: auto 0; padding: 10px 4px; color: var(--muted); font-size: 13px; line-height: 1.5; white-space: normal; }
+
+/* An ask is not a project */
+.intake-card { margin: 8px 14px; padding: 12px 14px; border: 1px solid var(--gate); border-radius: 10px; background: var(--panel-2); display: flex; flex-direction: column; gap: 8px; }
+.intake-card p { margin: 0; line-height: 1.45; }
+.intake-card .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.intake-card.banner { margin: 0 0 12px; }
+.composer .intake-card { margin: 8px 0 0; }
+.turn-ticket .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.turn-ticket label { display: flex; flex-direction: row; gap: 6px; align-items: center; }

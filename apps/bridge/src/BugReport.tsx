@@ -60,12 +60,15 @@ export function installErrorCatcher() {
 
 /** Ask the Tickets screen to open one ticket, now or when it mounts. */
 let pending: number | null = null;
-export function showTicket(id: number) {
+export function showTicket(id: number, project?: number | null) {
   pending = id;
-  location.hash = "#/factory/tickets";
+  // In its project's Tickets tab when it has one, so you stay where the work lives.
+  location.hash = project != null ? `#/p/${project}/tickets` : "#/factory/tickets";
   window.dispatchEvent(new CustomEvent("sf:ticket", { detail: id }));
 }
 export function takePendingTicket() { const p = pending; pending = null; return p; }
+/** Read without taking (React may run a state initializer twice); take it in an effect. */
+export function peekPendingTicket() { return pending; }
 
 /** A screen that throws says what happened and that it is filed, instead of going blank. */
 export class ErrorBoundary extends Component<{ children: ReactNode; where?: string }, { error: Error | null; ticket: number | null }> {
@@ -132,7 +135,7 @@ export function BugReport({ open, onClose }: { open: boolean; onClose: () => voi
           <section className="setup-sec">
             <p>Filed as bug #{filed}. The crew can work it from the ticket.</p>
             <div className="row">
-              <button onClick={() => { onClose(); showTicket(filed); }}>Open bug #{filed}</button>
+              <button onClick={() => { onClose(); showTicket(filed, projectOnScreen()); }}>Open bug #{filed}</button>
               <button className="ghost" onClick={() => setFiled(null)}>Report another</button>
             </div>
           </section>

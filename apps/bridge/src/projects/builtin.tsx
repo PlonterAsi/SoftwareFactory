@@ -5,6 +5,7 @@ import { OrderDeck } from "../OrderDeck";
 import { FactoryFloor } from "../FactoryFloor";
 import { RunDeck } from "../RunDeck";
 import { inProject, projectSets, registerProjectPanel, type PanelContext } from "./panels";
+import { AskBanner, TurnIntoTicket } from "../Intake";
 
 const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 const usd = (n: number) => `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`;
@@ -41,6 +42,7 @@ function Overview({ project: p, events, go, showRun }: PanelContext) {
   };
   return (
     <div className="pj-overview">
+      <AskBanner projectId={p.id} name={p.name} hasRuns={p.runIds.length > 0 || p.links.some((l) => l.kind === "self")} archived={p.status === "archived"} />
       <section className="pj-brief">
         {summary == null ? (
           <p className={p.summary ? "pj-summary" : "pj-summary empty-line"} onClick={() => setSummary(p.summary)} title="Click to edit">
@@ -216,6 +218,7 @@ function Settings({ project: p }: PanelContext) {
           ))}
         </fieldset>
       )}
+      {!p.links.some((l) => l.kind === "self") && p.status !== "archived" && <TurnIntoTicket projectId={p.id} name={p.name} />}
       <p className="muted small">Made {new Date(p.createdAt).toLocaleDateString()} · {p.origin === "you" ? "by you" : p.origin === "factory" ? "from a factory run" : "by the Order Engine from your notes"} · id {p.id}</p>
       {msg && <p className="muted" role="status">{msg}</p>}
     </form>

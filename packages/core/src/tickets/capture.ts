@@ -82,7 +82,7 @@ export class ErrorCapture {
   /** Off while an error is being filed, so a fault in filing cannot loop. */
   private busy = false;
 
-  constructor(private log: EventLog, private tickets: Tickets, private opts: { perHour?: number; now?: () => number } = {}) {}
+  constructor(private log: EventLog, private tickets: Tickets, private opts: { perHour?: number; now?: () => number; /** Where an error with no project of its own is filed (SoftwareFactory's own project). */ project?: () => number | null } = {}) {}
 
   private now() { return this.opts.now?.() ?? Date.now(); }
 
@@ -132,7 +132,7 @@ export class ErrorCapture {
       kind: "bug", title: `Error${where ? ` in ${where.split(" ").slice(0, 2).join(" ")}` : ""}: ${message}`.slice(0, 90),
       body, by: "error catcher", source: "error", severity: from === "core" && /uncaught/i.test(where) ? "blocking" : "annoying",
       answers: { expected: "No error." },
-      fingerprint: same ? `${fp}@${now}` : fp, tags: ["error", from], project: c.project ?? null,
+      fingerprint: same ? `${fp}@${now}` : fp, tags: ["error", from], project: c.project ?? this.opts.project?.() ?? null,
       links: same ? [{ to: Number(same.id), relation: "related" }] : undefined,
     });
     this.lastNote.set(fp, { at: now, since: 0 });

@@ -26,6 +26,7 @@ import { integrationsRoute, serveExtension } from "./integrations/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { Tickets } from "./tickets/tickets.js";
 import { ErrorCapture, isFault } from "./tickets/capture.js";
+import { classifyIntake, ensureSelfProject, projectToTicket } from "./tickets/intake.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { ImproveCouncil, type Target } from "./improve/council.js";
@@ -70,7 +71,9 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
   const tickets = new Tickets(log, { runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1), workRoot: join(dirname(projectsDir), "ticket-work") });
   // Every fault becomes a bug ticket by itself (docs/tickets.md, "Errors become bugs").
-  const errors = new ErrorCapture(log, tickets);
+  // SoftwareFactory's own project: the home of asks about the app and of the errors it catches. Made when first needed.
+  const ensureSelf = () => ensureSelfProject(log, (name) => order.createNode("project", name));
+  const errors = new ErrorCapture(log, tickets, { project: ensureSelf });
   const fault = (where: string, e: unknown, context?: Record<string, unknown>) => {
     const err = e instanceof Error ? e : new Error(String(e));
     return errors.capture({ message: `${err.name !== "Error" ? `${err.name}: ` : ""}${err.message}`, stack: err.stack, where, from: "core", context });
@@ -282,6 +285,20 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = errors.capture({ message: String(b.message ?? ""), stack: b.stack ? String(b.stack) : undefined, where: String(b.where ?? "the Bridge"), from: b.from === "shell" ? "shell" : "bridge", context: (b.context && typeof b.context === "object" ? b.context : undefined) as Record<string, unknown> | undefined, project: typeof b.project === "number" ? b.project : null });
         return json(res, 200, r ?? { ticket: null });
       }
+      if (req.method === "POST" && url.pathname === "/api/tickets/intake") {
+        // Before an idea becomes a project: is it an ask about one you have?
+        const b = await readJson(req);
+        const v = classifyIntake(log, String(b.text ?? ""), typeof b.exclude === "number" ? b.exclude : undefined);
+        if (v.verdict === "ask" && v.projectId == null) v.projectId = ensureSelf();
+        return json(res, 200, v);
+      }
+      if (req.method === "GET" && url.pathname === "/api/tickets/self") return json(res, 200, { projectId: ensureSelf() });
+      const turn = url.pathname.match(/^\/api\/tickets\/from-project\/(\d+)$/);
+      if (req.method === "POST" && turn) {
+        const b = await readJson(req);
+        const to = typeof b.to === "number" ? b.to : ensureSelf();
+        return json(res, 201, projectToTicket(log, tickets, order.state(), Number(turn[1]), { to, kind: b.kind ? String(b.kind) as TicketKind : undefined }));
+      }
       if (url.pathname === "/api/tickets" || url.pathname.startsWith("/api/tickets/")) {
         const r = await ticketRoute(tickets, req, url, gitReady);
         if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
@@ -335,7 +352,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop, tickets, improve, explorer, launcher, integrations, errors, fault });
+  return Object.assign(handler, { factory, order, bay, drop, tickets, improve, explorer, launcher, integrations, errors, fault, ensureSelf });
 }
 
 /**
@@ -554,6 +571,7 @@ if (isMain) {
   const improveEvery = process.env.SF_IMPROVE_EVERY_H ? Number(process.env.SF_IMPROVE_EVERY_H) : undefined;
   const core = createCore({ log, runtime, projectsDir, dataDir, dropDir: process.env.SF_DROP, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
   core.drop.start();
+  core.ensureSelf(); // SoftwareFactory has a project of its own from the first start
   const server = createServer(core);
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.
   const { order } = core;

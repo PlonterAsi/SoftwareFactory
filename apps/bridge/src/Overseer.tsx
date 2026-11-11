@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { GateActions, STEP } from "./GateActions";
+import { AskNotProject, checkIntake, type IntakeVerdict } from "./Intake";
+import { showTicket } from "./BugReport";
 import { askOverseer, captureSignal, setupApi, splitBuild, startFactoryRun, type AgentRunView, type ChatRoutes, type CrewMode, type FactoryRunView, type OrderState, type ProjectSummary, type Signal, type SinceView } from "./api";
 
 type Item = {
@@ -70,6 +72,7 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
   const [model, setModel] = useState("haiku");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [ask, setAsk] = useState<{ text: string; v: IntakeVerdict } | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   // The chat follows the page you are on (a project's page opens its chat); you can switch by hand.
   const [picked, setPicked] = useState<Channel | null>(null);
@@ -109,10 +112,16 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
   // Keep the newest message in view.
   useEffect(() => { feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight }); }, [items.length, channel]);
 
-  async function build(e: MouseEvent, idea?: string) {
+  async function build(e: MouseEvent, idea?: string, askChecked = false) {
     e.preventDefault();
     const t = (idea ?? text).trim();
     if (!t || busy) return;
+    // In General, a new build is a new project: when it reads like an ask about one you have, offer a ticket there first.
+    if (chatProject == null && !askChecked) {
+      const v = await checkIntake(t);
+      if (v) { setAsk({ text: t, v }); return; }
+    }
+    setAsk(null);
     setBusy(true);
     setErr(null);
     try {
@@ -215,6 +224,9 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
         </div>
         {mode === "practice" && <div className="composer-note">Practice crew: Build it makes a sample word counter, free. <button type="button" className="link" onClick={onSetup}>Use real agents</button></div>}
         {err && <div className="err">{err}</div>}
+        {ask && <AskNotProject text={ask.text} verdict={ask.v} onCancel={() => setAsk(null)}
+          onProject={() => { const t = ask.text; setAsk(null); void build({ preventDefault() {} } as MouseEvent, t, true).then(() => setText("")); }}
+          onFiled={(id, project) => { setAsk(null); setText(""); showTicket(id, project); }} />}
       </form>
     </section>
   );
