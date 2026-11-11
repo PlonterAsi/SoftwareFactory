@@ -27,6 +27,7 @@ import { LAYOUT_KEY, usePref, type Layout } from "./shell/prefs";
 import { Sidebar } from "./shell/Sidebar";
 import { Helm, HelmButton } from "./shell/Helm";
 import { NeedsYou } from "./shell/NeedsYou";
+import { BasesPage, useBases } from "./Bases";
 
 export function App() {
   const f = useFactory();
@@ -43,6 +44,7 @@ export function App() {
   syncPluginPanels(plugins.data?.plugins, f.events);
   const pluginsOn = plugins.data?.plugins.filter((p) => p.status === "enabled").length ?? 0;
   const chatRoutes = useChatRoutes(f.events, f.online);
+  const bases = useBases(f.online);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
   const view: FactoryView = route.page === "factory" ? route.view : "factory";
@@ -137,6 +139,8 @@ export function App() {
   );
   const page = route.page === "needs"
     ? <NeedsYou factoryRuns={f.factoryRuns} featuresWaiting={featuresWaiting} conflicts={open} onShowRun={showRun} />
+    : route.page === "bases"
+    ? <BasesPage bases={bases.data} refresh={bases.refresh} />
     : route.page === "kit"
     ? <KitPage />
     : route.page === "brain"
@@ -156,7 +160,7 @@ export function App() {
     const assistOpen = assist === "open";
     return (
       <div className="shell2">
-        <Sidebar route={route} needs={needsCount} projects={projects.list} factoryRuns={f.factoryRuns} crewBusy={Object.values(bay.stats).some((s) => s.state === "thinking")}>
+        <Sidebar route={route} needs={needsCount} projects={projects.list} factoryRuns={f.factoryRuns} crewBusy={Object.values(bay.stats).some((s) => s.state === "thinking")} base={bases.current?.name}>
           <button className="sb-item sb-btn" onClick={() => setSetupOpen(true)}><span className="sb-icon"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden className="sb-ico"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" /></svg></span><span className="sb-text">Systems</span></button>
           <div className="sb-status">
             <span className={f.online ? "dot on" : "dot"} /> {f.online ? "Online" : "Offline"}
@@ -197,6 +201,9 @@ export function App() {
       <header className="topbar">
         <div className="brand-nav">
           <a className="brand" href={href({ page: "home" })}><span className="logo" aria-hidden>◈</span> SoftwareFactory</a>
+          {bases.current && <a className="base-chip" href={href({ page: "bases" })} aria-current={route.page === "bases" ? "page" : undefined} title={`Base: ${bases.current.name} (${bases.current.folder}). Click to open another base or start a new one.`}>
+            <span className="base-chip-label">Base</span> {bases.current.name} <span aria-hidden>▾</span>
+          </a>}
           <nav className="topnav" aria-label="Main">
             <a href={href({ page: "home" })} aria-current={route.page === "home" || route.page === "project" ? "page" : undefined}>Projects</a>
             <a href={href({ page: "features" })} aria-current={route.page === "features" ? "page" : undefined} className={featuresWaiting ? "alert-text" : undefined}>

@@ -7,8 +7,8 @@ import { StatusGlyph, type Status } from "../ui";
  * The left rail of the Foundry Glass shell: where you are, what needs you, and the projects you
  * were last in. Amber appears here only when something waits for you.
  */
-export function Sidebar({ route, needs, projects, factoryRuns, crewBusy, children }: {
-  route: Route; needs: number; projects: ProjectSummary[] | null; factoryRuns: FactoryRunView[]; crewBusy: boolean; children?: ReactNode;
+export function Sidebar({ route, needs, projects, factoryRuns, crewBusy, base, children }: {
+  route: Route; needs: number; projects: ProjectSummary[] | null; factoryRuns: FactoryRunView[]; crewBusy: boolean; base?: string; children?: ReactNode;
 }) {
   const at = (r: Route["page"], view?: string) => route.page === r && (view == null || (route.page === "factory" && route.view === view));
   const recent = (projects ?? []).filter((p) => p.status !== "archived")
@@ -38,6 +38,7 @@ export function Sidebar({ route, needs, projects, factoryRuns, crewBusy, childre
       <div className="sb-group">
         <div className="sb-label">Factory</div>
         <Item to={{ page: "factory", view: "bay" }} on={at("factory", "bay")} icon={<StatusGlyph status={crewBusy ? "working" : "agent"} label="" />}>Agents</Item>
+        {base && <Item to={{ page: "bases" }} on={at("bases")} icon={<Ico d="M2 13h12M3 13V6l5-3 5 3v7M6.5 13V9.5h3V13" />}>Base: {base}</Item>}
         <Item to={{ page: "factory", view: "factory" }} on={at("factory", "factory") || at("factory", "order") || at("factory", "improve") || at("factory", "data")} icon={<Ico d="M2 13V7l4 2V7l4 2V3h4v10z" />}>Whole factory</Item>
       </div>
       <div className="sb-group">

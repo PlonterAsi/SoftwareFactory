@@ -103,7 +103,7 @@ try {
     const panels = await page.$$eval('a[href^="#/p/"]', (as) => [...new Set(as.map((a) => a.getAttribute("href")))]);
     for (const h of panels.filter((h) => h.split("/").length === 4)) await visit(h, `${tag}-${h.split("/")[3]}`);
   }
-  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/factory", "factory-floor"], ["#/factory/bay", "agent-bay"], ["#/factory/order", "order"], ["#/factory/improve", "improve"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
+  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/bases", "bases"], ["#/factory", "factory-floor"], ["#/factory/bay", "agent-bay"], ["#/factory/order", "order"], ["#/factory/improve", "improve"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
   current = "systems";
   await page.goto(`${BRIDGE}/#/`);
   await page.waitForTimeout(800);
@@ -115,6 +115,7 @@ try {
   await page.reload();
   await visit("#/", "fg-home");
   await visit("#/needs", "fg-needs");
+  await visit("#/bases", "fg-bases");
   const waitingProject = (await api(`/api/projects/of?kind=factory_run&ref=${waiting}`)).projectId;
   if (waitingProject != null) await visit(`#/p/${waitingProject}/runs`, "fg-waiting-runs");
   await visit("#/factory", "fg-factory-floor");
