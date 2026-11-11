@@ -17,6 +17,7 @@ import "./projects/builtin";
 import { ImproveDeck, useImprove } from "./ImproveDeck";
 import "./projects/improvePanel";
 import "./CodeMap";
+import { FeaturesPage, useIntegrations } from "./Features";
 
 export function App() {
   const f = useFactory();
@@ -25,6 +26,8 @@ export function App() {
   const improve = useImprove(f.events);
   const waiting = improve.proposals.filter((p) => p.status === "inbox").length;
   const [route, go] = useRoute();
+  const features = useIntegrations(f.events);
+  const featuresWaiting = features.data?.integrations.filter((i) => i.status === "awaiting").length ?? 0;
   const projects = useProjects(f.events, f.online);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
@@ -85,7 +88,10 @@ export function App() {
         <div className="brand-nav">
           <a className="brand" href={href({ page: "home" })}><span className="logo" aria-hidden>◈</span> SOFTWAREFACTORY</a>
           <nav className="topnav" aria-label="Main">
-            <a href={href({ page: "home" })} aria-current={route.page !== "factory" ? "page" : undefined}>Projects</a>
+            <a href={href({ page: "home" })} aria-current={route.page === "home" || route.page === "project" ? "page" : undefined}>Projects</a>
+            <a href={href({ page: "features" })} aria-current={route.page === "features" ? "page" : undefined} className={featuresWaiting ? "alert-text" : undefined}>
+              Features{features.data?.installed.length ? ` · ${features.data.installed.length}` : ""}{featuresWaiting ? ` · ${featuresWaiting} to approve` : ""}
+            </a>
             <a href={href({ page: "factory", view })} aria-current={route.page === "factory" ? "page" : undefined}>Whole factory</a>
           </nav>
         </div>
@@ -123,7 +129,9 @@ export function App() {
         </main>
       ) : (
         <main className="grid projects-grid">
-          {route.page === "project"
+          {route.page === "features"
+            ? <FeaturesPage events={f.events} id={route.id} onOpenProject={(id) => go({ page: "project", id, panel: "integrate" })} />
+            : route.page === "project"
             ? <Workspace id={route.id} panel={route.panel} run={route.run} factory={f} order={order} bay={bay} go={go} />
             : <Home list={projects.list} err={projects.err} onOpen={(id) => go({ page: "project", id })} />}
           {overseer}
