@@ -98,8 +98,8 @@ button, .kit-button { font: inherit; cursor: pointer; border-radius: 8px; paddin
 .kit-source { margin: 0; background: var(--kit-bg); border: 1px solid var(--kit-line); border-radius: 8px; padding: 12px; overflow: auto; max-height: 60vh; font-size: 12px; }
 .kit-hidden { display: none; }
 .kit-toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 10; }
-.kit-toast { background: var(--kit-panel); border: 1px solid var(--kit-line); border-left: 4px solid var(--kit-ok); border-radius: 8px; padding: 10px 14px; max-width: 360px; box-shadow: 0 6px 24px rgba(0,0,0,.3); }
-.kit-toast.error { border-left-color: var(--kit-danger); }
+.kit-toast { background: var(--kit-panel); border: 1px solid color-mix(in srgb, var(--kit-ok) 45%, var(--kit-line)); border-radius: 8px; padding: 10px 14px; max-width: 360px; box-shadow: 0 6px 24px rgba(0,0,0,.3); }
+.kit-toast.error { border-color: var(--kit-danger); color: var(--kit-danger); }
 .kit-error, .kit-fatal { border: 1px solid var(--kit-danger); border-radius: var(--kit-radius); padding: 16px; }
 .kit-error pre { white-space: pre-wrap; }
 @media (max-width: 720px) {
