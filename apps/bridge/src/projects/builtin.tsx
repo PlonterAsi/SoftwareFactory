@@ -61,7 +61,12 @@ function Overview({ project: p, events, go, showRun }: PanelContext) {
         <Gauge label="Ideas and notes" value={String(r.fragments)} sub={`${r.important} important, ${r.nodes} nodes`} onClick={() => go("ideas")} />
         <Gauge label="Conflicts" value={String(r.openConflicts)} sub={r.openConflicts ? "need your call" : "none open"} alert={r.openConflicts > 0} onClick={() => go("ideas")} />
         <Gauge label="Spend" value={usd(r.spendUsd)} sub={`${r.agentCalls} agent calls`} onClick={() => go("agents")} />
-        {Object.entries(r.linked).map(([k, n]) => <Gauge key={k} label={cap(k.replace(/_/g, " ")) + "s"} value={String(n)} sub="linked" onClick={() => go(k === "ticket" ? "tickets" : k)} />)}
+        {(() => {
+          const l = p.facets?.launch as { running?: number; folder?: string | null; lastStartedAt?: string | null } | undefined;
+          if (!l?.folder && !l?.running) return null;
+          return <Gauge label="Run it" value={l.running ? "Live" : "Ready"} sub={l.running ? `${l.running} running` : l.lastStartedAt ? `last started ${ago(l.lastStartedAt)}` : "start it from the app"} onClick={() => go("run")} />;
+        })()}
+        {Object.entries(r.linked).filter(([k]) => k !== "folder").map(([k, n]) => <Gauge key={k} label={cap(k.replace(/_/g, " ")) + "s"} value={String(n)} sub="linked" onClick={() => go(k === "ticket" ? "tickets" : k)} />)}
       </section>
       <section className="pj-recent">
         <h3>Latest</h3>

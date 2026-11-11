@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
  *   #/                     projects
  *   #/p/12                 project 12, its first panel
  *   #/p/12/runs/57         project 12, Runs panel, run 57
+ *   #/features[/7]         features added from finished projects (feature 7)
  *   #/factory[/view]       the whole factory (floor, bay, order, tickets, data), as before projects
  * The old #order, #bay and #data still open the factory views.
  */
@@ -12,7 +13,8 @@ export type FactoryView = "factory" | "order" | "bay" | "data" | "tickets" | "im
 export type Route =
   | { page: "home" }
   | { page: "project"; id: number; panel?: string; run?: number }
-  | { page: "factory"; view: FactoryView };
+  | { page: "factory"; view: FactoryView }
+  | { page: "features"; id?: number };
 
 const VIEWS: FactoryView[] = ["factory", "order", "bay", "data", "tickets", "improve"];
 
@@ -23,12 +25,14 @@ export function parse(hash: string): Route {
   if (parts[0] === "p" && /^\d+$/.test(parts[1] ?? "")) {
     return { page: "project", id: Number(parts[1]), panel: parts[2] || undefined, run: /^\d+$/.test(parts[3] ?? "") ? Number(parts[3]) : undefined };
   }
+  if (parts[0] === "features") return { page: "features", id: /^\d+$/.test(parts[1] ?? "") ? Number(parts[1]) : undefined };
   if (parts[0] === "factory") return { page: "factory", view: VIEWS.includes(parts[1] as FactoryView) ? (parts[1] as FactoryView) : "factory" };
   return { page: "home" };
 }
 
 export function href(r: Route): string {
   if (r.page === "project") return `#/p/${r.id}${r.panel ? `/${r.panel}${r.run ? `/${r.run}` : ""}` : ""}`;
+  if (r.page === "features") return r.id ? `#/features/${r.id}` : "#/features";
   if (r.page === "factory") return r.view === "factory" ? "#/factory" : `#/factory/${r.view}`;
   return "#/";
 }

@@ -72,10 +72,17 @@ describe("factory loop", () => {
     expect(fin.totalUsd).toBeCloseTo(0.0005);
     expect(existsSync(join(fin.dir, "SPEC.md"))).toBe(true);
     expect(git(fin.dir, "tag")).toBe("v0.1.0");
-    expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Fix round 1", "Build: Word Counter", "Acceptance tests (locked)", "Spec and plan: Word Counter"]);
+    expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Ship", "Fix round 1", "Build: Word Counter", "Acceptance tests (locked)", "Spec and plan: Word Counter"]);
 
     const tests = events(log, "factory.tests");
-    expect(tests.map((t) => [t.round, t.passed, t.failed])).toEqual([[0, 2, 1], [1, 3, 0]]);
+    // Three locked tests plus the page check, one cell each.
+    expect(tests.map((t) => [t.round, t.passed, t.failed])).toEqual([[0, 3, 1], [1, 4, 0]]);
+    expect(tests[0].cases.at(-1)).toMatchObject({ name: expect.stringContaining("the page loads"), pass: true });
+    // visualizeEverything for what it makes: a page the Run tab shows, and examples so nobody guesses the arguments.
+    expect(existsSync(join(fin.dir, "index.html"))).toBe(true);
+    expect(events(log, "factory.ui").every((u) => u.pass)).toBe(true);
+    expect(JSON.parse(readFileSync(join(fin.dir, "run.json"), "utf8")).examples).toEqual([{ label: "Count the words in the spec", profile: "cli", args: "SPEC.md" }]);
+    expect(readFileSync(join(fin.dir, "SPEC.md"), "utf8")).toContain("## Screen");
     const visuals = events(log, "factory.visual");
     expect(visuals.every((v) => v.pass)).toBe(true);
     expect(visuals.map((v) => v.station)).toEqual(["intake", "plan", "tests", "build", "test", "fix", "review", "ship"]);
@@ -210,7 +217,7 @@ describe("resuming runs", () => {
     expect(fin).toMatchObject({ run, outcome: "shipped" });
     // Only the stations after the cut were worked again: no second plan or test-writing call.
     expect(rt.calls.map((c) => c.systemPrompt?.match(/Station contract: (\w+)/)?.[1])).toEqual(["build", "fix", "review"]);
-    expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Fix round 1", "Build: Word Counter", "Acceptance tests (locked)", "Spec and plan: Word Counter"]);
+    expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Ship", "Fix round 1", "Build: Word Counter", "Acceptance tests (locked)", "Spec and plan: Word Counter"]);
     // The organized table follows: stopped, then back in flight, then shipped.
     expect(log.db.prepare("SELECT outcome, resumes, resumed_from FROM factory_runs WHERE id = ?").get(run)).toMatchObject({ outcome: "shipped", resumes: 1, resumed_from: "build" });
     // Spend carries over: the calls before the cut still count.

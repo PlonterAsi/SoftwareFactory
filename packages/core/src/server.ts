@@ -16,8 +16,13 @@ import { SLOTS, type Slot } from "./bay/agentfile.js";
 import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
+import { chatRoutes, projectHome } from "./chat/routes.js";
 import { RepoExplorer } from "./imports/explorer.js";
 import { importsRoute } from "./imports/routes.js";
+import { Launcher } from "./launch/launcher.js";
+import { launchRoute } from "./launch/routes.js";
+import { Integrations } from "./integrations/service.js";
+import { integrationsRoute, serveExtension } from "./integrations/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { Tickets } from "./tickets/tickets.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
@@ -44,10 +49,12 @@ export interface CoreOptions {
   dataDir?: string;
   /** Improvement Council caps: daily USD and hours between automatic sessions. */
   improve?: { maxUsd?: number; everyHours?: number };
+  /** The installed app's version, from the shell (SF_APP_VERSION). A new one is recorded as `app.updated`. */
+  appVersion?: string;
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion }: CoreOptions) {
   const bay = new AgentBay(log, runtime);
   const settings = readSettings(log);
   const drop = new DropFolder(log, settings.dropDir ?? dropDir ?? join(homedir(), "SoftwareFactory", "Drop"));
@@ -58,26 +65,49 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     return gitOk.ok;
   };
   const factory = new Factory(log, runtime, projectsDir, bay);
+  recordAppVersion(log, appVersion);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
   const tickets = new Tickets(log, { runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1) });
   // Imported repos are cloned next to the factory's own projects, in imports/.
   const explorer = new RepoExplorer(log, runtime, join(dirname(projectsDir), "imports"), bay, { createNode: (title) => order.createNode("project", title) });
+  // Finished projects added into SoftwareFactory: their frozen copies live in extensions/, next to projects/.
+  const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"));
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
   const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
     maxUsd: settings.improveMaxUsd ?? improveOpts?.maxUsd, everyHours: settings.improveEveryHours ?? improveOpts?.everyHours,
     autoGate: () => ((runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime)) === "real" ? null : "the practice crew only answers when you press Look now; switch to the real crew in Systems for automatic sessions"),
   }).listen();
   improve.auto = settings.improveAuto ?? true;
+  // Finished projects run from their own folders; the Bridge shows their output and pages.
+  const launcher = new Launcher(log);
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
   log.on("event", (e: SfEvent) => {
     if (e.type !== "signal.captured") return;
-    const p = e.payload as { text: string; source: string };
-    order.ingest({ id: e.id, text: p.text, source: p.source }).catch((err) => console.error("order ingest failed:", err));
+    const p = e.payload as { text: string; source: string; projectId?: number };
+    // Said in a project's chat: the Order Engine files it under that project unless the words point elsewhere.
+    const home = p.projectId != null ? projectHome(log, order.state(), Number(p.projectId)) : null;
+    order.ingest({ id: e.id, text: p.text, source: p.source, home }).catch((err) => console.error("order ingest failed:", err));
   });
   // Who is talking to the core: the desktop window sends its page origin (http://tauri.localhost
   // on Windows). Kept in memory only; /api/health shows it, so a smoke test can prove the window
   // reached the core, and the shell can tell a blank window from a dead core.
   const clients = { origins: new Map<string, string>(), streams: new Map<string, number>() };
+  /** A chat's project id from a request: null for General, false when that project is gone. */
+  const chatProject = (v: unknown): number | null | false => {
+    if (v == null || v === "" || v === "general") return null;
+    const id = Number(v);
+    if (!Number.isInteger(id)) return null;
+    return log.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(id) ? id : false;
+  };
+  /** What the Overseer reads first when asked in a project's chat: that project, not the whole factory. */
+  const projectBrief = (id: number): string => {
+    const p = log.db.prepare("SELECT name, kind, status, summary FROM projects WHERE id = ?").get(id) as { name: string; kind: string; status: string; summary: string } | undefined;
+    if (!p) return "";
+    const runs = log.db.prepare(`SELECT r.id, r.idea, r.outcome, r.reason FROM factory_runs r JOIN project_links l ON l.kind = 'factory_run' AND l.ref = CAST(r.id AS TEXT)
+      WHERE l.project_id = ? ORDER BY r.id DESC LIMIT 5`).all(id) as { id: number; idea: string; outcome: string | null; reason: string | null }[];
+    const lines = runs.map((r) => `- run #${r.id}: ${r.idea.slice(0, 120)} (${r.outcome ?? "running"}${r.reason ? `: ${r.reason.slice(0, 120)}` : ""})`);
+    return `You are in the chat of the project "${p.name}" (${p.kind}, ${p.status})${p.summary ? `: ${p.summary.slice(0, 400)}` : ""}. Answer about this project unless asked otherwise.\n${lines.length ? `Its latest factory runs:\n${lines.join("\n")}\n` : ""}\n`;
+  };
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const origin = typeof req.headers.origin === "string" ? req.headers.origin.slice(0, 100) : null;
     if (origin) clients.origins.set(origin, new Date().toISOString());
@@ -89,8 +119,16 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (req.method === "GET" && url.pathname === "/api/health") return json(res, 200, {
         ok: true, runtime: runtime.name, mode: runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime),
         pid: process.pid, node: process.version, schema: log.migration.to,
+        appVersion: appVersion ?? null, activeRuns: factory.activeCount(),
         clients: { origins: Object.fromEntries(clients.origins), streams: Object.fromEntries(clients.streams) },
       });
+      if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeCount()));
+      if (req.method === "POST" && url.pathname === "/api/updates") {
+        const body = await readJson(req);
+        if (typeof body.auto !== "boolean") return json(res, 400, { error: "Send { auto: true } or { auto: false }." });
+        log.append("settings.changed", { key: "autoUpdate", value: body.auto });
+        return json(res, 200, updatesReport(log, appVersion, factory.activeCount()));
+      }
       if (req.method === "GET" && url.pathname === "/api/setup") {
         const fresh = url.searchParams.get("fresh") === "1";
         if (fresh) gitOk.at = 0;
@@ -153,7 +191,12 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (req.method === "POST" && url.pathname === "/api/signals") {
         const body = await readJson(req);
-        return json(res, 201, captureSignal(log, String(body.text ?? ""), String(body.source ?? "bridge")));
+        const projectId = chatProject(body.projectId);
+        if (projectId === false) return json(res, 404, { error: "That project no longer exists, so its chat is closed. Pick another chat." });
+        return json(res, 201, captureSignal(log, String(body.text ?? ""), String(body.source ?? "bridge"), projectId ?? undefined));
+      }
+      if (req.method === "GET" && url.pathname === "/api/chat/routes") {
+        return json(res, 200, chatRoutes(log, order.state()));
       }
       if (req.method === "POST" && url.pathname === "/api/agent/run") {
         const body = await readJson(req);
@@ -161,15 +204,18 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (!prompt) return json(res, 400, { error: "prompt is required" });
         // The Overseer is an agent like the others: its prompt, model and cap live in the Agent Bay.
         const o = bay.crewFor("overseer")[0];
+        const projectId = chatProject(body.projectId);
+        if (projectId === false) return json(res, 404, { error: "That project no longer exists, so its chat is closed. Pick another chat." });
         // The Overseer reads a live status digest first, so it answers about this factory, not in general.
         const digest = statusDigest(log, order.state(), runtime.name);
+        const room = projectId != null ? projectBrief(projectId) : "";
         const run = await runAgent(log, runtime, o.id, {
-          prompt: `Status of the factory right now:\n${digest}\n\nThe person says:\n${prompt}`,
+          prompt: `Status of the factory right now:\n${digest}\n\n${room}The person says:\n${prompt}`,
           model: body.model ? String(body.model) : o.model,
           systemPrompt: o.role,
           budgetUsd: typeof body.budgetUsd === "number" ? body.budgetUsd : Math.min(budgetUsd, o.budgetUsd),
           pluginDirs: o.pluginDirs.length ? o.pluginDirs : undefined,
-        }, { agentVersion: o.version, station: "overseer" });
+        }, { agentVersion: o.version, station: "overseer", ...(projectId != null ? { projectId } : {}) });
         return json(res, run.error ? 502 : 200, { ...run, suggestion: run.result ? buildSuggestion(run.result.text).build : undefined });
       }
       if (req.method === "POST" && url.pathname === "/api/factory/runs") {
@@ -232,6 +278,16 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await importsRoute({ log, explorer, readJson, canImport }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (url.pathname.startsWith("/api/launch/") || url.pathname.startsWith("/preview/")) {
+        const r = await launchRoute({ log, launcher, readJson, openUrl: openFolder }, req, res, url);
+        if (r === "handled") return;
+        if (r) return json(res, r[0], r[1]);
+      }
+      if (url.pathname === "/api/integrations" || url.pathname.startsWith("/api/integrations/")) {
+        const r = await integrationsRoute({ log, integrations, readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
+      if (url.pathname.startsWith("/ext/") && serveExtension(integrations, req, res, url)) return;
       if (url.pathname.startsWith("/api/improve/")) {
         const r = await improveRoute(improve, req, url.pathname, log, (idea) => {
           if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");
@@ -263,11 +319,38 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 400, { error: (e as Error).message });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop, tickets, improve, explorer });
+  return Object.assign(handler, { factory, order, bay, drop, tickets, improve, explorer, launcher, integrations });
+}
+
+/**
+ * Note the installed version once per change, so the timeline shows each update
+ * (from, to) and the Bridge can say "Updated to 0.2.41". The first version seen
+ * is recorded with from = null.
+ */
+export function recordAppVersion(log: EventLog, version: string | undefined) {
+  if (!version) return;
+  const last = log.db.prepare("SELECT to_version FROM app_versions ORDER BY id DESC LIMIT 1").get() as { to_version: string } | undefined;
+  if (last?.to_version === version) return;
+  log.append("app.updated", { from: last?.to_version ?? null, to: version });
+}
+
+export interface UpdatesReport {
+  /** Install updates on its own when the factory is idle (default on). */
+  auto: boolean;
+  appVersion: string | null;
+  activeRuns: number;
+  /** Versions this install has run, newest first. */
+  history: { ts: string; from: string | null; to: string }[];
+}
+
+export function updatesReport(log: EventLog, appVersion: string | undefined, activeRuns: number): UpdatesReport {
+  const history = (log.db.prepare("SELECT ts, from_version, to_version FROM app_versions ORDER BY id DESC LIMIT 10").all() as { ts: string; from_version: string | null; to_version: string }[])
+    .map((r) => ({ ts: r.ts, from: r.from_version, to: r.to_version }));
+  return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns, history };
 }
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
-export function readSettings(log: EventLog): { crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number } {
+export function readSettings(log: EventLog): { crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean } {
   const rows = log.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]));
 }
@@ -453,7 +536,7 @@ if (isMain) {
   const orderMax = process.env.SF_ORDER_MAX_USD ? Number(process.env.SF_ORDER_MAX_USD) : undefined;
   const improveMax = process.env.SF_IMPROVE_MAX_USD ? Number(process.env.SF_IMPROVE_MAX_USD) : undefined;
   const improveEvery = process.env.SF_IMPROVE_EVERY_H ? Number(process.env.SF_IMPROVE_EVERY_H) : undefined;
-  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir: process.env.SF_DROP, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery } });
+  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir: process.env.SF_DROP, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
   core.drop.start();
   const server = createServer(core);
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.

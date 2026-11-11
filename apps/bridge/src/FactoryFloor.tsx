@@ -1,7 +1,8 @@
+import { GateActions } from "./GateActions";
 import { useEffect, useRef, useState } from "react";
 import { ReactFlow, Background, useNodesState, type ReactFlowInstance, type Edge, type Node, Handle, Position, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { decideGate, resumeRun, setupApi, type AgentRunView, type CrewMode, type FactoryRunView, type StationState } from "./api";
+import { resumeRun, setupApi, type AgentRunView, type CrewMode, type FactoryRunView, type StationState } from "./api";
 
 type Worker = { name: string; avatar: string; since: string };
 type StationData = { label: string; sub: string; gate?: boolean; later?: boolean; state: StationState; badge?: string; note?: string; workers?: Worker[] };
@@ -119,7 +120,8 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
           {run.finished && <span className={`outcome ${run.finished.outcome}`}>{run.finished.outcome}</span>}
         </div>
       )}
-      {run?.waiting && <GateBar run={run} />}
+      {run?.waiting && !run.finished && <GateBar run={run} />}
+      {run?.retrying && !run.waiting && !run.finished && <div className="run-result retrying" role="status">↻ Retrying <b>{STATION_LABEL[run.retrying.station] ?? run.retrying.station}</b> (attempt {run.retrying.attempt})…</div>}
       {run?.resumed && !run.finished && <div className="run-result resumed" role="status">↻ Picked up again at <b>{STATION_LABEL[run.resumed.from] ?? run.resumed.from}</b> after the app closed{run.resumed.count > 1 ? ` (${run.resumed.count} times)` : ""}. Finished stations were kept; spend carries over.</div>}
       <div className="flow-wrap" ref={wrap}>
         <ReactFlow onInit={(i) => { flow.current = i; }} nodes={nodes} onNodesChange={onNodesChange} edges={edgesFor(run)} nodeTypes={{ station: Station }} fitView fitViewOptions={{ padding: 0.1 }} proOptions={{ hideAttribution: true }} nodesConnectable={false} panOnDrag zoomOnScroll={false}>
@@ -143,21 +145,5 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
 const STATION_LABEL: Record<string, string> = { intake: "Intake", council: "Council", plan: "Plan", gateA: "the plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", review: "Review", gateB: "the build gate", ship: "Ship" };
 
 function GateBar({ run }: { run: FactoryRunView }) {
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const w = run.waiting!;
-  async function go(approve: boolean) {
-    setBusy(true); setErr(null);
-    try { await decideGate(run.run, w.gate, approve, note.trim() || undefined); setNote(""); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
-  }
-  return (
-    <div className={`gatebar ${w.gate}`} role="group" aria-label="Approval needed">
-      <span className="gate-q">{w.question}</span>
-      <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={w.gate === "escalation" ? "optional hint for the Fixer" : "optional: what to change (rejecting with a note sends it back)"} />
-      <button disabled={busy} onClick={() => go(true)}>{w.gate === "escalation" ? "Retry" : "Approve"}</button>
-      <button className="ghost" disabled={busy} onClick={() => go(false)}>{note.trim() && w.gate !== "escalation" ? "Send back" : "Stop"}</button>
-      {err && <span className="err">{err}</span>}
-    </div>
-  );
+  return <GateActions run={run} label={STATION_LABEL} />;
 }

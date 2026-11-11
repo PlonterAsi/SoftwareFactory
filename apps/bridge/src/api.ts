@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 
 /** Same shapes the core writes to its event log. */
 export interface SfEvent { id: number; ts: string; type: string; payload: any }
-export interface Signal { id: number; ts: string; text: string; source: string }
+/** projectId: the project chat it was said in; absent: the General chat. */
+export interface Signal { id: number; ts: string; text: string; source: string; projectId?: number }
 export interface AgentRunView {
   runId: number;
   agent: string;
   station?: string;
   factoryRun?: number;
+  /** The project chat an Overseer question was asked in. */
+  projectId?: number;
   /** A test run from the Agent Bay, not a conversation. */
   bayTest?: boolean;
   prompt: string;
@@ -31,8 +34,8 @@ const inTauriBundle = "__TAURI_INTERNALS__" in window && !location.host.startsWi
 export const API: string =
   import.meta.env.VITE_SF_API ?? (inTauriBundle || !location.protocol.startsWith("http") ? "http://127.0.0.1:4317" : "");
 
-export async function captureSignal(text: string) {
-  const r = await fetch(`${API}/api/signals`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+export async function captureSignal(text: string, projectId?: number) {
+  const r = await fetch(`${API}/api/signals`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, projectId }) });
   if (!r.ok) throw new Error((await r.json()).error ?? "capture failed");
   return (await r.json()) as Signal;
 }
@@ -62,6 +65,8 @@ export interface SeatView { agent: string; name: string; version: number; round:
 export interface CouncilBriefView { rounds: number; votes: Record<string, Vote>; outcome: Vote; agreed: string[]; proposals: string[]; concerns: string[] }
 export interface ReviewView { round: number; agent: string; verdict: "pass" | "fix"; findings: { severity: "high" | "low"; text: string }[] }
 export interface TestCaseView { name: string; file: string; pass: boolean; error?: string }
+/** A gate a run waits at. For a failed step: which one, how many tries, and whether the last try failed the same way. */
+export interface GateWaitView { gate: string; question: string; at: string; action?: string; kind?: "retry" | "council" | "rounds" | "budget"; station?: string; attempt?: number; error?: string; same?: boolean }
 export interface FactoryRunView {
   run: number;
   idea: string;
@@ -76,7 +81,9 @@ export interface FactoryRunView {
   files: Record<string, { lines: number; writes: number; last: string; locked: boolean }>;
   refused: { path: string; reason: string; station: string }[];
   visuals: { station: string; round?: number; pass: boolean; items: string[]; missing: string[] }[];
-  waiting?: { gate: string; question: string };
+  waiting?: GateWaitView;
+  /** A failed step you sent back with Retry, while it runs again. */
+  retrying?: { station: string; attempt: number; at: string };
   fixRounds: number;
   council: { round: number; seats: SeatView[]; brief: CouncilBriefView }[];
   reviews: ReviewView[];
@@ -99,6 +106,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
     switch (e.type) {
       case "factory.station":
         r.stations[p.station] = { state: p.state, round: p.round, note: p.note };
+        if (r.retrying?.station === p.station && p.state !== "active") r.retrying = undefined;
         r.spentUsd = p.spentUsd ?? r.spentUsd;
         r.maxUsd = p.maxUsd ?? r.maxUsd;
         if (p.station === "fix" && p.round) r.fixRounds = Math.max(r.fixRounds, p.round);
@@ -115,8 +123,11 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         for (const x of p.refused ?? []) r.refused.push({ ...x, station: p.station });
         break;
       case "factory.visual": r.visuals.push({ station: p.station, round: p.round, pass: p.pass, items: p.items, missing: p.missing }); break;
-      case "factory.gate": r.waiting = p.state === "waiting" ? { gate: p.gate, question: p.question } : undefined; break;
-      case "factory.run.finished": r.finished = { outcome: p.outcome, reason: p.reason, totalUsd: p.totalUsd, agentCalls: p.agentCalls, sha: p.sha, resumable: !!p.resumable || /^The core restarted/.test(p.reason ?? "") }; r.waiting = undefined; if (p.totalUsd != null) r.spentUsd = p.totalUsd; break;
+      case "factory.gate":
+        r.waiting = p.state === "waiting" ? { gate: p.gate, question: p.question, at: e.ts, action: p.action, kind: p.kind, station: p.station, attempt: p.attempt, error: p.error, same: p.same } : undefined;
+        if (p.state === "approved" && p.kind === "retry" && p.station) r.retrying = { station: p.station, attempt: (p.attempt ?? 1) + 1, at: e.ts };
+        break;
+      case "factory.run.finished": r.finished = { outcome: p.outcome, reason: p.reason, totalUsd: p.totalUsd, agentCalls: p.agentCalls, sha: p.sha, resumable: !!p.resumable || /^The core restarted/.test(p.reason ?? "") }; r.waiting = undefined; r.retrying = undefined; if (p.totalUsd != null) r.spentUsd = p.totalUsd; break;
       case "factory.run.resumed":
         r.finished = undefined;
         r.resumed = { from: p.from, auto: !!p.auto, count: (r.resumed?.count ?? 0) + 1, at: e.ts };
@@ -129,8 +140,8 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
   return [...runs.values()];
 }
 
-export async function askOverseer(prompt: string, model: string) {
-  const r = await fetch(`${API}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt, model }) });
+export async function askOverseer(prompt: string, model: string, projectId?: number) {
+  const r = await fetch(`${API}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt, model, projectId }) });
   return r.json();
 }
 
@@ -171,7 +182,7 @@ export function useFactory() {
     const byId = new Map<number, AgentRunView>();
     for (const e of events) {
       if (e.type === "agent.run.started") {
-        byId.set(e.id, { runId: e.id, agent: e.payload.agent, station: e.payload.station, factoryRun: e.payload.factoryRun, bayTest: !!e.payload.bayTest, prompt: e.payload.prompt, model: e.payload.model, startedAt: e.ts, state: "running" });
+        byId.set(e.id, { runId: e.id, agent: e.payload.agent, station: e.payload.station, factoryRun: e.payload.factoryRun, projectId: e.payload.projectId, bayTest: !!e.payload.bayTest, prompt: e.payload.prompt, model: e.payload.model, startedAt: e.ts, state: "running" });
       } else if (e.type === "agent.run.completed" && byId.has(e.payload.runId)) {
         Object.assign(byId.get(e.payload.runId)!, { state: "done", ...e.payload });
       } else if (e.type === "agent.run.failed" && byId.has(e.payload.runId)) {
@@ -376,7 +387,7 @@ export const projectsApi = {
 };
 
 /** Events that can change a project's list or numbers. */
-const PROJECT_EVENT = (t: string) => t.startsWith("project.") || t.startsWith("order.") || t.startsWith("factory.run.") || t === "agent.run.completed";
+const PROJECT_EVENT = (t: string) => t.startsWith("project.") || t.startsWith("integration.") || t.startsWith("order.") || t.startsWith("factory.run.") || t === "agent.run.completed" || t === "launch.started" || t === "launch.exited";
 
 /** Every project with its rollup, refetched (debounced) when something that changes them lands. */
 export function useProjects(events: SfEvent[], online: boolean) {
@@ -426,4 +437,68 @@ export function orderFor(order: OrderState & { arrivals?: Record<number, number>
     visuals: order.visuals,
     canon: Object.fromEntries(Object.entries(order.canon).filter(([k]) => ids.has(Number(k)))),
   };
+}
+
+// ---- Run tab: start finished projects from their own folders ----
+export type RunKind = "web" | "static" | "cli" | "program";
+export interface UsageField { id: string; label: string; kind: "positional" | "flag" | "option"; type: "folder" | "file" | "number" | "text" | "switch"; required: boolean; flag?: string; suggestions?: string[]; hint?: string }
+export interface UsageExample { label: string; argv: string[]; stdin?: string; note?: string }
+export interface UsageView { summary: string | null; synopsis: string | null; fields: UsageField[]; examples: UsageExample[]; readsStdin: boolean; sources: string[] }
+export interface RunProfileView { id: string; kind: RunKind; label: string; command: string; root?: string; args: boolean; recommended?: boolean; note?: string; utility?: boolean; usage?: UsageView }
+export interface BrowseView { path: string; parent: string | null; home: string; roots: string[]; entries: { name: string; path: string; dir: boolean; size?: number }[]; error: string | null }
+export interface ProjectFolderView { dir: string; source: "folder" | "import" | "run"; label: string; ref?: number; exists: boolean }
+export type LaunchState = "starting" | "running" | "serving" | "exited" | "stopped" | "failed";
+export interface LaunchSession {
+  id: number; projectId: number; profileId: string; kind: RunKind; label: string; command: string; args: string | null; dir: string; root: string | null;
+  mode: "inline" | "window"; state: LaunchState; port: number | null; url: string | null; startedAt: string; endedAt: string | null; exitCode: number | null;
+  pid: number | null; stdinOpen: boolean; lines: number;
+}
+export interface OutputLine { n: number; ts: string; stream: "out" | "err" | "in" | "sys"; text: string }
+export interface LaunchInfo { projectId: number; folders: ProjectFolderView[]; dir: string | null; exists: boolean; stack: string[]; profiles: RunProfileView[]; sessions: LaunchSession[]; running: LaunchSession[] }
+
+export const launchApi = {
+  info: async (id: number, dir?: string | null) => {
+    const r = await fetch(`${API}/api/launch/projects/${id}${dir ? `?dir=${encodeURIComponent(dir)}` : ""}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error ?? "could not read the project folder");
+    return j as LaunchInfo;
+  },
+  start: (id: number, body: { profileId: string; args?: string; argv?: string[]; stdin?: string; dir?: string; mode?: "inline" | "window" }) => post(`/api/launch/projects/${id}/start`, body) as Promise<LaunchSession>,
+  stop: (sid: number) => post(`/api/launch/sessions/${sid}/stop`) as Promise<LaunchSession>,
+  input: (sid: number, text: string | null) => post(`/api/launch/sessions/${sid}/input`, text == null ? { end: true } : { text }),
+  session: async (sid: number) => {
+    const r = await fetch(`${API}/api/launch/sessions/${sid}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error ?? "no such session");
+    return j as { session: LaunchSession; lines: OutputLine[]; dropped: number };
+  },
+  addFolder: (id: number, dir: string) => post(`/api/launch/projects/${id}/folder`, { dir }),
+  terminal: (id: number, dir?: string | null) => post(`/api/launch/projects/${id}/terminal`, { dir: dir ?? undefined }),
+  open: (url: string) => post(`/api/launch/open`, { url }),
+  browse: async (path?: string | null) => {
+    const r = await fetch(`${API}/api/launch/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error ?? "could not read that folder");
+    return j as BrowseView;
+  },
+};
+
+// ---- Project chats ----
+
+/** Where messages live beyond what they carry themselves: see packages/core/src/chat/routes.ts. */
+export interface ChatRoutes { filed: Record<number, number[]>; factoryRuns: Record<number, number> }
+
+/** The chat routes, refetched (debounced) when a Signal is filed or a project or run changes. */
+export function useChatRoutes(events: SfEvent[], online: boolean) {
+  const [routes, setRoutes] = useState<ChatRoutes>({ filed: {}, factoryRuns: {} });
+  const at = events.filter((e) => e.type === "signal.captured" || PROJECT_EVENT(e.type)).at(-1)?.id ?? 0;
+  useEffect(() => {
+    if (!online) return;
+    let stop = false;
+    const t = setTimeout(() => {
+      fetch(`${API}/api/chat/routes`).then((r) => (r.ok ? r.json() : null)).then((j) => { if (!stop && j) setRoutes(j); }).catch(() => {});
+    }, 250);
+    return () => { stop = true; clearTimeout(t); };
+  }, [at, online]);
+  return routes;
 }

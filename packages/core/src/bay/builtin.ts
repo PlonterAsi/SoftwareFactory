@@ -15,6 +15,18 @@ Write nothing outside the blocks except at most two short lines of notes.`;
 
 export const TARGET = `Target platform: Node.js 22, ES modules ("type": "module"), no third-party packages at all (built-in modules only, such as node:fs, node:path, node:test, node:assert).`;
 
+/**
+ * visualizeEverything applies to what the factory makes too: every project ships a
+ * screen the Run tab can preview. A command line only when the idea asks for one,
+ * and then next to the page, never instead of it.
+ */
+export const UI_TARGET = `Every project has a visual interface: a web page the person opens inside SoftwareFactory.
+- index.html at the project root, with web/app.js (an ES module, <script type="module" src="web/app.js">) and web/style.css. Plain HTML, CSS and JavaScript: no frameworks, no CDN, nothing loaded from the internet, no build step. It is served as static files from the project folder.
+- web/app.js imports the core logic from src/ by relative path with the full file name (import { x } from "../src/x.js"). Everything the page imports must run in a browser: no node: modules, no process, no Buffer. Keep Node-only code (reading or writing files on disk) in its own files that the page never imports.
+- On first open the page already shows something useful: a built-in sample input and its result. Every control is wired; results, and errors, appear on the page and are drawn visually where it helps (a table, bars, a preview), not only as text.
+- Only when the idea truly needs the local disk or the operating system (changing files in a folder, running commands) add server.js: node:http only, listening on Number(process.env.PORT) || 0 at 127.0.0.1, printing "Ready on http://localhost:<port>/" once listening, serving index.html, web/ and src/ and a small JSON API under /api/ that wraps the core; the page calls it with fetch, and package.json gets "start": "node server.js".
+- A command-line tool (bin/<name>.js) only when the idea asks for a command line or for scripting, and then next to the page. It prints "usage: <name> <input> [--flag] [--opt <n>]" for --help or missing arguments.`;
+
 export const CONTRACTS: Record<Slot, string> = {
   council: `Station contract: council.
 You hold one of three seats on the Council, which looks at a one-line idea before anything is planned. Give your seat's view, in at most 120 words in total.
@@ -23,32 +35,41 @@ Answer with ONE fenced json block and nothing else, shaped exactly like:
 At most 4 proposals and 4 concerns. vote is "build" (plan it now), "reshape" (plan it with your proposals applied) or "drop" (should not be built). scope is "small", "medium" or "large".`,
   plan: `Station contract: plan.
 ${TARGET}
-Design for testing: put the logic in pure functions exported from src/ modules so tests never need real binary files, network or the clock. A thin bin/ CLI wraps them.
-Keep it small: at most 4 source files and at most 8 acceptance criteria.
+${UI_TARGET}
+Design for testing: put the logic in pure functions exported from src/ modules so tests never need real binary files, network or the clock. The page (and the CLI, when there is one) are thin layers over them.
+Keep it small: at most 4 source files besides the page files (index.html, web/app.js, web/style.css), and at most 8 acceptance criteria. Acceptance criteria are about the src/ core; the page is checked separately.
+"ui" describes the screen: what it shows on first open (with which sample), its controls, and what the person sees after using them.
+"cli" is the usage line, or "" when the idea does not call for a command line.
+"examples" are ready-to-run inputs for the CLI (at most 3, [] when there is no CLI); args may name files the build adds under examples/ or SPEC.md, which always exists.
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"name": "Human name", "slug": "kebab-case-name", "summary": "one sentence",
- "interface": "exact exported functions with signatures and behaviour, and the CLI usage",
+ "interface": "exact exported functions with signatures and behaviour",
+ "ui": "the screen, in two or three sentences",
+ "cli": "usage: name <input> [--flag]",
+ "examples": [{"label": "short", "args": "examples/sample.txt --flag"}],
  "acceptance": ["criterion 1", "criterion 2"],
  "tasks": [{"id": "t1", "title": "short", "dependsOn": []}],
- "files": ["package.json", "src/x.js", "bin/x.js"]}`,
+ "files": ["package.json", "src/x.js", "index.html", "web/app.js", "web/style.css"]}`,
   tests: `Station contract: tests.
 Write acceptance tests from an approved spec BEFORE any code exists. The tests are then locked: nobody may edit them, so they must test exactly the spec's interface and acceptance criteria, nothing invented.
 ${TARGET}
-Use node:test and node:assert/strict. Put tests in test/*.test.js and import the code by relative path (for example ../src/x.js). Build fixtures in code (Buffers, temp dirs from node:os tmpdir), or write small fixture files under test/fixtures/ as file blocks too; resolve their paths from the test file (new URL("./fixtures/x.csv", import.meta.url)), never from the working directory. One test per acceptance criterion where possible, named after it.
+Use node:test and node:assert/strict. Put tests in test/*.test.js and import the code by relative path (for example ../src/x.js). Build fixtures in code (Buffers, temp dirs from node:os tmpdir), or write small fixture files under test/fixtures/ as file blocks too; resolve their paths from the test file (new URL("./fixtures/x.csv", import.meta.url)), never from the working directory. One test per acceptance criterion where possible, named after it. Test the src/ core only: never the page (index.html, web/), which the core checks on its own.
 ${FILE_FORMAT}`,
   build: `Station contract: build.
 Write the code that makes the locked acceptance tests pass and meets the spec.
 ${TARGET}
-You may not create or change anything under test/. Write package.json (with "type": "module" and "scripts": {"test": "node --test"}), every file the plan lists, and a short README.md.
+${UI_TARGET}
+You may not create or change anything under test/. Write package.json (with "type": "module" and "scripts": {"test": "node --test"}), every file the plan lists, the page as the plan's "ui" describes it, any sample files the plan's examples name, and a short README.md that says how to open the page.
 ${FILE_FORMAT}`,
   review: `Station contract: review.
-The locked acceptance tests already pass. Check the code against the spec for what the tests miss: spec points not met, wrong or unsafe behaviour, a README without usage. Never ask for style changes or new features.
+The locked acceptance tests already pass. Check the code against the spec for what the tests miss: spec points not met, wrong or unsafe behaviour, a README without usage, and the page: it must use the core from src/, show a sample result on first open, and have every control wired (a blank page or a dead button is "high"). Never ask for style changes or new features.
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"verdict": "pass", "findings": [{"severity": "low", "text": "short"}]}
 verdict is "fix" only when there is at least one "high" finding (something the spec requires that is wrong or missing). At most 5 findings.`,
   fix: `Station contract: fix.
-Tests failed, or a reviewer found a problem. Fix the code, never the tests (they are locked and any change to test/ is rejected). Change as little as needed. Return only the files you change, each in full.
+Tests failed, the page check failed, or a reviewer found a problem. Fix the code, never the tests (they are locked and any change to test/ is rejected). Change as little as needed. Return only the files you change, each in full.
 ${TARGET}
+${UI_TARGET}
 ${FILE_FORMAT}`,
   order: `Station contract: order.\n${ARCHIVIST_ROLE}`,
   improve: `Station contract: improve.
@@ -93,13 +114,13 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     id: "visionary", name: "Visionary", avatar: "✶", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
     description: "Council seat: expands the idea and finds what would make it worth using.",
     sample: "a CLI that turns a folder of markdown notes into a static site",
-    prompt: "You are the Visionary on the SoftwareFactory Council. You expand the idea: who uses it, the one feature that makes it worth using, and what a great first version feels like. Stay inside what one small build can deliver.",
+    prompt: "You are the Visionary on the SoftwareFactory Council. You expand the idea: who uses it, the one feature that makes it worth using, what the person sees on its screen, and what a great first version feels like. Stay inside what one small build can deliver.",
   },
   {
     id: "architect", name: "Architect", avatar: "⌬", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
     description: "Council seat: shapes the idea into modules, interfaces and a testable core.",
     sample: "a CLI that turns a folder of markdown notes into a static site",
-    prompt: "You are the Architect on the SoftwareFactory Council. You shape the idea: the smallest set of modules, the pure functions at its core, the inputs and outputs, and what must be testable without the network or real files.",
+    prompt: "You are the Architect on the SoftwareFactory Council. You shape the idea: the smallest set of modules, the pure functions at its core, the page that shows them, the inputs and outputs, and what must be testable without the network or real files.",
   },
   {
     id: "skeptic", name: "Skeptic", avatar: "⚠", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
@@ -123,7 +144,7 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     id: "builder", name: "Builder", avatar: "▣", station: "build", model: "sonnet", budgetUsd: 0.6, plugins: [], skills: [], tools: [],
     description: "Writes the code that passes the locked tests.",
     sample: "Spec: src/slug.js exports slugify(text) that lowercases, turns spaces into dashes and drops other punctuation.",
-    prompt: "You are the Builder of SoftwareFactory. You write small, clear code that makes the locked acceptance tests pass and meets the spec.",
+    prompt: "You are the Builder of SoftwareFactory. You write small, clear code that makes the locked acceptance tests pass and meets the spec, with a clean, readable page on top of it.",
   },
   {
     id: "reviewer", name: "Reviewer", avatar: "◎", station: "review", model: "haiku", budgetUsd: 0.1, plugins: [], skills: [], tools: [],
