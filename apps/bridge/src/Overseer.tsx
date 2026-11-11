@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { GateActions, STEP } from "./GateActions";
 import { askOverseer, captureSignal, setupApi, splitBuild, startFactoryRun, type AgentRunView, type ChatRoutes, type CrewMode, type FactoryRunView, type OrderState, type ProjectSummary, type Signal, type SinceView } from "./api";
 
 type Item = {
@@ -30,6 +31,8 @@ function chatItems({ signals, runs, factoryRuns, briefings, ingests, routes }: {
     })),
     // A gate waiting for you is said here too, so you never have to hunt for it.
     ...factoryRuns.filter((r) => r.waiting && !r.finished).map((r) => ({ key: "g" + r.run, ts: "~", kind: "gate" as const, text: r.waiting!.question, meta: `run #${r.run} waits for you`, run: r.run, home: runHome(r.run), headline: true })),
+    // After Retry, the chat says the step is running again until it passes or fails anew.
+    ...factoryRuns.filter((r) => r.retrying && !r.waiting && !r.finished).map((r) => ({ key: "rt" + r.run, ts: "~", kind: "factory" as const, text: `↻ Retrying ${STEP[r.retrying!.station] ?? r.retrying!.station} (attempt ${r.retrying!.attempt})…`, meta: `run #${r.run}`, run: r.run, home: runHome(r.run), headline: true })),
     // The Order Engine's daily briefing: everything non-urgent, batched into one message. It spans projects, so it lives in General.
     ...briefings.map((b) => ({ key: "b" + b.id, ts: b.ts, kind: "briefing" as const, text: b.lines.map((l) => "• " + l.text).join("\n"), meta: "Order Engine briefing", home: null })),
     // A quiet receipt under each Signal: how it was filed. It follows its Signal.
@@ -177,13 +180,15 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
         )}
         {items.map((i) => (
           <div key={i.key} className={"msg " + i.kind}>
-            <div className="msg-text">{i.text}</div>
+            {i.kind === "gate" && i.run && factoryRuns.find((r) => r.run === i.run)?.waiting
+              ? <GateActions run={factoryRuns.find((r) => r.run === i.run)!} compact />
+              : <div className="msg-text">{i.text}</div>}
             {i.meta && <div className="mono muted msg-meta">{i.meta}</div>}
             {(i.build || i.open || (i.kind === "gate" && i.run)) && (
               <div className="msg-actions">
                 {i.build && <button className="sm" disabled={busy} onClick={(e) => build(e, i.build)} title={i.build}>Build: {i.build.length > 48 ? i.build.slice(0, 46) + "…" : i.build}</button>}
                 {i.open && i.run && <button className="ghost sm" onClick={() => setupApi.open("run", i.run).catch((x) => setErr((x as Error).message))}>Open folder</button>}
-                {i.kind === "gate" && i.run && <button className="sm gate" onClick={() => onShowRun(i.run!)}>Show me</button>}
+                {i.kind === "gate" && i.run && <button className="ghost sm" onClick={() => onShowRun(i.run!)}>Show me</button>}
               </div>
             )}
           </div>

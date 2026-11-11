@@ -65,6 +65,8 @@ export interface SeatView { agent: string; name: string; version: number; round:
 export interface CouncilBriefView { rounds: number; votes: Record<string, Vote>; outcome: Vote; agreed: string[]; proposals: string[]; concerns: string[] }
 export interface ReviewView { round: number; agent: string; verdict: "pass" | "fix"; findings: { severity: "high" | "low"; text: string }[] }
 export interface TestCaseView { name: string; file: string; pass: boolean; error?: string }
+/** A gate a run waits at. For a failed step: which one, how many tries, and whether the last try failed the same way. */
+export interface GateWaitView { gate: string; question: string; at: string; action?: string; kind?: "retry" | "council" | "rounds" | "budget"; station?: string; attempt?: number; error?: string; same?: boolean }
 export interface FactoryRunView {
   run: number;
   idea: string;
@@ -79,7 +81,9 @@ export interface FactoryRunView {
   files: Record<string, { lines: number; writes: number; last: string; locked: boolean }>;
   refused: { path: string; reason: string; station: string }[];
   visuals: { station: string; round?: number; pass: boolean; items: string[]; missing: string[] }[];
-  waiting?: { gate: string; question: string };
+  waiting?: GateWaitView;
+  /** A failed step you sent back with Retry, while it runs again. */
+  retrying?: { station: string; attempt: number; at: string };
   fixRounds: number;
   council: { round: number; seats: SeatView[]; brief: CouncilBriefView }[];
   reviews: ReviewView[];
@@ -102,6 +106,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
     switch (e.type) {
       case "factory.station":
         r.stations[p.station] = { state: p.state, round: p.round, note: p.note };
+        if (r.retrying?.station === p.station && p.state !== "active") r.retrying = undefined;
         r.spentUsd = p.spentUsd ?? r.spentUsd;
         r.maxUsd = p.maxUsd ?? r.maxUsd;
         if (p.station === "fix" && p.round) r.fixRounds = Math.max(r.fixRounds, p.round);
@@ -118,8 +123,11 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         for (const x of p.refused ?? []) r.refused.push({ ...x, station: p.station });
         break;
       case "factory.visual": r.visuals.push({ station: p.station, round: p.round, pass: p.pass, items: p.items, missing: p.missing }); break;
-      case "factory.gate": r.waiting = p.state === "waiting" ? { gate: p.gate, question: p.question } : undefined; break;
-      case "factory.run.finished": r.finished = { outcome: p.outcome, reason: p.reason, totalUsd: p.totalUsd, agentCalls: p.agentCalls, sha: p.sha, resumable: !!p.resumable || /^The core restarted/.test(p.reason ?? "") }; r.waiting = undefined; if (p.totalUsd != null) r.spentUsd = p.totalUsd; break;
+      case "factory.gate":
+        r.waiting = p.state === "waiting" ? { gate: p.gate, question: p.question, at: e.ts, action: p.action, kind: p.kind, station: p.station, attempt: p.attempt, error: p.error, same: p.same } : undefined;
+        if (p.state === "approved" && p.kind === "retry" && p.station) r.retrying = { station: p.station, attempt: (p.attempt ?? 1) + 1, at: e.ts };
+        break;
+      case "factory.run.finished": r.finished = { outcome: p.outcome, reason: p.reason, totalUsd: p.totalUsd, agentCalls: p.agentCalls, sha: p.sha, resumable: !!p.resumable || /^The core restarted/.test(p.reason ?? "") }; r.waiting = undefined; r.retrying = undefined; if (p.totalUsd != null) r.spentUsd = p.totalUsd; break;
       case "factory.run.resumed":
         r.finished = undefined;
         r.resumed = { from: p.from, auto: !!p.auto, count: (r.resumed?.count ?? 0) + 1, at: e.ts };
