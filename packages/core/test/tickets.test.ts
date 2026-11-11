@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventLog, MockRuntime, Factory, AgentBay, Tickets, createCore, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal, OrderEngine, ImproveCouncil, listSignals } from "../src/index.js";
+import { EventLog, MockRuntime, Factory, AgentBay, Tickets, createCore, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, ideaFromTicket, captureSignal, OrderEngine, ImproveCouncil, listSignals } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-tickets-"));
 
@@ -131,6 +131,30 @@ describe("tickets: agents and the loop", () => {
     const said = t.notes(bug.id).map((n) => `${n.by}: ${n.text}`);
     expect(said.some((s) => /^factory: Run #\d+ shipped/.test(s))).toBe(true);
     expect(said.at(-1)).toMatch(/^qa-rule: Closed by the QA rule/);
+  }, 30_000);
+
+  it("goes through the factory's duplicate check: a rework of its own run is fine, someone else's build of the same idea needs 'again'", async () => {
+    const log = new EventLog();
+    const rt = new MockRuntime();
+    const bay = new AgentBay(log, rt);
+    const f = new Factory(log, rt, tmp(), bay);
+    const t = new Tickets(log, { runtime: rt, factory: f, bay });
+    const a = t.open({ kind: "request", title: "A word counter", answers: { need: "Count words" } });
+    const first = t.work(a.id, { autoApprove: true }).run;
+    await f.wait(first);
+    expect(t.get(a.id)!.status).toBe("built");
+    // Not good yet: working it again reworks the ticket's own shipped run.
+    t.say(a.id, "", { status: "open" });
+    const second = t.work(a.id, { autoApprove: true }).run;
+    await f.wait(second);
+    // The same idea built outside the ticket today: refused, unless again.
+    const b = t.open({ kind: "request", title: "A word counter", answers: { need: "Count words" } });
+    const other = f.start(ideaFromTicket(t.get(b.id)!, t.document(b.id)), { autoApprove: true });
+    await f.wait(other);
+    let err: any;
+    try { t.work(b.id); } catch (e) { err = e; }
+    expect(err?.duplicate).toMatchObject({ duplicateOf: other, state: "shipped" });
+    expect(t.work(b.id, { again: true, autoApprove: true }).run).toBeGreaterThan(other);
   }, 30_000);
 
   it("a request or a ticket with the hand brake stays built for your look", async () => {

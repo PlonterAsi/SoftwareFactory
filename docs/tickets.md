@@ -26,6 +26,7 @@ Questions are data in `packages/core/src/tickets/model.ts` (`FORMS`): adding one
 ## Agents and the loop
 
 - **Work it with the crew**: the ticket's work document becomes a factory run (Council, plan, locked tests, build, review, fix, ship). The ticket moves to in progress; gate waits, the ship and failures land on its thread; when the run ships, it moves to built.
+- **One build of an idea a day**: "Work it" goes through the factory's duplicate check. Reworking the ticket's own shipped run after you reopen it is fine; when the same idea is already building, resumable, or was built today by another run, the ticket page says which run and offers "Open run" or "Work it again anyway" (`again: true`).
 - **The QA rule**: a bug or task whose run shipped with every locked test green closes by itself, because the one who checks is not the one who builds. Writing "needs a look", "don't close" or "keep open" on the thread pulls the hand brake.
 - **Ask an agent**: the assignee (or the Overseer) reads the work document and replies on the thread in one short, capped call (at most $0.10). If it says the ticket can be built as written, an open ticket moves to ready.
 - **Tickets open themselves**: a factory run that fails on its own opens a bug; a task or question the Order Engine files from what you say opens a ticket under its project; an accepted Improvement Council proposal opens an idea (a code suggestion from an imported repo opens a task). A `fingerprint` makes each of these idempotent: seen again adds a note, never a second ticket.

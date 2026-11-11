@@ -445,7 +445,13 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
     case "spawn": return [201, tickets.spawn(id, { ...(body as object), by: "you" } as any)];
     case "work":
       if (!gitReady()) return [409, { error: "Git is not installed, so the crew has nowhere to keep what it builds. Install Git for Windows (git-scm.com/download/win), then press Work it again." }];
-      return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true })];
+      try {
+        return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true, again: body.again === true })];
+      } catch (e) {
+        const dup = (e as { duplicate?: Record<string, unknown> }).duplicate;
+        if (dup) return [409, { error: (e as Error).message, ...dup }];
+        throw e;
+      }
     case "ask": return [200, await tickets.ask(id, body.agent ? String(body.agent) : undefined)];
   }
   return null;

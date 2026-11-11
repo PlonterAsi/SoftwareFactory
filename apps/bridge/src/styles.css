@@ -1126,3 +1126,4 @@ button.tool-raw { font-size: 12px; margin-left: auto; }
 .dup-notice .dup-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .hull-twin { align-self: flex-start; font-size: 11px; color: var(--warn, #c9a227); cursor: pointer; text-decoration: underline dotted; }
 .pj-merge select { min-width: 0; flex: 1; }
+.tk-dup { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; padding: 8px 10px; border: 1px solid var(--gate); border-radius: 8px; }
