@@ -430,7 +430,11 @@ export function orderFor(order: OrderState & { arrivals?: Record<number, number>
 
 // ---- Run tab: start finished projects from their own folders ----
 export type RunKind = "web" | "static" | "cli" | "program";
-export interface RunProfileView { id: string; kind: RunKind; label: string; command: string; root?: string; args: boolean; recommended?: boolean; note?: string; utility?: boolean }
+export interface UsageField { id: string; label: string; kind: "positional" | "flag" | "option"; type: "folder" | "file" | "number" | "text" | "switch"; required: boolean; flag?: string; suggestions?: string[]; hint?: string }
+export interface UsageExample { label: string; argv: string[]; stdin?: string; note?: string }
+export interface UsageView { summary: string | null; synopsis: string | null; fields: UsageField[]; examples: UsageExample[]; readsStdin: boolean; sources: string[] }
+export interface RunProfileView { id: string; kind: RunKind; label: string; command: string; root?: string; args: boolean; recommended?: boolean; note?: string; utility?: boolean; usage?: UsageView }
+export interface BrowseView { path: string; parent: string | null; home: string; roots: string[]; entries: { name: string; path: string; dir: boolean; size?: number }[]; error: string | null }
 export interface ProjectFolderView { dir: string; source: "folder" | "import" | "run"; label: string; ref?: number; exists: boolean }
 export type LaunchState = "starting" | "running" | "serving" | "exited" | "stopped" | "failed";
 export interface LaunchSession {
@@ -448,7 +452,7 @@ export const launchApi = {
     if (!r.ok) throw new Error(j.error ?? "could not read the project folder");
     return j as LaunchInfo;
   },
-  start: (id: number, body: { profileId: string; args?: string; dir?: string; mode?: "inline" | "window" }) => post(`/api/launch/projects/${id}/start`, body) as Promise<LaunchSession>,
+  start: (id: number, body: { profileId: string; args?: string; argv?: string[]; stdin?: string; dir?: string; mode?: "inline" | "window" }) => post(`/api/launch/projects/${id}/start`, body) as Promise<LaunchSession>,
   stop: (sid: number) => post(`/api/launch/sessions/${sid}/stop`) as Promise<LaunchSession>,
   input: (sid: number, text: string | null) => post(`/api/launch/sessions/${sid}/input`, text == null ? { end: true } : { text }),
   session: async (sid: number) => {
@@ -460,4 +464,10 @@ export const launchApi = {
   addFolder: (id: number, dir: string) => post(`/api/launch/projects/${id}/folder`, { dir }),
   terminal: (id: number, dir?: string | null) => post(`/api/launch/projects/${id}/terminal`, { dir: dir ?? undefined }),
   open: (url: string) => post(`/api/launch/open`, { url }),
+  browse: async (path?: string | null) => {
+    const r = await fetch(`${API}/api/launch/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error ?? "could not read that folder");
+    return j as BrowseView;
+  },
 };

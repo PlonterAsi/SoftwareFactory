@@ -6,6 +6,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
   EventLog, MockRuntime, Factory, createCore, createProject, detectProfiles, splitArgs, quoteArg, resolveInside, findLocalUrl, projectEnv, projectFolders,
+  readUsage, parseSynopsis, browse,
 } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-launch-"));
@@ -255,4 +256,94 @@ describe("launch: running a project from the Bridge", () => {
     expect((await call(`/api/launch/projects/9999`)).status).toBe(404);
     expect((await call(`/api/launch/open`, { url: "https://evil.example" })).status).toBe(400);
   });
+});
+
+describe("launch: using a tool without knowing its arguments", () => {
+  const RENAMER = `#!/usr/bin/env node
+const USAGE = 'usage: photo-date-rename <dir> [--apply]';
+const args = process.argv.slice(2);
+if (args.filter((a) => !a.startsWith("--")).length !== 1) { console.error(USAGE); process.exit(2); }
+console.log("plan for " + args[0] + (args.includes("--apply") ? " (applied)" : " (dry run)"));
+`;
+  it("reads the usage line into a form: folders, files, switches, options", () => {
+    expect(parseSynopsis("<dir> [--apply] [--top <n>] [--format=<fmt>] [out-file]")).toEqual([
+      expect.objectContaining({ id: "pos:0", kind: "positional", type: "folder", required: true }),
+      expect.objectContaining({ id: "--apply", kind: "flag", type: "switch", required: false }),
+      expect.objectContaining({ id: "--top", kind: "option", type: "number", required: false }),
+      expect.objectContaining({ id: "--format", kind: "option", type: "text" }),
+      expect.objectContaining({ id: "pos:1", kind: "positional", type: "file", required: false }),
+    ]);
+    expect(parseSynopsis("[-h] <csv-file> --month <month>").map((f) => [f.id, f.type, f.required])).toEqual([["pos:0", "file", true], ["--month", "text", true]]);
+  });
+
+  it("finds what a factory-built tool does and how to call it, from its spec and its own usage text", () => {
+    const dir = folder({
+      "package.json": JSON.stringify({ type: "module" }),
+      "bin/photo-date-rename.js": RENAMER,
+      "SPEC.md": "# Photo Date Renamer\n\n> idea\n\nRenames JPEG photos in a folder to their capture date, with a dry run by default.\n\n## Interface\n\nbin/photo-date-rename.js CLI: photo-date-rename <dir> [--apply]. The default is a dry run.\n",
+    });
+    const p = detectProfiles(dir).profiles[0];
+    const u = readUsage(dir, p);
+    expect(u.summary).toMatch(/^Renames JPEG photos/);
+    expect(u.synopsis).toBe("photo-date-rename <dir> [--apply]");
+    expect(u.fields.map((f) => [f.id, f.type, f.required])).toEqual([["pos:0", "folder", true], ["--apply", "switch", false]]);
+    expect(u.sources).toContain("spec");
+  });
+
+  it("offers example runs: run.json first, then README command lines, then a sample from the project", () => {
+    const dir = folder({
+      "package.json": JSON.stringify({ type: "module", bin: { "expense-report": "bin/report.js" } }),
+      "bin/report.js": "const [f] = process.argv.slice(2); console.log('report of', f);\n",
+      "README.md": "# Expense report\n\nSums a CSV of expenses by category.\n\n    expense-report <csv-file> [--month <month>]\n\nMarch only:\n\n    expense-report test/fixtures/sample.csv --month 2024-03   # Report for March\n    expense-report --help\n",
+      "test/fixtures/sample.csv": "date,amount\n",
+      "run.json": JSON.stringify({ examples: [{ label: "Whole year", profile: "cli", args: "test/fixtures/sample.csv" }, { label: "Other tool", profile: "bin:other", args: "x" }] }),
+    });
+    const u = readUsage(dir, detectProfiles(dir).profiles.find((p) => p.kind === "cli")!);
+    expect(u.summary).toBe("Sums a CSV of expenses by category.");
+    expect(u.fields.map((f) => [f.id, f.type])).toEqual([["pos:0", "file"], ["--month", "text"]]);
+    expect(u.fields[0].suggestions).toEqual([join(dir, "test/fixtures/sample.csv")]);
+    expect(u.examples).toEqual([
+      { label: "Whole year", argv: ["test/fixtures/sample.csv"], stdin: undefined, note: undefined },
+      { label: "Report for March", argv: ["test/fixtures/sample.csv", "--month", "2024-03"] },
+    ]);
+    expect(u.sources[0]).toBe("run.json");
+  });
+
+  it("lets a tool that reads text be tried with typed text, with no usage written down", () => {
+    const dir = folder({ "bin/wc.js": "import { readFileSync } from 'node:fs';\nconsole.log(readFileSync(process.argv[2] ?? 0, 'utf8').split(/\\s+/).filter(Boolean).length);\n", "notes.txt": "a b c" });
+    const u = readUsage(dir, detectProfiles(dir).profiles[0]);
+    expect(u.readsStdin).toBe(true);
+    expect(u.fields).toEqual([expect.objectContaining({ id: "pos:0", type: "file", required: false, suggestions: [join(dir, "notes.txt")] })]);
+    expect(u.examples.map((e) => e.label)).toEqual(["Try it on notes.txt from the project", "Try it on a sample text"]);
+    expect(u.examples[1].stdin).toBeTruthy();
+  });
+
+  it("runs a tool with the form's arguments and typed text, and lists folders for the pickers", async () => {
+    const log = new EventLog(":memory:");
+    const core = createCore({ log, runtime: new MockRuntime({ delayMs: 0 }), projectsDir: join(tmp(), "projects"), order: { mode: "heuristic" } });
+    const server = createServer(core);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const call = async (path: string, body?: unknown) => (await fetch(base + path, body === undefined ? undefined : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
+    const dir = folder({ "bin/photo-date-rename.js": RENAMER, "bin/wc.js": "import { readFileSync } from 'node:fs';\nconsole.log('words:' + readFileSync(0, 'utf8').split(/\\s+/).filter(Boolean).length);\n", "my photos/a.jpg": "x" });
+    const pid = createProject(log, { name: "Tools" });
+    await call(`/api/launch/projects/${pid}/folder`, { dir });
+    const info = await call(`/api/launch/projects/${pid}`);
+    const ren = info.profiles.find((p: any) => p.id === "bin:photo-date-rename");
+    expect(ren.usage.fields[0]).toMatchObject({ type: "folder", required: true });
+    const s = await call(`/api/launch/projects/${pid}/start`, { profileId: ren.id, argv: [join(dir, "my photos")] });
+    expect(s.command).toBe(`node bin/photo-date-rename.js "${join(dir, "my photos")}"`);
+    const done = await until(async () => { const r = await call(`/api/launch/sessions/${s.id}`); return r.session.state === "exited" && r; });
+    expect(done.lines.map((l: any) => l.text)).toContain(`plan for ${join(dir, "my photos")} (dry run)`);
+    const w = await call(`/api/launch/projects/${pid}/start`, { profileId: "bin:wc", stdin: "one two three four" });
+    const wd = await until(async () => { const r = await call(`/api/launch/sessions/${w.id}`); return r.session.state === "exited" && r; });
+    expect(wd.lines.map((l: any) => [l.stream, l.text])).toEqual(expect.arrayContaining([["in", "one two three four"], ["out", "words:4"]]));
+    const b = await call(`/api/launch/browse?path=${encodeURIComponent(dir)}`);
+    expect(b.path).toBe(dir);
+    expect(b.entries.map((e: any) => [e.name, e.dir])).toEqual([["bin", true], ["my photos", true]]);
+    expect(b.parent).toBeTruthy();
+    expect(browse(null).path).toBeTruthy();
+    core.launcher.stopAll();
+    server.close();
+  }, 30_000);
 });

@@ -202,7 +202,7 @@ const MOCK = {
     name: "Word Counter", slug: "word-counter", summary: "Counts words in text from stdin or a file.",
     interface: "src/count.js exports countWords(text: string): number. bin/wc.js prints countWords of the file given as argv[2].",
     ui: "A text box prefilled with a sample paragraph; the word count updates as you type, shown as a big number with a bar per line.",
-    cli: "usage: wc <file>",
+    cli: "usage: wc [file]",
     examples: [{ label: "Count the words in the spec", args: "SPEC.md" }],
     acceptance: ["empty text has 0 words", "words are split on any whitespace", "punctuation-only tokens still count"],
     tasks: [{ id: "t1", title: "countWords", dependsOn: [] }, { id: "t2", title: "CLI wrapper", dependsOn: ["t1"] }, { id: "t3", title: "README", dependsOn: ["t2"] }],
@@ -228,8 +228,8 @@ FILE>>>
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { countWords } from "../src/count.js";
-if (!process.argv[2] || process.argv[2] === "--help") { console.log("usage: wc <file>"); process.exit(process.argv[2] ? 0 : 1); }
-console.log(countWords(readFileSync(process.argv[2], "utf8")));
+if (process.argv[2] === "--help") { console.log("usage: wc [file]"); process.exit(0); }
+console.log(countWords(readFileSync(process.argv[2] ?? 0, "utf8")));
 FILE>>>
 <<<FILE index.html
 <!doctype html>

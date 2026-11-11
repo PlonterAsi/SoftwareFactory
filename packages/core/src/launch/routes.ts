@@ -1,11 +1,13 @@
-import { statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { linkToProject, registerProjectFacet, unlinkFromProject } from "../projects/service.js";
 import { detectProfiles } from "./detect.js";
 import { openConsoleWindow, type Launcher, type OutputLine } from "./launcher.js";
 import { serveStatic } from "./static.js";
+import { readUsage } from "./usage.js";
 
 /** A folder a project can run from, and where it came from. */
 export interface ProjectFolder { dir: string; source: "folder" | "import" | "run"; label: string; ref?: number; exists: boolean }
@@ -48,6 +50,7 @@ export function projectFolders(log: EventLog, projectId: number): ProjectFolder[
  *   POST /api/launch/sessions/:sid/stop
  *   POST /api/launch/sessions/:sid/input      { text } a line of typed input, or { end: true } to close it
  *   POST /api/launch/open                     { url } open a local address in your browser
+ *   GET  /api/launch/browse?path=             a folder's folders and files, for the file and folder pickers
  *   GET  /preview/:id/...                     a project's plain pages, while its preview is on
  */
 export async function launchRoute(
@@ -69,6 +72,7 @@ export async function launchRoute(
   }
   if (!path.startsWith("/api/launch/")) return null;
 
+  if (req.method === "GET" && path === "/api/launch/browse") return [200, browse(url.searchParams.get("path"))];
   if (req.method === "POST" && path === "/api/launch/open") {
     const body = await ctx.readJson(req);
     const u = String(body.url ?? "");
@@ -91,7 +95,9 @@ export async function launchRoute(
     if (req.method === "GET" && !m[2]) {
       const f = pick(url.searchParams.get("dir"));
       const det = f ? detectProfiles(f.dir) : null;
-      return [200, { projectId: id, folders, dir: f?.dir ?? null, exists: det?.exists ?? false, stack: det?.stack ?? [], profiles: det?.profiles ?? [], sessions: launcher.sessionsOf(id), running: launcher.running(id) }];
+      // Command-line tools carry how to use them, so nobody has to know their arguments.
+      const profiles = (det?.profiles ?? []).map((p) => (p.kind === "cli" && f ? { ...p, usage: readUsage(f.dir, p) } : p));
+      return [200, { projectId: id, folders, dir: f?.dir ?? null, exists: det?.exists ?? false, stack: det?.stack ?? [], profiles, sessions: launcher.sessionsOf(id), running: launcher.running(id) }];
     }
     if (req.method !== "POST") return null;
     const body = await ctx.readJson(req);
@@ -115,7 +121,12 @@ export async function launchRoute(
       const det = detectProfiles(f.dir);
       const profile = det.profiles.find((p) => p.id === String(body.profileId ?? "")) ?? (body.profileId ? null : det.profiles.find((p) => p.recommended));
       if (!profile) return [404, { error: body.profileId ? `No way to run "${body.profileId}" in ${f.dir}` : `Nothing to run was found in ${f.dir}` }];
-      const s = await launcher.start({ projectId: id, dir: f.dir, profile, args: body.args ? String(body.args) : undefined, mode: body.mode === "window" ? "window" : "inline" });
+      const s = await launcher.start({
+        projectId: id, dir: f.dir, profile, args: body.args ? String(body.args) : undefined,
+        argv: Array.isArray(body.argv) ? body.argv.map(String) : undefined,
+        stdin: typeof body.stdin === "string" ? body.stdin.slice(0, 1_000_000) : undefined,
+        mode: body.mode === "window" ? "window" : "inline",
+      });
       return [202, s];
     }
     return null;
@@ -166,3 +177,25 @@ registerProjectFacet({
     return { running: live.length, live: live.map((r) => ({ id: Number(r.id), kind: r.kind, label: r.label, url: r.url })), lastStartedAt: last?.started_at ?? null, folder: folders.find((f) => f.exists)?.dir ?? null };
   },
 });
+
+/** One folder for the pickers: its subfolders and files, its parent, and where to start (home, drives). */
+export function browse(path: string | null) {
+  const home = homedir();
+  const roots = process.platform === "win32"
+    ? "CDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((d) => `${d}:\\`).filter((d) => { try { return existsSync(d); } catch { return false; } })
+    : ["/"];
+  const at = path && isAbsolute(path) && isDir(path) ? resolve(path) : home;
+  const entries: { name: string; path: string; dir: boolean; size?: number }[] = [];
+  let error: string | null = null;
+  try {
+    for (const name of readdirSync(at)) {
+      if (name.startsWith(".") || name === "node_modules" || /^(\$Recycle\.Bin|System Volume Information|pagefile\.sys|hiberfil\.sys|swapfile\.sys|DumpStack\.log\.tmp)$/i.test(name)) continue;
+      const p = join(at, name);
+      try { const st = statSync(p); entries.push({ name, path: p, dir: st.isDirectory(), size: st.isFile() ? st.size : undefined }); } catch { /* no access */ }
+      if (entries.length >= 2000) break;
+    }
+  } catch (e) { error = (e as Error).message; }
+  entries.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) : a.dir ? -1 : 1));
+  const parent = dirname(at) === at ? null : dirname(at);
+  return { path: at, parent, home, roots, entries, error };
+}

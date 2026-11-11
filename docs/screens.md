@@ -42,3 +42,5 @@ Cost: one Builder call plus a Reviewer call and any fix rounds, capped at $1 per
 ## Cost of the default
 
 The Builder writes three more small files (the page is asked to stay plain), so its output grows; its per-call cap ($0.60) and the run cap ($1.50) are unchanged and still stop a run that runs over. The page check costs nothing.
+
+![The Run tab offering Add a screen for a CLI-only project](img/bridge-add-screen.png)
