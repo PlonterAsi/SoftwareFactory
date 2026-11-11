@@ -18,13 +18,14 @@ export const EDITABLE: Record<string, string> = {
 
 export const ticketsProjection: Projection = {
   name: "tickets",
-  version: 2,
-  tables: ["tickets", "ticket_notes", "ticket_links"],
+  version: 3,
+  tables: ["tickets", "ticket_notes", "ticket_links", "ticket_keys"],
   describe: "Tickets: units of work per project, their append-only thread (notes, agent replies, status moves, events) and links",
   migrate(db) {
     db.exec(`CREATE TABLE IF NOT EXISTS tickets (
       id          INTEGER PRIMARY KEY,
       event_id    INTEGER NOT NULL,
+      number      INTEGER,
       kind        TEXT NOT NULL,
       title       TEXT NOT NULL,
       body        TEXT NOT NULL DEFAULT '',
@@ -50,6 +51,12 @@ export const ticketsProjection: Projection = {
     );
     CREATE INDEX IF NOT EXISTS tickets_project ON tickets(project, status);
     CREATE INDEX IF NOT EXISTS tickets_run ON tickets(run);
+    CREATE INDEX IF NOT EXISTS tickets_number ON tickets(project, number);
+    CREATE TABLE IF NOT EXISTS ticket_keys (
+      project INTEGER PRIMARY KEY,
+      key     TEXT NOT NULL UNIQUE
+    );
+    CREATE INDEX IF NOT EXISTS tickets_parent ON tickets(parent_id, line_order);
     CREATE UNIQUE INDEX IF NOT EXISTS tickets_fingerprint ON tickets(fingerprint) WHERE fingerprint IS NOT NULL;
     CREATE TABLE IF NOT EXISTS ticket_notes (
       event_id  INTEGER PRIMARY KEY,
@@ -77,13 +84,21 @@ export const ticketsProjection: Projection = {
         .run(e.id, Number(p.id), e.ts, String(p.by ?? "you"), kind, text, status, cost);
       db.prepare("UPDATE tickets SET updated_at = ?, last_note = ? WHERE id = ?").run(e.ts, text.slice(0, 200), Number(p.id));
     };
+    // A ticket's number inside its project: given by the service, or the next one (older events had none).
+    const numberIn = (project: number | null, given: unknown) => num(given) ?? Number((db.prepare("SELECT coalesce(max(number), 0) + 1 AS n FROM tickets WHERE project IS ?").get(project) as { n: number }).n);
+    // How a ticket is said in the thread: "SF-4" when its project has a key, else "#4".
+    const said = (id: number) => {
+      const r = db.prepare("SELECT t.number, k.key FROM tickets t LEFT JOIN ticket_keys k ON k.project = t.project WHERE t.id = ?").get(id) as { number: number | null; key: string | null } | undefined;
+      return r?.key && r.number != null ? `${r.key}-${r.number}` : `#${id}`;
+    };
     if (e.type === "ticket.opened") {
       const lineOrder = p.parent != null
         ? Number((db.prepare("SELECT coalesce(max(line_order), 0) + 1 AS n FROM tickets WHERE parent_id = ?").get(Number(p.parent)) as { n: number }).n)
         : null;
-      db.prepare(`INSERT OR REPLACE INTO tickets (id, event_id, kind, title, body, answers, project, status, priority, severity, assignee, parent_id, line_order, tags, source, opened_by, fingerprint, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(Number(p.id), e.id, String(p.kind), String(p.title), String(p.body ?? ""), JSON.stringify(p.answers ?? {}), num(p.project), str(p.priority), str(p.severity), str(p.assignee),
+      const project = num(p.project);
+      db.prepare(`INSERT OR REPLACE INTO tickets (id, event_id, number, kind, title, body, answers, project, status, priority, severity, assignee, parent_id, line_order, tags, source, opened_by, fingerprint, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(Number(p.id), e.id, numberIn(project, p.number), String(p.kind), String(p.title), String(p.body ?? ""), JSON.stringify(p.answers ?? {}), num(p.project), str(p.priority), str(p.severity), str(p.assignee),
           num(p.parent), lineOrder, JSON.stringify(p.tags ?? []), String(p.source ?? "you"), String(p.by ?? "you"), str(p.fingerprint), e.ts, e.ts);
       note("event", `Opened by ${p.by ?? "you"}${p.source && p.source !== "you" ? ` (from ${p.source})` : ""}`);
     } else if (e.type === "ticket.edited") {
@@ -101,14 +116,17 @@ export const ticketsProjection: Projection = {
       if (field === "tags") value = JSON.stringify(Array.isArray(p.value) ? p.value : []);
       else if (field === "project" || field === "parent") value = num(p.value);
       else value = str(p.value);
-      if (field === "parent") {
+      if (field === "project") {
+        // A move to another project takes the next number (and key) there; the thread keeps the old one.
+        db.prepare("UPDATE tickets SET project = ?, number = ?, updated_at = ? WHERE id = ?").run(value as number | null, numberIn(value as number | null, p.number), e.ts, Number(p.id));
+      } else if (field === "parent") {
         const order = value == null ? null : Number((db.prepare("SELECT coalesce(max(line_order), 0) + 1 AS n FROM tickets WHERE parent_id = ?").get(value as number) as { n: number }).n);
         db.prepare("UPDATE tickets SET parent_id = ?, line_order = ?, updated_at = ? WHERE id = ?").run(value as number | null, order, e.ts, Number(p.id));
       } else {
         db.prepare(`UPDATE tickets SET ${col} = ?, updated_at = ? WHERE id = ?`).run(value as string | number | null, e.ts, Number(p.id));
       }
       if (field === "kind" || field === "assignee" || field === "project" || field === "parent") {
-        note("event", `${field === "parent" ? "plan" : field} set to ${p.value == null || p.value === "" ? "nothing" : field === "parent" ? `#${p.value}` : p.value}`);
+        note("event", `${field === "parent" ? "parent" : field} set to ${p.value == null || p.value === "" ? "nothing" : field === "parent" ? said(Number(p.value)) : p.value}`);
       }
     } else if (e.type === "ticket.noted") {
       const status = str(p.status);
@@ -120,13 +138,16 @@ export const ticketsProjection: Projection = {
       const from = Number(p.id), to = Number(p.to), rel = String(p.relation);
       if (p.removed) db.prepare("DELETE FROM ticket_links WHERE from_id = ? AND to_id = ? AND relation = ?").run(from, to, rel);
       else db.prepare("INSERT OR REPLACE INTO ticket_links (from_id, to_id, relation, ts) VALUES (?, ?, ?, ?)").run(from, to, rel, e.ts);
-      note("event", `${p.removed ? "Unlinked" : "Linked"} ${rel.replace("_", " ")} #${to}`);
+      note("event", `${p.removed ? "Unlinked" : "Linked"} ${rel.replace("_", " ")} ${said(to)}`);
     } else if (e.type === "ticket.run") {
       db.prepare("UPDATE tickets SET run = ? WHERE id = ?").run(Number(p.run), Number(p.id));
       note("event", `Factory run #${p.run} started on this ticket`);
     } else if (e.type === "ticket.branch") {
       db.prepare("UPDATE tickets SET branch = ?, branch_dir = ? WHERE id = ?").run(String(p.branch), String(p.dir), Number(p.id));
       note("event", p.sha ? `Branch ${p.branch} at ${String(p.sha).slice(0, 7)}: ${(p.files ?? []).length} file(s) changed in ${p.dir}. Not pushed.` : `Branch ${p.branch} in ${p.dir}: nothing changed.`);
+    } else if (e.type === "ticket.keyed") {
+      // A project's ticket key ("SF"), given once; it stays when the project is renamed.
+      db.prepare("INSERT OR IGNORE INTO ticket_keys (project, key) VALUES (?, ?)").run(Number(p.project), String(p.key));
     } else if (e.type === "ticket.line.moved") {
       // Swap with the neighbour above or below in the plan.
       const t = db.prepare("SELECT parent_id, line_order FROM tickets WHERE id = ?").get(Number(p.id)) as { parent_id: number | null; line_order: number | null } | undefined;

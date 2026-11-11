@@ -16,7 +16,7 @@ export const KINDS = ["bug", "request", "task", "idea", "plan", "question"] as c
 export type TicketKind = (typeof KINDS)[number];
 
 export const KIND_LABEL: Record<TicketKind, string> = {
-  bug: "Bug", request: "Request", task: "Task", idea: "Idea", plan: "Plan", question: "Question",
+  bug: "Bug", request: "Request", task: "Task", idea: "Idea", plan: "Epic", question: "Question",
 };
 
 export interface Question {
@@ -95,6 +95,59 @@ export type TicketSeverity = (typeof TICKET_SEVERITIES)[number];
 export const RELATIONS = ["related", "duplicate_of", "derived_from", "blocks"] as const;
 export type Relation = (typeof RELATIONS)[number];
 
+/**
+ * Three levels, never more: an epic (the plan kind) holds tickets, a ticket
+ * holds subtasks. Anything bigger than an epic is a project of its own.
+ */
+export const LEVELS = ["epic", "ticket", "subtask"] as const;
+export type Level = (typeof LEVELS)[number];
+
+/** The level a ticket sits at, from its kind and its parent's kind. */
+export function levelOf(kind: TicketKind, parent: { kind: TicketKind } | null | undefined): Level {
+  if (kind === "plan") return "epic";
+  if (!parent || parent.kind === "plan") return "ticket";
+  return "subtask";
+}
+
+/**
+ * Whether `child` may sit under `parent`. Returns the reason it may not, or null.
+ * An epic sits at the top; a ticket under an epic; a subtask under a ticket
+ * (not under another subtask); both in the same project.
+ */
+export function refuseParent(child: { id?: number; kind: TicketKind; project: number | null; hasChildren?: boolean },
+  parent: { id: number; kind: TicketKind; parentId: number | null; project: number | null; parentKind?: TicketKind | null }): string | null {
+  if (child.id === parent.id) return "A ticket cannot sit under itself.";
+  if (child.kind === "plan") return "An epic sits at the top; it has no parent.";
+  if (parent.kind !== "plan") {
+    if (parent.parentId != null && parent.parentKind !== "plan") return "A subtask cannot hold subtasks: three levels, never more.";
+    if (child.hasChildren) return "This ticket has subtasks of its own, so it can only sit under an epic.";
+  }
+  if (child.project != null && parent.project != null && child.project !== parent.project) return "A ticket and its parent belong to the same project.";
+  return null;
+}
+
+/**
+ * A project's ticket key from its name: the capitals of a CamelCase word, or
+ * the first letters of its words ("SoftwareFactory" → SF, "photo renamer" →
+ * PR), 2 to 4 letters. `taken` keys get a digit added.
+ */
+export function keyFromName(name: string, taken: Set<string> = new Set()): string {
+  const words = name.replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(/\s+/).filter(Boolean);
+  let key = "";
+  if (words.length === 1) {
+    const caps = words[0].match(/\p{Lu}/gu) ?? [];
+    key = caps.length >= 2 ? caps.join("") : words[0].slice(0, 3);
+  } else key = words.map((w) => w[0]).join("");
+  key = key.normalize("NFKD").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 4);
+  if (key.length < 2) key = (key + "TK").slice(0, 2);
+  if (!/^[A-Z]/.test(key)) key = `P${key}`.slice(0, 4);
+  if (!taken.has(key)) return key;
+  for (let n = 2; ; n++) if (!taken.has(`${key}${n}`)) return `${key}${n}`;
+}
+
+/** "SF-42" or "#7". */
+export const keyText = (key: string | null, number: number | null, id: number) => (key && number != null ? `${key}-${number}` : `#${id}`);
+
 export const SOURCES = ["you", "order", "council", "agent", "factory", "improve"] as const;
 
 /** Kinds that are taste: only you close them, never an agent or a rule. */
@@ -134,6 +187,12 @@ export function refuseMove(kind: TicketKind, from: TicketStatus, to: TicketStatu
 
 export interface TicketView {
   id: number;
+  /** What people read and say: the project's key and the ticket's number in it ("SF-42"), or "#id" outside a project. */
+  key: string;
+  /** The ticket's number inside its project (1, 2, 3 …). */
+  number: number | null;
+  /** epic (a plan), ticket, or subtask (a step inside a ticket). Three levels, never more. */
+  level: Level;
   kind: TicketKind;
   title: string;
   body: string;
@@ -157,6 +216,10 @@ export interface TicketView {
   updatedAt: string;
   closedAt: string | null;
   lastNote: string | null;
+  /** Another ticket that is still open blocks this one. */
+  blocked: boolean;
+  /** Its children (an epic's tickets, a ticket's subtasks): how many, and how many are done. */
+  children: { total: number; done: number };
 }
 
 export interface NoteView {
@@ -169,21 +232,21 @@ export interface NoteView {
   costUsd: number | null;
 }
 
-export interface LinkView { from: number; to: number; relation: Relation; title?: string; status?: TicketStatus }
+export interface LinkView { from: number; to: number; relation: Relation; title?: string; status?: TicketStatus; key?: string }
 
 /**
  * The work document: the same text you read on the ticket page, an agent gets
  * as its brief, and a factory run starts from.
  */
 export function workDocument(t: TicketView, notes: NoteView[] = [], links: LinkView[] = [], lines: TicketView[] = []): string {
-  const out = [`# #${t.id} ${t.title}`, "", `${KIND_LABEL[t.kind]} · ${t.status.replace("_", " ")}${t.priority ? ` · priority ${PRIORITY_LABEL[t.priority]}` : ""}${t.severity ? ` · ${t.severity}` : ""}${t.tags.length ? ` · ${t.tags.join(", ")}` : ""}`];
+  const out = [`# ${t.key} ${t.title}`, "", `${KIND_LABEL[t.kind]} · ${t.status.replace("_", " ")}${t.priority ? ` · priority ${PRIORITY_LABEL[t.priority]}` : ""}${t.severity ? ` · ${t.severity}` : ""}${t.tags.length ? ` · ${t.tags.join(", ")}` : ""}`];
   if (t.body.trim()) out.push("", t.body.trim());
   for (const q of FORMS[t.kind]) {
     const a = t.answers[q.key];
     if (a && a.trim()) out.push("", `## ${q.label}`, "", a.trim());
   }
-  if (lines.length) out.push("", "## Lines of this plan", "", ...lines.map((l, i) => `${i + 1}. #${l.id} ${l.title} (${l.status.replace("_", " ")})`));
-  if (links.length) out.push("", "## Links", "", ...links.map((l) => `- ${l.relation.replace("_", " ")} #${l.to}${l.title ? ` ${l.title}` : ""}`));
+  if (lines.length) out.push("", t.kind === "plan" ? "## Tickets of this epic" : "## Subtasks", "", ...lines.map((l, i) => `${i + 1}. ${l.key} ${l.title} (${l.status.replace("_", " ")})`));
+  if (links.length) out.push("", "## Links", "", ...links.map((l) => `- ${l.relation.replace("_", " ")} ${l.key ?? `#${l.to}`}${l.title ? ` ${l.title}` : ""}`));
   const said = notes.filter((n) => n.kind === "note" || n.kind === "reply").slice(-6);
   if (said.length) out.push("", "## Recent thread", "", ...said.map((n) => `- ${n.by}: ${n.text.replace(/\s+/g, " ").slice(0, 400)}`));
   return out.join("\n");
@@ -195,7 +258,7 @@ export function ideaFromTicket(t: TicketView, doc: string): string {
   const head = `${t.title}${first && !t.title.toLowerCase().includes(first.toLowerCase()) ? `: ${first}` : ""}`;
   // The document without its title and status lines: the head already says what it is.
   const rest = doc.split("\n").slice(2).join("\n").trim();
-  return `${head} (ticket #${t.id})${rest ? `\n\n${rest}` : ""}`.slice(0, 6000);
+  return `${head} (ticket ${t.key})${rest ? `\n\n${rest}` : ""}`.slice(0, 6000);
 }
 
 /** A title from free text: its first line, trimmed to a readable length. */

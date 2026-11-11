@@ -23,6 +23,15 @@ Questions are data in `packages/core/src/tickets/model.ts` (`FORMS`): adding one
 
 **Links**: related, duplicate of (closes the duplicate), derived from ("a new ticket from this one"), blocks. A link shows on both tickets.
 
+## Keys, levels and what waits on you
+
+- **Keys.** Each project has a short key and numbers its tickets from 1: `SF-42` is ticket 42 of SoftwareFactory's own project. SoftwareFactory is always `SF`; other projects take letters from their name ("Garden planner" is `GP`), with a digit added if taken. The key is given once (`ticket.keyed`) and stays when the project is renamed. A ticket moved to another project takes the next number there, and its thread keeps the old key. Search, links and `GET /api/tickets/key/SF-42` all take keys; `#7` still finds ticket 7 of the whole factory.
+- **Three levels, never more.** An **epic** (the plan kind) holds tickets; a **ticket** may hold **subtasks**; a subtask holds nothing. Parent and child share a project. Anything bigger than an epic is a project of its own. When every ticket of an epic is built, closed or rejected, the epic moves to built for your look (an epic is taste: it never closes by itself).
+- **Blocked** is a flag, not a status: a `blocks` link from a ticket that is still open. It clears when that ticket closes.
+- **Waiting on you** is one list across every project, at the top of the Projects page and first on the Tickets tab: what is built (take a look), questions (answer), and ideas or requests an agent opened (build it or not). Each row carries the moves that answer it. `GET /api/tickets/waiting?project=`.
+
+The full design, and what comes next (tickets driving the loop, SoftwareFactory building itself through PRs), is in the ticket system design doc.
+
 ## Agents and the loop
 
 - **Work it with the crew**: the ticket's work document becomes a factory run (Council, plan, locked tests, build, review, fix, ship). The ticket moves to in progress; gate waits, the ship and failures land on its thread; when the run ships, it moves to built.
@@ -67,6 +76,8 @@ SELECT agent, count(*), round(sum(cost_usd), 4) FROM agent_runs WHERE station = 
 
 ```
 GET  /api/tickets?project=&view=open|look|agents|plans|closed|all&kind=&q=   list + counts
+GET  /api/tickets/waiting?project=     what waits on you: look, answer, decide, with the moves that answer it
+GET  /api/tickets/key/:key             a ticket by its key (SF-42) or #id
 GET  /api/tickets/meta                 kinds with their questions, statuses, priorities, severities, relations
 GET  /api/tickets/:id                  ticket, thread, links, plan lines, next moves, work document, its run
 GET  /api/tickets/:id/document         the work document as Markdown

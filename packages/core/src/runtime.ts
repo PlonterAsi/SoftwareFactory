@@ -160,8 +160,10 @@ export class MockRuntime implements AgentRuntime {
 const MOCK = {
   // The practice crew cannot read a codebase; it leaves a note file on the branch so the whole path can be tried for free.
   repo: (prompt: string) => {
-    const id = prompt.match(/^# #(\d+)/m)?.[1] ?? "0";
-    const title = prompt.match(/^# #\d+ (.*)$/m)?.[1] ?? "the ticket";
+    // The work document starts "# SF-4 Title" (a project's key and number) or "# #4 Title".
+    const head = prompt.match(/^# (?:#|[A-Z][A-Z0-9]*-)(\d+) (.*)$/m);
+    const id = head?.[1] ?? "0";
+    const title = head?.[2] ?? "the ticket";
     return [
       `<<<FILE docs/softwarefactory/ticket-${id}.md`,
       `# Ticket #${id}: ${title}`, "", "Practice crew: this note stands in for the change. Switch to the real crew in Systems to have the Builder edit the code.", "FILE>>>",

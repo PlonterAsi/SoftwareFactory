@@ -433,11 +433,21 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
   if (req.method === "GET" && path === "/api/tickets/meta") {
     return [200, { kinds: KINDS.map((k) => ({ code: k, label: KIND_LABEL[k], questions: FORMS[k] })), statuses: STATUS_WORDS, priorities: PRIORITIES.map((p) => ({ code: p, label: PRIORITY_LABEL[p] })), severities: TICKET_SEVERITIES, relations: RELATIONS }];
   }
+  if (req.method === "GET" && path === "/api/tickets/waiting") {
+    const project = proj == null || proj === "" ? null : Number(proj);
+    return [200, { items: tickets.waiting(project) }];
+  }
+  const byKey = path.match(/^\/api\/tickets\/key\/([^/]+)$/);
+  if (req.method === "GET" && byKey) {
+    const t = tickets.byKey(decodeURIComponent(byKey[1]));
+    return t ? [200, tickets.detail(t.id)] : [404, { error: `No ticket ${decodeURIComponent(byKey[1])}` }];
+  }
   if (req.method === "GET" && path === "/api/tickets") {
     const project = proj == null || proj === "" ? null : Number(proj);
     const view = (q.get("view") ?? "open") as "open";
+    const parent = q.get("parent");
     return [200, {
-      tickets: tickets.list({ project, view, kind: (q.get("kind") ?? undefined) as TicketKind | undefined, status: (q.get("status") ?? undefined) as TicketStatus | undefined, q: q.get("q") ?? undefined }),
+      tickets: tickets.list({ project, view, parent: parent ? Number(parent) : undefined, kind: (q.get("kind") ?? undefined) as TicketKind | undefined, status: (q.get("status") ?? undefined) as TicketStatus | undefined, q: q.get("q") ?? undefined }),
       counts: tickets.counts(project),
     }];
   }
@@ -458,7 +468,12 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
   switch (m[2]) {
     case "edit": return [200, tickets.edit(id, String(body.field), body.value, "you", body.key ? String(body.key) : undefined)];
     case "say": return [200, tickets.say(id, String(body.text ?? ""), { status: body.status ? String(body.status) as TicketStatus : undefined })];
-    case "link": return [200, tickets.link(id, Number(body.to), String(body.relation ?? "related") as Relation, "you", body.removed === true)];
+    case "link": {
+      // "SF-4", "#4" or 4: people say a ticket by its key.
+      const to = typeof body.to === "number" ? body.to : tickets.byKey(String(body.to ?? ""))?.id;
+      if (to == null) return [400, { error: `No ticket ${String(body.to ?? "")} to link to.` }];
+      return [200, tickets.link(id, to, String(body.relation ?? "related") as Relation, "you", body.removed === true)];
+    }
     case "line": return [200, tickets.moveLine(id, body.dir === "up" ? "up" : "down")];
     case "spawn": return [201, tickets.spawn(id, { ...(body as object), by: "you" } as any)];
     case "work":
@@ -572,6 +587,7 @@ if (isMain) {
   const core = createCore({ log, runtime, projectsDir, dataDir, dropDir: process.env.SF_DROP, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
   core.drop.start();
   core.ensureSelf(); // SoftwareFactory has a project of its own from the first start
+  core.tickets.backfillKeys(); // projects whose tickets came before keys get theirs (SF for SoftwareFactory)
   const server = createServer(core);
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.
   const { order } = core;

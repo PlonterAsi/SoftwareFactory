@@ -128,7 +128,7 @@ export function App() {
               <button role="tab" aria-selected={view === "factory"} className={view === "factory" ? "tab on" : "tab"} onClick={() => setView("factory")}>Factory floor</button>
               <button role="tab" aria-selected={view === "bay"} className={view === "bay" ? "tab on" : "tab"} onClick={() => setView("bay")}>Agent Bay{Object.values(bay.stats).some((s) => s.state === "thinking") ? " · working" : ""}</button>
               <button role="tab" aria-selected={view === "order"} className={(view === "order" ? "tab on" : "tab") + (open ? " alert" : "")} onClick={() => setView("order")}>Order deck{open ? ` · ${open}` : ""}</button>
-              <button role="tab" aria-selected={view === "tickets"} className={(view === "tickets" ? "tab on" : "tab") + (ticketCounts?.look ? " look" : "")} onClick={() => setView("tickets")}>Tickets{ticketCounts?.look ? ` · ${ticketCounts.look} for you` : ticketCounts?.open ? ` · ${ticketCounts.open}` : ""}</button>
+              <button role="tab" aria-selected={view === "tickets"} className={(view === "tickets" ? "tab on" : "tab") + (ticketCounts?.you ? " look" : "")} onClick={() => setView("tickets")}>Tickets{ticketCounts?.you ? ` · ${ticketCounts.you} for you` : ticketCounts?.open ? ` · ${ticketCounts.open}` : ""}</button>
               <button role="tab" aria-selected={view === "improve"} className={view === "improve" ? "tab on" : "tab"} onClick={() => setView("improve")}>Improve{improve.busy ? " · looking" : waiting ? ` · ${waiting}` : ""}</button>
               <button role="tab" aria-selected={view === "data"} className={view === "data" ? "tab on" : "tab"} onClick={() => setView("data")}>Data vault</button>
             </nav>
@@ -151,7 +151,7 @@ export function App() {
             ? <FeaturesPage events={f.events} id={route.id} onOpenProject={(id) => go({ page: "project", id, panel: "integrate" })} />
             : route.page === "project"
             ? <Workspace id={route.id} panel={route.panel} run={route.run} factory={f} order={order} bay={bay} go={go} />
-            : <Home list={projects.list} err={projects.err} onOpen={(id) => go({ page: "project", id })} />}
+            : <Home list={projects.list} err={projects.err} events={f.events} onOpen={(id) => go({ page: "project", id })} />}
           </ErrorBoundary>
           {overseer}
         </main>

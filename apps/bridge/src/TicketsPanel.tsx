@@ -8,8 +8,8 @@ registerProjectPanel({
   order: 40,
   // Open tickets (from the core's tickets facet), else how many are linked at all.
   badge: (ctx) => {
-    const f = ctx.project.facets?.tickets as { open?: number; look?: number } | undefined;
-    if (f?.look) return `${f.look} for you`;
+    const f = ctx.project.facets?.tickets as { open?: number; look?: number; you?: number } | undefined;
+    if (f?.you) return `${f.you} for you`;
     return f?.open || ctx.project.rollup?.linked?.ticket || null;
   },
   render: (ctx) => (

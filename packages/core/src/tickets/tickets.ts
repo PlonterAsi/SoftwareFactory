@@ -7,9 +7,10 @@ import "./tables.js";
 import { projectOf, registerProjectFacet } from "../projects/service.js";
 import { EDITABLE } from "./tables.js";
 import { branchFor, repoOfProject, workInRepo, type RepoRef } from "./repowork.js";
+import { selfProject } from "./intake.js";
 import {
   FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS,
-  ideaFromTicket, isClosed, nextMoves, refuseMove, titleFrom, workDocument,
+  ideaFromTicket, isClosed, keyFromName, keyText, nextMoves, refuseMove, refuseParent, titleFrom, workDocument,
   type LinkView, type NoteView, type Priority, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView,
 } from "./model.js";
 
@@ -39,11 +40,33 @@ export interface OpenTicket {
 export interface TicketFilter {
   project?: number | null;
   /** open (default), look (built, for your look), agents (an agent works it), plans, closed, all. */
-  view?: "open" | "look" | "agents" | "plans" | "closed" | "all";
+  view?: "open" | "look" | "you" | "agents" | "plans" | "closed" | "all";
+  /** Only the children of this epic or ticket. */
+  parent?: number;
   kind?: TicketKind;
   status?: TicketStatus;
   q?: string;
   limit?: number;
+}
+
+/**
+ * Waiting on you: built (take a look), a question (answer it), or an idea or
+ * request an agent opened (build it or not). Taste stays yours.
+ */
+export const WAITING_ON_YOU = `t.status NOT IN ('closed', 'rejected') AND (
+  t.status = 'built'
+  OR (t.kind = 'question')
+  OR (t.kind IN ('idea', 'request') AND t.status = 'open' AND t.opened_by != 'you'))`;
+
+export interface WaitingItem {
+  ticket: TicketView;
+  projectName: string | null;
+  /** look: it is built; answer: a question; decide: an agent's idea or request, build it or not. */
+  need: "look" | "answer" | "decide";
+  /** One line for the row. */
+  say: string;
+  /** The moves that answer it from the row itself. */
+  moves: { to: TicketStatus; label: string }[];
 }
 
 export interface TicketDetail {
@@ -62,8 +85,23 @@ export interface TicketDetail {
 }
 
 type Row = Record<string, any>;
+
+/**
+ * Every read of a ticket goes through this select: the row, its project's key,
+ * its parent's kind (for its level), whether an open ticket blocks it, and how
+ * many of its children are done. Columns of the ticket itself are `t.`.
+ */
+const SELECT = `SELECT t.*, k.key AS project_key, p.kind AS parent_kind,
+  EXISTS (SELECT 1 FROM ticket_links l JOIN tickets b ON b.id = l.from_id
+          WHERE l.to_id = t.id AND l.relation = 'blocks' AND b.status NOT IN ('closed', 'rejected')) AS is_blocked,
+  (SELECT count(*) FROM tickets c WHERE c.parent_id = t.id) AS n_children,
+  (SELECT count(*) FROM tickets c WHERE c.parent_id = t.id AND c.status IN ('built', 'closed', 'rejected')) AS n_done
+  FROM tickets t LEFT JOIN ticket_keys k ON k.project = t.project LEFT JOIN tickets p ON p.id = t.parent_id`;
+
 const toView = (r: Row): TicketView => ({
-  id: Number(r.id), kind: r.kind, title: r.title, body: r.body ?? "", answers: JSON.parse(r.answers ?? "{}"), project: r.project == null ? null : Number(r.project),
+  id: Number(r.id), key: keyText(r.project_key ?? null, r.number == null ? null : Number(r.number), Number(r.id)), number: r.number == null ? null : Number(r.number),
+  level: r.kind === "plan" ? "epic" : r.parent_id == null || r.parent_kind === "plan" ? "ticket" : "subtask",
+  blocked: !!r.is_blocked, children: { total: Number(r.n_children ?? 0), done: Number(r.n_done ?? 0) }, kind: r.kind, title: r.title, body: r.body ?? "", answers: JSON.parse(r.answers ?? "{}"), project: r.project == null ? null : Number(r.project),
   status: r.status, priority: r.priority ?? null, severity: r.severity ?? null, assignee: r.assignee ?? null, parentId: r.parent_id == null ? null : Number(r.parent_id),
   lineOrder: r.line_order == null ? null : Number(r.line_order), tags: JSON.parse(r.tags ?? "[]"), source: r.source, openedBy: r.opened_by, fingerprint: r.fingerprint ?? null,
   run: r.run == null ? null : Number(r.run), branch: r.branch ?? null, branchDir: r.branch_dir ?? null, createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at ?? null, lastNote: r.last_note ?? null,
@@ -92,35 +130,103 @@ export class Tickets {
   // ---- reading -------------------------------------------------------------
 
   get(id: number): TicketView | undefined {
-    const r = this.log.db.prepare("SELECT * FROM tickets WHERE id = ?").get(id) as Row | undefined;
+    const r = this.log.db.prepare(`${SELECT} WHERE t.id = ?`).get(id) as Row | undefined;
     return r ? toView(r) : undefined;
+  }
+
+  /** A ticket by what people say: "SF-42", "#7" or "7". */
+  byKey(text: string): TicketView | undefined {
+    const s = String(text ?? "").trim().toUpperCase();
+    const k = s.match(/^([A-Z][A-Z0-9]{1,5})-(\d+)$/);
+    if (k) {
+      const r = this.log.db.prepare(`${SELECT} WHERE k.key = ? AND t.number = ?`).get(k[1], Number(k[2])) as Row | undefined;
+      return r ? toView(r) : undefined;
+    }
+    const n = s.match(/^#?(\d+)$/);
+    return n ? this.get(Number(n[1])) : undefined;
+  }
+
+  /**
+   * A project's ticket key, given the first time a ticket lands there and kept
+   * when the project is renamed: SoftwareFactory's own project is SF; others
+   * take letters from their name.
+   */
+  keyFor(project: number | null): string | null {
+    if (project == null) return null;
+    const have = this.log.db.prepare("SELECT key FROM ticket_keys WHERE project = ?").get(project) as { key: string } | undefined;
+    if (have) return have.key;
+    const taken = new Set((this.log.db.prepare("SELECT key FROM ticket_keys").all() as { key: string }[]).map((r) => r.key));
+    let key: string;
+    if (project === selfProject(this.log) && !taken.has("SF")) key = "SF";
+    else {
+      const row = this.log.db.prepare("SELECT name FROM projects WHERE id = ?").get(project) as { name: string } | undefined;
+      // SF stays free for SoftwareFactory's own project, even before it exists.
+      key = keyFromName(row?.name ?? `P${project}`, new Set([...taken, "SF"]));
+    }
+    this.log.append("ticket.keyed", { project, key });
+    return key;
+  }
+
+  /** Give a key to every project that has tickets but none yet (tickets opened before keys existed). */
+  backfillKeys(): number {
+    const rows = this.log.db.prepare("SELECT DISTINCT t.project FROM tickets t LEFT JOIN ticket_keys k ON k.project = t.project WHERE t.project IS NOT NULL AND k.key IS NULL ORDER BY t.project").all() as { project: number }[];
+    for (const r of rows) this.keyFor(Number(r.project));
+    return rows.length;
   }
 
   list(f: TicketFilter = {}): TicketView[] {
     const where: string[] = [];
     const args: (string | number)[] = [];
     const view = f.view ?? "open";
-    if (f.project != null) { where.push("project = ?"); args.push(f.project); }
-    if (view === "open") where.push("status NOT IN ('closed', 'rejected')");
-    else if (view === "look") where.push("status = 'built'");
-    else if (view === "agents") where.push("status NOT IN ('closed', 'rejected') AND (run IS NOT NULL OR (assignee IS NOT NULL AND assignee != 'you'))");
-    else if (view === "plans") where.push("(kind = 'plan' OR parent_id IS NOT NULL)");
-    else if (view === "closed") where.push("status IN ('closed', 'rejected')");
-    if (f.kind) { where.push("kind = ?"); args.push(f.kind); }
-    if (f.status) { where.push("status = ?"); args.push(f.status); }
+    if (f.project != null) { where.push("t.project = ?"); args.push(f.project); }
+    if (view === "open") where.push("t.status NOT IN ('closed', 'rejected')");
+    else if (view === "look") where.push("t.status = 'built'");
+    else if (view === "you") where.push(WAITING_ON_YOU);
+    else if (view === "agents") where.push("t.status NOT IN ('closed', 'rejected') AND (t.run IS NOT NULL OR (t.assignee IS NOT NULL AND t.assignee != 'you'))");
+    else if (view === "plans") where.push("(t.kind = 'plan' OR t.parent_id IS NOT NULL)");
+    else if (view === "closed") where.push("t.status IN ('closed', 'rejected')");
+    if (f.kind) { where.push("t.kind = ?"); args.push(f.kind); }
+    if (f.status) { where.push("t.status = ?"); args.push(f.status); }
+    if (f.parent != null) { where.push("t.parent_id = ?"); args.push(f.parent); }
     if (f.q && f.q.trim()) {
-      // Reads the title, the description, the answers, the tags and the thread; "#12" finds ticket 12.
+      // Reads the title, the description, the answers, the tags and the thread; "#12" finds ticket 12, "SF-4" ticket 4 of SF.
       const q = f.q.trim();
       const n = q.match(/^#?(\d+)$/);
+      const k = q.toUpperCase().match(/^([A-Z][A-Z0-9]{1,5})-(\d+)$/);
       const like = `%${q.replace(/[%_]/g, "")}%`;
-      where.push(`(${n ? "id = ? OR " : ""}title LIKE ? OR body LIKE ? OR answers LIKE ? OR tags LIKE ? OR id IN (SELECT ticket_id FROM ticket_notes WHERE text LIKE ?))`);
+      where.push(`(${n ? "t.id = ? OR " : ""}${k ? "(k.key = ? AND t.number = ?) OR " : ""}t.title LIKE ? OR t.body LIKE ? OR t.answers LIKE ? OR t.tags LIKE ? OR t.id IN (SELECT ticket_id FROM ticket_notes WHERE text LIKE ?))`);
       if (n) args.push(Number(n[1]));
+      if (k) args.push(k[1], Number(k[2]));
       args.push(like, like, like, like, like);
     }
-    const order = "CASE priority WHEN 'now' THEN 0 WHEN 'this_week' THEN 1 WHEN 'next' THEN 2 WHEN 'someday' THEN 3 ELSE 4 END, updated_at DESC";
-    const sql = `SELECT * FROM tickets ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${view === "plans" ? "coalesce(parent_id, id), line_order IS NOT NULL, line_order" : order} LIMIT ?`;
+    const order = "CASE t.priority WHEN 'now' THEN 0 WHEN 'this_week' THEN 1 WHEN 'next' THEN 2 WHEN 'someday' THEN 3 ELSE 4 END, t.updated_at DESC";
+    // Plans view: each epic, then its tickets in their order, then each ticket's subtasks.
+    const tree = "coalesce(p.parent_id, t.parent_id, t.id), CASE WHEN t.parent_id IS NULL THEN 0 ELSE 1 END, coalesce(p.line_order, t.line_order), CASE WHEN p.parent_id IS NULL THEN 0 ELSE 1 END, t.line_order";
+    const sql = `${SELECT} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${view === "plans" ? tree : order} LIMIT ?`;
     args.push(f.limit ?? 200);
     return (this.log.db.prepare(sql).all(...args) as Row[]).map(toView);
+  }
+
+  /**
+   * Waiting on you, across every project: each ticket with the one thing it
+   * needs from you and the moves that answer it, so most take a single tap.
+   */
+  waiting(project?: number | null): WaitingItem[] {
+    const rows = this.list({ view: "you", project: project ?? undefined, limit: 300 });
+    const names = new Map((this.log.db.prepare("SELECT id, name FROM projects").all() as { id: number; name: string }[]).map((r) => [Number(r.id), r.name]));
+    const why = (t: TicketView): WaitingItem["need"] =>
+      t.status === "built" ? "look" : t.kind === "question" ? "answer" : "decide";
+    const rank = { look: 0, answer: 1, decide: 2 } as const;
+    return rows
+      .map((t) => {
+        const need = why(t);
+        const moves: WaitingItem["moves"] = need === "look" ? nextMoves(t.status, t.kind)
+          : need === "decide" ? [{ to: "ready", label: "Yes, build it" }, { to: "rejected", label: "No" }]
+          : [];
+        return { ticket: t, projectName: t.project != null ? names.get(t.project) ?? null : null, need, moves,
+          say: need === "look" ? "Built: take a look" : need === "answer" ? (t.answers.ask && t.answers.ask !== t.title ? t.answers.ask : "Needs your answer") : `${t.kind === "idea" ? "An idea" : "A request"} from ${t.openedBy}: build it?` };
+      })
+      .sort((a, b) => rank[a.need] - rank[b.need] || b.ticket.updatedAt.localeCompare(a.ticket.updatedAt));
   }
 
   /** Counts for the chips and the summary line: by status, by kind, waiting for your look. */
@@ -131,7 +237,8 @@ export class Tickets {
     const byKind = Object.fromEntries((this.log.db.prepare(`SELECT kind, count(*) AS n FROM tickets ${scope ? `${scope} AND` : "WHERE"} status NOT IN ('closed', 'rejected') GROUP BY kind`).all(...args) as { kind: string; n: number }[]).map((r) => [r.kind, Number(r.n)]));
     const open = STATUSES.filter((s) => !isClosed(s)).reduce((n, s) => n + (byStatus[s] ?? 0), 0);
     const oldest = this.log.db.prepare(`SELECT id, title, created_at FROM tickets ${scope ? `${scope} AND` : "WHERE"} status NOT IN ('closed', 'rejected') ORDER BY created_at LIMIT 1`).get(...args) as Row | undefined;
-    return { byStatus, byKind, open, look: byStatus.built ?? 0, total: Object.values(byStatus).reduce((a, b) => a + b, 0), oldest: oldest ? { id: Number(oldest.id), title: oldest.title, createdAt: oldest.created_at } : null };
+    const you = Number((this.log.db.prepare(`SELECT count(*) AS n FROM tickets t WHERE ${WAITING_ON_YOU}${project != null ? " AND t.project = ?" : ""}`).get(...args) as { n: number }).n);
+    return { byStatus, byKind, open, look: byStatus.built ?? 0, you, total: Object.values(byStatus).reduce((a, b) => a + b, 0), oldest: oldest ? { id: Number(oldest.id), title: oldest.title, createdAt: oldest.created_at } : null };
   }
 
   notes(id: number): NoteView[] {
@@ -142,19 +249,20 @@ export class Tickets {
 
   /** Links seen from this ticket, both ways (a link made on one side shows on the other). */
   links(id: number): LinkView[] {
-    const rows = this.log.db.prepare(`SELECT l.from_id, l.to_id, l.relation, t.title, t.status FROM ticket_links l JOIN tickets t ON t.id = CASE WHEN l.from_id = ? THEN l.to_id ELSE l.from_id END
-      WHERE l.from_id = ? OR l.to_id = ? ORDER BY l.ts`).all(id, id, id) as Row[];
+    const rows = this.log.db.prepare(`SELECT l.from_id, l.to_id, l.relation, t.title, t.status, t.number, k.key FROM ticket_links l JOIN tickets t ON t.id = CASE WHEN l.from_id = ? THEN l.to_id ELSE l.from_id END
+      LEFT JOIN ticket_keys k ON k.project = t.project WHERE l.from_id = ? OR l.to_id = ? ORDER BY l.ts`).all(id, id, id) as Row[];
     return rows.map((r) => {
       const out = Number(r.from_id) === id;
       const rel = r.relation as Relation;
       // Seen from the other side, "duplicate of" and "blocks" read backwards.
       const back: Partial<Record<Relation, string>> = { duplicate_of: "duplicated_by", blocks: "blocked_by", derived_from: "spawned" };
-      return { from: id, to: out ? Number(r.to_id) : Number(r.from_id), relation: (out ? rel : (back[rel] ?? rel)) as Relation, title: r.title, status: r.status };
+      return { from: id, to: out ? Number(r.to_id) : Number(r.from_id), relation: (out ? rel : (back[rel] ?? rel)) as Relation, title: r.title, status: r.status,
+        key: keyText(r.key ?? null, r.number == null ? null : Number(r.number), out ? Number(r.to_id) : Number(r.from_id)) };
     });
   }
 
   lines(planId: number): TicketView[] {
-    return (this.log.db.prepare("SELECT * FROM tickets WHERE parent_id = ? ORDER BY line_order").all(planId) as Row[]).map(toView);
+    return (this.log.db.prepare(`${SELECT} WHERE t.parent_id = ? ORDER BY t.line_order`).all(planId) as Row[]).map(toView);
   }
 
   detail(id: number): TicketDetail | undefined {
@@ -201,10 +309,17 @@ export class Tickets {
         return this.get(Number(same.id))!;
       }
     }
-    const project = o.project ?? (o.parent != null ? this.get(o.parent)?.project ?? null : null);
+    const parent = o.parent != null ? this.get(o.parent) : undefined;
+    if (o.parent != null && !parent) throw new Error(`No ticket #${o.parent} to sit under.`);
+    const project = o.project ?? parent?.project ?? null;
+    if (parent) {
+      const why = refuseParent({ kind, project }, { id: parent.id, kind: parent.kind, parentId: parent.parentId, project: parent.project, parentKind: parent.parentId != null ? this.get(parent.parentId)?.kind ?? null : null });
+      if (why) throw new Error(why);
+    }
     const id = Number((this.log.db.prepare("SELECT coalesce(max(id), 0) + 1 AS n FROM tickets").get() as { n: number }).n);
+    this.keyFor(project);
     this.log.append("ticket.opened", {
-      id, kind, title, body, answers, project, by, source: o.source ?? (by === "you" ? "you" : "agent"),
+      id, number: this.nextNumber(project), kind, title, body, answers, project, by, source: o.source ?? (by === "you" ? "you" : "agent"),
       priority: o.priority && PRIORITIES.includes(o.priority) ? o.priority : null,
       severity: kind === "bug" && o.severity && TICKET_SEVERITIES.includes(o.severity) ? o.severity : null,
       assignee: o.assignee ?? null, parent: o.parent ?? null, tags: (o.tags ?? []).map(String).filter(Boolean).slice(0, 12), fingerprint: o.fingerprint ?? null,
@@ -213,6 +328,11 @@ export class Tickets {
     this.linkProject(id, project);
     for (const l of o.links ?? []) this.link(id, l.to, l.relation, by);
     return this.get(id)!;
+  }
+
+  /** The next ticket number inside a project. */
+  private nextNumber(project: number | null): number {
+    return Number((this.log.db.prepare("SELECT coalesce(max(number), 0) + 1 AS n FROM tickets WHERE project IS ?").get(project) as { n: number }).n);
   }
 
   /** Change one field; nothing else is touched. */
@@ -230,14 +350,27 @@ export class Tickets {
     if (field === "severity" && value != null && value !== "" && !TICKET_SEVERITIES.includes(value as TicketSeverity)) throw new Error(`Unknown severity "${value}"`);
     if (field === "parent" && value != null && value !== "") {
       const p = this.get(Number(value));
-      if (!p || p.kind !== "plan") throw new Error("Only a plan holds lines.");
-      if (p.id === id) throw new Error("A plan cannot be its own line.");
+      if (!p) throw new Error(`No ticket #${value} to sit under.`);
+      const why = refuseParent({ id, kind: t.kind, project: t.project, hasChildren: t.children.total > 0 },
+        { id: p.id, kind: p.kind, parentId: p.parentId, project: p.project, parentKind: p.parentId != null ? this.get(p.parentId)?.kind ?? null : null });
+      if (why) throw new Error(why);
     }
+    if (field === "kind" && value === "plan" && t.parentId != null) throw new Error("An epic sits at the top: take it out of its parent first.");
+    if (field === "kind" && t.kind === "plan" && value !== "plan" && t.children.total > 0) throw new Error("This epic still holds tickets; move them out first.");
     if (field === "title" && !String(value ?? "").trim()) throw new Error("A ticket needs a title.");
     const v = field === "tags" ? (Array.isArray(value) ? value.map(String).filter(Boolean) : String(value ?? "").split(",").map((s) => s.trim()).filter(Boolean))
       : field === "project" || field === "parent" ? (value == null || value === "" ? null : Number(value)) : value;
+    if (field === "project") {
+      const to = v as number | null;
+      if (to === t.project) return t;
+      if (t.parentId != null || t.children.total > 0) throw new Error("Move the whole epic, not one of its parts: a ticket and its parent stay in one project.");
+      this.keyFor(to);
+      this.log.append("ticket.edited", { id, field, value: to, number: this.nextNumber(to), was: t.key, by });
+      this.log.append("ticket.noted", { id, by, kind: "event", text: `Was ${t.key}; now ${this.get(id)!.key}` });
+      this.linkProject(id, to);
+      return this.get(id)!;
+    }
     this.log.append("ticket.edited", { id, field, value: v, by });
-    if (field === "project") this.linkProject(id, v as number | null);
     // Converting keeps the answers that still fit; the rest stay in the record, unseen.
     return this.get(id)!;
   }
@@ -382,8 +515,27 @@ export class Tickets {
   // ---- agents and rules write back -----------------------------------------
 
   /** Keep tickets in step with the rest of the factory. Runs synchronously for every event. */
+  /**
+   * When the last ticket of an epic is done, the epic is built and waits for
+   * your look (an epic is taste: it never closes by itself). A reopened ticket
+   * says so on its epic.
+   */
+  private rollUp(id: number) {
+    const t = this.get(id);
+    if (!t || t.parentId == null) return;
+    const epic = this.get(t.parentId);
+    if (!epic || epic.kind !== "plan") return;
+    const { total, done } = epic.children;
+    if (total > 0 && done === total && ["open", "ready", "in_progress"].includes(epic.status)) {
+      this.log.append("ticket.noted", { id: epic.id, by: "factory", status: "built", text: `All ${total} ticket${total === 1 ? "" : "s"} of this epic are done. Take a look.` });
+    } else if (!isClosed(t.status) && t.status !== "built" && epic.status === "built") {
+      this.log.append("ticket.noted", { id: epic.id, by: "factory", kind: "event", text: `${t.key} was reopened, so this epic is not all done any more.` });
+    }
+  }
+
   private react(e: SfEvent) {
     const p = e.payload as Record<string, any>;
+    if (e.type === "ticket.noted" && p.status) this.rollUp(Number(p.id));
     if (e.type === "factory.run.finished") {
       const run = Number(p.run);
       const t = this.byRun(run);
@@ -494,6 +646,7 @@ registerProjectFacet({
   compute(log, project) {
     const rows = log.db.prepare("SELECT id, kind, title, status FROM tickets WHERE project = ? ORDER BY updated_at DESC LIMIT 5").all(project.id) as Row[];
     const c = log.db.prepare("SELECT count(*) FILTER (WHERE status NOT IN ('closed', 'rejected')) AS open, count(*) FILTER (WHERE status = 'built') AS look, count(*) AS total FROM tickets WHERE project = ?").get(project.id) as Row;
-    return { open: Number(c.open), look: Number(c.look), total: Number(c.total), recent: rows.map((r) => ({ id: Number(r.id), kind: r.kind, title: r.title, status: r.status })) };
+    const you = log.db.prepare(`SELECT count(*) AS n FROM tickets t WHERE t.project = ? AND ${WAITING_ON_YOU}`).get(project.id) as Row;
+    return { open: Number(c.open), look: Number(c.look), you: Number(you.n), total: Number(c.total), recent: rows.map((r) => ({ id: Number(r.id), kind: r.kind, title: r.title, status: r.status })) };
   },
 });

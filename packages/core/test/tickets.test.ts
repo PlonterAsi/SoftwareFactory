@@ -68,7 +68,10 @@ describe("tickets: the record", () => {
     expect(t.lines(plan.id).map((l) => l.id)).toEqual([l1.id, l2.id]);
     t.moveLine(l2.id, "up");
     expect(t.lines(plan.id).map((l) => l.id)).toEqual([l2.id, l1.id]);
-    expect(() => t.edit(l1.id, "parent", a.id)).toThrow(/Only a plan/);
+    const sub = t.open({ kind: "task", title: "CSV header row", parent: l1.id });
+    expect(t.get(sub.id)!.level).toBe("subtask");
+    expect(() => t.open({ kind: "task", title: "Too deep", parent: sub.id })).toThrow(/three levels/);
+    expect(() => t.edit(l1.id, "parent", a.id)).toThrow(/has subtasks of its own/);
     expect(workDocument(t.get(plan.id)!, [], [], t.lines(plan.id))).toMatch(/1\. #\d+ JSON[\s\S]*2\. #\d+ CSV/);
     const s = t.spawn(a.id, { kind: "task", title: "Add a crash log" });
     expect(t.links(s.id)[0]).toMatchObject({ to: a.id, relation: "derived_from" });
@@ -319,7 +322,7 @@ describe("tickets: the API", () => {
       expect(d.body.moves.map((m: any) => m.to)).toEqual(["in_progress", "closed", "rejected"]);
       expect(d.body.notes.map((n: any) => n.kind)).toEqual(["event", "status"]);
       const doc = await call("GET", `/api/tickets/${id}/document`);
-      expect(doc.body).toMatch(/^# #1 Tickets on the star map/);
+      expect(doc.body).toMatch(/^# P5-1 Tickets on the star map/);
       const list = await call("GET", "/api/tickets?project=5");
       expect(list.body.tickets).toHaveLength(1);
       expect(list.body.counts.open).toBe(1);

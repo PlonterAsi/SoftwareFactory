@@ -5,6 +5,8 @@ import { href } from "./router";
 import { ImportRepo } from "../CodeMap";
 import { AskNotProject, checkIntake, type IntakeVerdict } from "../Intake";
 import { showTicket } from "../BugReport";
+import { Waiting } from "../Tickets";
+import type { SfEvent } from "../api";
 
 type Filter = "live" | "archived" | "all";
 
@@ -12,7 +14,7 @@ type Filter = "live" | "archived" | "all";
  * The fleet: every project, most recently active first. Each row's hull bar shows
  * its runs (shipped, failed, running) at a glance; the numbers say the rest.
  */
-export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err: string | null; onOpen: (id: number) => void }) {
+export function Home({ list, err, onOpen, events }: { list: ProjectSummary[] | null; err: string | null; onOpen: (id: number) => void; events: SfEvent[] }) {
   const [filter, setFilter] = useState<Filter>("live");
   const [q, setQ] = useState("");
   const [name, setName] = useState("");
@@ -59,6 +61,10 @@ export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err
         </form>
       </header>
       {ask && <AskNotProject text={name.trim()} verdict={ask} onProject={make} onCancel={() => setAsk(null)} onFiled={(id, project) => { setAsk(null); setName(""); showTicket(id, project); }} />}
+      <section className="waiting-home" aria-label="Waiting on you">
+        <h2>Waiting on you</h2>
+        <Waiting events={events} onSelect={(id, project) => showTicket(id, project)} limit={6} />
+      </section>
       <ImportRepo />
       <div className="fleet-tools">
         <div className="seg" role="tablist" aria-label="Which projects">

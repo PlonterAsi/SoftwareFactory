@@ -14,12 +14,12 @@ import { peekPendingTicket, takePendingTicket } from "./BugReport";
 export type TicketKind = "bug" | "request" | "task" | "idea" | "plan" | "question";
 export type TicketStatus = "open" | "ready" | "in_progress" | "built" | "closed" | "rejected";
 export interface TicketView {
-  id: number; kind: TicketKind; title: string; body: string; answers: Record<string, string>; project: number | null; status: TicketStatus;
+  id: number; key: string; number: number | null; level: "epic" | "ticket" | "subtask"; blocked: boolean; children: { total: number; done: number }; kind: TicketKind; title: string; body: string; answers: Record<string, string>; project: number | null; status: TicketStatus;
   priority: string | null; severity: string | null; assignee: string | null; parentId: number | null; lineOrder: number | null; tags: string[];
   source: string; openedBy: string; run: number | null; branch: string | null; branchDir: string | null; createdAt: string; updatedAt: string; closedAt: string | null; lastNote: string | null;
 }
 interface NoteView { eventId: number; ts: string; by: string; kind: "note" | "reply" | "status" | "event"; text: string; status: TicketStatus | null; costUsd: number | null }
-interface LinkView { to: number; relation: string; title?: string; status?: TicketStatus }
+interface LinkView { to: number; relation: string; title?: string; status?: TicketStatus; key?: string }
 interface Detail {
   ticket: TicketView; notes: NoteView[]; links: LinkView[]; lines: TicketView[]; parent: TicketView | null; moves: { to: TicketStatus; label: string }[]; document: string;
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
@@ -28,14 +28,16 @@ interface Detail {
 }
 interface Question { key: string; label: string; short?: boolean; required?: boolean; choices?: string[] }
 interface Meta { kinds: { code: TicketKind; label: string; questions: Question[] }[]; statuses: { code: TicketStatus; label: string; closed?: boolean; wantsLook?: boolean }[]; priorities: { code: string; label: string }[]; severities: string[]; relations: string[] }
-interface Counts { byStatus: Record<string, number>; byKind: Record<string, number>; open: number; look: number; total: number; oldest: { id: number; title: string; createdAt: string } | null }
-type View = "open" | "look" | "agents" | "plans" | "closed" | "all";
+interface Counts { byStatus: Record<string, number>; byKind: Record<string, number>; open: number; look: number; you: number; total: number; oldest: { id: number; title: string; createdAt: string } | null }
+type View = "you" | "open" | "look" | "agents" | "plans" | "closed" | "all";
+
+export interface WaitingItem { ticket: TicketView; projectName: string | null; need: "look" | "answer" | "decide"; say: string; moves: { to: TicketStatus; label: string }[] }
 
 export const KIND_GLYPH: Record<TicketKind, string> = { bug: "✖", request: "➜", task: "▢", idea: "✶", plan: "☰", question: "?" };
 const STATUS_LABEL: Record<TicketStatus, string> = { open: "Open", ready: "Ready", in_progress: "In progress", built: "For your look", closed: "Closed", rejected: "Rejected" };
 const BOARD: TicketStatus[] = ["open", "ready", "in_progress", "built", "closed"];
 const VIEWS: { id: View; label: string }[] = [
-  { id: "open", label: "Open" }, { id: "look", label: "For your look" }, { id: "agents", label: "Crew working" }, { id: "plans", label: "Plans" }, { id: "closed", label: "Closed" }, { id: "all", label: "All" },
+  { id: "you", label: "Waiting on you" }, { id: "open", label: "Open" }, { id: "agents", label: "Crew working" }, { id: "plans", label: "Epics" }, { id: "closed", label: "Closed" }, { id: "all", label: "All" },
 ];
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -56,10 +58,11 @@ export const ticketsApi = {
     return call<{ tickets: TicketView[]; counts: Counts }>("GET", `/api/tickets?${s}`);
   },
   get: (id: number) => call<Detail>("GET", `/api/tickets/${id}`),
+  waiting: (project?: number | null) => call<{ items: WaitingItem[] }>("GET", `/api/tickets/waiting${project != null ? `?project=${project}` : ""}`),
   open: (t: Partial<TicketView> & { answers?: Record<string, string>; parent?: number | null }) => call<TicketView>("POST", "/api/tickets", t),
   edit: (id: number, field: string, value: unknown, key?: string) => call<TicketView>("POST", `/api/tickets/${id}/edit`, { field, value, key }),
   say: (id: number, text: string, status?: TicketStatus) => call<TicketView>("POST", `/api/tickets/${id}/say`, { text, status }),
-  link: (id: number, to: number, relation: string) => call<TicketView>("POST", `/api/tickets/${id}/link`, { to, relation }),
+  link: (id: number, to: number | string, relation: string) => call<TicketView>("POST", `/api/tickets/${id}/link`, { to, relation }),
   line: (id: number, dir: "up" | "down") => call<TicketView[]>("POST", `/api/tickets/${id}/line`, { dir }),
   work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number) => call<{ run: number | null; branch?: string }>("POST", `/api/tickets/${id}/work`, { maxUsd, where }),
   ask: (id: number, agent?: string) => call<{ reply?: string; error?: string }>("POST", `/api/tickets/${id}/ask`, { agent }),
@@ -94,6 +97,7 @@ export function Tickets({ events, projectId = null, crew = [], onShowRun }: {
   const projects = useProjectList(events);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [view, setView] = useState<View>("open");
+  const [picked, setPicked] = useState(false);
   const [mode, setMode] = useState<"list" | "board">("list");
   const [q, setQ] = useState("");
   const [kind, setKind] = useState<TicketKind | "">("");
@@ -119,6 +123,8 @@ export function Tickets({ events, projectId = null, crew = [], onShowRun }: {
     }, 120);
     return () => { stop = true; clearTimeout(t); };
   }, [last, projectId, view, q, kind, mode]);
+  // Opens on what needs you when something does; otherwise on the open list.
+  useEffect(() => { if (!picked && data?.counts.you && view === "open") { setView("you"); setPicked(true); } }, [data?.counts.you]);
   const tickets = data?.tickets ?? [];
   const counts = data?.counts;
   const crewById = useMemo(() => Object.fromEntries(crew.map((c) => [c.id, c])), [crew]);
@@ -129,20 +135,20 @@ export function Tickets({ events, projectId = null, crew = [], onShowRun }: {
       <header className="pane-head">
         <span>Tickets</span>
         <span className="muted mono">
-          {counts ? <>{counts.open} open{counts.look ? <> · <b className="look-count">{counts.look} for your look</b></> : null} · {counts.total} in all</> : "…"}
+          {counts ? <>{counts.open} open{counts.you ? <> · <b className="look-count">{counts.you} waiting on you</b></> : null} · {counts.total} in all</> : "…"}
         </span>
       </header>
       <div className="tk-bar">
         <div className="tabs" role="tablist" aria-label="Ticket views">
           {VIEWS.map((v) => (
-            <button key={v.id} role="tab" aria-selected={view === v.id && mode === "list"} className={view === v.id && mode === "list" ? "tab on" : "tab"} onClick={() => { setView(v.id); setMode("list"); }}>
-              {v.label}{v.id === "look" && counts?.look ? ` · ${counts.look}` : ""}
+            <button key={v.id} role="tab" aria-selected={view === v.id && mode === "list"} className={view === v.id && mode === "list" ? "tab on" : "tab"} onClick={() => { setView(v.id); setMode("list"); setPicked(true); }}>
+              {v.label}{v.id === "you" && counts?.you ? ` · ${counts.you}` : ""}
             </button>
           ))}
           <button role="tab" aria-selected={mode === "board"} className={mode === "board" ? "tab on" : "tab"} onClick={() => setMode("board")}>Board</button>
         </div>
         <div className="tk-tools">
-          <input className="tk-search" placeholder="Search words, answers, the thread, or #12" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search tickets" />
+          <input className="tk-search" placeholder="Search words, answers, the thread, or SF-12" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search tickets" />
           <select value={kind} onChange={(e) => setKind(e.target.value as TicketKind | "")} aria-label="Kind">
             <option value="">every kind</option>
             {meta?.kinds.map((k) => <option key={k.code} value={k.code}>{k.label}{counts?.byKind[k.code] ? ` (${counts.byKind[k.code]})` : ""}</option>)}
@@ -156,6 +162,7 @@ export function Tickets({ events, projectId = null, crew = [], onShowRun }: {
         <div className="tk-main">
           {mode === "board"
             ? <Board tickets={tickets} sel={sel} onSelect={setSel} crew={crewById} onMove={(id, to) => run(() => ticketsApi.say(id, "", to))} />
+            : view === "you" ? <Waiting events={events} projectId={projectId} sel={sel} onSelect={setSel} onError={setErr} showProject={projectId == null} />
             : <List tickets={tickets} view={view} sel={sel} onSelect={setSel} crew={crewById} counts={counts} />}
         </div>
         {sel != null && meta && <TicketPage key={sel} id={sel} meta={meta} last={last} crew={crew} projects={projects} onClose={() => setSel(null)} onSelect={setSel} onShowRun={onShowRun} onError={setErr} />}
@@ -176,17 +183,19 @@ function List({ tickets, view, sel, onSelect, crew, counts }: { tickets: TicketV
   }
   return (
     <>
-      {counts?.oldest && view === "open" && <div className="tk-summary muted">Oldest open: <button className="link" onClick={() => onSelect(counts.oldest!.id)}>#{counts.oldest.id} {counts.oldest.title}</button> · opened {ago(counts.oldest.createdAt)}</div>}
+      {counts?.oldest && view === "open" && <div className="tk-summary muted">Oldest open: <button className="link" onClick={() => onSelect(counts.oldest!.id)}>{counts.oldest.title}</button> · opened {ago(counts.oldest.createdAt)}</div>}
       <ul className="tk-list" role="listbox" aria-label="Tickets">
         {tickets.map((t) => (
-          <li key={t.id} role="option" aria-selected={t.id === sel} className={`tk-row s-${t.status} ${t.id === sel ? "on" : ""} ${t.parentId != null && view === "plans" ? "line" : ""}`} onClick={() => onSelect(t.id)}>
-            <span className={`tk-kind k-${t.kind}`} title={t.kind} aria-hidden>{KIND_GLYPH[t.kind]}</span>
-            <span className="tk-num mono">#{t.id}</span>
+          <li key={t.id} role="option" aria-selected={t.id === sel} className={`tk-row s-${t.status} ${t.id === sel ? "on" : ""} ${view === "plans" ? `lv-${t.level}` : ""}`} onClick={() => onSelect(t.id)}>
+            <span className={`tk-kind k-${t.kind}`} title={t.kind === "plan" ? "epic" : t.kind} aria-hidden>{KIND_GLYPH[t.kind]}</span>
+            <span className="tk-num mono">{t.key}</span>
             <span className="tk-title">
               <span className="tk-title-t">{t.title}</span>
               <span className="tk-sub">
                 <span className={`tk-status st-${t.status}`}>{STATUS_LABEL[t.status]}</span>
                 {t.priority && <span className={`tk-pri p-${t.priority}`}>{t.priority.replace("_", " ")}</span>}
+                {t.blocked && <span className="tk-blocked" title="Another ticket that is still open blocks this one">blocked</span>}
+                {t.children.total > 0 && <Progress c={t.children} label={t.kind === "plan" ? "tickets" : "subtasks"} />}
                 <span className="tk-meta muted">{t.run != null ? <span className="tk-run mono">run #{t.run}</span> : t.assignee ? <Who id={t.assignee} crew={crew} /> : t.source !== "you" ? `from ${t.source}` : ""}</span>
                 {t.lastNote && <span className="tk-last muted">{t.lastNote}</span>}
               </span>
@@ -216,7 +225,7 @@ function Board({ tickets, sel, onSelect, crew, onMove }: { tickets: TicketView[]
             <div className="tk-col-head"><span>{STATUS_LABEL[s]}</span><span className="mono muted">{col.length}</span></div>
             {col.slice(0, 60).map((t) => (
               <button key={t.id} draggable onDragStart={(e) => e.dataTransfer.setData("text/ticket", String(t.id))} className={`tk-card ${t.id === sel ? "on" : ""}`} onClick={() => onSelect(t.id)}>
-                <span className="tk-card-top"><span className={`tk-kind k-${t.kind}`} aria-hidden>{KIND_GLYPH[t.kind]}</span><span className="mono muted">#{t.id}</span>{t.priority === "now" && <span className="tk-pri p-now">now</span>}</span>
+                <span className="tk-card-top"><span className={`tk-kind k-${t.kind}`} aria-hidden>{KIND_GLYPH[t.kind]}</span><span className="mono muted">{t.key}</span>{t.priority === "now" && <span className="tk-pri p-now">now</span>}{t.blocked && <span className="tk-blocked">blocked</span>}</span>
                 <span className="tk-card-title">{t.title}</span>
                 <span className="tk-card-foot muted">{t.run != null ? <span className="tk-run mono">run #{t.run}</span> : <Who id={t.assignee} crew={crew} />}</span>
               </button>
@@ -284,7 +293,7 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   const [linkTo, setLinkTo] = useState("");
   const [showDoc, setShowDoc] = useState(false);
   useEffect(() => { ticketsApi.get(id).then(setD).catch((e) => onError((e as Error).message)); }, [id, last]);
-  if (!d) return <aside className="tk-page"><div className="empty">Loading #{id}…</div></aside>;
+  if (!d) return <aside className="tk-page"><div className="empty">Loading…</div></aside>;
   const t = d.ticket;
   const questions = meta.kinds.find((k) => k.code === t.kind)?.questions ?? [];
   const crewById = Object.fromEntries(crew.map((c) => [c.id, c]));
@@ -296,23 +305,24 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   const closed = t.status === "closed" || t.status === "rejected";
   const stationAt = d.run?.station ? STATION_ORDER.indexOf(d.run.station) : -1;
   return (
-    <aside className="tk-page" aria-label={`Ticket #${t.id}`}>
+    <aside className="tk-page" aria-label={`Ticket ${t.key}`}>
       <div className="tk-page-head">
         <span className={`tk-kind k-${t.kind}`} aria-hidden>{KIND_GLYPH[t.kind]}</span>
-        <span className="mono muted">#{t.id}</span>
+        <span className="mono muted" title={`Ticket ${t.key}${t.key !== `#${t.id}` ? ` (#${t.id} in the whole factory)` : ""}`}>{t.key}</span>
         <InlineText value={t.title} className="tk-page-title" onSave={(v) => edit("title", v)} label="Title" />
         <button className="ghost sm" onClick={onClose} aria-label="Close the ticket page">✕</button>
       </div>
       <div className="tk-chips">
         <ChipSelect label="kind" value={t.kind} options={meta.kinds.map((k) => [k.code, k.label])} onChange={(v) => edit("kind", v)} />
         <span className={`tk-status st-${t.status}`}>{STATUS_LABEL[t.status]}</span>
+        {t.blocked && <span className="tk-blocked" title="Another ticket that is still open blocks this one: see Links">blocked</span>}
         <ChipSelect label="priority" value={t.priority ?? ""} options={[["", "+ priority"], ...meta.priorities.map((p) => [p.code, p.label] as [string, string])]} onChange={(v) => edit("priority", v || null)} />
         {t.kind === "bug" && <ChipSelect label="severity" value={t.severity ?? ""} options={[["", "+ severity"], ...meta.severities.map((s) => [s, s] as [string, string])]} onChange={(v) => edit("severity", v || null)} />}
         <ChipSelect label="assignee" value={t.assignee ?? ""} options={[["", "+ assignee"], ["you", "you"], ...crew.map((c) => [c.id, `${c.avatar} ${c.name}`] as [string, string])]} onChange={(v) => edit("assignee", v || null)} />
         {projects.length > 0 && <ChipSelect label="project" value={t.project != null ? String(t.project) : ""} options={[["", "+ project"], ...projects.map((p) => [String(p.id), p.title] as [string, string])]} onChange={(v) => edit("project", v ? Number(v) : null)} />}
         <InlineText value={t.tags.join(", ")} placeholder="+ tags" className="tk-chip" onSave={(v) => edit("tags", v)} label="Tags" />
       </div>
-      {d.parent && <div className="muted tk-parent">Line of plan <button className="link" onClick={() => onSelect(d.parent!.id)}>#{d.parent.id} {d.parent.title}</button></div>}
+      {d.parent && <div className="muted tk-parent">{t.level === "subtask" ? "Subtask of" : "Part of epic"} <button className="link" onClick={() => onSelect(d.parent!.id)}>{d.parent.key} {d.parent.title}</button></div>}
 
       <div className="tk-crew">
         {d.repo ? (
@@ -355,32 +365,34 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
         ))}
       </div>
 
-      {(t.kind === "plan" || d.lines.length > 0) && (
+      {t.level !== "subtask" && (t.kind === "plan" || d.lines.length > 0 || !closed) && (
         <div className="tk-lines">
-          <div className="b-sub muted">Lines of this plan {d.lines.length ? `· ${d.lines.filter((l) => l.status === "closed").length}/${d.lines.length} done` : ""}</div>
-          {d.lines.length > 0 && <div className="tk-progress" aria-hidden><span style={{ width: `${(100 * d.lines.filter((l) => l.status === "closed").length) / d.lines.length}%` }} /></div>}
+          <div className="b-sub muted">{t.kind === "plan" ? "Tickets of this epic" : "Subtasks"}{d.lines.length ? ` · ${t.children.done}/${t.children.total} done` : ""}</div>
+          {d.lines.length > 0 && <div className="tk-progress" aria-hidden><span style={{ width: `${(100 * t.children.done) / Math.max(1, t.children.total)}%` }} /></div>}
           {d.lines.map((l, i) => (
             <div key={l.id} className="tk-line">
               <button className="ghost tiny" disabled={i === 0} onClick={() => act("line", () => ticketsApi.line(l.id, "up"))} aria-label="Move up">▲</button>
               <button className="ghost tiny" disabled={i === d.lines.length - 1} onClick={() => act("line", () => ticketsApi.line(l.id, "down"))} aria-label="Move down">▼</button>
-              <button className="link" onClick={() => onSelect(l.id)}>#{l.id} {l.title}</button>
+              <button className="link" onClick={() => onSelect(l.id)}><span className="mono muted">{l.key}</span> {l.title}</button>
+              {l.blocked && <span className="tk-blocked">blocked</span>}
+              {l.children.total > 0 && <Progress c={l.children} label="subtasks" />}
               <span className={`tk-status st-${l.status}`}>{STATUS_LABEL[l.status]}</span>
             </div>
           ))}
-          {t.kind === "plan" && <AddLine onAdd={(title) => act("line", () => ticketsApi.open({ kind: "task", title, parent: t.id, project: t.project }))} />}
+          {!closed && <AddLine placeholder={t.kind === "plan" ? "+ a ticket of this epic" : "+ a subtask"} onAdd={(title) => act("line", () => ticketsApi.open({ kind: "task", title, parent: t.id, project: t.project }))} />}
         </div>
       )}
 
       <div className="tk-links">
         <div className="b-sub muted">Links</div>
         {d.links.map((l) => (
-          <div key={`${l.relation}-${l.to}`} className="tk-link"><span className="muted">{l.relation.replace(/_/g, " ")}</span> <button className="link" onClick={() => onSelect(l.to)}>#{l.to} {l.title}</button>{l.status && <span className={`tk-status st-${l.status}`}>{STATUS_LABEL[l.status]}</span>}</div>
+          <div key={`${l.relation}-${l.to}`} className="tk-link"><span className="muted">{l.relation.replace(/_/g, " ")}</span> <button className="link" onClick={() => onSelect(l.to)}><span className="mono muted">{l.key ?? `#${l.to}`}</span> {l.title}</button>{l.status && <span className={`tk-status st-${l.status}`}>{STATUS_LABEL[l.status]}</span>}</div>
         ))}
-        <form className="tk-linkform" onSubmit={(e) => { e.preventDefault(); const [rel, num] = linkTo.split(":"); if (num) act("link", () => ticketsApi.link(id, Number(num.replace("#", "")), rel)).then(() => setLinkTo("")); }}>
+        <form className="tk-linkform" onSubmit={(e) => { e.preventDefault(); const [rel, num] = linkTo.split(":"); if (num) act("link", () => ticketsApi.link(id, num.trim(), rel)).then(() => setLinkTo("")); }}>
           <select value={linkTo.split(":")[0] || "related"} onChange={(e) => setLinkTo(`${e.target.value}:${linkTo.split(":")[1] ?? ""}`)} aria-label="Link kind">
             {meta.relations.map((r) => <option key={r} value={r}>{r.replace(/_/g, " ")}</option>)}
           </select>
-          <input placeholder="#" className="tk-num-input" value={linkTo.split(":")[1] ?? ""} onChange={(e) => setLinkTo(`${linkTo.split(":")[0] || "related"}:${e.target.value}`)} aria-label="Ticket number" />
+          <input placeholder="SF-4" className="tk-num-input" value={linkTo.split(":")[1] ?? ""} onChange={(e) => setLinkTo(`${linkTo.split(":")[0] || "related"}:${e.target.value}`)} aria-label="Ticket number" />
           <button className="ghost tiny" type="submit">Link</button>
         </form>
       </div>
@@ -445,11 +457,11 @@ function Section({ label, value, choices, onSave }: { label: string; value: stri
   );
 }
 
-function AddLine({ onAdd }: { onAdd: (title: string) => void }) {
+function AddLine({ onAdd, placeholder }: { onAdd: (title: string) => void; placeholder: string }) {
   const [v, setV] = useState("");
   return (
     <form className="tk-addline" onSubmit={(e) => { e.preventDefault(); if (v.trim()) { onAdd(v.trim()); setV(""); } }}>
-      <input placeholder="+ a line of this plan" value={v} onChange={(e) => setV(e.target.value)} aria-label="New plan line" />
+      <input placeholder={placeholder} value={v} onChange={(e) => setV(e.target.value)} aria-label={placeholder.replace("+ ", "New ")} />
     </form>
   );
 }
@@ -461,4 +473,58 @@ function ago(ts: string): string {
   const h = Math.round(m / 60);
   if (h < 48) return `${h} h ago`;
   return `${Math.round(h / 24)} days ago`;
+}
+
+/** "2/5 subtasks", with a thin bar: how much of what a ticket holds is done. */
+function Progress({ c, label }: { c: { total: number; done: number }; label: string }) {
+  return (
+    <span className="tk-prog" title={`${c.done} of ${c.total} ${label} done`}>
+      <span className="tk-prog-bar" aria-hidden><span style={{ width: `${(100 * c.done) / Math.max(1, c.total)}%` }} /></span>
+      <span className="mono">{c.done}/{c.total}</span>
+    </span>
+  );
+}
+
+const NEED_LABEL: Record<WaitingItem["need"], string> = { look: "Take a look", answer: "Answer", decide: "Decide" };
+
+/**
+ * Waiting on you: what needs your look, your answer or your yes, across every
+ * project (or one). Each row carries the moves that answer it, so most take
+ * one tap; anything longer opens the ticket.
+ */
+export function Waiting({ events, projectId = null, sel = null, onSelect, onError, showProject = true, limit }: {
+  events: SfEvent[]; projectId?: number | null; sel?: number | null; onSelect: (id: number, project: number | null) => void; onError?: (m: string) => void; showProject?: boolean; limit?: number;
+}) {
+  const [items, setItems] = useState<WaitingItem[] | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const last = events.filter((e) => e.type.startsWith("ticket.")).at(-1)?.id ?? 0;
+  const load = () => ticketsApi.waiting(projectId).then((r) => setItems(r.items)).catch((e) => onError?.((e as Error).message));
+  useEffect(() => { load(); }, [last, projectId]);
+  if (!items) return <div className="empty">Reading…</div>;
+  if (!items.length) return <div className="empty">Nothing waits on you. The crew has what it needs.</div>;
+  const move = async (t: TicketView, to: TicketStatus) => {
+    setBusy(t.id);
+    try { await ticketsApi.say(t.id, "", to); await load(); } catch (e) { onError?.((e as Error).message); } finally { setBusy(null); }
+  };
+  const shown = limit ? items.slice(0, limit) : items;
+  return (
+    <ul className="tk-waiting" aria-label="Waiting on you">
+      {shown.map(({ ticket: t, projectName, need, say, moves }) => (
+        <li key={t.id} className={`tk-wait need-${need} ${t.id === sel ? "on" : ""}`}>
+          <span className={`tk-need need-${need}`}>{NEED_LABEL[need]}</span>
+          <button className="tk-wait-main" onClick={() => onSelect(t.id, t.project)}>
+            <span className="tk-wait-title"><span className="mono muted">{t.key}</span> {t.title}</span>
+            <span className="tk-wait-say muted">{say}{showProject && projectName ? ` · ${projectName}` : ""}</span>
+          </button>
+          <span className="tk-wait-acts">
+            {moves.map((m) => (
+              <button key={m.to} className={m.to === "closed" || m.to === "ready" ? "sm" : "ghost sm"} disabled={busy != null} onClick={() => move(t, m.to)}>{m.label}</button>
+            ))}
+            {need === "answer" && <button className="sm" onClick={() => onSelect(t.id, t.project)}>Answer</button>}
+          </span>
+        </li>
+      ))}
+      {limit && items.length > limit && <li className="muted tk-wait-more">and {items.length - limit} more on the Tickets tab</li>}
+    </ul>
+  );
 }
