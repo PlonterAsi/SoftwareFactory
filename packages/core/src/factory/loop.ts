@@ -123,6 +123,30 @@ export class Factory {
     return out;
   }
 
+  /**
+   * The run already doing this exact idea, if any: one still in flight (or stopped, ready to resume),
+   * or one that shipped in the last day. Pressing Build twice (or on an old suggestion) should
+   * point at that run, not start a copy that becomes a second project with the same name.
+   * A run that failed or was rejected does not count: building it again is the point.
+   */
+  duplicateOf(idea: string, withinHours = 24): { run: number; state: "running" | "shipped" | "stopped"; projectId: number | null } | null {
+    const norm = normIdea(idea);
+    if (!norm) return null;
+    const since = new Date(Date.now() - withinHours * 3600_000).toISOString();
+    const rows = this.log.db.prepare("SELECT id, idea, outcome, started_at, finished_at FROM factory_runs ORDER BY id DESC LIMIT 500").all() as { id: number; idea: string; outcome: string | null; started_at: string; finished_at: string | null }[];
+    for (const r of rows) {
+      if (normIdea(r.idea) !== norm) continue;
+      const running = r.outcome == null || this.active.has(r.id);
+      const stopped = r.outcome === "stopped" && this.resumable(r.id).ok;
+      const shipped = r.outcome === "shipped" && (r.finished_at ?? r.started_at) >= since;
+      if (!running && !stopped && !shipped) continue;
+      let own: { project_id: number } | undefined;
+      try { own = this.log.db.prepare("SELECT project_id FROM project_links WHERE kind = 'factory_run' AND ref = ?").get(String(r.id)) as typeof own; } catch { /* projects not loaded */ }
+      return { run: r.id, state: running ? "running" : stopped ? "stopped" : "shipped", projectId: own ? Number(own.project_id) : null };
+    }
+    return null;
+  }
+
   /** Can this run be picked up again? Only runs stopped by the app closing, whose project folder still exists. */
   resumable(run: number): { ok: boolean; why?: string; from?: StationId } {
     if (this.active.has(run)) return { ok: false, why: "It is running." };
@@ -651,6 +675,23 @@ class Run {
       totalUsd: Number(this.spent.toFixed(6)), agentCalls: this.calls, fixRounds: this.fixRounds,
     });
   }
+}
+
+/**
+ * The API's answer when a Build would repeat a run: 409 with the run it repeats, so the Bridge can
+ * offer "Show run #N" or "Build again anyway" (the same request with { again: true }).
+ */
+export function duplicateReply(factory: Pick<Factory, "duplicateOf">, idea: string, again: unknown): [number, Record<string, unknown>] | null {
+  if (again === true) return null;
+  const d = factory.duplicateOf(idea);
+  if (!d) return null;
+  const what = d.state === "running" ? "is already building it" : d.state === "stopped" ? "already started it and can resume" : "already built it today";
+  return [409, { error: `Run #${d.run} ${what}. Open that run, or build again anyway.`, duplicateOf: d.run, state: d.state, projectId: d.projectId }];
+}
+
+/** An idea as the duplicate check compares it: case, spacing and closing punctuation do not matter. */
+export function normIdea(idea: string): string {
+  return idea.toLowerCase().replace(/\s+/g, " ").trim().replace(/[.!?\s]+$/, "");
 }
 
 function stationName(id: StationId) {
