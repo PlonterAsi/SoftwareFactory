@@ -1,5 +1,7 @@
-import { useMemo, useState, type FormEvent } from "react";
-import { projectsApi, setupApi, PROJECT_KINDS, PROJECT_STATUSES, type ProjectDetail, type SfEvent } from "../api";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { DuplicateNotice } from "../DuplicateNotice";
+import { duplicateOf, projectsApi, setupApi, type DuplicateRun, PROJECT_KINDS, PROJECT_STATUSES, type ProjectDetail, type ProjectSummary, type SfEvent } from "../api";
+import { href } from "./router";
 import { StarMap } from "../StarMap";
 import { OrderDeck } from "../OrderDeck";
 import { FactoryFloor } from "../FactoryFloor";
@@ -27,12 +29,14 @@ function Overview({ project: p, events, go, showRun }: PanelContext) {
   const r = p.rollup;
   const sets = useMemo(() => projectSets(p), [p]);
   const recent = useMemo(() => events.filter((e) => inProject(e, p, sets) && describe(e)).slice(-8).reverse(), [events, p, sets]);
-  async function build(e: FormEvent) {
-    e.preventDefault();
+  const [dup, setDup] = useState<DuplicateRun | null>(null);
+  async function build(e?: FormEvent, again = false) {
+    e?.preventDefault();
     if (!idea.trim() || busy) return;
     setBusy(true);
-    try { const { run } = await projectsApi.build(p.id, idea.trim()); setIdea(""); setErr(null); showRun(run); }
-    catch (x) { setErr((x as Error).message); }
+    setDup(null);
+    try { const { run } = await projectsApi.build(p.id, idea.trim(), undefined, again); setIdea(""); setErr(null); showRun(run); }
+    catch (x) { const d = duplicateOf(x); if (d) setDup(d); else setErr((x as Error).message); }
     finally { setBusy(false); }
   }
   const saveSummary = async () => {
@@ -55,6 +59,7 @@ function Overview({ project: p, events, go, showRun }: PanelContext) {
           <button type="submit" disabled={!idea.trim() || busy}>{busy ? "Starting…" : "Build it"}</button>
         </form>
         {err && <p className="error" role="alert">{err}</p>}
+        {dup && <DuplicateNotice dup={dup} busy={busy} onShow={showRun} onDismiss={() => setDup(null)} onAgain={() => build(undefined, true)} />}
       </section>
       <section className="pj-gauges" aria-label="Project numbers">
         <Gauge label="Runs" value={String(r.runs)} sub={r.running ? `${r.running} running` : r.runs ? `${r.shipped} shipped, ${r.failed} failed` : "none yet"} onClick={() => go("runs")} />
@@ -205,6 +210,7 @@ function Settings({ project: p }: PanelContext) {
           ))}
         </div>
       </fieldset>
+      <MergeInto project={p} />
       {p.runs.some((r) => r.dir) && (
         <fieldset>
           <legend>Folders</legend>
@@ -219,6 +225,47 @@ function Settings({ project: p }: PanelContext) {
       <p className="muted small">Made {new Date(p.createdAt).toLocaleDateString()} · {p.origin === "you" ? "by you" : p.origin === "factory" ? "from a factory run" : "by the Order Engine from your notes"} · id {p.id}</p>
       {msg && <p className="muted" role="status">{msg}</p>}
     </form>
+  );
+}
+
+/**
+ * Merge this project into another: its runs, ideas, tickets and links move over, and this one goes away
+ * (archived instead, if you made it). Projects with the same name come first, since those are usually copies.
+ */
+function MergeInto({ project: p }: { project: ProjectDetail }) {
+  const [all, setAll] = useState<ProjectSummary[] | null>(null);
+  const [into, setInto] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { projectsApi.list().then(setAll).catch(() => setAll([])); }, [p.id]);
+  const others = (all ?? []).filter((x) => x.id !== p.id && x.status !== "archived");
+  const same = others.filter((x) => x.name === p.name);
+  const rest = others.filter((x) => x.name !== p.name).sort((a, b) => a.name.localeCompare(b.name));
+  if (!others.length) return null;
+  const label = (x: ProjectSummary) => `${x.name} · #${x.id} · ${x.rollup.runs} run${x.rollup.runs === 1 ? "" : "s"}`;
+  async function merge() {
+    const target = others.find((x) => String(x.id) === into);
+    if (!target || busy) return;
+    if (!confirm(`Move everything in "${p.name}" (#${p.id}) into "${target.name}" (#${target.id})? ${p.origin === "you" ? "This project is then archived." : "This project then goes away."} Its folders on disk stay as they are.`)) return;
+    setBusy(true);
+    try { await projectsApi.merge(p.id, target.id); location.hash = href({ page: "project", id: target.id }); }
+    catch (x) { setMsg((x as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <fieldset className="pj-merge">
+      <legend>Merge into another project</legend>
+      {same.length > 0 && <p className="muted small">{same.length === 1 ? "Another project has" : `${same.length} other projects have`} this same name, so this is likely a copy. Merging keeps every run and its folder; only the duplicate entry goes.</p>}
+      <div className="row">
+        <select value={into} onChange={(e) => setInto(e.target.value)} aria-label="Project to merge into">
+          <option value="">Choose a project…</option>
+          {same.length > 0 && <optgroup label="Same name">{same.map((x) => <option key={x.id} value={x.id}>{label(x)}</option>)}</optgroup>}
+          {rest.length > 0 && <optgroup label={same.length ? "Others" : "Projects"}>{rest.map((x) => <option key={x.id} value={x.id}>{label(x)}</option>)}</optgroup>}
+        </select>
+        <button type="button" className="ghost" disabled={!into || busy} onClick={merge}>{busy ? "Merging…" : "Merge"}</button>
+      </div>
+      {msg && <p className="error" role="alert">{msg}</p>}
+    </fieldset>
   );
 }
 

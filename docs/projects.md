@@ -46,10 +46,17 @@ GET  /api/projects/:id                links, node tree, runs, agents, files, fac
 POST /api/projects/:id                { name?, kind?, summary?, status? }
 POST /api/projects/:id/links          { kind, ref }
 POST /api/projects/:id/unlink         { kind, ref }
-POST /api/projects/:id/runs           { idea, maxUsd? }   start a factory run inside this project
+POST /api/projects/:id/runs           { idea, maxUsd?, again? }   start a factory run inside this project
+POST /api/projects/:id/merge          { into }   move every link into another project; this one goes away (archived if you made it)
 ```
 
-`POST /api/factory/runs` also takes `projectId`.
+`POST /api/factory/runs` also takes `projectId` and `again`.
+
+### One idea, one run
+
+Every Build (`/api/factory/runs`, `/api/projects/:id/runs`, an improvement's Build) first asks `factory.duplicateOf(idea)`: a run of the same idea (case, spacing and the closing period ignored) that is still in flight, stopped and resumable, or shipped in the last 24 hours. If there is one, the answer is `409 { duplicateOf, state, projectId }` and nothing starts; the Bridge shows "Run #N is already building this idea" with **Show run #N** and **Build again anyway** (the same request with `again: true`). A failed or rejected run never blocks a new attempt.
+
+Why: one Overseer "Build:" suggestion was pressed five times on a real PC (2026-11-11). Each press started a full run, three from General became three projects with the same name, and two landed in whatever project chat was open. Now a suggestion that was pressed shows "Building as run #N · Show", builds in the chat it was given in, and the Projects list marks live projects that share a name ("same name as 1 other · merge"), which opens Settings → **Merge into another project**.
 
 ## Extension points
 
