@@ -1,6 +1,7 @@
 import { isAbsolute, join } from "node:path";
 import type { AgentDef, Slot } from "../bay/agentfile.js";
 import { BUILTIN_AGENTS, DEFAULT_SLOTS, systemPromptFor } from "../bay/builtin.js";
+import type { Principle } from "../brain/brain.js";
 
 /**
  * A crew member is an agent bound to a station: the agent's own prompt plus
@@ -37,10 +38,11 @@ export function pluginDirsFor(plugins: string[], env = process.env): string[] {
   return plugins.map((p) => (isAbsolute(p) || !env.SF_PLUGINS_DIR ? p : join(env.SF_PLUGINS_DIR, p)));
 }
 
-export function bind(agent: AgentDef, version: number, slot: Slot): CrewMember {
+/** Bind an agent to a station. Its role is its prompt, the Brain's principles for the station, then the contract. */
+export function bind(agent: AgentDef, version: number, slot: Slot, principles?: Principle[]): CrewMember {
   return {
     id: agent.id, version, name: agent.name, station: slot, model: agent.model, budgetUsd: agent.budgetUsd,
-    role: systemPromptFor(agent, slot), pluginDirs: pluginDirsFor(agent.plugins), tools: agent.tools,
+    role: systemPromptFor(agent, slot, principles), pluginDirs: pluginDirsFor(agent.plugins), tools: agent.tools,
   };
 }
 

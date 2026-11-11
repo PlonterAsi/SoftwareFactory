@@ -1,5 +1,6 @@
 import type { AgentDef, Slot } from "./agentfile.js";
 import { ARCHIVIST_ROLE } from "../order/archivist.js";
+import { brainBlock, DEFAULT_PRINCIPLES, type Principle } from "../brain/brain.js";
 
 /**
  * Station contracts. An agent's own prompt says who it is; the contract of the
@@ -16,16 +17,48 @@ Write nothing outside the blocks except at most two short lines of notes.`;
 export const TARGET = `Target platform: Node.js 22, ES modules ("type": "module"), no third-party packages at all (built-in modules only, such as node:fs, node:path, node:test, node:assert).`;
 
 /**
- * visualizeEverything applies to what the factory makes too: every project ships a
- * screen the Run tab can preview. A command line only when the idea asks for one,
- * and then next to the page, never instead of it.
+ * What the factory makes is a real program (the Brain's principles "real-programs",
+ * "crud-and-visibility", "no-raw-data"): an app on the SoftwareFactory app kit, which the
+ * core writes into every project (packages/core/kit/). The kit gives navigation, full CRUD
+ * for every entity, a data store and a System view; the crew writes the model and the logic.
  */
-export const UI_TARGET = `Every project has a visual interface: a web page the person opens inside SoftwareFactory.
-- index.html at the project root, with web/app.js (an ES module, <script type="module" src="web/app.js">) and web/style.css. Plain HTML, CSS and JavaScript: no frameworks, no CDN, nothing loaded from the internet, no build step. It is served as static files from the project folder.
-- web/app.js imports the core logic from src/ by relative path with the full file name (import { x } from "../src/x.js"). Everything the page imports must run in a browser: no node: modules, no process, no Buffer. Keep Node-only code (reading or writing files on disk) in its own files that the page never imports.
-- On first open the page already shows something useful: a built-in sample input and its result. Every control is wired; results, and errors, appear on the page and are drawn visually where it helps (a table, bars, a preview), not only as text.
-- Only when the idea truly needs the local disk or the operating system (changing files in a folder, running commands) add server.js: node:http only, listening on Number(process.env.PORT) || 0 at 127.0.0.1, printing "Ready on http://localhost:<port>/" once listening, serving index.html, web/ and src/ and a small JSON API under /api/ that wraps the core; the page calls it with fetch, and package.json gets "start": "node server.js".
-- A command-line tool (bin/<name>.js) only when the idea asks for a command line or for scripting, and then next to the page. It prints "usage: <name> <input> [--flag] [--opt <n>]" for --help or missing arguments.`;
+export const KIT_OWNED = ["server.js", "web/kit/db.js", "web/kit/store.js", "web/kit/shell.js", "web/kit/kit.css"];
+
+/** What the kit gives, in short: every station that plans or judges a build needs this much. */
+export const APP_SHAPE = `Every project is an application on the SoftwareFactory app kit. The core writes the kit into the project and rewrites it before every test run: ${KIT_OWNED.join(", ")}. It gives, with no code from the crew:
+- a server the person starts with one press (npm start, no arguments) that serves the screens and keeps all data in data/db.json, with a JSON API for every entity;
+- a left navigation; for every entity a searchable, sortable list, a create and edit form with validation, and delete with confirmation (full CRUD);
+- an Overview, and a System view that shows every entity and field, every flow, every feature, the activity history of changes, backup and restore, and the source files.
+The crew writes the app's model (src/schema.js: entities with typed fields and sample records, flows, features), its domain logic (pure functions in src/), and its own views (a dashboard, board, calendar or chart that shows what the logic works out).`;
+
+/** The full build target: what the Builder and Fixer write, file by file. */
+export const APP_TARGET = `${APP_SHAPE}
+Never write or change the kit files. You write:
+- src/schema.js: the app's model. Pure data and pure functions (it runs in the browser and in Node: no node: imports, no process).
+  export const app = { name: "Human name", slug: "kebab-name", tagline: "short", summary: "one sentence" };
+  export const entities = [{ name: "task" (lowerCamelCase), label: "Tasks", singular: "Task", description: "one line", title: "the field that names a record",
+    fields: [{ name, label?, type, required?, options? (for choice), to? (for ref: an entity name), min?, max?, help?, default? }],
+    computed: [{ name, label, value: (record, db) => number or string }] (optional: derived values, shown in the list and on the record),
+    seed: [3 to 6 realistic sample records; a ref field points at another entity's seed as "@project:0" (its first seed)] }];
+  Field types: text, longtext, number, bool, date (YYYY-MM-DD), choice, tags, ref, email, url, color.
+  export const flows = [{ name, description, steps: ["what the person does", "..."] }];
+  export const features = [{ name, description, where: "v/<view id>" or "e/<entity name>" }];
+  Wherever db is passed, it is { data: { <entity name>: [records] } } and a record is { id, ...fields, createdAt, updatedAt }.
+- src/<logic>.js: the domain logic as pure exported functions (what the locked tests test). schema computed values and the views call them.
+- web/app.js: import * as schema from "../src/schema.js"; import { startApp } from "./kit/shell.js"; then startApp({ schema, views: [ ... ] }).
+  A view is { id, label, description, render(el, ctx) }, with ctx = { store, schema, h, bars, stat, go, toast }:
+  store.list(entity, { q, sort, desc }), store.get(entity, id), store.count(entity), store.db, and the async writes store.create(entity, data), store.update(entity, id, patch), store.remove(entity, id) (the screen redraws after each);
+  h(tag, attrs, ...children) makes an element (attrs may hold onclick, oninput, class, style...); bars([{ label, value, max? }]) draws bars; stat(label, value, sub?) a number card; go("e/task/3") opens a record; toast(text, "error"?) shows a message.
+  A view with id "dashboard" replaces the default Overview. Give the app at least one view of its own that draws what the domain logic works out, with controls that act on the data through the store.
+- index.html: <link rel="stylesheet" href="web/kit/kit.css"> then <link rel="stylesheet" href="web/style.css">, a <div id="app"></div>, and <script type="module" src="web/app.js"></script>. Plain HTML, CSS and JavaScript: no frameworks, no CDN, nothing from the internet, no build step.
+- web/style.css: the app's own look on top of the kit (may be short).
+- package.json: { "name": "<slug>", "type": "module", "scripts": { "start": "node server.js", "test": "node --test" } }.
+- api.js only when the idea truly needs the local disk or the operating system: export async function handle(req, res, url, ctx), returning true when it answered (ctx = { db, schema, save, send, body, root }); its routes live under /api/ and the views call them with fetch. Folders and files are chosen in the view, never typed by the person as arguments.
+- A command-line tool (bin/<name>.js) only when the idea explicitly asks for scripting, and then next to the app, never instead of it.
+Never make the person type JSON, arguments or file paths: no text box whose content is parsed as JSON, no screen that asks for a config file.`;
+
+/** Kept for older callers: the build target is now the whole app. */
+export const UI_TARGET = APP_TARGET;
 
 export const CONTRACTS: Record<Slot, string> = {
   council: `Station contract: council.
@@ -35,41 +68,49 @@ Answer with ONE fenced json block and nothing else, shaped exactly like:
 At most 4 proposals and 4 concerns. vote is "build" (plan it now), "reshape" (plan it with your proposals applied) or "drop" (should not be built). scope is "small", "medium" or "large".`,
   plan: `Station contract: plan.
 ${TARGET}
-${UI_TARGET}
-Design for testing: put the logic in pure functions exported from src/ modules so tests never need real binary files, network or the clock. The page (and the CLI, when there is one) are thin layers over them.
-Keep it small: at most 4 source files besides the page files (index.html, web/app.js, web/style.css), and at most 8 acceptance criteria. Acceptance criteria are about the src/ core; the page is checked separately.
-"ui" describes the screen: what it shows on first open (with which sample), its controls, and what the person sees after using them.
-"cli" is the usage line, or "" when the idea does not call for a command line.
-"examples" are ready-to-run inputs for the CLI (at most 3, [] when there is no CLI); args may name files the build adds under examples/ or SPEC.md, which always exists.
+${APP_SHAPE}
+Model the idea as an app: the entities the person creates and manages (each with typed fields and realistic sample records), the flows they go through, and the views that show what the logic works out. An idea phrased as a script or a CLI ("a tool that renames photos", "convert a CSV") still becomes an app: what it works on becomes entities or a form, its options become fields, its results become records or a view, and its runs are kept in a history the person can browse.
+Design for testing: put the domain logic in pure functions exported from src/ modules so tests never need real binary files, network or the clock. The screens are thin layers over them.
+Keep it small: 1 to 4 entities, at most 3 views of its own, at most 4 source files besides src/schema.js and the page files (index.html, web/app.js, web/style.css), at most 8 acceptance criteria. Acceptance criteria are about the src/ logic; the app's screens are checked separately.
+"ui" describes the app in two or three sentences: its navigation, its own views, and what the person does first.
+"cli" is "" unless the idea explicitly asks for a command line; "examples" are then ready-to-run CLI inputs (at most 3), otherwise [].
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"name": "Human name", "slug": "kebab-case-name", "summary": "one sentence",
- "interface": "exact exported functions with signatures and behaviour",
- "ui": "the screen, in two or three sentences",
- "cli": "usage: name <input> [--flag]",
- "examples": [{"label": "short", "args": "examples/sample.txt --flag"}],
+ "interface": "exact exported functions of the src/ logic with signatures and behaviour; src/schema.js exports app, entities, flows, features",
+ "entities": [{"name": "task", "label": "Tasks", "fields": [{"name": "title", "type": "text", "required": true}, {"name": "status", "type": "choice", "options": ["todo", "done"]}, {"name": "project", "type": "ref", "to": "project"}], "seed": "what its 3 to 6 sample records are"}],
+ "flows": [{"name": "short", "steps": ["what the person does", "next step"]}],
+ "views": [{"id": "dashboard", "label": "Dashboard", "shows": "what it draws and which controls it has"}],
+ "ui": "the app, in two or three sentences",
+ "cli": "",
+ "examples": [],
  "acceptance": ["criterion 1", "criterion 2"],
  "tasks": [{"id": "t1", "title": "short", "dependsOn": []}],
- "files": ["package.json", "src/x.js", "index.html", "web/app.js", "web/style.css"]}`,
+ "files": ["package.json", "src/schema.js", "src/x.js", "index.html", "web/app.js", "web/style.css"]}`,
   tests: `Station contract: tests.
 Write acceptance tests from an approved spec BEFORE any code exists. The tests are then locked: nobody may edit them, so they must test exactly the spec's interface and acceptance criteria, nothing invented.
 ${TARGET}
-Use node:test and node:assert/strict. Put tests in test/*.test.js and import the code by relative path (for example ../src/x.js). Build fixtures in code (Buffers, temp dirs from node:os tmpdir), or write small fixture files under test/fixtures/ as file blocks too; resolve their paths from the test file (new URL("./fixtures/x.csv", import.meta.url)), never from the working directory. One test per acceptance criterion where possible, named after it. Test the src/ core only: never the page (index.html, web/), which the core checks on its own.
+Use node:test and node:assert/strict. Put tests in test/*.test.js and import the code by relative path (for example ../src/x.js). Build fixtures in code (Buffers, temp dirs from node:os tmpdir), or write small fixture files under test/fixtures/ as file blocks too; resolve their paths from the test file (new URL("./fixtures/x.csv", import.meta.url)), never from the working directory. One test per acceptance criterion where possible, named after it. Test the src/ logic only (you may import ../src/schema.js too): never the screens (index.html, web/) or the server, which the core checks on its own. Never test argument parsing or a command line unless the spec has one.
 ${FILE_FORMAT}`,
   build: `Station contract: build.
-Write the code that makes the locked acceptance tests pass and meets the spec.
+Write the code that makes the locked acceptance tests pass and meets the spec, as a whole app.
 ${TARGET}
-${UI_TARGET}
-You may not create or change anything under test/. Write package.json (with "type": "module" and "scripts": {"test": "node --test"}), every file the plan lists, the page as the plan's "ui" describes it, any sample files the plan's examples name, and a short README.md that says how to open the page.
+${APP_TARGET}
+You may not create or change anything under test/. Write every file the plan lists, the entities, flows and views the plan describes, and a short README.md that says what the app does and that it opens from the Run tab's Start (no arguments).
 ${FILE_FORMAT}`,
   review: `Station contract: review.
-The locked acceptance tests already pass. Check the code against the spec for what the tests miss: spec points not met, wrong or unsafe behaviour, a README without usage, and the page: it must use the core from src/, show a sample result on first open, and have every control wired (a blank page or a dead button is "high"). Never ask for style changes or new features.
+${APP_SHAPE}
+The locked acceptance tests already pass. Check the code against the spec and the principles for what the tests miss:
+- spec points not met, wrong or unsafe behaviour, a README without how to open it;
+- the app: index.html loads the kit and web/app.js, which starts the app with src/schema.js; every entity the idea needs is in the schema with sensible typed fields and realistic sample records; every flow and feature of the spec is reachable; at least one view of its own draws what the logic works out and every control on it is wired;
+- "high": a project that is a script or CLI with no real app, a screen that asks the person to type JSON, arguments, config or file paths, an entity the person cannot create, edit or delete, a blank view or a dead button.
+Never ask for style changes or new features.
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"verdict": "pass", "findings": [{"severity": "low", "text": "short"}]}
-verdict is "fix" only when there is at least one "high" finding (something the spec requires that is wrong or missing). At most 5 findings.`,
+verdict is "fix" only when there is at least one "high" finding (something the spec or a principle requires that is wrong or missing). At most 5 findings.`,
   fix: `Station contract: fix.
-Tests failed, the page check failed, or a reviewer found a problem. Fix the code, never the tests (they are locked and any change to test/ is rejected). Change as little as needed. Return only the files you change, each in full.
+Tests failed, the app check failed, or a reviewer found a problem. Fix the code, never the tests (they are locked and any change to test/ is rejected) and never the kit files (they are rewritten). Change as little as needed. Return only the files you change, each in full.
 ${TARGET}
-${UI_TARGET}
+${APP_TARGET}
 ${FILE_FORMAT}`,
   order: `Station contract: order.\n${ARCHIVIST_ROLE}`,
   improve: `Station contract: improve.
@@ -120,7 +161,7 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     id: "architect", name: "Architect", avatar: "⌬", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
     description: "Council seat: shapes the idea into modules, interfaces and a testable core.",
     sample: "a CLI that turns a folder of markdown notes into a static site",
-    prompt: "You are the Architect on the SoftwareFactory Council. You shape the idea: the smallest set of modules, the pure functions at its core, the page that shows them, the inputs and outputs, and what must be testable without the network or real files.",
+    prompt: "You are the Architect on the SoftwareFactory Council. You shape the idea into an app: the entities it manages and their fields, the pure functions at its core, the views that show what they work out, and what must be testable without the network or real files.",
   },
   {
     id: "skeptic", name: "Skeptic", avatar: "⚠", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
@@ -144,7 +185,7 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     id: "builder", name: "Builder", avatar: "▣", station: "build", model: "sonnet", budgetUsd: 0.6, plugins: [], skills: [], tools: [],
     description: "Writes the code that passes the locked tests.",
     sample: "Spec: src/slug.js exports slugify(text) that lowercases, turns spaces into dashes and drops other punctuation.",
-    prompt: "You are the Builder of SoftwareFactory. You write small, clear code that makes the locked acceptance tests pass and meets the spec, with a clean, readable page on top of it.",
+    prompt: "You are the Builder of SoftwareFactory. You write small, clear code that makes the locked acceptance tests pass and meets the spec, as a whole app a person can use: its model, its logic and its own views.",
   },
   {
     id: "reviewer", name: "Reviewer", avatar: "◎", station: "review", model: "haiku", budgetUsd: 0.1, plugins: [], skills: [], tools: [],
@@ -197,7 +238,13 @@ export const DEFAULT_SLOTS: Record<Slot, string[]> = {
 
 export const SLOT_SEATS: Record<Slot, number> = { council: 3, plan: 1, tests: 1, build: 1, review: 1, fix: 1, order: 1, overseer: 1, improve: 6, map: 1, survey: 1 };
 
-/** The system prompt an agent runs with on a station: its own prompt, then the station's contract. */
-export function systemPromptFor(agent: Pick<AgentDef, "prompt">, slot: Slot | "none"): string {
-  return slot === "none" ? agent.prompt : `${agent.prompt.trim()}\n\n${CONTRACTS[slot]}`;
+/**
+ * The system prompt an agent runs with on a station: its own prompt, then the Brain's principles
+ * for that station, then the station's contract. The principles come from the Brain (the event
+ * log, so your edits apply to the next call); without a log, the defaults.
+ */
+export function systemPromptFor(agent: Pick<AgentDef, "prompt">, slot: Slot | "none", principles: Principle[] = DEFAULT_PRINCIPLES): string {
+  if (slot === "none") return agent.prompt;
+  const brain = brainBlock(slot, principles);
+  return [agent.prompt.trim(), brain, CONTRACTS[slot]].filter(Boolean).join("\n\n");
 }

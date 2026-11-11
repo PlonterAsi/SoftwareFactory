@@ -157,7 +157,7 @@ describe("Council", () => {
     await f.wait(f.start("count words", { autoApprove: true, council: "always" }));
     const [c] = events(log, "factory.council");
     expect(c.seats.map((s: SeatResult) => [s.agent, s.take?.vote])).toEqual([["visionary", "build"], ["architect", "build"], ["skeptic", "build"]]);
-    expect(c.brief.agreed).toEqual(expect.arrayContaining(["read from a file or stdin", "unicode whitespace"]));
+    expect(c.brief.agreed).toEqual(expect.arrayContaining(["pieces with a word goal", "unicode whitespace"]));
     expect(rt.calls.find((r) => r.systemPrompt?.includes("Station contract: plan"))!.prompt).toContain("Council brief");
     const v = events(log, "factory.visual").find((x) => x.station === "council");
     expect(v.pass).toBe(true);

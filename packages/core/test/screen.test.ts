@@ -116,7 +116,7 @@ describe("adding a screen to a finished project", () => {
     expect(rt.calls.map((c) => c.systemPrompt?.match(/Station contract: (\w+)/)?.[1])).toEqual(["build", "review"]);
     expect(rt.calls[0].prompt).toContain("Current code:");
     expect(rt.calls[0].prompt).toContain("bin/wc.js");
-    expect(rt.calls[0].prompt).toContain('"ui": "One page for: Counts words in a file.');
+    expect(rt.calls[0].prompt).toContain('"ui": "An app for: Counts words in a file.');
     expect(existsSync(join(fin.dir, "index.html"))).toBe(true);
     expect(git(fin.dir, "ls-files", "test")).toBe(testsBefore);
     expect(git(fin.dir, "tag").split("\n").sort()).toEqual(["v0.1.0", "v0.2.0"]);
