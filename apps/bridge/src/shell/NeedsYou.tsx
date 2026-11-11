@@ -1,5 +1,5 @@
 import type { FactoryRunView } from "../api";
-import { GateActions } from "../GateActions";
+import { ApprovalCard } from "./ApprovalCard";
 import { href } from "../projects/router";
 import { EmptyState, StatusTag } from "../ui";
 
@@ -22,19 +22,7 @@ export function NeedsYou({ factoryRuns, featuresWaiting, conflicts, onShowRun }:
         <EmptyState title="Nothing needs you">The crew is working, or idle. When a build needs your OK or a step fails, it shows up here and in the sidebar.</EmptyState>
       ) : (
         <ol className="needs-list">
-          {waiting.map((r) => {
-            return (
-              <li key={r.run} className="needs-item">
-                <div className="needs-meta">
-                  <StatusTag status="needs" />
-                  <span className="needs-title">{r.plan?.name ?? r.idea}</span>
-                  <span className="muted mono">build #{r.run}</span>
-                  <button className="link" onClick={() => onShowRun(r.run)}>Open the build</button>
-                </div>
-                <GateActions run={r} />
-              </li>
-            );
-          })}
+          {waiting.map((r) => <li key={r.run} className="needs-approval"><ApprovalCard run={r} onShowRun={onShowRun} /></li>)}
           {featuresWaiting > 0 && (
             <li className="needs-item">
               <div className="needs-meta"><StatusTag status="needs" /><span className="needs-title">{featuresWaiting} finished app{featuresWaiting > 1 ? "s" : ""} to approve</span></div>

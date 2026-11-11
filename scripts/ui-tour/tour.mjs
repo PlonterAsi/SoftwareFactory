@@ -128,6 +128,17 @@ try {
   if (await page.locator(".helm").count()) { await page.screenshot({ path: join(out, "fg-helm.png") }); shots.push("fg-helm"); }
   else problems.push("fg-helm: Ctrl K did not open the helm");
   await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  current = "fg-keys";
+  await page.keyboard.press("?");
+  await page.waitForTimeout(300);
+  if (await page.locator(".keys").count()) { await page.screenshot({ path: join(out, "fg-keys.png") }); shots.push("fg-keys"); }
+  else problems.push("fg-keys: ? did not open the shortcut list");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("g");
+  await page.keyboard.press("n");
+  await page.waitForTimeout(300);
+  if (!page.url().endsWith("#/needs")) problems.push(`fg-keys: g n went to ${page.url()}, not Needs you`);
   await page.keyboard.press("Control+j");
   await page.waitForTimeout(400);
   if (await page.locator(".s2-assist").count()) problems.push("fg: Ctrl J did not hide the Assistant");

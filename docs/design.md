@@ -41,3 +41,9 @@ Switch it on in **Systems → Layout → Foundry Glass** (kept per computer in `
 - **Helm** (Ctrl K): Enter files what you typed as a note (in the open project), Ctrl Enter builds it, arrows and Enter jump to a project or page.
 - **Assistant** (Ctrl J): the chat as a right column you can hide; remembered per computer.
 - The UI tour shoots the new shell as `fg-*` screens.
+
+## Approval screen, motion, keys (phase 5)
+
+- **ApprovalCard** (`shell/ApprovalCard.tsx`, used by Needs you): what you approve laid out beside the question. Plan OK shows the summary, tasks, "done means" checks and budget. Build OK shows the last test round, the review and the files. The GateBar is sticky at the card's foot.
+- **Motion**: pages in the new shell fade up 4px over 180ms; helm and Assistant slide in; all off under reduced motion.
+- **Keys** (`shell/Shortcuts.tsx`, new shell only, never while typing): `?` lists them; `G` then N/P/A/F/L/O/B goes to Needs you, Projects, Agents, Whole factory, Finished apps, Add-ons, Brain.
