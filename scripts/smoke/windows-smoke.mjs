@@ -224,6 +224,17 @@ console.log("seeded", db);
   const testsRun = spawnSync(bundledNode, ["--test"], { cwd: fin1.dir, encoding: "utf8" });
   check("the shipped repo's tests pass on their own", testsRun.status === 0, testsRun.stdout.split("\n").filter((l) => /^# (pass|fail)/.test(l)).join(", "));
 
+  // ---------- 4a. project chats: what is said in a project's chat stays in that project ----------
+  try {
+    const cp = (await api(`/api/projects/of?kind=factory_run&ref=${run1}`)).body.projectId;
+    const said = await api("/api/signals", { method: "POST", body: JSON.stringify({ text: "Smoke note for this project's chat: keep it offline.", projectId: cp }) });
+    check("a note said in a project's chat is saved in that chat", said.status === 201 && said.body.projectId === cp, JSON.stringify(said.body).slice(0, 200));
+    const routed = await until("the Order Engine to file the chat note", async () => { const r = (await api("/api/chat/routes")).body; return r?.filed?.[said.body.id] ? r : null; }, 30_000, 500);
+    check("the chat note is filed under that same project", routed?.filed?.[said.body.id]?.includes(cp) && routed?.factoryRuns?.[run1] === cp, JSON.stringify({ filed: routed?.filed?.[said.body.id], run: routed?.factoryRuns?.[run1], cp }));
+  } catch (e) {
+    check("project chats work in the installed app", false, String(e).slice(0, 300));
+  }
+
   // ---------- 4b. run finished projects from inside the app (Run tab) ----------
   try {
     const pid1 = (await api(`/api/projects/of?kind=factory_run&ref=${run1}`)).body.projectId;

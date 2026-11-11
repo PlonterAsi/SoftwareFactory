@@ -979,3 +979,13 @@ button.tool-raw { font-size: 12px; margin-left: auto; }
 .pk:not(.dir) .pk-name { color: var(--muted); }
 .pk:not(.dir):hover .pk-name { color: var(--accent); }
 .pk-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Project chats: General plus one per project, switched from the Overseer's head. */
+.chat-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.chat-tab { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--muted); font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-tab:hover { color: var(--ink); border-color: rgba(79, 214, 232, 0.45); }
+.chat-tab.on { color: var(--ink); background: var(--accent-dim); border-color: rgba(79, 214, 232, 0.55); }
+.chat-badge { min-width: 16px; padding: 0 5px; border-radius: 999px; font: 10px/16px var(--mono); text-align: center; background: var(--line); color: var(--ink); }
+.chat-badge.gate { background: var(--gate); color: #1a1205; }
+.chat-pick { max-width: 160px; padding: 3px 6px; font-size: 12px; }
+.chat-empty { margin: auto 0; padding: 10px 4px; color: var(--muted); font-size: 13px; line-height: 1.5; white-space: normal; }

@@ -46,10 +46,15 @@ const NOISE = /^(ok(ay)?|k|thanks?|thank|you|thx|lol|haha+|h+m+|u+m+|cool|nice|g
 
 const PREFIX = /^(project|idea|thread|topic)\s*[:\-]\s*(.+)$/i;
 
-/** The free Archivist: plain heuristics over the node tree. Same input, same answer. */
-export function heuristicArchivist(text: string, state: OrderState): ArchivistPlan {
+/**
+ * The free Archivist: plain heuristics over the node tree. Same input, same answer.
+ * `home`: the root node of the project whose chat the message was said in; words with no
+ * clearer home go there instead of to the Unsorted tray.
+ */
+export function heuristicArchivist(text: string, state: OrderState, home?: number | null): ArchivistPlan {
   const plan: ArchivistPlan = { nodes: [], fragments: [] };
   const live = state.nodes.filter((n) => n.mergedInto == null);
+  if (home != null && !live.some((n) => n.id === home)) home = null;
   // Vocabulary of each node: its title (counted twice) and its live fragments.
   const vocab = new Map<number, Set<string>>();
   for (const n of live) vocab.set(n.id, new Set(tokens(n.title)));
@@ -63,7 +68,7 @@ export function heuristicArchivist(text: string, state: OrderState): ArchivistPl
   const focus = (): number | string | null => {
     const ps = live.filter((n) => n.kind === "project").sort((a, b) => b.lastActive.localeCompare(a.lastActive));
     const proposed = plan.nodes.find((n) => n.kind === "project");
-    return proposed?.ref ?? ps[0]?.id ?? null;
+    return proposed?.ref ?? home ?? ps[0]?.id ?? null;
   };
 
   let current: number | string | null = null; // a node opened earlier in this same Signal
@@ -126,6 +131,8 @@ export function heuristicArchivist(text: string, state: OrderState): ArchivistPl
     }
     // Said in the same breath as something already filed: it most likely belongs with it.
     if (lastFiled != null) return { text: piece, kind, important, node: lastFiled, confidence: 0.55, contradicts, alternatives: alternativesFor(lastFiled) };
+    // Said in a project's own chat: that project is its home unless the words point elsewhere.
+    if (home != null && kind !== "question") return { text: piece, kind, important, node: home, confidence: 0.6, contradicts, alternatives: alternativesFor(home) };
     const f = focus();
     // No words tie it anywhere. With one project that is still the obvious home; with several, the
     // most recently active one is only a guess, so it waits in Unsorted with that guess on top
@@ -149,7 +156,7 @@ Answer with ONE fenced json block and nothing else, shaped exactly like:
 "parent" and "node" are an existing node id (number), a "ref" from your own "nodes" list, or null (a project has parent null; a fragment with node null goes to the Unsorted tray). kind is one of: ${KINDS.join(", ")}. confidence is 0 to 1; use below ${FILE_AT} when unsure.`;
 
 /** What the agent Archivist sees: the message, the tree and the nearest Canon only, so the call stays small. */
-export function archivistPrompt(text: string, state: OrderState, maxCanon = 25): string {
+export function archivistPrompt(text: string, state: OrderState, maxCanon = 25, home?: number | null): string {
   const live = state.nodes.filter((n) => n.mergedInto == null);
   const tree = live.length
     ? live.map((n) => `${n.id} ${n.kind} "${n.title}"${n.parentId != null ? ` parent ${n.parentId}` : ""}`).join("\n")
@@ -160,7 +167,9 @@ export function archivistPrompt(text: string, state: OrderState, maxCanon = 25):
     .sort((a, b) => b.s - a.s)
     .slice(0, maxCanon)
     .map(({ f }) => `${f.id} [node ${f.nodeId}] ${f.text.slice(0, 200)}`);
-  return `NODE TREE (id kind "title" parent):\n${tree}\n\nNEAREST CANON (id [node] text):\n${canon.join("\n") || "(none yet)"}\n\nNEW MESSAGE:\n"""\n${text.slice(0, 6000)}\n"""`;
+  const homeNode = home != null ? live.find((n) => n.id === home) : undefined;
+  const said = homeNode ? `SAID IN THE CHAT OF PROJECT ${homeNode.id} "${homeNode.title}": file fragments under it (or its ideas and threads) unless they are clearly about another project.\n\n` : "";
+  return `${said}NODE TREE (id kind "title" parent):\n${tree}\n\nNEAREST CANON (id [node] text):\n${canon.join("\n") || "(none yet)"}\n\nNEW MESSAGE:\n"""\n${text.slice(0, 6000)}\n"""`;
 }
 
 /** Check and normalise an agent's proposal. Throws when it is unusable. */

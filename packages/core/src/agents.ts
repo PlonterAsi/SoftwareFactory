@@ -10,7 +10,7 @@ export interface AgentRun {
 }
 
 /** Run one agent call and record start, result and cost in the event log. */
-export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: string, req: AgentRequest, meta: { factoryRun?: number; station?: string; agentVersion?: number; seat?: number; round?: number; bayTest?: boolean } = {}): Promise<AgentRun> {
+export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: string, req: AgentRequest, meta: { factoryRun?: number; projectId?: number; station?: string; agentVersion?: number; seat?: number; round?: number; bayTest?: boolean } = {}): Promise<AgentRun> {
   const start = log.append("agent.run.started", { agent, runtime: runtime.name, model: req.model ?? null, prompt: req.prompt.slice(0, 4000), budgetUsd: req.budgetUsd ?? null, ...meta });
   try {
     const result = await runtime.run(req);

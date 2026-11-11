@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 
 /** Same shapes the core writes to its event log. */
 export interface SfEvent { id: number; ts: string; type: string; payload: any }
-export interface Signal { id: number; ts: string; text: string; source: string }
+/** projectId: the project chat it was said in; absent: the General chat. */
+export interface Signal { id: number; ts: string; text: string; source: string; projectId?: number }
 export interface AgentRunView {
   runId: number;
   agent: string;
   station?: string;
   factoryRun?: number;
+  /** The project chat an Overseer question was asked in. */
+  projectId?: number;
   /** A test run from the Agent Bay, not a conversation. */
   bayTest?: boolean;
   prompt: string;
@@ -31,8 +34,8 @@ const inTauriBundle = "__TAURI_INTERNALS__" in window && !location.host.startsWi
 export const API: string =
   import.meta.env.VITE_SF_API ?? (inTauriBundle || !location.protocol.startsWith("http") ? "http://127.0.0.1:4317" : "");
 
-export async function captureSignal(text: string) {
-  const r = await fetch(`${API}/api/signals`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+export async function captureSignal(text: string, projectId?: number) {
+  const r = await fetch(`${API}/api/signals`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, projectId }) });
   if (!r.ok) throw new Error((await r.json()).error ?? "capture failed");
   return (await r.json()) as Signal;
 }
@@ -137,8 +140,8 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
   return [...runs.values()];
 }
 
-export async function askOverseer(prompt: string, model: string) {
-  const r = await fetch(`${API}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt, model }) });
+export async function askOverseer(prompt: string, model: string, projectId?: number) {
+  const r = await fetch(`${API}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt, model, projectId }) });
   return r.json();
 }
 
@@ -179,7 +182,7 @@ export function useFactory() {
     const byId = new Map<number, AgentRunView>();
     for (const e of events) {
       if (e.type === "agent.run.started") {
-        byId.set(e.id, { runId: e.id, agent: e.payload.agent, station: e.payload.station, factoryRun: e.payload.factoryRun, bayTest: !!e.payload.bayTest, prompt: e.payload.prompt, model: e.payload.model, startedAt: e.ts, state: "running" });
+        byId.set(e.id, { runId: e.id, agent: e.payload.agent, station: e.payload.station, factoryRun: e.payload.factoryRun, projectId: e.payload.projectId, bayTest: !!e.payload.bayTest, prompt: e.payload.prompt, model: e.payload.model, startedAt: e.ts, state: "running" });
       } else if (e.type === "agent.run.completed" && byId.has(e.payload.runId)) {
         Object.assign(byId.get(e.payload.runId)!, { state: "done", ...e.payload });
       } else if (e.type === "agent.run.failed" && byId.has(e.payload.runId)) {
@@ -479,3 +482,23 @@ export const launchApi = {
     return j as BrowseView;
   },
 };
+
+// ---- Project chats ----
+
+/** Where messages live beyond what they carry themselves: see packages/core/src/chat/routes.ts. */
+export interface ChatRoutes { filed: Record<number, number[]>; factoryRuns: Record<number, number> }
+
+/** The chat routes, refetched (debounced) when a Signal is filed or a project or run changes. */
+export function useChatRoutes(events: SfEvent[], online: boolean) {
+  const [routes, setRoutes] = useState<ChatRoutes>({ filed: {}, factoryRuns: {} });
+  const at = events.filter((e) => e.type === "signal.captured" || PROJECT_EVENT(e.type)).at(-1)?.id ?? 0;
+  useEffect(() => {
+    if (!online) return;
+    let stop = false;
+    const t = setTimeout(() => {
+      fetch(`${API}/api/chat/routes`).then((r) => (r.ok ? r.json() : null)).then((j) => { if (!stop && j) setRoutes(j); }).catch(() => {});
+    }, 250);
+    return () => { stop = true; clearTimeout(t); };
+  }, [at, online]);
+  return routes;
+}
