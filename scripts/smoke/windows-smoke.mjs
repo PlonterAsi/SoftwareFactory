@@ -17,15 +17,22 @@
 //      from its last completed station and ship
 //   7. closes the app normally and expects the core to exit with it
 //   8. unpacks the portable zip and checks it starts too
+//   Safe by design: deletes nothing (an existing data folder is moved aside), and runs only on CI or with --test-machine.
+//   9. in-app update: installs an older version (0.0.1, built by CI to look for updates on this
+//      test's local server), launches it, and expects it to find this build, download and verify
+//      it, stop its core, install it and start again as the new version with the data intact
 //
 // Usage (Windows):
-//   node scripts/smoke/windows-smoke.mjs --installer out/SoftwareFactory-setup.exe --portable out/SoftwareFactory-portable.zip --out smoke-out
+//   node scripts/smoke/windows-smoke.mjs --installer out/SoftwareFactory-setup.exe --portable out/SoftwareFactory-portable.zip \
+//     [--old-installer smoke-update/SoftwareFactory-old-setup.exe --update-sig smoke-update/SoftwareFactory-setup.exe.testsig --version 0.2.41] --out smoke-out
 //
 // Writes smoke-out/report.md (also appended to the job summary), core logs and screenshots.
 
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { createReadStream, statSync } from "node:fs";
+import { createServer } from "node:http";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith("--") ? [...acc, [a.slice(2), all[i + 1]?.startsWith("--") ? "1" : all[i + 1] ?? "1"]] : acc), []));
@@ -34,7 +41,23 @@ const API = "http://127.0.0.1:4317";
 const IDENT = "dev.plonter.softwarefactory";
 const DATA = join(process.env.APPDATA ?? join(process.env.HOME ?? ".", ".config"), IDENT);
 const APP_ENV = { ...process.env, SF_RUNTIME: "mock", SF_MOCK_DELAY_MS: args.delay ?? "400", SF_DROP: join(OUT, "drop") };
+// Safety: this test installs and uninstalls SoftwareFactory and starts from an empty data folder.
+// It deletes nothing (an existing data folder is moved aside to a dated backup), and it runs only
+// on a CI machine or when told this is a test machine, never by accident on a PC with real work.
+if (!process.env.CI && !args["test-machine"]) {
+  console.error("Refusing to run: this smoke test reinstalls SoftwareFactory and moves its data folder aside.\nRun it on CI, or on a test machine with --test-machine.");
+  process.exit(2);
+}
 mkdirSync(OUT, { recursive: true });
+const STAMP = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
+/** Move a folder out of the way instead of deleting it. */
+function moveAside(dir) {
+  if (!existsSync(dir)) return null;
+  const to = `${dir}.before-smoke-${STAMP}`;
+  renameSync(dir, to);
+  log("moved aside (nothing deleted):", dir, "->", to);
+  return to;
+}
 
 const results = [];
 let fatal = null;
@@ -128,7 +151,7 @@ async function main() {
   // ---------- 1. install ----------
   const installer = resolve(args.installer ?? "out/SoftwareFactory-setup.exe");
   must("installer exists", existsSync(installer), installer);
-  rmSync(DATA, { recursive: true, force: true });
+  moveAside(DATA);
   const inst = spawnSync(installer, ["/S"], { encoding: "utf8", timeout: 300_000 });
   check("silent install exits 0", inst.status === 0, `status ${inst.status} ${inst.error?.message ?? ""}`);
   const candidates = [join(process.env.LOCALAPPDATA ?? "", "SoftwareFactory"), join(process.env.ProgramFiles ?? "C:\\Program Files", "SoftwareFactory")];
@@ -273,7 +296,7 @@ console.log("seeded", db);
   check("closing the window exits the app", appGone, appGone ? "" : `app pid ${pid} still running`);
   const down = await waitDown(15_000);
   check("closing the window stops the core", down, down ? "" : `core pid ${corePid} still answers${alive(corePid) ? " (process alive)" : ""}`);
-  if (!down) { kill(pid, true); spawnSync("taskkill", ["/IM", "node.exe", "/F"]); await waitDown(10_000); }
+  if (!down) { kill(pid, true); if (corePid) kill(corePid, true); await waitDown(10_000); }
   saveLogs("closed");
 
   // ---------- 7b. the shell killed alone (crash, Task Manager): the core must not linger ----------
@@ -289,8 +312,7 @@ console.log("seeded", db);
   // ---------- 8. portable zip ----------
   if (args.portable) {
     const zip = resolve(args.portable);
-    const dir = join(OUT, "portable");
-    rmSync(dir, { recursive: true, force: true });
+    const dir = join(OUT, `portable-${STAMP}`);
     const x = ps(`Expand-Archive -Force -Path '${zip}' -DestinationPath '${dir}'`);
     must("portable zip unpacks", x.status === 0, x.stderr);
     const pexe = join(dir, "SoftwareFactory", "SoftwareFactory.exe");
@@ -308,6 +330,104 @@ console.log("seeded", db);
     kill(app.child.pid, true);
     await waitDown(10_000);
     saveLogs("portable");
+  }
+}
+
+// ---------- 9. in-app update from an older installed version ----------
+async function updatePhase() {
+  const oldInstaller = resolve(args["old-installer"]);
+  const newInstaller = resolve(args.installer ?? "out/SoftwareFactory-setup.exe");
+  const NEW = args.version;
+  must("an older build to update from exists", existsSync(oldInstaller), oldInstaller);
+  must("the test signature for this build exists", existsSync(args["update-sig"] ?? ""), args["update-sig"]);
+  must("this build's version is known", /^\d+\.\d+\.\d+$/.test(NEW ?? ""), NEW);
+
+  // The update server the old build was built to ask: http://127.0.0.1:4399. It behaves like GitHub
+  // for a private repo: the manifest and the installer answer only with the read token (404 without),
+  // the installer only for Accept: application/octet-stream, and it is served from another host by
+  // redirect, where the token must not follow (GitHub's file storage refuses requests that carry it).
+  const TOKEN = "smoke-test-read-token";
+  const hits = [];
+  const refused = [];
+  const manifest = {
+    version: NEW, notes: "Smoke test update", pub_date: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    platforms: { "windows-x86_64": { signature: readFileSync(args["update-sig"], "utf8").trim(), url: "http://127.0.0.1:4399/repos/x/y/releases/assets/1" } },
+  };
+  const server = createServer((req, res) => {
+    const path = req.url?.split("?")[0];
+    hits.push(path);
+    const auth = req.headers.authorization ?? "";
+    log("update server:", req.method, req.url, `host=${req.headers.host}`, auth ? "with token" : "no token", `accept=${req.headers.accept}`);
+    const deny = (why) => { refused.push(`${path}: ${why}`); res.writeHead(404); res.end(); };
+    if (path === "/latest.json") {
+      if (auth !== `Bearer ${TOKEN}`) return deny("no token");
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(manifest));
+    }
+    if (path === "/repos/x/y/releases/assets/1") {
+      if (auth !== `Bearer ${TOKEN}`) return deny("no token");
+      if (req.headers.accept !== "application/octet-stream") return deny(`accept ${req.headers.accept}`);
+      res.writeHead(302, { location: "http://localhost:4399/storage/SoftwareFactory-setup.exe" });
+      return res.end();
+    }
+    if (path === "/storage/SoftwareFactory-setup.exe") {
+      if (auth) { refused.push(`${path}: the token followed the redirect`); res.writeHead(400); return res.end(); }
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-length": statSync(newInstaller).size });
+      return createReadStream(newInstaller).pipe(res);
+    }
+    res.writeHead(404); res.end();
+  });
+  await new Promise((r) => server.listen(4399, "127.0.0.1", r));
+  let exeName = "softwarefactory.exe";
+  try {
+    const inst = spawnSync(oldInstaller, ["/S"], { encoding: "utf8", timeout: 300_000 });
+    check("the older version (0.0.1) installs over this one", inst.status === 0, `status ${inst.status}`);
+    const installDir = [join(process.env.LOCALAPPDATA ?? "", "SoftwareFactory"), join(process.env.ProgramFiles ?? "C:\\Program Files", "SoftwareFactory")].find((d) => findExe(d));
+    const exe = findExe(installDir);
+    exeName = basename(exe);
+    // The read token, as Systems > Updates saves it (the repo may be private).
+    writeFileSync(join(DATA, "updater-token"), TOKEN);
+    launch(exe, "old-version");
+    const h = await until("the old version's core", health, 120_000, 1000);
+    must("the old version runs", h?.appVersion === "0.0.1", h ? `appVersion ${h.appVersion}` : readTail(join(DATA, "core.log")));
+    const oldCore = h.pid;
+    const marker = `A note written on 0.0.1, before the update (${Date.now()})`;
+    const sig = await api("/api/signals", { method: "POST", body: JSON.stringify({ text: marker, source: "bridge" }) });
+    check("a note is saved on the old version", sig.status === 201, JSON.stringify(sig.body).slice(0, 200));
+    screenshot("5-old-version");
+
+    // The Bridge checks 5 s after opening, finds NEW, counts down 15 s (factory idle), then installs.
+    const found = await until("the old version to ask for updates", async () => hits.some((u) => u.startsWith("/latest.json")), 90_000, 500);
+    check("the old version looked for an update by itself, with its read token", found && !refused.some((r) => r.startsWith("/latest.json")), `requests: ${hits.join(", ") || "none"}; refused: ${refused.join("; ") || "none"}`);
+    await sleep(8_000);
+    screenshot("6-update-countdown");
+    const fetched = await until("the old version to download this build", async () => hits.includes("/storage/SoftwareFactory-setup.exe"), 90_000, 500);
+    check("it downloaded the new installer after the idle countdown, the way a private GitHub release serves it", fetched && refused.length === 0, `requests: ${hits.join(", ")}; refused: ${refused.join("; ") || "none"}`);
+    const oldGone = await until("the old app to hand over", async () => !alive(app.child.pid), 90_000, 500);
+    check("the old app closed itself to install", oldGone, oldGone ? "" : `pid ${app.child.pid} still running`);
+    check("the old core stopped before the installer ran", !alive(oldCore), `core pid ${oldCore}`);
+    screenshot("7-installing");
+
+    // The installer replaces the app and starts the new version by itself.
+    const back = await until(`the app to come back as v${NEW}`, async () => { const x = await health(); return x?.appVersion === NEW ? x : null; }, 240_000, 1000);
+    saveLogs("updated");
+    check(`the app restarted by itself as v${NEW}`, back, back ? `core pid ${back.pid}` : `health now: ${JSON.stringify(await health())?.slice(0, 200)}`);
+    if (!back) { launch(findExe(installDir), "after-update"); await until("the updated core", health, 120_000, 1000); }
+    const after = await health();
+    check(`the installed app is now v${NEW}`, after?.appVersion === NEW, `appVersion ${after?.appVersion}`);
+    await waitBridge(60_000);
+    screenshot("8-updated");
+    const notes = (await api("/api/signals")).body;
+    check("the note written before the update is still there", Array.isArray(notes) && notes.some((n) => (n.text ?? n.payload?.text) === marker), `${Array.isArray(notes) ? notes.length : "?"} notes`);
+    const ups = (await api("/api/updates")).body;
+    check("the update is in the version history", ups?.history?.[0]?.from === "0.0.1" && ups.history[0].to === NEW, JSON.stringify(ups?.history?.slice(0, 2)));
+    const st2 = (await api("/api/store")).body.database;
+    check("the database is healthy after the update", st2.schemaVersion === st2.latestSchema && st2.projections.every((p) => !p.error), `${st2.schemaVersion} of ${st2.latestSchema}`);
+  } finally {
+    server.close();
+    // The updated app was started by the installer, not by this script: stop it by name.
+    spawnSync("taskkill", ["/IM", exeName, "/T", "/F"]);
+    await waitDown(15_000);
   }
 }
 
@@ -340,6 +460,7 @@ function report() {
 
 try {
   await main();
+  if (args["old-installer"]) await updatePhase();
 } catch (e) {
   fatal = e.message;
   log("FATAL", e.stack ?? e.message);

@@ -65,6 +65,7 @@ export type EventType =
   | "improve.visual"
   | "store.migrated"
   | "store.rebuilt"
+  | "app.updated"
   | "project.created"
   | "project.updated"
   | "project.linked"
