@@ -1,8 +1,8 @@
 import type { IncomingMessage } from "node:http";
 import type { EventLog } from "../events.js";
-import type { Factory } from "../factory/loop.js";
+import { duplicateReply, type Factory } from "../factory/loop.js";
 import type { OrderEngine } from "../order/engine.js";
-import { createProject, linkToProject, listProjects, projectDetail, projectOf, unlinkFromProject, updateProject } from "./service.js";
+import { createProject, linkToProject, listProjects, mergeProject, projectDetail, projectOf, unlinkFromProject, updateProject } from "./service.js";
 
 /**
  * The projects API. Every write is an event, so the Bridge sees it on the stream.
@@ -14,7 +14,8 @@ import { createProject, linkToProject, listProjects, projectDetail, projectOf, u
  *   POST /api/projects/:id                { name?, kind?, summary?, status? }
  *   POST /api/projects/:id/links          { kind, ref }   move a thing into this project
  *   POST /api/projects/:id/unlink         { kind, ref }
- *   POST /api/projects/:id/runs           { idea, maxUsd? }   start a factory run in this project
+ *   POST /api/projects/:id/runs           { idea, maxUsd?, again? }   start a factory run in this project (409 + duplicateOf when it repeats one, unless again)
+ *   POST /api/projects/:id/merge          { into }   move everything of this project into another; this one goes away (or is archived if you made it)
  *   POST /api/projects/:id/screen         { baseRun?, maxUsd? }   give a shipped build (default: the newest) a screen (a page), same folder, next version
  */
 export async function projectsRoute(
@@ -38,7 +39,7 @@ export async function projectsRoute(
     linkToProject(log, id, "order_node", node);
     return [201, projectDetail(log, id)];
   }
-  const m = path.match(/^\/api\/projects\/(\d+)(?:\/(links|unlink|runs|screen))?$/);
+  const m = path.match(/^\/api\/projects\/(\d+)(?:\/(links|unlink|runs|screen|merge))?$/);
   if (!m) return null;
   const id = Number(m[1]);
   if (req.method === "GET" && !m[2]) {
@@ -62,8 +63,13 @@ export async function projectsRoute(
     if (!projectDetail(log, id)) return [404, { error: `No project #${id}` }];
     const blocked = ctx.canBuild?.();
     if (blocked) return [409, { error: blocked }];
+    const dup = duplicateReply(ctx.factory, String(body.idea ?? ""), body.again);
+    if (dup) return dup;
     const run = ctx.factory.start(String(body.idea ?? ""), { projectId: id, maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined });
     return [202, { run, projectId: id }];
+  }
+  if (m[2] === "merge") {
+    try { return [200, projectDetail(log, mergeProject(log, id, Number(body.into)))]; } catch (e) { return [409, { error: (e as Error).message }]; }
   }
   if (m[2] === "screen") {
     if (!projectDetail(log, id)) return [404, { error: `No project #${id}` }];
