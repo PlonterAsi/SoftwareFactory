@@ -535,5 +535,23 @@ if (isMain) {
       }
     }, 1000).unref();
   }
-  server.listen(port, "127.0.0.1", () => console.log(`SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, db ${dbPath})`));
+  // Keep idle connections longer than any client's keep-alive pool (the Bridge, the smoke test),
+  // so a client never sends on a socket the core is closing at that same moment.
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
+  // A connection that breaks before a request is understood is otherwise dropped without a word.
+  server.on("clientError", (err: NodeJS.ErrnoException, socket) => {
+    if (err.code !== "ECONNRESET") console.error(`${new Date().toISOString()} connection error: ${err.code ?? ""} ${err.message}`);
+    if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"); else socket.destroy();
+  });
+  // A core that stops answering for a while (synchronous work hogging the event loop) says so in core.log,
+  // with the time, so a frozen-looking window can be matched to what the core was doing.
+  let tick = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const stalled = now - tick - 500;
+    if (stalled >= 2_000) console.error(`${new Date(now).toISOString()} the core was busy for ${(stalled / 1000).toFixed(1)} s and could not answer`);
+    tick = now;
+  }, 500).unref();
+  server.listen(port, "127.0.0.1", () => console.log(`${new Date().toISOString()} SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, db ${dbPath})`));
 }

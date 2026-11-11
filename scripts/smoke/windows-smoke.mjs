@@ -74,8 +74,36 @@ function must(name, ok, detail) {
   if (!check(name, ok, detail)) throw new Error(`${name}: ${detail}`);
 }
 
+// Connection errors the test met and got past (a GET retried once). Listed in the report,
+// so a flaky core shows up as a warning with its cause instead of failing the run silently.
+const blips = [];
+let corePid = null;
+let polling = 0;
+/** Why a fetch failed, in one line: undici hides the socket error in `cause`. */
+function why(e) {
+  const c = e?.cause;
+  return [e?.message, c?.code, c?.message].filter(Boolean).join(" / ");
+}
 async function api(path, init) {
-  const r = await fetch(API + path, { ...init, headers: { "content-type": "application/json" } });
+  let r;
+  try {
+    r = await fetch(API + path, { ...init, headers: { "content-type": "application/json" } });
+  } catch (e) {
+    // Polling while the core starts or stops: a refused connection is the expected answer.
+    if (polling) throw e;
+    const method = init?.method ?? "GET";
+    const detail = `${method} ${path}: ${why(e)}; core pid ${corePid ?? "?"} ${corePid ? (alive(corePid) ? "alive" : "GONE") : ""}`;
+    // Only a GET is safe to send twice; a POST that failed might have been half done.
+    if (method !== "GET") throw new Error(detail, { cause: e });
+    log("connection blip, retrying once:", detail);
+    blips.push(detail);
+    await sleep(500);
+    try {
+      r = await fetch(API + path, { ...init, headers: { "content-type": "application/json" } });
+    } catch (e2) {
+      throw new Error(`${detail}; retry failed too: ${why(e2)}`, { cause: e2 });
+    }
+  }
   const text = await r.text();
   let body;
   try { body = JSON.parse(text); } catch { body = text; }
@@ -87,10 +115,13 @@ async function health() {
 async function until(what, fn, timeoutMs, everyMs = 500) {
   const t0 = Date.now();
   let last;
-  while (Date.now() - t0 < timeoutMs) {
-    try { last = await fn(); if (last) return last; } catch (e) { last = null; }
-    await sleep(everyMs);
-  }
+  polling++;
+  try {
+    while (Date.now() - t0 < timeoutMs) {
+      try { last = await fn(); if (last) return last; } catch (e) { last = null; }
+      await sleep(everyMs);
+    }
+  } finally { polling--; }
   log(`timed out after ${timeoutMs} ms waiting for ${what}`);
   return null;
 }
@@ -193,6 +224,7 @@ console.log("seeded", db);
   const h = await until("the core to answer", health, 120_000, 1000);
   saveLogs("installed-start");
   must("bundled core answers on 127.0.0.1:4317", h?.ok, h ? JSON.stringify(h) : readTail(join(DATA, "core.log")));
+  corePid = h.pid ?? null;
   check("practice crew is on", h.runtime === "mock" && h.mode === "practice", `${h.runtime} / ${h.mode}`);
   const nodeV = spawnSync(bundledNode, ["-p", "process.version"], { encoding: "utf8" }).stdout.trim();
   check("the core runs on the bundled Node.js", h.node === nodeV, `core ${h.node}, bundled ${nodeV}`);
@@ -503,6 +535,7 @@ function report() {
     "",
     `${results.length - failed.length} of ${results.length} checks passed${fatal ? `; stopped early: ${fatal}` : ""}.`,
     "",
+    ...(blips.length ? [`⚠️ ${blips.length} connection blip(s) to the core, each passed on one retry:`, "", ...blips.map((b) => `- ${b}`), ""] : []),
     "| | Check | Detail |",
     "|---|---|---|",
     ...results.map((r) => `| ${r.ok ? "✅" : "❌"} | ${r.name} | ${r.detail.replace(/\|/g, "\\|").replace(/\n/g, " ").slice(0, 300)} |`),
@@ -514,12 +547,33 @@ function report() {
   return failed.length === 0 && !fatal;
 }
 
+/** After a fatal error: say in the job log whether the core is alive, answering, listening and what it last printed. */
+async function diagnose() {
+  try {
+    log("diagnosis: core pid", corePid ?? "unknown", corePid ? (alive(corePid) ? "is alive" : "is GONE") : "");
+    let h = null;
+    try { h = await (await fetch(API + "/api/health")).json(); } catch (e) { h = `no answer: ${why(e)}`; }
+    log("diagnosis: /api/health now:", typeof h === "string" ? h : JSON.stringify(h).slice(0, 400));
+    const ns = spawnSync("netstat", ["-ano", "-p", "TCP"], { encoding: "utf8" });
+    const lines = (ns.stdout ?? "").split(/\r?\n/).filter((l) => l.includes(":4317"));
+    const states = lines.reduce((m, l) => { const st = l.trim().split(/\s+/)[3] ?? "?"; m[st] = (m[st] ?? 0) + 1; return m; }, {});
+    log("diagnosis: sockets on :4317 by state", JSON.stringify(states));
+    for (const f of ["core.log", "core.prev.log"]) {
+      const p = join(DATA, f);
+      if (existsSync(p)) log(`diagnosis: last lines of ${f}:\n` + readFileSync(p, "utf8").split(/\r?\n/).slice(-30).join("\n"));
+    }
+  } catch (e) {
+    log("diagnosis failed:", e.message);
+  }
+}
+
 try {
   await main();
   if (args["old-installer"]) await updatePhase();
 } catch (e) {
   fatal = e.message;
   log("FATAL", e.stack ?? e.message);
+  await diagnose();
 } finally {
   if (app?.child?.pid) kill(app.child.pid, true);
   saveLogs("final");
