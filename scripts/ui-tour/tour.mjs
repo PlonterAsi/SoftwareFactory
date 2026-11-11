@@ -110,6 +110,28 @@ try {
   const sys = page.getByRole("button", { name: "Systems" }).first();
   if (await sys.count()) { await sys.click(); await page.waitForTimeout(600); await page.screenshot({ path: join(out, "systems.png") }); shots.push("systems"); }
   else problems.push("systems: no Systems button found");
+  // The Foundry Glass shell (Systems → Layout), same screens plus Needs you and the helm.
+  await page.evaluate(() => localStorage.setItem("sf.layout", "foundry"));
+  await page.reload();
+  await visit("#/", "fg-home");
+  await visit("#/needs", "fg-needs");
+  const waitingProject = (await api(`/api/projects/of?kind=factory_run&ref=${waiting}`)).projectId;
+  if (waitingProject != null) await visit(`#/p/${waitingProject}/runs`, "fg-waiting-runs");
+  await visit("#/factory", "fg-factory-floor");
+  await visit("#/plugins", "fg-plugins");
+  current = "fg-helm";
+  await page.keyboard.press("Control+k");
+  await page.waitForTimeout(400);
+  await page.keyboard.type("habit");
+  await page.waitForTimeout(300);
+  if (await page.locator(".helm").count()) { await page.screenshot({ path: join(out, "fg-helm.png") }); shots.push("fg-helm"); }
+  else problems.push("fg-helm: Ctrl K did not open the helm");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+j");
+  await page.waitForTimeout(400);
+  if (await page.locator(".s2-assist").count()) problems.push("fg: Ctrl J did not hide the Assistant");
+  await visit("#/needs", "fg-needs-no-assistant");
+  await page.evaluate(() => localStorage.removeItem("sf.layout"));
   await browser.close();
 
   writeFileSync(join(out, "contact-sheet.html"), `<!doctype html><meta charset="utf-8"><title>UI tour ${outName}</title><style>body{background:#111;color:#ddd;font:14px system-ui;margin:20px}div{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:16px}img{width:100%;border:1px solid #333}</style><h1>UI tour ${outName}</h1><p>${problems.length ? problems.length + " problems, see problems.txt" : "No problems found"}</p><div>${shots.map((s) => `<figure><img src="${s}.png"><figcaption>${s}</figcaption></figure>`).join("")}</div>`);
