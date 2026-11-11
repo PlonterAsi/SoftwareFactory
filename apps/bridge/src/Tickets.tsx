@@ -40,7 +40,7 @@ const VIEWS: { id: View; label: string }[] = [
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(`${API}${path}`, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   const j = await r.json();
-  if (!r.ok) throw new Error(j.error ?? `${method} ${path} failed`);
+  if (!r.ok) throw Object.assign(new Error(j.error ?? `${method} ${path} failed`), { body: j });
   return j as T;
 }
 
@@ -60,7 +60,7 @@ export const ticketsApi = {
   say: (id: number, text: string, status?: TicketStatus) => call<TicketView>("POST", `/api/tickets/${id}/say`, { text, status }),
   link: (id: number, to: number, relation: string) => call<TicketView>("POST", `/api/tickets/${id}/link`, { to, relation }),
   line: (id: number, dir: "up" | "down") => call<TicketView[]>("POST", `/api/tickets/${id}/line`, { dir }),
-  work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number) => call<{ run: number | null; branch?: string }>("POST", `/api/tickets/${id}/work`, { maxUsd, where }),
+  work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number, again?: boolean) => call<{ run: number | null; branch?: string }>("POST", `/api/tickets/${id}/work`, { maxUsd, where, again }),
   ask: (id: number, agent?: string) => call<{ reply?: string; error?: string }>("POST", `/api/tickets/${id}/ask`, { agent }),
 };
 
@@ -285,6 +285,16 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
     try { await fn(); setD(await ticketsApi.get(id)); } catch (e) { onError((e as Error).message); } finally { setBusy(null); }
   };
   const edit = (field: string, value: unknown, key?: string) => act("edit", () => ticketsApi.edit(id, field, value, key));
+  // The factory builds one idea once a day: when this one is already built or building, say so and offer both ways on.
+  const [dup, setDup] = useState<{ run: number; error: string } | null>(null);
+  const work = async (where: "auto" | "repo" = "auto", again = false) => {
+    setBusy("work"); setDup(null);
+    try { await ticketsApi.work(id, where, undefined, again); setD(await ticketsApi.get(id)); }
+    catch (e) {
+      const b = (e as { body?: { duplicateOf?: number } }).body;
+      if (b?.duplicateOf != null) setDup({ run: b.duplicateOf, error: (e as Error).message }); else onError((e as Error).message);
+    } finally { setBusy(null); }
+  };
   const closed = t.status === "closed" || t.status === "rejected";
   const stationAt = d.run?.station ? STATION_ORDER.indexOf(d.run.station) : -1;
   return (
@@ -308,12 +318,12 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
 
       <div className="tk-crew">
         {d.repo ? (
-          <button disabled={closed || busy != null || d.working} onClick={() => act("work", () => ticketsApi.work(id, "repo"))}
+          <button disabled={closed || busy != null || d.working} onClick={() => work("repo")}
             title={`The Builder works it on a new branch of a clone of ${d.repo.source}. The original repo is not touched and nothing is pushed.`}>
             {busy === "work" ? "Starting…" : d.working ? "Builder at work in the repo" : t.branch ? "Work it again in the repo" : "Work it in the repo"}
           </button>
         ) : (
-          <button disabled={closed || busy != null} onClick={() => act("work", () => ticketsApi.work(id))} title="The factory loop builds it: Council, plan, locked tests, build, review, fix, ship. The run writes back here.">
+          <button disabled={closed || busy != null} onClick={() => work()} title="The factory loop builds it: Council, plan, locked tests, build, review, fix, ship. The run writes back here.">
             {busy === "work" ? "Starting…" : d.run && !d.run.outcome ? "Crew at work" : "Work it with the crew"}
           </button>
         )}
@@ -322,6 +332,13 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
         </button>
         <button className="ghost" onClick={() => setShowDoc((s) => !s)}>{showDoc ? "Hide" : "Work document"}</button>
       </div>
+      {dup && (
+        <div className="tk-dup" role="alert">
+          <span>{dup.error}</span>
+          {onShowRun && <button className="sm" onClick={() => onShowRun(dup.run)}>Open run #{dup.run}</button>}
+          <button className="sm ghost" onClick={() => work("auto", true)}>Work it again anyway</button>
+        </div>
+      )}
       {d.run && (
         <div className="tk-runstrip" aria-label={`Factory run ${d.run.id}`}>
           <button className="link mono" onClick={() => onShowRun?.(d.run!.id)}>run #{d.run.id}</button>
