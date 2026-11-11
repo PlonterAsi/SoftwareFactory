@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { EmptyState } from "../ui";
 import { projectsApi, PROJECT_KINDS, type ProjectSummary } from "../api";
 import { ago } from "./builtin";
 import { href } from "./router";
@@ -64,10 +65,7 @@ export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err
       </div>
       {(err || msg) && <p className="error pad" role="alert">{msg ?? `Could not read projects: ${err}`}</p>}
       {list && !list.length ? (
-        <div className="fleet-empty">
-          <p>No projects yet.</p>
-          <p className="muted">Name one above, or tell the Overseer an idea and press Build it: every build starts its own project, and the notes you file grow projects on their own.</p>
-        </div>
+        <EmptyState title="No projects yet">Name one above, or tell the Assistant an idea and press Build it: every build starts its own project, and the notes you file grow projects on their own.</EmptyState>
       ) : (
         <ul className="manifest">
           {shown.map((p) => <Row key={p.id} p={p} onOpen={onOpen} twins={(twins.get(p.name) ?? 1) - 1} />)}
