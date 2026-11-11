@@ -283,6 +283,8 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   const [busy, setBusy] = useState<string | null>(null);
   const [linkTo, setLinkTo] = useState("");
   const [showDoc, setShowDoc] = useState(false);
+  // A Work it the factory held back because that idea is built or building (hooks stay above the early return).
+  const [dup, setDup] = useState<{ run: number; error: string } | null>(null);
   useEffect(() => { ticketsApi.get(id).then(setD).catch((e) => onError((e as Error).message)); }, [id, last]);
   if (!d) return <aside className="tk-page"><div className="empty">Loading #{id}…</div></aside>;
   const t = d.ticket;
@@ -294,7 +296,6 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   };
   const edit = (field: string, value: unknown, key?: string) => act("edit", () => ticketsApi.edit(id, field, value, key));
   // The factory builds one idea once a day: when this one is already built or building, say so and offer both ways on.
-  const [dup, setDup] = useState<{ run: number; error: string } | null>(null);
   const work = async (where: "auto" | "repo" = "auto", again = false) => {
     setBusy("work"); setDup(null);
     try { await ticketsApi.work(id, where, undefined, again); setD(await ticketsApi.get(id)); }
