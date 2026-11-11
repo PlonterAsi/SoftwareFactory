@@ -31,3 +31,13 @@ All in `apps/bridge/src/ui/`, shown in every state at `#/_kit` (not linked; the 
 - **EmptyState**: title, one or two lines on what will appear, and optionally the one action that gets there.
 
 Words people see: Assistant (not Overseer), note (not Signal), Loose ideas (not Unsorted), Project rules (not Canon), Your OK: plan / Your OK: build (not gate A/B), Budget (not fuel), Agents (not Agent Bay), Systems (not Ship's systems). Code names stay as they are.
+
+## Foundry Glass shell (phase 3, preview)
+
+Switch it on in **Systems → Layout → Foundry Glass** (kept per computer in `localStorage["sf.layout"]`; Classic stays the default until phase 6). Code in `apps/bridge/src/shell/`.
+
+- **Sidebar** (248px): Needs you (amber count only when something waits), Projects, six most recent projects with a status glyph, Agents, Whole factory, Finished apps, Add-ons, Brain; Systems, online, spend, crew and version at the foot. Command (the game door) joins when the game thread ships it.
+- **Needs you** (`#/needs`): every waiting approval answered in place with GateBar, plus finished apps to approve and rule conflicts.
+- **Helm** (Ctrl K): Enter files what you typed as a note (in the open project), Ctrl Enter builds it, arrows and Enter jump to a project or page.
+- **Assistant** (Ctrl J): the chat as a right column you can hide; remembered per computer.
+- The UI tour shoots the new shell as `fg-*` screens.
