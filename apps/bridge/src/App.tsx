@@ -22,6 +22,7 @@ import "./projects/improvePanel";
 import "./projects/runPanel";
 import "./CodeMap";
 import { FeaturesPage, useIntegrations } from "./Features";
+import { PluginsPage, syncPluginPanels, usePlugins } from "./Plugins";
 
 export function App() {
   const f = useFactory();
@@ -33,6 +34,10 @@ export function App() {
   const features = useIntegrations(f.events);
   const featuresWaiting = features.data?.integrations.filter((i) => i.status === "awaiting").length ?? 0;
   const projects = useProjects(f.events, f.online);
+  const plugins = usePlugins(f.events, f.online);
+  // Enabled plugins' tabs join every project before the workspace renders.
+  syncPluginPanels(plugins.data?.plugins, f.events);
+  const pluginsOn = plugins.data?.plugins.filter((p) => p.status === "enabled").length ?? 0;
   const chatRoutes = useChatRoutes(f.events, f.online);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
@@ -99,6 +104,9 @@ export function App() {
             <a href={href({ page: "features" })} aria-current={route.page === "features" ? "page" : undefined} className={featuresWaiting ? "alert-text" : undefined}>
               Features{features.data?.installed.length ? ` · ${features.data.installed.length}` : ""}{featuresWaiting ? ` · ${featuresWaiting} to approve` : ""}
             </a>
+            <a href={href({ page: "plugins" })} aria-current={route.page === "plugins" ? "page" : undefined}>
+              Plugins{pluginsOn ? ` · ${pluginsOn}` : ""}
+            </a>
             <a href={href({ page: "factory", view })} aria-current={route.page === "factory" ? "page" : undefined}>Whole factory</a>
           </nav>
         </div>
@@ -141,7 +149,9 @@ export function App() {
         </main>
       ) : (
         <main className="grid projects-grid">
-          {route.page === "features"
+          {route.page === "plugins"
+            ? <PluginsPage events={f.events} list={plugins.data} err={plugins.err} refresh={plugins.refresh} id={route.id} panel={route.panel} />
+            : route.page === "features"
             ? <FeaturesPage events={f.events} id={route.id} onOpenProject={(id) => go({ page: "project", id, panel: "integrate" })} />
             : route.page === "project"
             ? <Workspace id={route.id} panel={route.panel} run={route.run} factory={f} order={order} bay={bay} go={go} />
