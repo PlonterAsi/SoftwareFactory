@@ -12,6 +12,7 @@ import { parseModuleNotes, parseSuggestions } from "../imports/crew.js";
 import { parseLensAnswer } from "../improve/lenses.js";
 import { MODELS, SLOTS, normalizeAgent, parseAgentFile, serializeAgent, slugify, type AgentDef, type HomeStation, type Slot } from "./agentfile.js";
 import { BUILTIN_AGENTS, DEFAULT_SLOTS, SLOT_SEATS, systemPromptFor } from "./builtin.js";
+import { principles } from "../brain/brain.js";
 
 /**
  * The Agent Bay: where workers are created, edited, tested and assigned.
@@ -115,7 +116,8 @@ export class AgentBay implements CrewSource {
   /** The agents working a station right now, bound to its contract (used by the factory and the Order Engine). */
   crewFor(slot: Slot): CrewMember[] {
     const all = new Map(this.agents().map((a) => [a.def.id, a]));
-    return this.slots()[slot].map((id) => all.get(id)).filter((a): a is AgentView => !!a).map((a) => bind(a.def, a.version, slot));
+    const brain = principles(this.log);
+    return this.slots()[slot].map((id) => all.get(id)).filter((a): a is AgentView => !!a).map((a) => bind(a.def, a.version, slot, brain));
   }
 
   tests(): BayTest[] {
@@ -289,7 +291,7 @@ export class AgentBay implements CrewSource {
     const start = this.log.append("bay.test", { agent: id, version: a.version, station, task: sample, state: "running" });
     const prompt = samplePrompt(station, sample);
     const r = await runAgent(this.log, this.runtime, id, {
-      prompt, model: a.def.model, systemPrompt: systemPromptFor(a.def, station), budgetUsd: Math.min(a.def.budgetUsd, 0.25),
+      prompt, model: a.def.model, systemPrompt: systemPromptFor(a.def, station, principles(this.log)), budgetUsd: Math.min(a.def.budgetUsd, 0.25),
       pluginDirs: bind(a.def, a.version, station === "none" ? "overseer" : station).pluginDirs, tools: a.def.tools,
     }, { agentVersion: a.version, station: station === "none" ? undefined : station, bayTest: true });
     const checks: { label: string; pass: boolean }[] = [{ label: "answered within its cap", pass: !r.error }];

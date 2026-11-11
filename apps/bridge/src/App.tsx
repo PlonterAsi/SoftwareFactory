@@ -1,3 +1,4 @@
+import { BrainPage } from "./Brain";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API, setupApi, useBay, useChatRoutes, useFactory, useOrder, useProjects, type SinceView } from "./api";
 import { Setup } from "./Setup";
@@ -104,6 +105,7 @@ export function App() {
             <a href={href({ page: "plugins" })} aria-current={route.page === "plugins" ? "page" : undefined}>
               Plugins{pluginsOn ? ` · ${pluginsOn}` : ""}
             </a>
+            <a href={href({ page: "brain" })} aria-current={route.page === "brain" ? "page" : undefined}>Brain</a>
             <a href={href({ page: "factory", view })} aria-current={route.page === "factory" ? "page" : undefined}>Whole factory</a>
           </nav>
         </div>
@@ -143,7 +145,9 @@ export function App() {
         </main>
       ) : (
         <main className="grid projects-grid">
-          {route.page === "plugins"
+          {route.page === "brain"
+            ? <BrainPage events={f.events} />
+            : route.page === "plugins"
             ? <PluginsPage events={f.events} list={plugins.data} err={plugins.err} refresh={plugins.refresh} id={route.id} panel={route.panel} />
             : route.page === "features"
             ? <FeaturesPage events={f.events} id={route.id} onOpenProject={(id) => go({ page: "project", id, panel: "integrate" })} />

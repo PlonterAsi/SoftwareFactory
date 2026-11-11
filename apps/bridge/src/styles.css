@@ -1022,6 +1022,38 @@ button.tool-raw { font-size: 12px; margin-left: auto; }
 .chat-pick { max-width: 160px; padding: 3px 6px; font-size: 12px; }
 .chat-empty { margin: auto 0; padding: 10px 4px; color: var(--muted); font-size: 13px; line-height: 1.5; white-space: normal; }
 
+/* Brain: the principles every loop follows (Brain.tsx) */
+.br-page { padding: 18px 22px 48px; max-width: 1200px; }
+.br-head { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; }
+.br-head h2 { margin: 0 0 4px; font: 600 18px var(--display); letter-spacing: 0.12em; text-transform: uppercase; }
+.br-head p { margin: 0; max-width: 780px; }
+.br-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; margin: 16px 0 22px; }
+.br-card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.br-card.off { opacity: 0.55; }
+.br-card header { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.br-card h3 { margin: 0; font-size: 15px; }
+.br-card p { margin: 0; line-height: 1.5; }
+.br-stations { display: flex; flex-wrap: wrap; gap: 4px; }
+.br-chip { font: 500 11px var(--mono); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
+.br-enforced { margin: 0; padding-left: 16px; font-size: 12px; color: var(--muted); }
+.br-enforced li::marker { content: "✓ "; color: var(--good); }
+.br-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+.br-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.br-form input:not([type=checkbox]), .br-form textarea { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.br-pick { border: 1px solid var(--line); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 10px; }
+.br-pick legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+label.br-check { flex-direction: row !important; align-items: center; gap: 6px; color: var(--ink) !important; }
+.br-sub { margin: 0 0 8px; font: 600 12px var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.br-matrix-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 22px; }
+.br-matrix { border-collapse: collapse; width: 100%; font-size: 12px; }
+.br-matrix th, .br-matrix td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.br-matrix th { font-weight: 600; max-width: 140px; }
+.br-matrix tbody tr { cursor: pointer; }
+.br-matrix tbody tr.on { background: var(--accent-dim); }
+.br-cell { text-align: center !important; color: var(--accent); }
+.br-prompt-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.br-prompt-head select { margin-left: 6px; }
+.br-prompt-text { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; max-height: 480px; overflow: auto; font: 12px/1.5 var(--mono); }
 /* A Build held back because a run already does that idea */
 .dup-notice { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--warn, #c9a227); border-radius: 6px; font-size: 12.5px; background: color-mix(in srgb, var(--warn, #c9a227) 10%, transparent); }
 .dup-notice .dup-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
