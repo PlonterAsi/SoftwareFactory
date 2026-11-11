@@ -32,6 +32,18 @@ Questions are data in `packages/core/src/tickets/model.ts` (`FORMS`): adding one
 - **Tickets open themselves**: a factory run that fails on its own opens a bug; a task or question the Order Engine files from what you say opens a ticket under its project; an accepted Improvement Council proposal opens an idea (a code suggestion from an imported repo opens a task). A `fingerprint` makes each of these idempotent: seen again adds a note, never a second ticket.
 - **Any other module** can ask for a ticket by appending `ticket.requested { title, kind?, body?, project?, priority?, severity?, source, by?, fingerprint?, ref? }`; the ticket service opens it and its `ticket.opened` carries `request` and `ref`.
 
+## Errors become bugs
+
+Nothing that goes wrong is lost in a log nobody reads, and nothing is sent to an outside service.
+
+- **In the core**: a route that throws a fault (a `TypeError`, a `RangeError`, anything that is not a plain sentence for you) answers 500 and files a bug; a plain `Error` such as "A ticket needs a title" stays a 400. A promise nobody caught, a failed Order Engine filing and a failed Council tick are filed too. An uncaught exception is filed as a *blocking* bug before the core stops, so the ticket is there when the app starts again.
+- **In the Bridge**: an error on a screen, or a promise nobody caught, is posted to `POST /api/tickets/capture`. A screen that breaks shows what broke and which bug it was filed as, with Reload, instead of a blank window; the rest of the window keeps working.
+- **One bug per error, not per occurrence**: the fingerprint is where it came from (core, bridge), the message with its numbers and quoted values blanked, and the first stack frame without its line, so the same fault after an edit is still one bug. A repeat adds "Seen again" to the thread, at most once in ten minutes, with the count in between.
+- **After you close it**: a repeat opens a new bug, linked to the closed one ("This happened before as #N"), because a closed ticket never moves by itself. A rejected one stays rejected.
+- **Never a flood**: at most 20 new error bugs an hour; the rest are counted and the count is said on the next one.
+- **Secrets never reach a ticket**: GitHub and Slack tokens, `sk-` keys, Bearer/Basic values, `password=`/`token:`-style values and credentials in URLs are replaced before anything is written.
+- **Report a bug** (the Bug button at the top): what happened and what you expected; the screen, the window size and the last errors are attached unless you untick it. The bug lands under the project you are looking at.
+
 ## Storage
 
 Events `ticket.opened`, `ticket.edited`, `ticket.noted`, `ticket.linked`, `ticket.run`, `ticket.branch`, `ticket.line.moved`, `ticket.requested`; tables `tickets`, `ticket_notes`, `ticket_links`, owned by the `tickets` projection (rebuildable from the log like every table, see [storage.md](storage.md)). Each ticket is also linked to its project (`project.linked { kind: "ticket" }`), and every project's detail carries a `tickets` facet (open, for your look, newest five).
@@ -58,4 +70,5 @@ POST /api/tickets/:id/line             { dir: "up" | "down" }   reorder a plan l
 POST /api/tickets/:id/spawn            { kind, title, ... }     a new ticket, linked derived from
 POST /api/tickets/:id/work             { maxUsd?, where?: "auto" | "repo" | "new" }   in the project's repo when it has one, else a factory run
 POST /api/tickets/:id/ask              { agent? }               one capped agent reply on the thread
+POST /api/tickets/capture              { message, stack?, where, from?: "bridge" | "shell", context?, project? }   file an error as a bug (or "Seen again")
 ```

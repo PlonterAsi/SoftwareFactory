@@ -33,6 +33,7 @@ export * from "./tickets/model.js";
 export * from "./tickets/tables.js";
 export * from "./tickets/tickets.js";
 export * from "./tickets/repowork.js";
+export * from "./tickets/capture.js";
 export * from "./improve/lenses.js";
 export * from "./improve/council.js";
 export * from "./improve/tables.js";

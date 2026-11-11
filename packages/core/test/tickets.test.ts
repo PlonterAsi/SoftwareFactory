@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventLog, MockRuntime, ClaudeCodeRuntime, Factory, AgentBay, Tickets, createCore, git, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal, OrderEngine, ImproveCouncil, listSignals } from "../src/index.js";
+import { EventLog, MockRuntime, ClaudeCodeRuntime, Factory, AgentBay, Tickets, createCore, git, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal, OrderEngine, ImproveCouncil, listSignals, ErrorCapture, errorFingerprint, scrub, isFault } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-tickets-"));
 
@@ -329,5 +329,98 @@ describe("tickets with the real Improvement Council", () => {
     expect(acc.ticketId).toBeTypeOf("number");
     expect(listSignals(log)).toHaveLength(before);
     expect(t.get(acc.ticketId!)).toMatchObject({ title: p.title, source: "improve", kind: "idea", status: "open" });
+  });
+});
+
+describe("tickets: errors become bugs", () => {
+  const stackAt = (line: number) => `TypeError: Cannot read properties of undefined (reading 'title')\n    at TicketPage (http://127.0.0.1:5173/src/Tickets.tsx?t=17${line}:${line}:9)\n    at renderWithHooks (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom.js:1:2)`;
+
+  it("files one bug per error, says Seen again at most every ten minutes, and keeps secrets out", () => {
+    const log = new EventLog();
+    const t = new Tickets(log);
+    let now = 1_000_000;
+    const c = new ErrorCapture(log, t, { now: () => now });
+    const a = c.capture({ message: "TypeError: Cannot read properties of undefined (reading 'title')", stack: stackAt(40), where: "bridge #/factory/tickets", from: "bridge", context: { token: "ghp_abcdefghijklmnopqrstuvwxyz0123456789", screen: "#/factory/tickets" } })!;
+    expect(a.again).toBe(false);
+    const bug = t.get(a.ticket)!;
+    expect(bug).toMatchObject({ kind: "bug", source: "error", status: "open", tags: ["error", "bridge"] });
+    expect(bug.title).toMatch(/^Error in bridge #\/factory\/tickets: TypeError/);
+    expect(bug.body).toContain("Around it:");
+    expect(bug.body).not.toContain("ghp_abc");
+    // The same fault after an edit moved its line: still the same bug, and a note only once in ten minutes.
+    expect(c.capture({ message: "TypeError: Cannot read properties of undefined (reading 'title')", stack: stackAt(52), where: "bridge #/p/3", from: "bridge" })).toEqual({ ticket: a.ticket, again: true });
+    now += 60_000;
+    c.capture({ message: "TypeError: Cannot read properties of undefined (reading 'title')", stack: stackAt(52), where: "bridge #/p/3", from: "bridge" });
+    now += 10 * 60_000;
+    c.capture({ message: "TypeError: Cannot read properties of undefined (reading 'title')", stack: stackAt(52), where: "bridge #/p/4", from: "bridge" });
+    const seen = t.notes(a.ticket).filter((n) => n.text.startsWith("Seen again")).map((n) => n.text);
+    expect(seen).toEqual(["Seen again in bridge #/p/4, 3 times since it was filed."]);
+    now += 11 * 60_000;
+    c.capture({ message: "TypeError: Cannot read properties of undefined (reading 'title')", stack: stackAt(60), where: "bridge #/p/5", from: "bridge" });
+    expect(t.notes(a.ticket).filter((n) => n.text.startsWith("Seen again")).at(-1)!.text).toBe("Seen again in bridge #/p/5.");
+    expect(t.list({ view: "all" })).toHaveLength(1);
+  });
+
+  it("a repeat after you closed it opens a new bug linked to the old; a rejected one stays quiet", () => {
+    const log = new EventLog();
+    const t = new Tickets(log);
+    const c = new ErrorCapture(log, t);
+    const one = c.capture({ message: "RangeError: Invalid time value", where: "GET /api/order/state" })!;
+    t.say(one.ticket, "Fixed", { status: "closed" });
+    const two = c.capture({ message: "RangeError: Invalid time value", where: "GET /api/order/state" })!;
+    expect(two.again).toBe(false);
+    expect(two.ticket).not.toBe(one.ticket);
+    expect(t.get(two.ticket)!.body).toContain(`This happened before as #${one.ticket}`);
+    expect(t.links(two.ticket).map((l) => l.to)).toContain(one.ticket);
+    expect(t.get(one.ticket)!.status).toBe("closed");
+    // The third time finds the newest one, not the closed one again.
+    expect(c.capture({ message: "RangeError: Invalid time value", where: "GET /api/order/state" })!.ticket).toBe(two.ticket);
+    const other = c.capture({ message: "Not a bug", where: "x" })!;
+    t.say(other.ticket, "Expected", { status: "rejected" });
+    expect(c.capture({ message: "Not a bug", where: "x" })).toEqual({ ticket: other.ticket, again: true });
+    expect(t.list({ view: "all" })).toHaveLength(3);
+  });
+
+  it("files at most perHour new bugs an hour and says how many it held back", () => {
+    const log = new EventLog();
+    const t = new Tickets(log);
+    let now = 0;
+    const c = new ErrorCapture(log, t, { perHour: 2, now: () => now });
+    for (let i = 0; i < 5; i++) c.capture({ message: `Error number ${i} in ${"abcde"[i]}`, where: `job ${"abcde"[i]}` });
+    expect(t.list({ view: "all" })).toHaveLength(2);
+    now += 3600_001;
+    const r = c.capture({ message: "A new one", where: "job z" })!;
+    expect(t.get(r.ticket)!.body).toContain("3 more errors were not filed in the last hour");
+  });
+
+  it("knows a fault from a sentence, and the fingerprint ignores numbers, quotes and lines", () => {
+    expect(isFault(new TypeError("x"))).toBe(true);
+    expect(isFault(new Error("A ticket needs a title"))).toBe(false);
+    expect(isFault(new SyntaxError("Unexpected token"))).toBe(false);
+    expect(errorFingerprint({ message: "No proposal #12 'a'" })).toBe(errorFingerprint({ message: "No proposal #345 'b'" }));
+    expect(errorFingerprint({ message: "x", from: "core" })).not.toBe(errorFingerprint({ message: "x", from: "bridge" }));
+    expect(scrub("Authorization: Bearer abcdefghijklmnop1234 and sk-ant-api03-abcdefghijklmnopqrstu and https://me:pw@github.com/x")).toBe("Authorization: Bearer [secret] and [key] and https://[secret]@github.com/x");
+  });
+
+  it("a fault in a route answers 500 and is a bug; a sentence stays a 400; the Bridge posts its own", async () => {
+    const log = new EventLog();
+    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp() });
+    const server = createServer(core).listen(0);
+    const port = (server.address() as { port: number }).port;
+    const call = async (method: string, path: string, body?: unknown) => {
+      const r = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      return { status: r.status, body: await r.json() };
+    };
+    try {
+      expect((await call("POST", "/api/tickets", { kind: "bug" })).status).toBe(400);
+      expect(core.tickets.list({ view: "all" })).toHaveLength(0);
+      core.tickets.counts = () => { throw new TypeError("Cannot read properties of null (reading 'open')"); };
+      const r = await call("GET", "/api/tickets?view=open");
+      expect(r.status).toBe(500);
+      expect(core.tickets.get(r.body.ticket)).toMatchObject({ kind: "bug", source: "error", tags: ["error", "core"] });
+      expect(core.tickets.get(r.body.ticket)!.title).toBe("Error in GET /api/tickets: TypeError: Cannot read properties of null (reading 'open')");
+      const b = await call("POST", "/api/tickets/capture", { message: "ReferenceError: foo is not defined", stack: "at Board (Tickets.tsx:3:1)", where: "bridge #/factory/tickets", context: { screen: "#/factory/tickets" }, project: null });
+      expect(core.tickets.get(b.body.ticket)).toMatchObject({ kind: "bug", tags: ["error", "bridge"] });
+    } finally { server.close(); }
   });
 });

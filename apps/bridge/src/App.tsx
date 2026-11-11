@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API, setupApi, useBay, useFactory, useOrder, useProjects, type SinceView } from "./api";
 import { Setup } from "./Setup";
+import { BugReport, ErrorBoundary } from "./BugReport";
 import { CoreDown } from "./CoreDown";
 import { AgentBay } from "./AgentBay";
 import { RunDeck } from "./RunDeck";
@@ -53,6 +54,7 @@ export function App() {
     go({ page: "factory", view: "factory" });
   };
   const [setupOpen, setSetupOpen] = useState(false);
+  const [bugOpen, setBugOpen] = useState(false);
   const lastEvent = f.events.at(-1)?.id ?? 0;
 
   // "Since you left": read once when the core first answers, before saying where we are now.
@@ -101,6 +103,7 @@ export function App() {
           <span className="sep">·</span> {f.factoryRuns.length} factory runs
           <span className="sep">·</span> {f.runs.length} agent calls
           <span className="sep">·</span> spend ${f.totalUsd.toFixed(4)}
+          <button className="ghost sm bug-btn" onClick={() => setBugOpen(true)} aria-label="Report a bug" title="Report a bug: what went wrong, with the screen attached">Bug</button>
           <button className="ghost sm systems" onClick={() => setSetupOpen(true)} aria-label="Ship's systems: crew, checks and folders">Systems</button>
         </div>
       </header>
@@ -116,25 +119,30 @@ export function App() {
               <button role="tab" aria-selected={view === "improve"} className={view === "improve" ? "tab on" : "tab"} onClick={() => setView("improve")}>Improve{improve.busy ? " · looking" : waiting ? ` · ${waiting}` : ""}</button>
               <button role="tab" aria-selected={view === "data"} className={view === "data" ? "tab on" : "tab"} onClick={() => setView("data")}>Data vault</button>
             </nav>
+            <ErrorBoundary key={view} where={`bridge #/factory/${view}`}>
             {view === "factory" ? <>
               <FactoryFloor runs={f.runs} factoryRuns={f.factoryRuns} selected={selected} onSelect={setPicked} crew={crew} mode={f.mode} />
               <RunDeck run={selected} />
             </> : view === "bay" ? <AgentBay bay={bay} /> : view === "tickets" ? <Tickets events={f.events} onShowRun={showRun}
                 crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))} />
               : view === "improve" ? <ImproveDeck improve={improve} crew={bay.agents} onRunStarted={showRun} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
+            </ErrorBoundary>
             <Timeline runs={f.runs} totalUsd={f.totalUsd} />
           </div>
           {overseer}
         </main>
       ) : (
         <main className="grid projects-grid">
-          {route.page === "project"
-            ? <Workspace id={route.id} panel={route.panel} run={route.run} factory={f} order={order} bay={bay} go={go} />
-            : <Home list={projects.list} err={projects.err} onOpen={(id) => go({ page: "project", id })} />}
+          <ErrorBoundary key={route.page === "project" ? `p${route.id}` : "home"} where={`bridge ${href(route)}`}>
+            {route.page === "project"
+              ? <Workspace id={route.id} panel={route.panel} run={route.run} factory={f} order={order} bay={bay} go={go} />
+              : <Home list={projects.list} err={projects.err} onOpen={(id) => go({ page: "project", id })} />}
+          </ErrorBoundary>
           {overseer}
         </main>
       )}
       <Setup open={setupOpen} onClose={() => setSetupOpen(false)} dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />
+      <BugReport open={bugOpen} onClose={() => setBugOpen(false)} />
       <CoreDown online={f.online} />
     </div>
   );

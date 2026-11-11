@@ -18,6 +18,7 @@ import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { Tickets } from "./tickets/tickets.js";
+import { ErrorCapture, isFault } from "./tickets/capture.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { ImproveCouncil, type Target } from "./improve/council.js";
@@ -58,6 +59,12 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const factory = new Factory(log, runtime, projectsDir, bay);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
   const tickets = new Tickets(log, { runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1), workRoot: join(dirname(projectsDir), "ticket-work") });
+  // Every fault becomes a bug ticket by itself (docs/tickets.md, "Errors become bugs").
+  const errors = new ErrorCapture(log, tickets);
+  const fault = (where: string, e: unknown, context?: Record<string, unknown>) => {
+    const err = e instanceof Error ? e : new Error(String(e));
+    return errors.capture({ message: `${err.name !== "Error" ? `${err.name}: ` : ""}${err.message}`, stack: err.stack, where, from: "core", context });
+  };
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
   const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
     maxUsd: settings.improveMaxUsd ?? improveOpts?.maxUsd, everyHours: settings.improveEveryHours ?? improveOpts?.everyHours,
@@ -68,7 +75,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   log.on("event", (e: SfEvent) => {
     if (e.type !== "signal.captured") return;
     const p = e.payload as { text: string; source: string };
-    order.ingest({ id: e.id, text: p.text, source: p.source }).catch((err) => console.error("order ingest failed:", err));
+    order.ingest({ id: e.id, text: p.text, source: p.source }).catch((err) => { console.error("order ingest failed:", err); fault("order engine, filing a Signal", err, { signal: e.id }); });
   });
   // Who is talking to the core: the desktop window sends its page origin (http://tauri.localhost
   // on Windows). Kept in memory only; /api/health shows it, so a smoke test can prove the window
@@ -219,6 +226,12 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await projectsRoute({ log, order, factory, readJson, canBuild }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (req.method === "POST" && url.pathname === "/api/tickets/capture") {
+        // An error the Bridge caught: filed like the core's own.
+        const b = await readJson(req);
+        const r = errors.capture({ message: String(b.message ?? ""), stack: b.stack ? String(b.stack) : undefined, where: String(b.where ?? "the Bridge"), from: b.from === "shell" ? "shell" : "bridge", context: (b.context && typeof b.context === "object" ? b.context : undefined) as Record<string, unknown> | undefined, project: typeof b.project === "number" ? b.project : null });
+        return json(res, 200, r ?? { ticket: null });
+      }
       if (url.pathname === "/api/tickets" || url.pathname.startsWith("/api/tickets/")) {
         const r = await ticketRoute(tickets, req, url, gitReady);
         if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
@@ -251,10 +264,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       return json(res, 404, { error: "not found" });
     } catch (e) {
-      return json(res, 400, { error: (e as Error).message });
+      // A sentence for the person ("A ticket needs a title") is a 400; a fault in the code is a 500 and a bug ticket.
+      if (!isFault(e)) return json(res, 400, { error: (e as Error).message });
+      const r = fault(`${req.method} ${url.pathname}`, e, { query: Object.fromEntries(url.searchParams) });
+      return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop, tickets, improve });
+  return Object.assign(handler, { factory, order, bay, drop, tickets, improve, errors, fault });
 }
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
@@ -458,7 +474,15 @@ if (isMain) {
   sweepIfDue();
   setInterval(sweepIfDue, 3_600_000).unref();
   // The Improvement Council looks again on its own (real crew only, within its caps): first a few minutes after start, then every 15 minutes it checks if a look is due.
-  const improveTick = () => { core.improve.tick().catch((e) => console.error("improve tick failed:", e)); };
+  const improveTick = () => { core.improve.tick().catch((e) => { console.error("improve tick failed:", e); core.fault("improvement council tick", e); }); };
+  // Nothing thrown is lost: it is a bug ticket before anything else happens.
+  process.on("unhandledRejection", (e) => { console.error("unhandled rejection:", e); core.fault("the core (unhandled promise rejection)", e); });
+  process.on("uncaughtException", (e) => {
+    console.error("uncaught exception:", e);
+    core.fault("the core (uncaught exception, the core stopped)", e);
+    try { log.close(); } catch { /* already closed */ }
+    process.exit(1);
+  });
   setTimeout(improveTick, 3 * 60_000).unref();
   setInterval(improveTick, 15 * 60_000).unref();
   // Runs the app closed on pick up again from their last completed station (SF_AUTO_RESUME=0 leaves them for the Resume button).

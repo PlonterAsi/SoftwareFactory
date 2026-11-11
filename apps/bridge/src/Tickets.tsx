@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { API, type SfEvent } from "./api";
+import { takePendingTicket } from "./BugReport";
 
 /**
  * Tickets: every unit of work on a project, in one place. A list or a board,
@@ -97,7 +98,13 @@ export function Tickets({ events, projectId = null, crew = [], onShowRun }: {
   const [q, setQ] = useState("");
   const [kind, setKind] = useState<TicketKind | "">("");
   const [data, setData] = useState<{ tickets: TicketView[]; counts: Counts } | null>(null);
-  const [sel, setSel] = useState<number | null>(null);
+  const [sel, setSel] = useState<number | null>(() => takePendingTicket());
+  useEffect(() => {
+    // Report a bug and a broken screen open their bug here.
+    const on = (e: Event) => { setSel((e as CustomEvent<number>).detail); takePendingTicket(); };
+    window.addEventListener("sf:ticket", on);
+    return () => window.removeEventListener("sf:ticket", on);
+  }, []);
   const [err, setErr] = useState<string | null>(null);
   const [making, setMaking] = useState(false);
   // Anything that can change a ticket: its own events, and the runs that write back onto tickets.

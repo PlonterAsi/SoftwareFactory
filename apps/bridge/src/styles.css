@@ -795,3 +795,14 @@ button.chip.on { color: var(--ink); border-color: var(--accent); background: var
 }
 @media (prefers-reduced-motion: reduce) { .seg-running { animation: none; } }
 .tk-branch .tk-branch-dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Errors become bugs */
+.bug-btn { margin-left: 6px; }
+.broke { margin: 24px; padding: 18px 20px; border: 1px solid var(--bad); border-radius: 10px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
+.broke h2 { margin: 0; font: 600 18px var(--display); color: var(--bad); }
+.broke p { margin: 0; }
+.broke .row, .bug-report .row { display: flex; gap: 8px; }
+.bug-form { display: flex; flex-direction: column; gap: 12px; }
+.bug-form label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+.bug-form label.check { flex-direction: row; align-items: flex-start; gap: 8px; font-weight: 400; color: var(--muted); }
+.bug-form textarea { resize: vertical; }
