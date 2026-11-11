@@ -178,14 +178,15 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      # Checkout first: it cleans the workspace, so the downloaded installers must come after it.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
       - uses: actions/download-artifact@v4
         with:
           name: SoftwareFactory-windows
           path: out
-
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: scripts
 
       # Installed apps read latest.json from the `updates` branch through GitHub's API, and download the
       # installer through the release asset API, so updates keep working when this repo is private
@@ -197,6 +198,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           notes="SoftwareFactory v$SF_VERSION: Windows build of main at ${GITHUB_SHA::7} ($(date -u +%Y-%m-%d)), smoke-tested as an installed app on Windows before publishing. Ships its own Node.js. For real agents install Claude Code and sign in; Git is needed to ship apps. Unsigned: Windows SmartScreen will warn, choose More info, then Run anyway. Installed apps from v0.2 on update themselves (Systems, Updates)."
+          # Never delete the current release unless the new files are here to replace it.
+          [ -f out/SoftwareFactory-setup.exe ] || { echo "no installers downloaded; keeping the current release"; exit 1; }
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest out/* --title "SoftwareFactory v$SF_VERSION (latest main)" --notes "$notes" --prerelease --target "$GITHUB_SHA"
           # The update manifest, only for a signed build.
