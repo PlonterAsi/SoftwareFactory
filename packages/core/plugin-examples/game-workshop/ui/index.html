@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Workshop</title>
+<style>
+/* The Workshop: a loop patch board. DOM for the board, Canvas 2D for the replay strip only while it plays. Tokens follow the Bridge. */
+:root {
+  color-scheme: dark;
+  --bg: #070b12; --panel: #0c1320; --panel-2: #101a2b; --line: #1c2a40; --grid: #142034;
+  --ink: #d9e4f2; --muted: #8195b0; --accent: #4fd6e8; --gate: #f2b34b; --bad: #ff6b6b; --good: #5ee0a0;
+  --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", Consolas, ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--body); padding: 14px max(16px, env(safe-area-inset-left, 0px)) 24px max(16px, env(safe-area-inset-right, 0px)); }
+.practice { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; color: var(--gate); border: 1px dashed rgba(242,179,75,.5); border-radius: 4px; padding: 5px 10px; margin-bottom: 12px; text-transform: uppercase; }
+header { display: grid; gap: 6px; margin-bottom: 12px; }
+h1 { font-family: var(--display); font-weight: 600; letter-spacing: .12em; font-size: 20px; margin: 0; text-transform: uppercase; }
+h2 { font-family: var(--display); font-weight: 600; letter-spacing: .1em; font-size: 13px; margin: 0; text-transform: uppercase; color: var(--muted); }
+.tape { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.tape b { color: var(--ink); font-weight: 500; }
+.goal { border: 1px solid rgba(242,179,75,.45); background: rgba(242,179,75,.08); border-radius: 6px; padding: 10px 12px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.goal b { color: var(--gate); font-family: var(--display); letter-spacing: .06em; }
+.stars { font-family: var(--mono); color: var(--gate); letter-spacing: .2em; }
+.muted { color: var(--muted); }
+button { font: inherit; color: inherit; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; margin-top: 12px; }
+@media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+.board { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 14px; display: grid; gap: 12px; min-width: 0; }
+.rail { display: grid; grid-template-columns: repeat(8, minmax(92px, 1fr)); gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.chip { border: 1.5px solid var(--line); border-radius: 6px; background: var(--panel-2); padding: 8px; display: grid; gap: 6px; align-content: start; min-height: 128px; position: relative; }
+.chip .nm { font-family: var(--display); font-weight: 600; font-size: 13px; letter-spacing: .04em; }
+.chip .cost { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.chip.gatechip { border-color: rgba(242,179,75,.6); }
+.chip.ship { border-color: rgba(94,224,160,.5); }
+.slot { border: 1px dashed var(--muted); border-radius: 5px; padding: 6px; font-size: 12px; text-align: left; cursor: pointer; background: transparent; display: grid; gap: 1px; }
+.slot:hover, .slot:focus-visible { border-color: var(--accent); outline: none; }
+.slot.armed { border-color: var(--accent); border-style: solid; background: rgba(79,214,232,.08); }
+.slot .an { font-family: var(--display); font-weight: 600; }
+.slot .am { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.slot.changed { border-style: solid; border-color: var(--good); }
+.part { font-family: var(--mono); font-size: 10px; color: var(--gate); border: 1px solid rgba(242,179,75,.5); border-radius: 3px; padding: 1px 5px; justify-self: start; }
+.part.on { background: rgba(242,179,75,.12); }
+.loop-arc { position: absolute; left: -46px; right: 46px; bottom: -14px; height: 10px; border: 1.5px solid var(--accent); border-top: 0; border-radius: 0 0 10px 10px; opacity: .6; pointer-events: none; }
+canvas { display: block; width: 100%; height: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; }
+.side { display: grid; gap: 10px; align-content: start; }
+.card { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 12px; display: grid; gap: 8px; }
+.pal { display: grid; gap: 4px; }
+.agent { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); cursor: pointer; text-align: left; font-size: 12px; }
+.agent.sel, .agent:hover, .agent:focus-visible { border-color: var(--accent); outline: none; }
+.agent .p { font-family: var(--mono); color: var(--muted); }
+.agent .best { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+label { font-size: 12px; display: grid; gap: 4px; }
+label .row { display: flex; justify-content: space-between; gap: 8px; }
+label .v { font-family: var(--mono); color: var(--gate); }
+input[type=range] { width: 100%; accent-color: #f2b34b; }
+select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 5px; padding: 5px; font: inherit; font-size: 12px; }
+.toggle { display: flex; gap: 8px; align-items: center; font-size: 12px; cursor: pointer; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { border: 1px solid var(--accent); background: rgba(79,214,232,.1); color: var(--ink); border-radius: 5px; padding: 7px 14px; cursor: pointer; font-family: var(--display); letter-spacing: .05em; position: relative; overflow: hidden; }
+.btn.gate { border-color: var(--gate); background: rgba(242,179,75,.1); }
+.btn.quiet { border-color: var(--line); background: transparent; }
+.btn .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(242,179,75,.35); pointer-events: none; }
+.btn:disabled { opacity: .4; cursor: default; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
+.m { border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; display: grid; gap: 2px; background: var(--panel-2); }
+.m .k { font: 10px var(--mono); letter-spacing: .12em; color: var(--muted); text-transform: uppercase; }
+.m .v { font-family: var(--display); font-size: 20px; font-variant-numeric: tabular-nums; }
+.m .d { font-family: var(--mono); font-size: 11px; }
+.d.up { color: var(--good); } .d.down { color: var(--bad); } .d.same { color: var(--muted); }
+table { border-collapse: collapse; width: 100%; font-size: 12px; min-width: 520px; }
+.tbl { overflow-x: auto; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 10px var(--mono); letter-spacing: .12em; color: var(--muted); text-transform: uppercase; }
+td.num { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+.o-shipped { color: var(--good); } .o-blown { color: var(--bad); } .o-escalated { color: var(--gate); } .o-rejected { color: var(--muted); } .o-shipped-bug { color: var(--bad); font-weight: 600; }
+.diff { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 13px; }
+.stamp { font-family: var(--mono); font-size: 12px; color: var(--gate); border: 1px dashed var(--gate); border-radius: 4px; padding: 6px 10px; }
+.keys { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; background: var(--panel-2); }
+.toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; font-size: 13px; pointer-events: none; opacity: 0; transition: opacity .2s; max-width: 90vw; }
+.toast.on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+</head>
+<body>
+<div class="practice">Practice bench · a recorded practice week · nothing is written to SoftwareFactory · $0 real spend</div>
+<header>
+  <h1>The Workshop · Habit Tracker loop</h1>
+  <div class="tape" id="tape"></div>
+  <div class="goal"><b>FAULT TO FIX</b><span id="goaltext"></span><span class="stars" id="stars" aria-label="stars">☆☆☆</span></div>
+</header>
+
+<div class="layout">
+  <div class="board">
+    <h2>The board · click a slot, then an agent</h2>
+    <div class="rail" id="rail"></div>
+    <div class="btns">
+      <button class="btn" id="replay">Replay last week on this board (R)</button>
+      <button class="btn quiet" id="compare">Show the original board (hold Tab)</button>
+      <button class="btn quiet" id="reset">Reset board (Esc)</button>
+      <span class="muted" style="font-size:12px">The replay is free: it reuses last week's recorded tickets, no agent is called.</span>
+    </div>
+    <canvas id="strip" width="1000" height="230" aria-label="Replay of the tickets through the board"></canvas>
+    <div class="metrics" id="metrics"></div>
+    <div class="tbl"><table><thead><tr><th>Ticket</th><th>Outcome</th><th>Why</th><th style="text-align:right">Cost</th><th style="text-align:right">Wait</th></tr></thead><tbody id="rows"></tbody></table></div>
+  </div>
+  <div class="side">
+    <div class="card"><h2>Agents</h2><div class="pal" id="pal"></div></div>
+    <div class="card"><h2>Parts</h2>
+      <label><span class="row"><span>Fuse: cap per ticket</span><span class="v" id="fusev"></span></span><input type="range" id="fuse" min="1.5" max="5" step="0.25"></label>
+      <label><span class="row"><span>Governor: max fix retries</span><span class="v" id="govv"></span></span><input type="range" id="gov" min="0" max="5" step="1"></label>
+      <label>Human gate<select id="gate"><option value="spec">At spec (every ticket waits for you)</option><option value="auto">At spec, small tickets pass on their own</option><option value="review">At review instead of spec</option></select></label>
+      <label class="toggle"><input type="checkbox" id="lint"> Plugin cartridge on Build: Lint first (+$0.01, fewer test failures)</label>
+    </div>
+    <div class="card"><h2>Commit</h2>
+      <ul class="diff" id="diff"></ul>
+      <button class="btn gate" id="commit" disabled><span class="fill"></span>Hold to commit to the loop</button>
+      <div id="stamp"></div>
+    </div>
+  </div>
+</div>
+<div class="keys" style="margin-top:10px"><span><kbd>R</kbd> replay</span><span>hold <kbd>Tab</kbd> compare with the original</span><span><kbd>Z</kbd> undo</span><span><kbd>Esc</kbd> reset</span><span><kbd>Space</kbd> skip the replay</span></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+// Patchboard simulation: deterministic replay of a recorded week through a loop board.
+const AGENTS = {
+  Scout:   { name: "Scout",   model: "Haiku",  price: 0.02, q: { intake: 2, spec: 1, build: 1, test: 1, fix: 1, review: 1 } },
+  Drafter: { name: "Drafter", model: "Sonnet", price: 0.08, q: { intake: 3, spec: 3, build: 2, test: 2, fix: 2, review: 2 } },
+  Smith:   { name: "Smith",   model: "Opus",   price: 0.30, q: { intake: 3, spec: 3, build: 3, test: 3, fix: 3, review: 3 } },
+  Prover:  { name: "Prover",  model: "Sonnet", price: 0.10, q: { intake: 2, spec: 2, build: 2, test: 3, fix: 3, review: 2 } },
+  Judge:   { name: "Judge",   model: "Opus",   price: 0.25, q: { intake: 2, spec: 2, build: 2, test: 2, fix: 2, review: 3 } },
+};
+const CALLS = { intake: 0.2, spec: 0.6, build: 1.5, test: 0.4, fix: 0.7, review: 0.5 };
+const WEEK = [
+  { id: "H-1", title: "Add a habit", size: 2, hard: 2, base: 0, wait: 3 },
+  { id: "H-2", title: "Streak counter", size: 2, hard: 3, base: 2, wait: 2 },
+  { id: "H-3", title: "Reminders", size: 3, hard: 3, base: 5, wait: 4 },
+  { id: "H-4", title: "Dark mode", size: 1, hard: 1, base: 0, wait: 19 },
+  { id: "H-5", title: "Export CSV", size: 2, hard: 2, base: 1, wait: 2 },
+  { id: "H-6", title: "Weekly chart", size: 3, hard: 3, base: 3, wait: 3 },
+  { id: "H-7", title: "Typo fix", size: 1, hard: 1, base: 0, wait: 6 },
+  { id: "H-8", title: "Sync between devices", size: 3, hard: 3, base: 1, wait: 3, bug: "sendback" },
+  { id: "H-9", title: "Home screen widget", size: 2, hard: 2, base: 0, wait: 2, bug: "reject" },
+  { id: "H-10", title: "Settings page", size: 2, hard: 2, base: 1, wait: 2 },
+];
+const START = { crew: { intake: "Smith", spec: "Smith", build: "Smith", test: "Prover", fix: "Smith", review: "Judge" }, fuse: 4, governor: 0, gate: "spec", lint: false };
+
+function runTicket(t, board) {
+  const A = (st) => AGENTS[board.crew[st]];
+  let cost = 0; const path = []; let outcome = null; let wait = 0; let note = "";
+  const pay = (st) => { cost += CALLS[st] * t.size * A(st).price * (st === "build" && board.lint ? 1 : 1) + (st === "build" && board.lint ? 0.01 : 0); path.push(st); if (cost > board.fuse + 1e-9) { outcome = "blown"; note = `blew the $${board.fuse.toFixed(2)} fuse at ${st}`; return false; } return true; };
+  if (!pay("intake")) return { t, cost, path, outcome, wait, note };
+  if (!pay("spec")) return { t, cost, path, outcome, wait, note };
+  if (board.gate === "spec" || (board.gate === "auto" && t.size > 1)) { wait = t.wait; path.push("gate"); }
+  const specWeak = A("spec").q.spec < 2 && t.size >= 2 ? 1 : 0;
+  if (!pay("build")) return { t, cost, path, outcome, wait, note };
+  let retries = t.base + Math.max(0, t.hard - A("fix").q.fix) + Math.max(0, t.hard - A("build").q.build) * 2 + specWeak;
+  if (board.lint) retries = Math.floor(retries * 0.6);
+  const limit = board.governor || 6;
+  if (!pay("test")) return { t, cost, path, outcome, wait, note };
+  let loops = 0;
+  while (loops < retries) {
+    if (loops >= limit) { outcome = "escalated"; note = `governor stopped it after ${limit} retries, handed to you`; return { t, cost, path, outcome, wait, note }; }
+    if (!pay("fix") || !pay("test")) return { t, cost, path, outcome, wait, note };
+    loops++;
+  }
+  if (!pay("review")) return { t, cost, path, outcome, wait, note };
+  if (board.gate === "review") { wait = Math.max(wait, 2); path.push("gate2"); }
+  const sharp = A("review").q.review >= 3;
+  if (t.bug === "reject") { outcome = sharp ? "rejected" : "shipped-bug"; note = sharp ? "review caught it and rejected it" : "review missed a real bug"; }
+  else if (t.bug === "sendback") {
+    if (sharp) { note = "review caught a bug and sent it back"; if (!pay("fix") || !pay("test") || !pay("review")) return { t, cost, path, outcome, wait, note }; outcome = "shipped"; }
+    else { outcome = "shipped-bug"; note = "review missed a real bug"; }
+  } else outcome = "shipped";
+  path.push("ship");
+  return { t, cost, path, outcome, wait, note, loops };
+}
+function runWeek(board) {
+  const res = WEEK.map((t) => runTicket(t, board));
+  const total = res.reduce((s, r) => s + r.cost, 0);
+  const shipped = res.filter((r) => r.outcome === "shipped").length;
+  const missed = res.filter((r) => r.outcome === "shipped-bug").length;
+  const caught = res.filter((r) => r.t.bug && (r.outcome === "rejected" || (r.t.bug === "sendback" && r.outcome === "shipped"))).length;
+  const wait = Math.max(...res.map((r) => r.wait));
+  const blown = res.filter((r) => r.outcome === "blown").length;
+  const escalated = res.filter((r) => r.outcome === "escalated").length;
+  return { res, total, shipped, per: shipped ? total / shipped : Infinity, missed, caught, wait, blown, escalated };
+}
+
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const money = (n) => isFinite(n) ? "$" + n.toFixed(2) : "–";
+const STATIONS = [
+  { id: "intake", name: "Intake" }, { id: "spec", name: "Spec" }, { id: "gate", name: "Gate" }, { id: "build", name: "Build" },
+  { id: "test", name: "Test" }, { id: "fix", name: "Fix" }, { id: "review", name: "Review" }, { id: "ship", name: "Ship" },
+];
+const BEST = { Scout: "cheap; fine for intake", Drafter: "good at specs", Smith: "strong at everything, expensive", Prover: "tests and fixes well", Judge: "sharp reviewer" };
+const GOAL = { per: 2.0, ships: 8, caught: 2 };
+const clone = (b) => JSON.parse(JSON.stringify(b));
+let board = clone(START), history = [], armed = null, baseline = runWeek(START), current = null, showOriginal = false, committed = false;
+
+function changes(b) {
+  const out = [];
+  for (const st of Object.keys(START.crew)) if (b.crew[st] !== START.crew[st]) out.push(`${STATIONS.find((s) => s.id === st).name}: ${START.crew[st]} to ${b.crew[st]}`);
+  if (b.fuse !== START.fuse) out.push(`Fuse: $${START.fuse.toFixed(2)} to $${b.fuse.toFixed(2)} per ticket`);
+  if (b.governor !== START.governor) out.push(`Governor: ${b.governor ? b.governor + " fix retries, then hand to you" : "off"}`);
+  if (b.gate !== START.gate) out.push(`Gate: ${b.gate === "auto" ? "small tickets pass spec on their own" : "moves from spec to review"}`);
+  if (b.lint !== START.lint) out.push(`Build: ${b.lint ? "adds the Lint first cartridge" : "removes the Lint cartridge"}`);
+  return out;
+}
+function starsOf(r) {
+  if (!r) return 0;
+  const goal = r.per < GOAL.per && r.shipped >= GOAL.ships && r.caught >= GOAL.caught && !r.missed;
+  if (!goal) return 0;
+  let s = 1; if (r.wait <= 4) s++; if (s === 2 && r.per < 1.5) s++;
+  return s;
+}
+function drawTape() {
+  const b = baseline;
+  $("tape").innerHTML = `Last week on the original board: <b>${b.res.length}</b> tickets · <b>${b.shipped}</b> shipped · <b>${money(b.total)}</b> spent · <b>${money(b.per)}</b> per shipped ticket · <b>${b.blown}</b> blew the fuse · longest wait at a gate <b>${b.wait}h</b>`;
+  $("goaltext").textContent = `Get the cost per shipped ticket under ${money(GOAL.per)}, ship at least ${GOAL.ships}, and review must still catch the bugs in H-8 and H-9. Second star: no ticket waits more than 4 hours. Third star: also under $1.50.`;
+}
+function drawRail() {
+  const b = showOriginal ? START : board;
+  $("rail").innerHTML = STATIONS.map((s) => {
+    if (s.id === "gate") return `<div class="chip gatechip"><span class="nm">Gate</span><span class="cost">you approve</span><span class="part on">${b.gate === "spec" ? "every ticket" : b.gate === "auto" ? "small ones skip" : "moved to review"}</span></div>`;
+    if (s.id === "ship") return `<div class="chip ship"><span class="nm">Ship</span><span class="cost">merged</span>${b.fuse ? `<span class="part on">fuse ${money(b.fuse)}</span>` : ""}</div>`;
+    const a = AGENTS[b.crew[s.id]]; const changed = !showOriginal && b.crew[s.id] !== START.crew[s.id];
+    const parts = [];
+    if (s.id === "build" && b.lint) parts.push('<span class="part on">Lint first</span>');
+    if (s.id === "fix") parts.push(`<span class="part${b.governor ? " on" : ""}">governor ${b.governor || "off"}</span>`);
+    if (s.id === "review" && b.gate === "review") parts.push('<span class="part on">gate here</span>');
+    return `<div class="chip"><span class="nm">${s.name}</span>
+      <button class="slot${armed === s.id ? " armed" : ""}${changed ? " changed" : ""}" data-st="${s.id}" ${showOriginal ? "disabled" : ""}><span class="an">${a.name}</span><span class="am">${a.model} · ${money(a.price)}/call</span></button>
+      ${parts.join("")}${s.id === "fix" ? '<span class="loop-arc" aria-hidden="true"></span>' : ""}</div>`;
+  }).join("");
+  $("rail").querySelectorAll(".slot").forEach((el) => (el.onclick = () => { armed = armed === el.dataset.st ? null : el.dataset.st; drawRail(); drawPal(); if (armed) toast(`Pick an agent for ${STATIONS.find((s) => s.id === armed).name}.`); }));
+}
+function drawPal() {
+  $("pal").innerHTML = Object.values(AGENTS).map((a) => `<button class="agent${armed && board.crew[armed] === a.name ? " sel" : ""}" data-a="${a.name}"><span><b>${a.name}</b> <span class="p">${a.model}</span></span><span class="p">${money(a.price)}</span><span class="best">${BEST[a.name]}</span></button>`).join("");
+  $("pal").querySelectorAll(".agent").forEach((el) => (el.onclick = () => {
+    if (!armed) { toast("Click a slot on the board first."); return; }
+    set((b) => { b.crew[armed] = el.dataset.a; }); armed = null; drawRail(); drawPal();
+  }));
+}
+function drawParts() {
+  $("fuse").value = board.fuse; $("fusev").textContent = money(board.fuse);
+  $("gov").value = board.governor; $("govv").textContent = board.governor ? board.governor + " retries" : "off";
+  $("gate").value = board.gate; $("lint").checked = board.lint;
+}
+function set(fn) { history.push(clone(board)); fn(board); committed = false; current = null; $("stamp").innerHTML = ""; drawAll(); }
+$("fuse").oninput = (e) => set((b) => { b.fuse = +e.target.value; });
+$("gov").oninput = (e) => set((b) => { b.governor = +e.target.value; });
+$("gate").onchange = (e) => set((b) => { b.gate = e.target.value; });
+$("lint").onchange = (e) => set((b) => { b.lint = e.target.checked; });
+
+function delta(now, was, better) {
+  if (!isFinite(now) || !isFinite(was)) return '<span class="d same">–</span>';
+  const d = now - was; if (Math.abs(d) < 1e-9) return '<span class="d same">no change</span>';
+  const good = better === "lower" ? d < 0 : d > 0;
+  return `<span class="d ${good ? "up" : "down"}">${d > 0 ? "+" : ""}${Number.isInteger(d) ? d : d.toFixed(2)}</span>`;
+}
+function drawMetrics() {
+  const r = current, b = baseline;
+  const cell = (k, v, d) => `<div class="m"><span class="k">${k}</span><span class="v">${v}</span>${d || ""}</div>`;
+  if (!r) { $("metrics").innerHTML = cell("Cost per shipped", money(b.per), '<span class="d same">original board</span>') + cell("Shipped", b.shipped) + cell("Spent", money(b.total)) + cell("Bugs caught", `${b.caught} of 2`) + cell("Longest wait", b.wait + "h"); $("rows").innerHTML = rows(b); return; }
+  $("metrics").innerHTML = cell("Cost per shipped", money(r.per), delta(r.per, b.per, "lower")) + cell("Shipped", r.shipped, delta(r.shipped, b.shipped, "higher"))
+    + cell("Spent", money(r.total), delta(r.total, b.total, "lower")) + cell("Bugs caught", `${r.caught} of 2`, r.missed ? '<span class="d down">a real bug shipped</span>' : delta(r.caught, b.caught, "higher"))
+    + cell("Longest wait", r.wait + "h", delta(r.wait, b.wait, "lower"));
+  $("rows").innerHTML = rows(r);
+}
+function rows(r) {
+  const label = { shipped: "shipped", blown: "fuse blew", escalated: "handed to you", rejected: "rejected", "shipped-bug": "shipped with a bug" };
+  return r.res.map((x) => `<tr><td><span style="font-family:var(--mono)">${x.t.id}</span> ${esc(x.t.title)}</td><td class="o-${x.outcome}">${label[x.outcome]}</td><td class="muted">${esc(x.note || (x.loops ? x.loops + (x.loops === 1 ? " fix retry" : " fix retries") : "clean"))}</td><td class="num">${money(x.cost)}</td><td class="num">${x.wait}h</td></tr>`).join("");
+}
+function drawDiff() {
+  const c = changes(board);
+  $("diff").innerHTML = c.length ? c.map((x) => `<li>${esc(x)}</li>`).join("") : '<li class="muted">No changes yet.</li>';
+  const s = starsOf(current);
+  $("stars").textContent = "★".repeat(s) + "☆".repeat(3 - s);
+  $("commit").disabled = !current || !c.length || committed;
+}
+function drawAll() { drawRail(); drawPal(); drawParts(); drawMetrics(); drawDiff(); }
+
+// ---- replay strip ------------------------------------------------------------
+const cv = $("strip"), g = cv.getContext("2d");
+const SX = (i) => 60 + i * ((cv.width - 120) / 7);
+const IDX = { intake: 0, spec: 1, gate: 2, build: 3, test: 4, fix: 5, review: 6, gate2: 6, ship: 7 };
+let anim = null;
+function drawStrip(tNow) {
+  g.fillStyle = "#070b12"; g.fillRect(0, 0, cv.width, cv.height);
+  g.strokeStyle = "#1c2a40"; g.lineWidth = 2; g.beginPath(); g.moveTo(SX(0), 40); g.lineTo(SX(7), 40); g.stroke();
+  g.strokeStyle = "rgba(79,214,232,.5)"; g.beginPath(); g.moveTo(SX(5), 40); g.quadraticCurveTo((SX(4) + SX(5)) / 2, 70, SX(4), 40); g.stroke();
+  g.font = "12px 'IBM Plex Mono', Consolas, monospace"; g.textAlign = "center";
+  STATIONS.forEach((s, i) => { g.fillStyle = s.id === "gate" ? "#f2b34b" : s.id === "ship" ? "#5ee0a0" : "#8195b0"; g.beginPath(); g.arc(SX(i), 40, 5, 0, 7); g.fill(); g.fillText(s.name, SX(i), 22); });
+  if (!anim) { g.fillStyle = "#8195b0"; g.textAlign = "left"; g.fillText("Press Replay to run last week's 10 tickets through this board.", 60, 130); return; }
+  const r = anim.r;
+  r.res.forEach((x, k) => {
+    const y = 78 + k * 14;
+    g.textAlign = "right"; g.fillStyle = "#8195b0"; g.font = "10px 'IBM Plex Mono', Consolas, monospace"; g.fillText(x.t.id, 50, y + 3);
+    const start = k * 0.35, step = 0.32; const local = (tNow - start) / step;
+    const path = x.path.filter((p) => IDX[p] != null);
+    if (local < 0) return;
+    const i = Math.min(path.length - 1, Math.floor(local)); const f = Math.min(1, local - i);
+    // trail
+    g.strokeStyle = "rgba(79,214,232,.18)"; g.lineWidth = 1; g.beginPath(); g.moveTo(SX(0), y);
+    for (let j = 1; j <= i; j++) g.lineTo(SX(IDX[path[j]]), y); g.stroke();
+    const a = SX(IDX[path[i]]), bb = i + 1 < path.length ? SX(IDX[path[i + 1]]) : a; const xx = a + (bb - a) * f;
+    const doneP = i >= path.length - 1;
+    const col = !doneP ? "#4fd6e8" : x.outcome === "shipped" ? "#5ee0a0" : x.outcome === "blown" || x.outcome === "shipped-bug" ? "#ff6b6b" : x.outcome === "escalated" ? "#f2b34b" : "#8195b0";
+    g.fillStyle = col; g.beginPath(); g.arc(xx, y, 4.5, 0, 7); g.fill();
+    if (path[i] === "gate" && !doneP && x.wait >= 6) { g.fillStyle = "#f2b34b"; g.textAlign = "left"; g.fillText(`${x.wait}h`, xx + 8, y + 3); }
+    if (doneP) { g.textAlign = "left"; g.fillStyle = col; g.fillText(x.outcome === "shipped" ? "shipped" : x.outcome === "blown" ? "fuse" : x.outcome === "escalated" ? "to you" : x.outcome === "rejected" ? "rejected" : "BUG SHIPPED", xx + 8, y + 3); }
+  });
+}
+function replay() {
+  if (showOriginal) return;
+  const r = runWeek(board);
+  const longest = Math.max(...r.res.map((x) => x.path.length));
+  anim = { r, t0: performance.now(), dur: (r.res.length - 1) * 0.35 + longest * 0.32 + 0.3 };
+  const loop = (now) => {
+    if (!anim) return;
+    const t = (now - anim.t0) / 1000;
+    drawStrip(t);
+    if (t < anim.dur && !anim.skip) anim.raf = requestAnimationFrame(loop);
+    else { drawStrip(1e9); current = r; drawMetrics(); drawDiff(); const s = starsOf(r); toast(s ? `Goal met · ${"★".repeat(s)}` : r.missed ? "A real bug got through review. Quality comes first." : "Not there yet. Look at what blew the fuse or waited longest."); }
+  };
+  anim.raf = requestAnimationFrame(loop);
+}
+$("replay").onclick = replay;
+$("reset").onclick = () => { set((b) => Object.assign(b, clone(START))); anim = null; drawStrip(0); };
+const cmp = (on) => { if (showOriginal === on) return; showOriginal = on; drawRail(); $("compare").textContent = on ? "Showing the original board" : "Show the original board (hold Tab)"; };
+$("compare").onpointerdown = () => cmp(true); $("compare").onpointerup = $("compare").onpointerleave = () => cmp(false);
+
+// ---- commit (practice) ----------------------------------------------------------
+let hold = null;
+$("commit").onpointerdown = (e) => {
+  if ($("commit").disabled) return; e.preventDefault(); const t0 = performance.now(); const fill = $("commit").querySelector(".fill");
+  hold = { raf: 0 }; const step = (t) => { const k = Math.min(1, (t - t0) / 1000); fill.style.width = k * 100 + "%"; if (k >= 1) { hold = null; doCommit(); return; } hold.raf = requestAnimationFrame(step); }; hold.raf = requestAnimationFrame(step);
+};
+$("commit").onpointerup = $("commit").onpointerleave = () => { if (!hold) return; cancelAnimationFrame(hold.raf); hold = null; $("commit").querySelector(".fill").style.width = "0"; };
+function doCommit() {
+  committed = true; $("commit").querySelector(".fill").style.width = "0";
+  const r = current, s = starsOf(r);
+  $("stamp").innerHTML = `<div class="stamp">PRACTICE COMMIT · ${changes(board).length} changes staged for the Habit Tracker loop · ${money(baseline.per)} to ${money(r.per)} per shipped ticket · ${"★".repeat(s) || "goal not met"} · nothing was written to SoftwareFactory</div>`;
+  drawDiff(); toast("Committed (practice). The real version writes these changes to the loop and the Brain.");
+}
+
+// ---- keys ------------------------------------------------------------------------
+let tabDown = false;
+document.addEventListener("keydown", (e) => {
+  if ((e.target.tagName === "SELECT" || e.target.tagName === "INPUT") && /^Arrow|^ $|^Enter$/.test(e.key)) return;
+  const k = e.key.toLowerCase();
+  if (k === "tab") { e.preventDefault(); if (!tabDown) { tabDown = true; cmp(true); } return; }
+  if (e.repeat) return;
+  if (k === "r") replay();
+  if (k === " " && anim) { e.preventDefault(); anim.skip = true; }
+  if (k === "z") { const prev = history.pop(); if (prev) { board = prev; current = null; drawAll(); toast("Undone."); } }
+  if (k === "escape") { if (armed) { armed = null; drawRail(); drawPal(); return; } $("reset").click(); }
+});
+document.addEventListener("keyup", (e) => { if (e.key === "Tab") { tabDown = false; cmp(false); } });
+let toastT;
+function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), 2400); }
+
+drawTape(); drawAll(); drawStrip(0);
+</script>
+</body>
+</html>

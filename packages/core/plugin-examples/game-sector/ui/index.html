@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Sector</title>
+<style>
+/* The Sector: practice map. Canvas 2D at 30 fps, paused when hidden. Tokens follow the Bridge. */
+:root {
+  color-scheme: dark;
+  --bg: #070b12; --panel: #0c1320; --panel-2: #101a2b; --line: #1c2a40; --grid: #142034;
+  --ink: #d9e4f2; --muted: #8195b0; --accent: #4fd6e8; --gate: #f2b34b; --bad: #ff6b6b; --good: #5ee0a0;
+  --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", Consolas, ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--body); padding: 14px max(16px, env(safe-area-inset-left, 0px)) 24px max(16px, env(safe-area-inset-right, 0px)); }
+.practice { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; color: var(--gate); border: 1px dashed rgba(242,179,75,.5); border-radius: 4px; padding: 5px 10px; margin-bottom: 12px; text-transform: uppercase; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; margin-bottom: 10px; }
+h1 { font-family: var(--display); font-weight: 600; letter-spacing: .12em; font-size: 20px; margin: 0; text-transform: uppercase; }
+.hud { display: flex; flex-wrap: wrap; gap: 6px 18px; font-family: var(--mono); font-size: 12px; color: var(--muted); align-items: center; }
+.hud b { color: var(--ink); font-weight: 500; }
+.hud .fuel b { color: var(--good); } .hud .att b { color: var(--gate); }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 12px; }
+@media (max-width: 680px) { .layout { grid-template-columns: 1fr; } }
+.mapbox { position: relative; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
+canvas { display: block; width: 100%; height: auto; cursor: crosshair; touch-action: none; }
+.side { display: grid; gap: 10px; align-content: start; }
+.card { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 12px; display: grid; gap: 8px; }
+.card .h { font: 10px var(--mono); letter-spacing: .14em; color: var(--muted); text-transform: uppercase; }
+.card .title { font-family: var(--display); font-weight: 600; font-size: 16px; }
+.card p { margin: 0; font-size: 13px; }
+.muted { color: var(--muted); }
+.price { font-family: var(--mono); font-size: 12px; color: var(--gate); }
+.btns { display: flex; flex-wrap: wrap; gap: 6px; }
+button { font: inherit; color: inherit; }
+.btn { border: 1px solid var(--accent); background: rgba(79,214,232,.1); color: var(--ink); border-radius: 5px; padding: 6px 12px; cursor: pointer; font-family: var(--display); letter-spacing: .04em; font-size: 13px; position: relative; overflow: hidden; }
+.btn.gate { border-color: var(--gate); background: rgba(242,179,75,.1); }
+.btn.quiet { border-color: var(--line); background: transparent; }
+.btn .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(242,179,75,.35); pointer-events: none; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type=text] { width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; color: var(--ink); padding: 7px 9px; font: inherit; }
+input[type=text]:focus { outline: none; border-color: var(--accent); }
+.agents { display: grid; gap: 4px; }
+.agent { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; padding: 5px 6px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; font-size: 12px; text-align: left; background: none; }
+.agent:hover, .agent.sel { border-color: var(--accent); }
+.agent .k { font-family: var(--mono); color: var(--accent); }
+.agent .st { font-family: var(--mono); font-size: 11px; }
+.st.idle { color: var(--gate); } .st.busy { color: var(--accent); } .st.walk { color: var(--muted); }
+.log { font-size: 12px; display: grid; gap: 4px; max-height: 190px; overflow: auto; }
+.log .row { display: flex; gap: 8px; }
+.log .row .t { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+.keys { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; }
+kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; background: var(--panel-2); }
+.toast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 7px 14px; font-size: 13px; pointer-events: none; opacity: 0; transition: opacity .2s; max-width: 90%; text-align: center; }
+.toast.on { opacity: 1; }
+.modal { position: fixed; inset: 0; background: rgba(7,11,18,.84); display: grid; place-items: center; padding: 16px; }
+.sheet { width: min(620px, 100%); max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px; display: grid; gap: 12px; }
+.sheet h2 { font-family: var(--display); letter-spacing: .1em; text-transform: uppercase; font-size: 18px; margin: 0; color: var(--good); }
+.sheet ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+</head>
+<body>
+<div class="practice">Practice map · practice data · nothing is written to SoftwareFactory · $0 real spend</div>
+<header>
+  <h1>The Sector</h1>
+  <div class="hud">
+    <span class="fuel">FUEL <b id="fuel">$5.00</b></span>
+    <span>POWER <b id="power">4 / 4</b> slots</span>
+    <span class="att">ATTENTION <b id="att">0</b> waiting on you</span>
+    <span>THREATS <b id="thr">0</b></span>
+    <span>CLOCK <b id="clock">Day 1, 09:00</b></span>
+    <button class="btn quiet" id="speed" style="padding:2px 8px;font-size:11px">Speed 1×</button>
+    <button class="btn quiet" id="pause" style="padding:2px 8px;font-size:11px">Pause</button>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="mapbox">
+    <canvas id="map" width="960" height="580" aria-label="Sector map"></canvas>
+    <div class="toast" id="toast"></div>
+  </div>
+  <div class="side">
+    <div class="card" id="panel"></div>
+    <div class="card"><div class="h">Agents · press 1–4 or click</div><div class="agents" id="agents"></div></div>
+    <div class="card"><div class="h">Sector log</div><div class="log" id="log"></div></div>
+  </div>
+</div>
+<div class="keys">
+  <span>Click a beacon or threat to act</span><span><kbd>1</kbd>–<kbd>4</kbd> pick agent, then click a target</span><span>hold <kbd>Space</kbd> or the button to spend</span><span><kbd>Enter</kbd> approve</span><span><kbd>Esc</kbd> park or cancel</span><span><kbd>Tab</kbd> next beacon</span><span><kbd>R</kbd> draw a campaign</span><span><kbd>P</kbd> pause</span>
+</div>
+<div class="modal" id="modal" hidden></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const C = { bg: "#0c1320", grid: "#142034", line: "#1c2a40", ink: "#d9e4f2", muted: "#8195b0", accent: "#4fd6e8", gate: "#f2b34b", bad: "#ff6b6b", good: "#5ee0a0", panel2: "#101a2b" };
+const cv = $("map"), g = cv.getContext("2d");
+const W = cv.width, H = cv.height;
+const SEC_PER_HOUR = 5; // demo time: one sector hour every 5 seconds
+
+// ---- world --------------------------------------------------------------
+let S;
+function newWorld() {
+  return {
+    t: 0, speed: 1, paused: false, ended: false, fuel: 5, cap: 5, spent: 0,
+    buildings: [
+      { id: "sf", name: "SoftwareFactory", kind: "SYSTEM", shape: "hex", x: 250, y: 300, r: 46, stage: "HQ" },
+      { id: "wc", name: "Word Counter", kind: "APP", shape: "box", x: 560, y: 150, r: 34, stage: "shipped" },
+      { id: "ht", name: "Habit Tracker", kind: "APP", shape: "box", x: 640, y: 400, r: 34, stage: "building", progress: 0.25, tickets: ["HT-1 Add a habit", "HT-2 Streak view", "HT-3 Reminders"] },
+      { id: "rb", name: "Recipe Box", kind: "IDEA", shape: "seed", x: 840, y: 250, r: 26, stage: "seed" },
+    ],
+    agents: [
+      { k: 1, name: "Scout", model: "Haiku", price: 0.04, slots: 1, role: "sort and triage", x: 0, y: 0, state: "idle" },
+      { k: 2, name: "Mason", model: "Sonnet", price: 0.35, slots: 1, role: "build", x: 0, y: 0, state: "idle" },
+      { k: 3, name: "Warden", model: "Sonnet", price: 0.2, slots: 1, role: "test and fix", x: 0, y: 0, state: "idle" },
+      { k: 4, name: "Oracle", model: "Opus", price: 1.2, slots: 2, role: "council and spec", x: 0, y: 0, state: "idle" },
+    ],
+    threats: [{ id: "T1", on: "wc", text: "Crash on empty input", born: -36 * SEC_PER_HOUR, kind: "bug" }],
+    beacons: [{ id: "B1", on: "sf", text: "Approve spec: Habit Tracker v1", kind: "gate", born: 0 }],
+    routes: [], log: [], done: [], scripted: new Set(), sel: null, mode: null, routeFrom: null, focus: null,
+  };
+}
+const B = (id) => S.buildings.find((b) => b.id === id);
+const powerUsed = () => S.agents.filter((a) => a.state !== "idle").reduce((s, a) => s + a.slots, 0);
+const hours = () => S.t / SEC_PER_HOUR;
+function clockText() { const h = 9 + hours(); const day = 1 + Math.floor(h / 24); const hh = Math.floor(h % 24); const mm = Math.floor((h % 1) * 60 / 10) * 10; return `Day ${day}, ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`; }
+function home(a, i) { const hq = B("sf"); return { x: hq.x - hq.r - 30 - (i % 2) * 24, y: hq.y - 4 + Math.floor(i / 2) * 24 }; }
+
+// ---- scripted sector events (practice) -----------------------------------
+const SCRIPT = [
+  { at: 1, id: "intro", run: () => toast("Day 1. Two things want you: the amber beacon and the red threat.") },
+  { at: 50, id: "B2", run: () => addBeacon("B2", "sf", "Improvement proposal: add a retry limit to fix loops", "proposal") },
+  { at: 75, id: "T2", run: () => addThreat("T2", "ht", "Streak resets at midnight") },
+  { at: 120, id: "B3", run: () => addBeacon("B3", "rb", "Recipe Box seed is ready: plant it?", "seed") },
+  { at: 150, id: "T3", run: () => addThreat("T3", "sf", "Smoke test failed on last merge", "breach") },
+  { at: 175, id: "N1", run: () => addBeacon("N1", "sf", "3 new raw notes in the inbox", "inbox") },
+];
+function addBeacon(id, on, text, kind) { if (S.beacons.some((b) => b.id === id)) return; S.beacons.push({ id, on, text, kind, born: S.t }); log(`Beacon: ${text}`); }
+function addThreat(id, on, text, kind = "bug") { S.threats.push({ id, on, text, born: S.t, kind }); log(`Threat on ${B(on).name}: ${text}`); }
+
+// ---- actions --------------------------------------------------------------
+function log(text) { S.log.push({ at: clockText(), text }); drawLog(); }
+function record(kind, text, cost = 0) { S.done.push({ kind, text, cost }); }
+function approveBeacon(b) {
+  S.beacons = S.beacons.filter((x) => x !== b);
+  if (b.id === "B1") { const ht = B("ht"); ht.ready = true; log("Spec approved. Habit Tracker can be built: send Mason."); record("approve", "Approved spec: Habit Tracker v1"); }
+  else if (b.kind === "proposal") { log("Proposal accepted, became ticket SF-44."); record("ticket", "SF-44 Add a retry limit to fix loops"); }
+  else if (b.kind === "review") { const ht = B("ht"); ht.progress = Math.min(1, ht.progress + 0.25); log(`Build accepted. ${ht.name} is ${Math.round(ht.progress * 100)}% built.`); record("approve", b.text); if (ht.progress >= 1) { ht.stage = "shipped"; ht.shape = "box"; log("Habit Tracker shipped."); } }
+  else if (b.kind === "inbox") { log("Scout will sort the notes. Send Scout to HQ."); S.inboxReady = true; }
+  tone(520); select(null);
+}
+function parkBeacon(b) { S.beacons = S.beacons.filter((x) => x !== b); log(`Parked: ${b.text}`); record("park", b.text); select(null); tone(240); }
+function dismissThreat(t) { S.threats = S.threats.filter((x) => x !== t); log(`Filed as ticket and left for later: ${t.text}`); record("ticket", `${t.on.toUpperCase()}-bug ${t.text}`); select(null); }
+function plant(name) {
+  const rb = B("rb"); rb.shape = "box"; rb.stage = "planned"; rb.kind = "APP"; rb.oneLine = name;
+  S.beacons = S.beacons.filter((b) => b.id !== "B3");
+  log(`Planted Recipe Box: "${name}".`); record("project", `Planted Recipe Box: ${name}`); tone(440); tone(660);
+  select({ type: "building", ref: rb });
+}
+function canDeploy(a, target) {
+  if (a.state !== "idle") return "That agent is busy.";
+  if (powerUsed() + a.slots > 4) return "Not enough power: free a slot first.";
+  if (S.fuel < a.price) return "Out of fuel for today. Deploying is locked.";
+  if (target.type === "threat" && !["Warden", "Mason"].includes(a.name)) return `${a.name} cannot fix bugs. Warden can.`;
+  if (target.type === "building" && target.ref.id === "ht" && a.name !== "Mason") return "Building needs Mason.";
+  if (target.type === "building" && target.ref.id === "ht" && !target.ref.ready) return "Approve the Habit Tracker spec first (amber beacon at HQ).";
+  if (target.type === "building" && target.ref.id === "rb" && a.name !== "Oracle") return "Oracle runs councils on new projects.";
+  if (target.type === "building" && target.ref.id === "rb" && target.ref.stage === "seed") return "Plant the seed first.";
+  if (target.type === "building" && target.ref.id === "sf" && a.name !== "Scout") return "Only Scout has work at HQ right now.";
+  if (target.type === "building" && target.ref.id === "sf" && !S.inboxReady) return "No notes waiting at HQ yet.";
+  if (target.type === "building" && target.ref.id === "wc") return "Word Counter has nothing to build. Click its threat instead.";
+  return null;
+}
+function deploy(a, target) {
+  const why = canDeploy(a, target); if (why) { toast(why); return; }
+  S.fuel -= a.price; S.spent += a.price;
+  const tgtXY = target.type === "threat" ? threatXY(target.ref) : { x: target.ref.x, y: target.ref.y + target.ref.r + 18 };
+  Object.assign(a, { state: "walk", target, tx: tgtXY.x, ty: tgtXY.y, workLeft: 10 });
+  const what = target.type === "threat" ? target.ref.text : target.ref.name;
+  log(`${a.name} sent to ${what} ($${a.price.toFixed(2)}).`); tone(360, .1, "triangle");
+  S.mode = null; pendingAgent = null; select(null);
+}
+function finishWork(a) {
+  const t = a.target; a.state = "back";
+  const hp = home(a, a.k - 1); a.tx = hp.x; a.ty = hp.y;
+  if (t.type === "threat") { S.threats = S.threats.filter((x) => x !== t.ref); log(`${a.name} fixed: ${t.ref.text}.`); record("fix", `Fixed: ${t.ref.text}`, a.price); }
+  else if (t.ref.id === "ht") { addBeacon("R" + S.t.toFixed(0), "ht", `Review build: ${t.ref.tickets[0] || "next ticket"}`, "review"); t.ref.tickets.shift(); record("run", "Mason built a Habit Tracker ticket", a.price); }
+  else if (t.ref.id === "rb") { t.ref.stage = "specced"; log("Oracle's council wrote Recipe Box's first spec."); addBeacon("RB2", "rb", "Approve spec: Recipe Box v1", "gate2"); record("run", "Council spec for Recipe Box", a.price); }
+  else if (t.ref.id === "sf") { S.inboxReady = false; log("Scout sorted 3 notes: 2 into Habit Tracker, 1 noise."); record("sort", "Scout sorted 3 notes", a.price); }
+  tone(620); tone(820);
+}
+function draftRoute(from, to) {
+  if (from === to) { toast("Pick a different building."); return; }
+  S.routes.push({ from, to });
+  log(`Campaign drafted: ${from.name} to ${to.name}, 3 stops (spec, build, ship).`);
+  record("campaign", `Campaign ${from.name} to ${to.name}: 3 draft tickets`);
+  S.mode = null; S.routeFrom = null; tone(500); toast("Campaign drafted as 3 tickets (practice).");
+  drawPanel();
+}
+
+// ---- selection and side panel --------------------------------------------
+function select(sel) { S.focus = sel; drawPanel(); }
+function holdButton(label, cost, onDone) {
+  return { label, cost, onDone };
+}
+let holdState = null;
+function wireHold(btn, onDone) {
+  const start = (e) => { e.preventDefault(); if (holdState) return; const fill = btn.querySelector(".fill"); const t0 = performance.now();
+    holdState = { raf: 0 }; const step = (t) => { const k = Math.min(1, (t - t0) / 1000); fill.style.width = k * 100 + "%"; if (k >= 1) { holdState = null; onDone(); return; } holdState.raf = requestAnimationFrame(step); }; holdState.raf = requestAnimationFrame(step); };
+  const stop = () => { if (!holdState) return; cancelAnimationFrame(holdState.raf); holdState = null; const f = btn.querySelector(".fill"); if (f) f.style.width = "0"; toast("Let go. Nothing was spent."); };
+  btn.onpointerdown = start; btn.onpointerup = stop; btn.onpointerleave = stop;
+  btn._start = start; btn._stop = stop;
+}
+function drawPanel() {
+  const p = $("panel"); const f = S.focus; const a = S.sel;
+  if (S.mode === "route") { p.innerHTML = `<div class="h">Campaign</div><div class="title">${S.routeFrom ? "Pick where it ends" : "Pick where it starts"}</div><p class="muted">Click two buildings. The route becomes a campaign with draft tickets for spec, build and ship. Free.</p><div class="btns"><button class="btn quiet" id="cancel">Cancel (Esc)</button></div>`; $("cancel").onclick = () => { S.mode = null; S.routeFrom = null; drawPanel(); }; return; }
+  if (a && !f) { p.innerHTML = `<div class="h">Agent selected</div><div class="title">${a.name} · ${a.model}</div><p>${esc(a.role)}. About $${a.price.toFixed(2)} a run, uses ${a.slots} power slot${a.slots > 1 ? "s" : ""}.</p><p class="muted">Click a threat or a building to send ${a.name}.</p>`; return; }
+  if (!f) {
+    const n = S.beacons.length;
+    p.innerHTML = `<div class="h">Sector</div><div class="title">${n ? `${n} thing${n > 1 ? "s" : ""} waiting on you` : "Sector steady"}</div><p class="muted">Click an amber beacon to decide, a red mark to defend, or pick an agent and click where to send it.</p>`; return;
+  }
+  if (f.type === "beacon") {
+    const b = f.ref;
+    if (b.kind === "seed") {
+      p.innerHTML = `<div class="h">Seed · Recipe Box</div><div class="title">Plant a new project</div><p>One line is enough. Planting is free and creates the project.</p><input type="text" id="seed" value="Save recipes and scale servings" aria-label="One line for the project"><div class="btns"><button class="btn" id="plant">Plant (Enter)</button><button class="btn quiet" id="park">Not now (Esc)</button></div>`;
+      const go = () => plant($("seed").value.trim() || "Recipe Box");
+      $("plant").onclick = go; $("park").onclick = () => parkBeacon(b);
+      $("seed").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } if (e.key === "Escape") parkBeacon(b); e.stopPropagation(); };
+      $("seed").focus(); return;
+    }
+    const verb = b.kind === "proposal" ? "Accept as ticket" : b.kind === "review" ? "Accept build" : b.kind === "inbox" ? "Hand to Scout" : "Approve";
+    p.innerHTML = `<div class="h">Waiting on you · ${esc(B(b.on).name)}</div><div class="title">${esc(b.text)}</div>
+      <p class="muted">${b.kind === "gate" ? "Spec: 5 screens, local storage, daily check-ins. Council voted 3 for, 0 against." : b.kind === "gate2" ? "Oracle's spec: list, search, scale servings. 4 screens." : b.kind === "review" ? "The diff adds one screen and 6 passing tests." : b.kind === "proposal" ? "Fix loops retried 5 times on one ticket last week and burned $4." : "Raw notes sit unsorted."}</p>
+      <div class="btns"><button class="btn gate" id="ok">${verb} (Enter)</button><button class="btn quiet" id="park">Park (Esc)</button></div><p class="muted">Free. No agent starts until you send one.</p>`;
+    $("ok").onclick = () => { if (b.kind === "gate2") { S.beacons = S.beacons.filter((x) => x !== b); B("rb").stage = "planned"; B("rb").ready = true; log("Recipe Box spec approved."); record("approve", "Approved spec: Recipe Box v1"); select(null); return; } approveBeacon(b); };
+    $("park").onclick = () => parkBeacon(b); return;
+  }
+  if (f.type === "threat") {
+    const t = f.ref; const ageH = Math.round((S.t - t.born) / SEC_PER_HOUR);
+    const w = pendingAgent && !canDeploy(pendingAgent, f) ? pendingAgent : S.agents.find((x) => x.name === "Warden");
+    p.innerHTML = `<div class="h">Threat · ${esc(B(t.on).name)}</div><div class="title">${esc(t.text)}</div><p class="muted">Open ${ageH} hours. It grows the longer it waits.</p>
+      <p class="price">Send ${w.name}: about $${w.price.toFixed(2)}, ${w.slots} slot</p>
+      <div class="btns"><button class="btn gate" id="send"><span class="fill"></span>Hold to send ${w.name} (Space)</button><button class="btn quiet" id="later">Ticket it for later</button></div>`;
+    wireHold($("send"), () => deploy(w, f)); $("later").onclick = () => dismissThreat(t); return;
+  }
+  if (f.type === "building") {
+    const b = f.ref;
+    p.innerHTML = `<div class="h">${esc(b.kind)} · ${esc(b.stage)}</div><div class="title">${esc(b.name)}</div>
+      ${b.oneLine ? `<p>“${esc(b.oneLine)}”</p>` : ""}
+      ${b.progress != null ? `<p class="muted">${Math.round(b.progress * 100)}% built. Next: ${esc(b.tickets[0] || "ship")}.</p>` : ""}
+      ${S.routes.filter((r) => r.from === b || r.to === b).map((r) => `<p class="muted">Campaign: ${esc(r.from.name)} to ${esc(r.to.name)}</p>`).join("")}
+      <p class="muted">In the real app this opens the project's own tabs with full edit.</p>`;
+    const sug = pendingAgent ? pendingAgent : b.id === "ht" ? S.agents.find((x) => x.name === "Mason") : b.id === "rb" && b.stage === "planned" ? S.agents.find((x) => x.name === "Oracle") : b.id === "sf" && S.inboxReady ? S.agents.find((x) => x.name === "Scout") : null;
+    if (sug && !canDeploy(sug, f)) { p.innerHTML += `<p class="price">Send ${sug.name}: about $${sug.price.toFixed(2)}, ${sug.slots} slot${sug.slots > 1 ? "s" : ""}</p><div class="btns"><button class="btn gate" id="send"><span class="fill"></span>Hold to send ${sug.name} (Space)</button></div>`; wireHold($("send"), () => deploy(sug, f)); }
+  }
+}
+function drawAgents() {
+  $("agents").innerHTML = S.agents.map((a) => `<button class="agent${S.sel === a ? " sel" : ""}" data-k="${a.k}"><span class="k">${a.k}</span><span>${a.name} <span class="muted">· ${a.model} · $${a.price.toFixed(2)}</span></span><span class="st ${a.state === "idle" ? "idle" : a.state === "work" ? "busy" : "walk"}">${a.state === "idle" ? "idle" : a.state === "work" ? "working" : "moving"}</span></button>`).join("");
+  $("agents").querySelectorAll(".agent").forEach((el) => (el.onclick = () => pickAgent(+el.dataset.k)));
+}
+function pickAgent(k) { const a = S.agents.find((x) => x.k === k); S.sel = S.sel === a ? null : a; S.focus = null; drawAgents(); drawPanel(); }
+function drawLog() { $("log").innerHTML = S.log.slice(-30).map((l) => `<div class="row"><span class="t">${esc(l.at.replace("Day ", "D"))}</span><span>${esc(l.text)}</span></div>`).join(""); $("log").scrollTop = 1e6; }
+let toastT;
+function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), 2600); }
+
+// ---- sound ----------------------------------------------------------------
+let ac = null;
+function tone(f, d = 0.08, type = "sine") { if (!S || !S.sound) return; try { ac = ac || new AudioContext(); const o = ac.createOscillator(), gn = ac.createGain(); o.type = type; o.frequency.value = f; gn.gain.value = .04; gn.gain.exponentialRampToValueAtTime(.0001, ac.currentTime + d); o.connect(gn).connect(ac.destination); o.start(); o.stop(ac.currentTime + d); } catch (e) {} }
+
+// ---- geometry and hit tests -----------------------------------------------
+function threatXY(t) { const b = B(t.on); const list = S.threats.filter((x) => x.on === t.on); const i = list.indexOf(t); return { x: b.x + b.r + 14 + i * 26, y: b.y - b.r - 6 }; }
+function beaconXY(bc) { const b = B(bc.on); const list = S.beacons.filter((x) => x.on === bc.on); const i = list.indexOf(bc); return { x: b.x - b.r - 10 - i * 26, y: b.y - b.r - 8 }; }
+function threatSize(t) { const ageH = (S.t - t.born) / SEC_PER_HOUR; return 6 + Math.min(14, ageH / 4); }
+function hit(px, py) {
+  for (const t of S.threats) { const p = threatXY(t); if (Math.hypot(px - p.x, py - p.y) < threatSize(t) + 8) return { type: "threat", ref: t }; }
+  for (const bc of S.beacons) { const p = beaconXY(bc); if (Math.hypot(px - p.x, py - p.y) < 18) return { type: "beacon", ref: bc }; }
+  for (const b of S.buildings) if (Math.hypot(px - b.x, py - b.y) < b.r + 10) return { type: "building", ref: b };
+  return null;
+}
+cv.addEventListener("pointerdown", (e) => {
+  if (S.ended) return;
+  const r = cv.getBoundingClientRect(); const px = (e.clientX - r.left) * W / r.width, py = (e.clientY - r.top) * H / r.height;
+  const h = hit(px, py);
+  if (S.sound === undefined) S.sound = false;
+  if (S.mode === "route") { if (h && h.type === "building") { if (!S.routeFrom) { S.routeFrom = h.ref; drawPanel(); } else draftRoute(S.routeFrom, h.ref); } return; }
+  if (S.sel && h && h.type !== "beacon") { const a = S.sel; const why = canDeploy(a, h); if (why) { toast(why); return; } S.sel = null; drawAgents(); S.focus = h; drawPanel(); toast(`Hold Space or the button to send ${a.name} for $${a.price.toFixed(2)}.`); pendingAgent = a; return; }
+  pendingAgent = null; select(h);
+});
+let pendingAgent = null;
+
+// ---- draw -------------------------------------------------------------------
+function poly(n, x, y, r, rot = 0) { g.beginPath(); for (let i = 0; i < n; i++) { const a = rot + i * Math.PI * 2 / n; g[i ? "lineTo" : "moveTo"](x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); }
+function render() {
+  g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
+  g.strokeStyle = C.grid; g.lineWidth = 1; g.beginPath();
+  for (let x = 0; x <= W; x += 32) { g.moveTo(x + .5, 0); g.lineTo(x + .5, H); } for (let y = 0; y <= H; y += 32) { g.moveTo(0, y + .5); g.lineTo(W, y + .5); } g.stroke();
+  // conduits
+  g.setLineDash([4, 6]); g.strokeStyle = "#2a4466"; g.lineWidth = 2;
+  const hq = B("sf"); for (const b of S.buildings) if (b !== hq) { g.beginPath(); g.moveTo(hq.x, hq.y); g.lineTo(b.x, b.y); g.stroke(); }
+  g.setLineDash([]);
+  // campaigns
+  for (const r of S.routes) { g.strokeStyle = C.gate; g.lineWidth = 2.5; g.beginPath(); g.moveTo(r.from.x, r.from.y); g.quadraticCurveTo((r.from.x + r.to.x) / 2, Math.min(r.from.y, r.to.y) - 90, r.to.x, r.to.y); g.stroke();
+    for (let i = 1; i <= 3; i++) { const k = i / 4, cx = (r.from.x + r.to.x) / 2, cy = Math.min(r.from.y, r.to.y) - 90; const x = (1 - k) * (1 - k) * r.from.x + 2 * (1 - k) * k * cx + k * k * r.to.x, y = (1 - k) * (1 - k) * r.from.y + 2 * (1 - k) * k * cy + k * k * r.to.y; g.fillStyle = C.bg; g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); g.stroke(); } }
+  if (S.mode === "route" && S.routeFrom) { g.strokeStyle = C.gate; g.setLineDash([3, 4]); g.beginPath(); g.arc(S.routeFrom.x, S.routeFrom.y, S.routeFrom.r + 14, 0, 7); g.stroke(); g.setLineDash([]); }
+  // buildings
+  for (const b of S.buildings) {
+    const sel = S.focus && S.focus.ref === b;
+    g.lineWidth = sel ? 3 : 2;
+    if (b.shape === "hex") { poly(6, b.x, b.y, b.r, Math.PI / 6); g.fillStyle = C.panel2; g.fill(); g.strokeStyle = C.accent; g.stroke(); poly(6, b.x, b.y, b.r * .55, Math.PI / 6); g.fillStyle = "rgba(79,214,232,.18)"; g.fill(); }
+    else if (b.shape === "box") {
+      const s = b.r; g.fillStyle = C.panel2; g.fillRect(b.x - s, b.y - s, 2 * s, 2 * s);
+      g.strokeStyle = b.stage === "shipped" ? C.good : C.accent;
+      if (b.stage === "building" || b.stage === "planned" || b.stage === "specced") g.setLineDash([5, 4]);
+      g.strokeRect(b.x - s, b.y - s, 2 * s, 2 * s); g.setLineDash([]);
+      if (b.progress != null && b.stage !== "shipped") { g.fillStyle = "rgba(79,214,232,.28)"; const h = 2 * s * b.progress; g.fillRect(b.x - s + 3, b.y + s - h, 2 * s - 6, h - 3); }
+      if (b.stage === "shipped") { g.fillStyle = "rgba(94,224,160,.2)"; g.fillRect(b.x - s + 8, b.y - s + 8, 2 * s - 16, 10); g.fillRect(b.x - s + 8, b.y - s + 24, s, 10); }
+    } else { g.setLineDash([3, 5]); g.strokeStyle = C.muted; g.beginPath(); g.arc(b.x, b.y, b.r, 0, 7); g.stroke(); g.setLineDash([]); g.fillStyle = C.muted; g.beginPath(); g.arc(b.x, b.y, 4, 0, 7); g.fill(); }
+    if (sel) { g.strokeStyle = C.ink; g.lineWidth = 1; g.beginPath(); g.arc(b.x, b.y, b.r + 12, 0, 7); g.stroke(); }
+    g.textAlign = "center"; g.fillStyle = C.ink; g.font = "13px 'IBM Plex Mono', Consolas, monospace"; g.fillText(b.name, b.x, b.y + b.r + 34);
+    g.fillStyle = b.stage === "seed" ? C.muted : C.muted; g.font = "11px 'IBM Plex Mono', Consolas, monospace";
+    g.fillText(`${b.kind} · ${b.stage}${b.progress != null && b.stage !== "shipped" ? " " + Math.round(b.progress * 100) + "%" : ""}`, b.x, b.y + b.r + 50);
+  }
+  // threats
+  for (const t of S.threats) { const p = threatXY(t), r = threatSize(t); const sel = S.focus && S.focus.ref === t;
+    g.fillStyle = t.kind === "breach" ? "rgba(255,107,107,.35)" : C.bad; poly(5, p.x, p.y, r, -Math.PI / 2); g.fill();
+    g.strokeStyle = C.bad; g.lineWidth = sel ? 2.5 : 1; poly(5, p.x, p.y, r + 4, -Math.PI / 2 + .3); g.stroke(); }
+  // beacons
+  const pulse = (Math.sin(S.t * 3) + 1) / 2;
+  for (const bc of S.beacons) { const p = beaconXY(bc); const ageK = Math.min(1, (S.t - bc.born) / 60);
+    g.strokeStyle = C.gate; g.globalAlpha = .35 + .65 * (S.reduce ? 1 : pulse); g.lineWidth = 2; g.beginPath(); g.arc(p.x, p.y, 11 + ageK * 4, 0, 7); g.stroke(); g.globalAlpha = 1;
+    g.fillStyle = C.gate; g.beginPath(); g.arc(p.x, p.y, 5, 0, 7); g.fill(); }
+  // agents
+  S.agents.forEach((a, i) => { const sel = S.sel === a || pendingAgent === a;
+    g.fillStyle = C.panel2; g.strokeStyle = a.state === "idle" ? C.muted : C.ink; g.lineWidth = sel ? 2.5 : 1.5;
+    poly(3, a.x, a.y, a.slots > 1 ? 11 : 9, -Math.PI / 2); g.fill(); g.stroke();
+    g.fillStyle = C.ink; g.font = "10px 'IBM Plex Mono', Consolas, monospace"; g.textAlign = "center"; g.fillText(a.name[0], a.x, a.y + 4);
+    if (a.state === "work") { g.strokeStyle = C.accent; g.lineWidth = 2; g.beginPath(); g.arc(a.x, a.y, 15, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - a.workLeft / 10)); g.stroke(); }
+    if (sel) { g.fillStyle = C.accent; g.fillText(a.name, a.x, a.y - 16); } });
+  // legend
+  g.textAlign = "left"; g.font = "11px 'IBM Plex Mono', Consolas, monospace"; g.fillStyle = C.muted;
+  g.fillText("hexagon system · square app · dashed under construction · circle seed · red threat · amber waiting on you", 14, H - 12);
+}
+
+// ---- loop -------------------------------------------------------------------
+let last = performance.now(), acc = 0;
+function tick(now) {
+  requestAnimationFrame(tick);
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (document.hidden || S.paused || S.ended || !$("modal").hidden) return;
+  acc += dt; if (acc < 1 / 30) return; const step = acc * S.speed; acc = 0;
+  S.t += step;
+  for (const ev of SCRIPT) if (S.t >= ev.at && !S.scripted.has(ev.id)) { S.scripted.add(ev.id); ev.run(); }
+  for (const a of S.agents) {
+    if (a.state === "walk" || a.state === "back") { const dx = a.tx - a.x, dy = a.ty - a.y, d = Math.hypot(dx, dy), v = 90 * step;
+      if (d <= v) { a.x = a.tx; a.y = a.ty; a.state = a.state === "walk" ? "work" : "idle"; drawAgents(); } else { a.x += dx / d * v; a.y += dy / d * v; } }
+    else if (a.state === "work") { a.workLeft -= step; if (a.workLeft <= 0) { finishWork(a); drawAgents(); drawPanel(); } }
+  }
+  if (S.t >= 48 * SEC_PER_HOUR) return endShift("Day 3 reached");
+  if (S.t > 130 && !S.beacons.length && S.threats.every((t) => threatSize(t) < 9) && S.agents.every((a) => a.state === "idle") && B("rb").stage !== "seed") return endShift("Sector steady");
+  hud(); render();
+}
+function hud() {
+  $("fuel").textContent = "$" + S.fuel.toFixed(2); $("power").textContent = `${4 - powerUsed()} / 4`;
+  $("att").textContent = S.beacons.length; $("thr").textContent = S.threats.length; $("clock").textContent = clockText();
+}
+function endShift(why) {
+  S.ended = true; hud(); render();
+  const by = (k) => S.done.filter((d) => d.kind === k);
+  const lines = S.done.map((d) => `<li>${esc(d.text)}${d.cost ? ` <span class="muted">($${d.cost.toFixed(2)})</span>` : ""}</li>`).join("");
+  $("modal").innerHTML = `<div class="sheet"><h2>${esc(why)}</h2>
+    <p>${S.done.length} real actions in ${Math.round(S.t)} seconds. ${by("project").length ? "1 project planted. " : ""}${by("campaign").length ? by("campaign").length + " campaign drafted. " : ""}</p>
+    ${lines ? `<div><b>What changed</b><ul>${lines}</ul></div>` : "<p class=\"muted\">No actions this time.</p>"}
+    <p><b>Spend</b> $${S.spent.toFixed(2)} of the $${S.cap.toFixed(2)} practice cap.</p>
+    ${S.beacons.length || S.threats.length ? `<div><b>Still waiting</b><ul>${S.beacons.map((b) => `<li>${esc(b.text)}</li>`).join("")}${S.threats.map((t) => `<li>Threat: ${esc(t.text)}</li>`).join("")}</ul></div>` : ""}
+    <p class="muted">Practice only. Nothing was written to SoftwareFactory.</p>
+    <div class="btns"><button class="btn" id="again">Play again</button></div></div>`;
+  $("modal").hidden = false; $("again").onclick = start;
+}
+
+// ---- keys -------------------------------------------------------------------
+document.addEventListener("keydown", (e) => {
+  if (S.ended || e.target.tagName === "INPUT") return;
+  const k = e.key.toLowerCase();
+  if (k === " ") { e.preventDefault(); if (e.repeat) return; const b = $("send"); if (b && b._start) b._start(e); return; }
+  if (e.repeat) return;
+  if (["1", "2", "3", "4"].includes(k)) return pickAgent(+k);
+  if (k === "enter") { const ok = $("ok") || $("plant"); if (ok) { e.preventDefault(); ok.click(); } return; }
+  if (k === "escape") { if (S.mode) { S.mode = null; S.routeFrom = null; drawPanel(); return; } const pk = $("park"); if (pk) return pk.click(); S.sel = null; pendingAgent = null; select(null); drawAgents(); return; }
+  if (k === "tab") { e.preventDefault(); if (!S.beacons.length) return toast("Nothing is waiting on you."); const i = S.focus && S.focus.type === "beacon" ? (S.beacons.indexOf(S.focus.ref) + 1) % S.beacons.length : 0; select({ type: "beacon", ref: S.beacons[i] }); return; }
+  if (k === "r") { S.mode = "route"; S.routeFrom = null; S.sel = null; select(null); return; }
+  if (k === "p") return togglePause();
+});
+document.addEventListener("keyup", (e) => { if (e.key === " ") { const b = $("send"); if (b && b._stop) b._stop(); } });
+function togglePause() { S.paused = !S.paused; $("pause").textContent = S.paused ? "Resume" : "Pause"; toast(S.paused ? "Paused" : "Running"); }
+$("pause").onclick = togglePause;
+$("speed").onclick = () => { S.speed = S.speed === 1 ? 2 : 1; $("speed").textContent = `Speed ${S.speed}×`; };
+
+function start() {
+  S = newWorld();
+  S.reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  S.agents.forEach((a, i) => { const p = home(a, i); a.x = p.x; a.y = p.y; });
+  $("modal").hidden = true; pendingAgent = null;
+  log("Practice sector loaded. Nothing here touches your real projects.");
+  drawAgents(); drawPanel(); hud(); render();
+}
+start();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
