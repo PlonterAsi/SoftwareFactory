@@ -32,6 +32,15 @@ Questions are data in `packages/core/src/tickets/model.ts` (`FORMS`): adding one
 
 The full design, and what comes next (tickets driving the loop, SoftwareFactory building itself through PRs), is in the ticket system design doc.
 
+## The ready queue: the crew starts work by itself
+
+A ticket that reaches **ready** joins its project's queue, ordered by priority, then age. The crew starts the next one on its own when the rule allows, and says so on the ticket; everything else waits for your Work it press, and the ticket page says why in one sentence.
+
+- **The rule**: a bug or task, sized S or M, not blocked, not taken by you (assignee "you"), and no hold words from you on its thread ("hold", "don't close", "needs a look"). Requests, ideas, epics and questions are taste: they never start by themselves. Size L is split first, or started by you.
+- **Size** (S, M, L) is set by whoever reads the ticket: Ask an agent now ends with a `SIZE:` line and fills it if it is empty, or you set it on the ticket page.
+- **Caps**: at most 2 tickets worked at once per project, $0.60 per ticket, and a day's starts × $0.60 stay under $3. An auto-started run approves its own gates (budget escalations still stop it), and the QA rule closes the ticket only on green locked tests.
+- **The switch**: "Crew picks up: on/off" in the Tickets header; `GET/POST /api/tickets/auto { on, maxUsd, dailyUsd, wip }`, saved as settings. `GET /api/tickets/queue?project=` lists each ready ticket with its place in line or the reason it waits.
+
 ## Agents and the loop
 
 - **Work it with the crew**: the ticket's work document becomes a factory run (Council, plan, locked tests, build, review, fix, ship). The ticket moves to in progress; gate waits, the ship and failures land on its thread; when the run ships, it moves to built.

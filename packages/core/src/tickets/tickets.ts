@@ -10,8 +10,8 @@ import { branchFor, repoOfProject, workInRepo, type RepoRef } from "./repowork.j
 import { selfProject } from "./intake.js";
 import {
   FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS,
-  ideaFromTicket, isClosed, keyFromName, keyText, nextMoves, refuseMove, refuseParent, titleFrom, workDocument,
-  type LinkView, type NoteView, type Priority, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView,
+  SIZES, autoWorkRefusal, ideaFromTicket, isClosed, keyFromName, keyText, nextMoves, refuseMove, refuseParent, titleFrom, workDocument,
+  type LinkView, type NoteView, type Priority, type Size, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView,
 } from "./model.js";
 
 export interface OpenTicket {
@@ -82,9 +82,12 @@ export interface TicketDetail {
   repo: RepoRef | null;
   /** The Builder is working it in the repo right now. */
   working: boolean;
+  /** Where it stands in the ready queue, or why the crew leaves it to you. */
+  queue: { position: number | null; why: string | null } | null;
 }
 
 type Row = Record<string, any>;
+const pri = (p: string | null) => ({ now: 0, this_week: 1, next: 2, someday: 3 } as Record<string, number>)[p ?? ""] ?? 4;
 
 /**
  * Every read of a ticket goes through this select: the row, its project's key,
@@ -102,13 +105,33 @@ const toView = (r: Row): TicketView => ({
   id: Number(r.id), key: keyText(r.project_key ?? null, r.number == null ? null : Number(r.number), Number(r.id)), number: r.number == null ? null : Number(r.number),
   level: r.kind === "plan" ? "epic" : r.parent_id == null || r.parent_kind === "plan" ? "ticket" : "subtask",
   blocked: !!r.is_blocked, children: { total: Number(r.n_children ?? 0), done: Number(r.n_done ?? 0) }, kind: r.kind, title: r.title, body: r.body ?? "", answers: JSON.parse(r.answers ?? "{}"), project: r.project == null ? null : Number(r.project),
-  status: r.status, priority: r.priority ?? null, severity: r.severity ?? null, assignee: r.assignee ?? null, parentId: r.parent_id == null ? null : Number(r.parent_id),
+  status: r.status, priority: r.priority ?? null, severity: r.severity ?? null, size: r.size ?? null, assignee: r.assignee ?? null, parentId: r.parent_id == null ? null : Number(r.parent_id),
   lineOrder: r.line_order == null ? null : Number(r.line_order), tags: JSON.parse(r.tags ?? "[]"), source: r.source, openedBy: r.opened_by, fingerprint: r.fingerprint ?? null,
   run: r.run == null ? null : Number(r.run), branch: r.branch ?? null, branchDir: r.branch_dir ?? null, createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at ?? null, lastNote: r.last_note ?? null,
 });
 
 /** The contract appended to any agent asked about a ticket. The practice crew answers it too. */
-export const TICKET_CONTRACT = "Station contract: ticket. You are reading one ticket of SoftwareFactory. Reply in at most 6 short lines: what you understand, the smallest next step, and anything missing. End with one line `STATUS: ready` if it can be built as written, or `STATUS: open` if it needs an answer first.";
+export const TICKET_CONTRACT = "Station contract: ticket. You are reading one ticket of SoftwareFactory. Reply in at most 6 short lines: what you understand, the smallest next step, and anything missing. Then one line `SIZE: S`, `SIZE: M` or `SIZE: L` (S: one small change; M: a few files, one run; L: should be split). End with one line `STATUS: ready` if it can be built as written, or `STATUS: open` if it needs an answer first.";
+
+/** How the crew picks up ready tickets by itself (Systems can turn it off). */
+export interface AutoWork {
+  on: boolean;
+  /** Cap for one ticket the crew starts on its own. */
+  maxUsd: number;
+  /** All starts of a day together stay under this: starts x maxUsd <= dailyUsd. */
+  dailyUsd: number;
+  /** Tickets worked at once per project. */
+  wip: number;
+}
+export const AUTO_WORK_DEFAULT: AutoWork = { on: true, maxUsd: 0.6, dailyUsd: 3, wip: 2 };
+
+export interface QueueSpot {
+  ticket: TicketView;
+  /** 1 = next in line in its project. Null when the crew will not take it on its own. */
+  position: number | null;
+  /** Why it is not in line, in a sentence. */
+  why: string | null;
+}
 
 /**
  * Tickets: open, edit one field at a time, talk, move, link, plan, and hand a
@@ -121,10 +144,97 @@ export class Tickets {
   /** Tickets the Builder is working in a repo clone right now. */
   private inRepo = new Map<number, Promise<void>>();
 
-  constructor(private log: EventLog, private opts: { runtime?: AgentRuntime; factory?: Factory; bay?: AgentBay; budgetUsd?: number; workRoot?: string } = {}) {
+  /** Tickets the dispatcher could not start, with why, until something about them changes. */
+  private stuck = new Map<number, string>();
+  private dispatchSoon: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(private log: EventLog, private opts: { runtime?: AgentRuntime; factory?: Factory; bay?: AgentBay; budgetUsd?: number; workRoot?: string; autoWork?: () => AutoWork; canWork?: () => string | null } = {}) {
     log.on("event", (e: SfEvent) => {
       try { this.react(e); } catch (err) { console.error("tickets: reacting to", e.type, "failed:", err); }
+      if (e.type.startsWith("ticket.") || e.type === "factory.run.finished") {
+        const pid = (e.payload as { id?: number; by?: string }).id;
+        if (e.type.startsWith("ticket.") && pid != null && (e.payload as { by?: string }).by !== "dispatcher") this.stuck.delete(Number(pid));
+        this.scheduleDispatch();
+      }
     });
+  }
+
+  /** The auto-work rule in force: off unless the core was given one. */
+  autoWork(): AutoWork { return this.opts.autoWork?.() ?? { ...AUTO_WORK_DEFAULT, on: false }; }
+
+  private scheduleDispatch() {
+    if (!this.opts.autoWork || this.dispatchSoon) return;
+    // After the event that triggered it has landed everywhere, and once per burst of events.
+    this.dispatchSoon = setTimeout(() => { this.dispatchSoon = null; try { this.dispatch(); } catch (err) { console.error("tickets: dispatch failed:", err); } }, 50);
+    this.dispatchSoon.unref?.();
+  }
+
+  /** A ticket the crew is working right now: a factory run still going, or the Builder in its repo clone. */
+  private isWorking(t: TicketView): boolean {
+    return this.inRepo.has(t.id) || (t.run != null && !!this.opts.factory?.isActive(t.run));
+  }
+
+  /** Auto starts today (by the dispatcher), for the daily cap. */
+  private autoStartsToday(): number {
+    const day = new Date().toISOString().slice(0, 10);
+    return Number((this.log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND ts >= ?").get(day) as { n: number }).n);
+  }
+
+  /**
+   * The ready queue, per project: each ready ticket with its place in line,
+   * or the sentence that says why the crew leaves it to you. Order: priority,
+   * then the oldest first.
+   */
+  queue(project?: number | null): QueueSpot[] {
+    const ready = this.list({ view: "all", status: "ready", project: project ?? undefined, limit: 500 })
+      .sort((a, b) => pri(a.priority) - pri(b.priority) || a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
+    const place = new Map<string, number>();
+    return ready.map((t) => {
+      const why = this.stuck.get(t.id) ?? autoWorkRefusal(t, this.handBrake(t.id));
+      if (why) return { ticket: t, position: null, why };
+      const k = String(t.project);
+      const n = (place.get(k) ?? 0) + 1;
+      place.set(k, n);
+      return { ticket: t, position: n, why: null };
+    });
+  }
+
+  /** You wrote "hold", "don't close", "needs a look" on the thread: the crew keeps its hands off. */
+  private handBrake(id: number): boolean {
+    return this.notes(id).some((n) => n.kind === "note" && n.by === "you" && HAND_BRAKE.test(n.text));
+  }
+
+  /**
+   * Start what the rule allows: in each project, the next tickets in line
+   * while fewer than `wip` are being worked, and only while today's starts
+   * stay under the daily cap. Each start says so on its ticket.
+   */
+  dispatch(): number[] {
+    const rule = this.autoWork();
+    if (!rule.on || this.opts.canWork?.()) return [];
+    const started: number[] = [];
+    const busy = new Map<string, number>();
+    for (const t of this.list({ view: "all", status: "in_progress", limit: 500 })) if (this.isWorking(t)) busy.set(String(t.project), (busy.get(String(t.project)) ?? 0) + 1);
+    let today = this.autoStartsToday();
+    for (const spot of this.queue()) {
+      if (spot.position == null) continue;
+      const k = String(spot.ticket.project);
+      if ((busy.get(k) ?? 0) >= rule.wip) continue;
+      if ((today + 1) * rule.maxUsd > rule.dailyUsd + 1e-9) break;
+      const t = spot.ticket;
+      try {
+        this.log.append("ticket.noted", { id: t.id, by: "dispatcher", auto: 1, kind: "event", text: `The crew picked it up on its own: a ready ${t.kind}, size ${t.size}, capped at $${rule.maxUsd.toFixed(2)}. Write "hold" on the thread to keep the crew off it.` });
+        this.work(t.id, { maxUsd: rule.maxUsd, autoApprove: true, by: "dispatcher" });
+        started.push(t.id);
+        busy.set(k, (busy.get(k) ?? 0) + 1);
+        today++;
+      } catch (err) {
+        const why = `The crew could not start it: ${(err as Error).message}`;
+        this.log.append("ticket.noted", { id: t.id, by: "dispatcher", kind: "event", text: why });
+        this.stuck.set(t.id, why);
+      }
+    }
+    return started;
   }
 
   // ---- reading -------------------------------------------------------------
@@ -280,7 +390,13 @@ export class Tickets {
       ticket: t, notes, links, lines, parent: t.parentId != null ? this.get(t.parentId) ?? null : null,
       moves: nextMoves(t.status, t.kind), document: workDocument(t, notes, links, lines), run,
       repo: repoOfProject(this.log, t.project), working: this.inRepo.has(id),
+      queue: t.status === "ready" ? this.spot(t) : null,
     };
+  }
+
+  private spot(t: TicketView): { position: number | null; why: string | null } {
+    const q = this.queue(t.project).find((x) => x.ticket.id === t.id);
+    return q ? { position: q.position, why: q.why } : { position: null, why: null };
   }
 
   document(id: number): string {
@@ -348,6 +464,7 @@ export class Tickets {
     if (field === "kind" && !KINDS.includes(value as TicketKind)) throw new Error(`Unknown kind "${value}"`);
     if (field === "priority" && value != null && value !== "" && !PRIORITIES.includes(value as Priority)) throw new Error(`Unknown priority "${value}"`);
     if (field === "severity" && value != null && value !== "" && !TICKET_SEVERITIES.includes(value as TicketSeverity)) throw new Error(`Unknown severity "${value}"`);
+    if (field === "size" && value != null && value !== "" && !SIZES.includes(value as Size)) throw new Error(`Size is S, M or L, not "${value}"`);
     if (field === "parent" && value != null && value !== "") {
       const p = this.get(Number(value));
       if (!p) throw new Error(`No ticket #${value} to sit under.`);
@@ -423,7 +540,7 @@ export class Tickets {
    * work document, the ticket moves to in progress, and the run writes back
    * onto the ticket when it ends (see react()).
    */
-  work(id: number, o: { maxUsd?: number; autoApprove?: boolean; where?: "auto" | "repo" | "new" } = {}): { ticket: TicketView; run: number | null; branch?: string } {
+  work(id: number, o: { maxUsd?: number; autoApprove?: boolean; where?: "auto" | "repo" | "new"; by?: string } = {}): { ticket: TicketView; run: number | null; branch?: string } {
     const t = this.must(id);
     if (isClosed(t.status)) throw new Error("This ticket is closed; reopen it first.");
     const repo = o.where === "new" ? null : repoOfProject(this.log, t.project);
@@ -433,7 +550,7 @@ export class Tickets {
     if (!factory) throw new Error("The factory is not running in this core.");
     if (t.run != null && factory.isActive(t.run)) throw new Error(`Run #${t.run} is already working this ticket.`);
     const run = factory.start(ideaFromTicket(t, this.document(id)), { maxUsd: o.maxUsd, autoApprove: o.autoApprove, ...(t.project != null ? { projectId: t.project } : {}) });
-    this.log.append("ticket.run", { id, run, by: "you" });
+    this.log.append("ticket.run", { id, run, by: o.by ?? "you" });
     if (t.status !== "in_progress") this.log.append("ticket.noted", { id, by: "factory", status: "in_progress", text: `The crew took it: factory run #${run}` });
     return { ticket: this.get(id)!, run };
   }
@@ -503,7 +620,9 @@ export class Tickets {
       const text = run.result.text.trim();
       const ready = /STATUS:\s*ready/i.test(text);
       const now = this.get(id)!;
-      const reply = text.replace(/\n?STATUS:\s*\w+\s*$/i, "").trim() || text;
+      const size = text.match(/^\s*SIZE:\s*([SML])\b/im)?.[1]?.toUpperCase() as Size | undefined;
+      if (size && now.size == null) this.edit(id, "size", size, a?.def.id ?? want);
+      const reply = text.replace(/\n?STATUS:\s*\w+\s*$/i, "").replace(/^\s*SIZE:\s*[SML]\b.*$/im, "").trim() || text;
       if (ready && now.status === "open") this.say(id, reply, { by: a?.def.id ?? want, kind: "reply", status: "ready", costUsd: run.result.costUsd });
       else this.say(id, reply, { by: a?.def.id ?? want, kind: "reply", costUsd: run.result.costUsd });
       return { ticket: this.get(id)!, reply, costUsd: run.result.costUsd };
@@ -514,7 +633,6 @@ export class Tickets {
 
   // ---- agents and rules write back -----------------------------------------
 
-  /** Keep tickets in step with the rest of the factory. Runs synchronously for every event. */
   /**
    * When the last ticket of an epic is done, the epic is built and waits for
    * your look (an epic is taste: it never closes by itself). A reopened ticket
@@ -533,6 +651,7 @@ export class Tickets {
     }
   }
 
+  /** Keep tickets in step with the rest of the factory. Runs synchronously for every event. */
   private react(e: SfEvent) {
     const p = e.payload as Record<string, any>;
     if (e.type === "ticket.noted" && p.status) this.rollUp(Number(p.id));
@@ -549,7 +668,7 @@ export class Tickets {
           project: this.projectOfRun(run),
         });
       }
-    } else if (e.type === "factory.gate" && p.state === "waiting") {
+    } else if (e.type === "factory.gate" && p.state === "waiting" && !p.auto) {
       const t = this.byRun(Number(p.run));
       if (t) this.log.append("ticket.noted", { id: t.id, by: "factory", kind: "event", text: `Run #${p.run} waits for you at the ${String(p.gate).replace("gateA", "plan gate").replace("gateB", "build gate")}: ${p.question ?? ""}`.trim() });
     } else if (e.type === "order.fragment") {

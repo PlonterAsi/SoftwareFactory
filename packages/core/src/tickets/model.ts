@@ -92,6 +92,29 @@ export const PRIORITY_LABEL: Record<Priority, string> = { now: "Now", this_week:
 export const TICKET_SEVERITIES = ["blocking", "annoying", "cosmetic"] as const;
 export type TicketSeverity = (typeof TICKET_SEVERITIES)[number];
 
+/** How big a ticket is, as the agent who read it judged: S and M may start on their own; L is split first or started by you. */
+export const SIZES = ["S", "M", "L"] as const;
+export type Size = (typeof SIZES)[number];
+
+/** Kinds the crew may start without a click once they are ready: work, not taste. */
+export const AUTO_KINDS: TicketKind[] = ["bug", "task"];
+
+/**
+ * Why the crew does not pick up this ticket on its own, or null if it may.
+ * The rule: a ready bug or task, sized S or M, not blocked, not taken by you,
+ * and no hand-brake words on its thread.
+ */
+export function autoWorkRefusal(t: Pick<TicketView, "kind" | "status" | "size" | "blocked" | "assignee">, handBrake = false): string | null {
+  if (t.status !== "ready") return t.status === "open" ? "Not ready yet: once it is ready, the crew can take it." : null;
+  if (!AUTO_KINDS.includes(t.kind)) return `A ${t.kind === "plan" ? "epic" : t.kind} waits for your Work it press.`;
+  if (t.blocked) return "Blocked: it starts when what blocks it is closed.";
+  if (t.assignee === "you") return "You took it, so the crew leaves it to you.";
+  if (handBrake) return "The thread says to hold it.";
+  if (t.size == null) return "Not sized yet: Ask an agent sizes it, or set S, M or L.";
+  if (t.size === "L") return "Size L: split it into smaller tickets, or press Work it yourself.";
+  return null;
+}
+
 export const RELATIONS = ["related", "duplicate_of", "derived_from", "blocks"] as const;
 export type Relation = (typeof RELATIONS)[number];
 
@@ -201,6 +224,8 @@ export interface TicketView {
   status: TicketStatus;
   priority: Priority | null;
   severity: TicketSeverity | null;
+  /** S, M or L, as the agent who read it judged (or you set). */
+  size: Size | null;
   assignee: string | null;
   parentId: number | null;
   lineOrder: number | null;
@@ -239,7 +264,7 @@ export interface LinkView { from: number; to: number; relation: Relation; title?
  * as its brief, and a factory run starts from.
  */
 export function workDocument(t: TicketView, notes: NoteView[] = [], links: LinkView[] = [], lines: TicketView[] = []): string {
-  const out = [`# ${t.key} ${t.title}`, "", `${KIND_LABEL[t.kind]} · ${t.status.replace("_", " ")}${t.priority ? ` · priority ${PRIORITY_LABEL[t.priority]}` : ""}${t.severity ? ` · ${t.severity}` : ""}${t.tags.length ? ` · ${t.tags.join(", ")}` : ""}`];
+  const out = [`# ${t.key} ${t.title}`, "", `${KIND_LABEL[t.kind]} · ${t.status.replace("_", " ")}${t.priority ? ` · priority ${PRIORITY_LABEL[t.priority]}` : ""}${t.severity ? ` · ${t.severity}` : ""}${t.size ? ` · size ${t.size}` : ""}${t.tags.length ? ` · ${t.tags.join(", ")}` : ""}`];
   if (t.body.trim()) out.push("", t.body.trim());
   for (const q of FORMS[t.kind]) {
     const a = t.answers[q.key];

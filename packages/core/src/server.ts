@@ -24,7 +24,7 @@ import { launchRoute } from "./launch/routes.js";
 import { Integrations } from "./integrations/service.js";
 import { integrationsRoute, serveExtension } from "./integrations/routes.js";
 import { DropFolder } from "./bridge/drop.js";
-import { Tickets } from "./tickets/tickets.js";
+import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
 import { ErrorCapture, isFault } from "./tickets/capture.js";
 import { classifyIntake, ensureSelfProject, projectToTicket } from "./tickets/intake.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
@@ -69,7 +69,20 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const factory = new Factory(log, runtime, projectsDir, bay);
   recordAppVersion(log, appVersion);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
-  const tickets = new Tickets(log, { runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1), workRoot: join(dirname(projectsDir), "ticket-work") });
+  // The crew picks up ready bugs and tasks on its own, within your caps (docs/tickets.md, "The ready queue").
+  const autoWork = (): AutoWork => {
+    const st = readSettings(log);
+    return {
+      on: st.ticketsAutoWork ?? AUTO_WORK_DEFAULT.on,
+      maxUsd: st.ticketsAutoMaxUsd ?? AUTO_WORK_DEFAULT.maxUsd,
+      dailyUsd: st.ticketsAutoDailyUsd ?? AUTO_WORK_DEFAULT.dailyUsd,
+      wip: st.ticketsWip ?? AUTO_WORK_DEFAULT.wip,
+    };
+  };
+  const tickets = new Tickets(log, {
+    runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1), workRoot: join(dirname(projectsDir), "ticket-work"),
+    autoWork, canWork: () => (gitReady() ? null : "Git is not installed"),
+  });
   // Every fault becomes a bug ticket by itself (docs/tickets.md, "Errors become bugs").
   // SoftwareFactory's own project: the home of asks about the app and of the errors it catches. Made when first needed.
   const ensureSelf = () => ensureSelfProject(log, (name) => order.createNode("project", name));
@@ -300,6 +313,19 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         return json(res, 201, projectToTicket(log, tickets, order.state(), Number(turn[1]), { to, kind: b.kind ? String(b.kind) as TicketKind : undefined }));
       }
       if (url.pathname === "/api/tickets" || url.pathname.startsWith("/api/tickets/")) {
+        if (url.pathname === "/api/tickets/auto") {
+          // The auto-work rule: GET reads it, POST changes any of on, maxUsd, dailyUsd, wip.
+          if (req.method === "POST") {
+            const b = await readJson(req);
+            const set = (key: string, v: unknown, ok: boolean) => { if (ok) log.append("settings.changed", { key, value: v }); };
+            set("ticketsAutoWork", b.on, typeof b.on === "boolean");
+            set("ticketsAutoMaxUsd", b.maxUsd, typeof b.maxUsd === "number" && b.maxUsd > 0 && b.maxUsd <= 5);
+            set("ticketsAutoDailyUsd", b.dailyUsd, typeof b.dailyUsd === "number" && b.dailyUsd >= 0 && b.dailyUsd <= 50);
+            set("ticketsWip", b.wip, Number.isInteger(b.wip) && Number(b.wip) >= 1 && Number(b.wip) <= 6);
+            tickets.dispatch();
+          }
+          return json(res, 200, tickets.autoWork());
+        }
         const r = await ticketRoute(tickets, req, url, gitReady);
         if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
       }
@@ -383,7 +409,10 @@ export function updatesReport(log: EventLog, appVersion: string | undefined, act
 }
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
-export function readSettings(log: EventLog): { crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean } {
+export function readSettings(log: EventLog): {
+  crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean;
+  ticketsAutoWork?: boolean; ticketsAutoMaxUsd?: number; ticketsAutoDailyUsd?: number; ticketsWip?: number;
+} {
   const rows = log.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]));
 }
@@ -432,6 +461,10 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
   const proj = q.get("project");
   if (req.method === "GET" && path === "/api/tickets/meta") {
     return [200, { kinds: KINDS.map((k) => ({ code: k, label: KIND_LABEL[k], questions: FORMS[k] })), statuses: STATUS_WORDS, priorities: PRIORITIES.map((p) => ({ code: p, label: PRIORITY_LABEL[p] })), severities: TICKET_SEVERITIES, relations: RELATIONS }];
+  }
+  if (req.method === "GET" && path === "/api/tickets/queue") {
+    const project = proj == null || proj === "" ? null : Number(proj);
+    return [200, { rule: tickets.autoWork(), queue: tickets.queue(project).map((q) => ({ id: q.ticket.id, key: q.ticket.key, title: q.ticket.title, kind: q.ticket.kind, size: q.ticket.size, position: q.position, why: q.why })) }];
   }
   if (req.method === "GET" && path === "/api/tickets/waiting") {
     const project = proj == null || proj === "" ? null : Number(proj);

@@ -13,12 +13,12 @@ const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : n
 /** Fields `ticket.edited` may change, and the column each one writes. */
 export const EDITABLE: Record<string, string> = {
   title: "title", body: "body", kind: "kind", priority: "priority", severity: "severity", assignee: "assignee",
-  project: "project", tags: "tags", parent: "parent_id",
+  project: "project", tags: "tags", parent: "parent_id", size: "size",
 };
 
 export const ticketsProjection: Projection = {
   name: "tickets",
-  version: 3,
+  version: 4,
   tables: ["tickets", "ticket_notes", "ticket_links", "ticket_keys"],
   describe: "Tickets: units of work per project, their append-only thread (notes, agent replies, status moves, events) and links",
   migrate(db) {
@@ -34,6 +34,7 @@ export const ticketsProjection: Projection = {
       status      TEXT NOT NULL,
       priority    TEXT,
       severity    TEXT,
+      size        TEXT,
       assignee    TEXT,
       parent_id   INTEGER,
       line_order  INTEGER,
@@ -125,7 +126,7 @@ export const ticketsProjection: Projection = {
       } else {
         db.prepare(`UPDATE tickets SET ${col} = ?, updated_at = ? WHERE id = ?`).run(value as string | number | null, e.ts, Number(p.id));
       }
-      if (field === "kind" || field === "assignee" || field === "project" || field === "parent") {
+      if (field === "kind" || field === "assignee" || field === "project" || field === "parent" || field === "size") {
         note("event", `${field === "parent" ? "parent" : field} set to ${p.value == null || p.value === "" ? "nothing" : field === "parent" ? said(Number(p.value)) : p.value}`);
       }
     } else if (e.type === "ticket.noted") {

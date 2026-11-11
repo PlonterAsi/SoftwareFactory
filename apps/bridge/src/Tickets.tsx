@@ -15,7 +15,7 @@ export type TicketKind = "bug" | "request" | "task" | "idea" | "plan" | "questio
 export type TicketStatus = "open" | "ready" | "in_progress" | "built" | "closed" | "rejected";
 export interface TicketView {
   id: number; key: string; number: number | null; level: "epic" | "ticket" | "subtask"; blocked: boolean; children: { total: number; done: number }; kind: TicketKind; title: string; body: string; answers: Record<string, string>; project: number | null; status: TicketStatus;
-  priority: string | null; severity: string | null; assignee: string | null; parentId: number | null; lineOrder: number | null; tags: string[];
+  priority: string | null; severity: string | null; size: "S" | "M" | "L" | null; assignee: string | null; parentId: number | null; lineOrder: number | null; tags: string[];
   source: string; openedBy: string; run: number | null; branch: string | null; branchDir: string | null; createdAt: string; updatedAt: string; closedAt: string | null; lastNote: string | null;
 }
 interface NoteView { eventId: number; ts: string; by: string; kind: "note" | "reply" | "status" | "event"; text: string; status: TicketStatus | null; costUsd: number | null }
@@ -25,7 +25,9 @@ interface Detail {
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
   repo: { source: string; dir: string; branch: string | null } | null;
   working: boolean;
+  queue: { position: number | null; why: string | null } | null;
 }
+interface AutoWork { on: boolean; maxUsd: number; dailyUsd: number; wip: number }
 interface Question { key: string; label: string; short?: boolean; required?: boolean; choices?: string[] }
 interface Meta { kinds: { code: TicketKind; label: string; questions: Question[] }[]; statuses: { code: TicketStatus; label: string; closed?: boolean; wantsLook?: boolean }[]; priorities: { code: string; label: string }[]; severities: string[]; relations: string[] }
 interface Counts { byStatus: Record<string, number>; byKind: Record<string, number>; open: number; look: number; you: number; total: number; oldest: { id: number; title: string; createdAt: string } | null }
@@ -58,6 +60,7 @@ export const ticketsApi = {
     return call<{ tickets: TicketView[]; counts: Counts }>("GET", `/api/tickets?${s}`);
   },
   get: (id: number) => call<Detail>("GET", `/api/tickets/${id}`),
+  auto: (patch?: Partial<AutoWork>) => call<AutoWork>(patch ? "POST" : "GET", "/api/tickets/auto", patch),
   waiting: (project?: number | null) => call<{ items: WaitingItem[] }>("GET", `/api/tickets/waiting${project != null ? `?project=${project}` : ""}`),
   open: (t: Partial<TicketView> & { answers?: Record<string, string>; parent?: number | null }) => call<TicketView>("POST", "/api/tickets", t),
   edit: (id: number, field: string, value: unknown, key?: string) => call<TicketView>("POST", `/api/tickets/${id}/edit`, { field, value, key }),
@@ -153,6 +156,7 @@ export function Tickets({ events, projectId = null, crew = [], onShowRun }: {
             <option value="">every kind</option>
             {meta?.kinds.map((k) => <option key={k.code} value={k.code}>{k.label}{counts?.byKind[k.code] ? ` (${counts.byKind[k.code]})` : ""}</option>)}
           </select>
+          <AutoToggle last={last} onError={setErr} />
           <button className="sm" onClick={() => setMaking((m) => !m)}>{making ? "Cancel" : "+ New ticket"}</button>
         </div>
       </div>
@@ -194,6 +198,7 @@ function List({ tickets, view, sel, onSelect, crew, counts }: { tickets: TicketV
               <span className="tk-sub">
                 <span className={`tk-status st-${t.status}`}>{STATUS_LABEL[t.status]}</span>
                 {t.priority && <span className={`tk-pri p-${t.priority}`}>{t.priority.replace("_", " ")}</span>}
+                {t.size && <span className="tk-size mono" title={`Size ${t.size}`}>{t.size}</span>}
                 {t.blocked && <span className="tk-blocked" title="Another ticket that is still open blocks this one">blocked</span>}
                 {t.children.total > 0 && <Progress c={t.children} label={t.kind === "plan" ? "tickets" : "subtasks"} />}
                 <span className="tk-meta muted">{t.run != null ? <span className="tk-run mono">run #{t.run}</span> : t.assignee ? <Who id={t.assignee} crew={crew} /> : t.source !== "you" ? `from ${t.source}` : ""}</span>
@@ -317,6 +322,7 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
         <span className={`tk-status st-${t.status}`}>{STATUS_LABEL[t.status]}</span>
         {t.blocked && <span className="tk-blocked" title="Another ticket that is still open blocks this one: see Links">blocked</span>}
         <ChipSelect label="priority" value={t.priority ?? ""} options={[["", "+ priority"], ...meta.priorities.map((p) => [p.code, p.label] as [string, string])]} onChange={(v) => edit("priority", v || null)} />
+        <ChipSelect label="size" value={t.size ?? ""} options={[["", "+ size"], ["S", "size S"], ["M", "size M"], ["L", "size L"]]} onChange={(v) => edit("size", v || null)} />
         {t.kind === "bug" && <ChipSelect label="severity" value={t.severity ?? ""} options={[["", "+ severity"], ...meta.severities.map((s) => [s, s] as [string, string])]} onChange={(v) => edit("severity", v || null)} />}
         <ChipSelect label="assignee" value={t.assignee ?? ""} options={[["", "+ assignee"], ["you", "you"], ...crew.map((c) => [c.id, `${c.avatar} ${c.name}`] as [string, string])]} onChange={(v) => edit("assignee", v || null)} />
         {projects.length > 0 && <ChipSelect label="project" value={t.project != null ? String(t.project) : ""} options={[["", "+ project"], ...projects.map((p) => [String(p.id), p.title] as [string, string])]} onChange={(v) => edit("project", v ? Number(v) : null)} />}
@@ -340,6 +346,13 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
         </button>
         <button className="ghost" onClick={() => setShowDoc((s) => !s)}>{showDoc ? "Hide" : "Work document"}</button>
       </div>
+      {d.queue && (
+        <div className={`tk-queue ${d.queue.position != null ? "in-line" : ""}`} role="status">
+          {d.queue.position != null
+            ? d.queue.position === 1 ? "Next in line: the crew starts it as soon as a slot is free." : `Number ${d.queue.position} in line for the crew.`
+            : d.queue.why}
+        </div>
+      )}
       {d.run && (
         <div className="tk-runstrip" aria-label={`Factory run ${d.run.id}`}>
           <button className="link mono" onClick={() => onShowRun?.(d.run!.id)}>run #{d.run.id}</button>
@@ -526,5 +539,24 @@ export function Waiting({ events, projectId = null, sel = null, onSelect, onErro
       ))}
       {limit && items.length > limit && <li className="muted tk-wait-more">and {items.length - limit} more on the Tickets tab</li>}
     </ul>
+  );
+}
+
+/**
+ * The auto-work rule, as one switch in the Tickets header: when on, the crew
+ * starts ready bugs and tasks of size S or M by itself, within the caps.
+ */
+function AutoToggle({ last, onError }: { last: number; onError: (m: string) => void }) {
+  const [rule, setRule] = useState<AutoWork | null>(null);
+  useEffect(() => { ticketsApi.auto().then(setRule).catch(() => {}); }, [last]);
+  if (!rule) return null;
+  const flip = () => ticketsApi.auto({ on: !rule.on }).then(setRule).catch((e) => onError((e as Error).message));
+  return (
+    <button type="button" className={`ghost sm tk-auto ${rule.on ? "on" : ""}`} aria-pressed={rule.on} onClick={flip}
+      title={rule.on
+        ? `The crew starts ready bugs and tasks of size S or M by itself: at most ${rule.wip} per project at once, $${rule.maxUsd.toFixed(2)} each, $${rule.dailyUsd.toFixed(2)} a day in all. Press to stop.`
+        : "The crew only starts a ticket when you press Work it. Press to let it pick up ready bugs and tasks by itself."}>
+      <span className="tk-auto-dot" aria-hidden /> Crew picks up: {rule.on ? "on" : "off"}
+    </button>
   );
 }

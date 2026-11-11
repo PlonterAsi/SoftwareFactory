@@ -629,9 +629,10 @@ class Run {
     const station: StationId = gate === "escalation" ? "fix" : gate;
     if (gate !== "escalation") this.mark(station, "waiting");
     const { neverAuto: _n, ...info } = opts;
-    this.log.append("factory.gate", { run: this.id, gate, state: "waiting", question, ...info });
     let auto = this.o.autoApprove && gate !== "escalation";
     if (this.o.autoApprove && gate === "escalation" && !opts.neverAuto && this.autoRetriesUsed < this.o.autoRetries) { this.autoRetriesUsed++; auto = true; }
+    // `auto`: nobody is asked, the run approves itself (screens and tickets then say nothing waits for you).
+    this.log.append("factory.gate", { run: this.id, gate, state: "waiting", question, ...info, ...(auto ? { auto: true } : {}) });
     // An unattended run never hangs: an escalation it may not retry stops the run.
     const d: GateDecision = auto ? { approve: true, by: "auto" }
       : this.o.autoApprove ? { approve: false, by: "auto" }

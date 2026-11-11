@@ -1133,3 +1133,11 @@ button.tool-raw { font-size: 12px; margin-left: auto; }
 .waiting-home h2 { font: 600 13px var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
 .waiting-home .empty { padding: 6px 0; text-align: left; }
 @media (max-width: 720px) { .tk-wait { grid-template-columns: 1fr; } .tk-wait-acts { justify-content: flex-start; } }
+
+/* The ready queue */
+.tk-queue { margin: 6px 0 2px; padding: 6px 10px; border-radius: 6px; border: 1px dashed var(--line); color: var(--muted); font-size: 12px; }
+.tk-queue.in-line { border-color: var(--accent); color: var(--accent); border-style: solid; background: var(--accent-dim); }
+.tk-size { font-size: 10px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
+.tk-auto { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tk-auto-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.tk-auto.on .tk-auto-dot { background: var(--good); box-shadow: 0 0 6px var(--good); }
