@@ -299,6 +299,19 @@ console.log("seeded", db);
     check("a shipped project is added as a feature after approval", false, e.message);
   }
 
+  // ---------- 4d. plugins: the bundled example installs, turns on, and its locked-down backend answers ----------
+  try {
+    const list = (await api("/api/plugins")).body;
+    check("the bundled example plugin ships with the app", list.examples?.some((x) => x.id === "run-stats"), JSON.stringify(list.examples ?? list).slice(0, 300));
+    await api("/api/plugins/install", { method: "POST", body: JSON.stringify({ example: "run-stats" }) });
+    const on = await api("/api/plugins/run-stats/enable", { method: "POST", body: "{}" });
+    const called = await api("/api/plugins/run-stats/call", { method: "POST", body: JSON.stringify({ method: "totals" }) });
+    check("a plugin's backend runs in its own process on the bundled Node.js and answers", on.body?.status === "enabled" && typeof called.body?.value?.shipped === "number", JSON.stringify({ on: on.body?.status, err: on.body?.error, called: called.body }).slice(0, 300));
+    await api("/api/plugins/run-stats/remove", { method: "POST", body: "{}" });
+  } catch (e) {
+    check("plugins work in the installed app", false, e.message);
+  }
+
   // ---------- 5. Data vault ----------
   const vault = (await api("/api/store")).body;
   const broken = vault.database.projections.filter((p) => p.error || p.behind > 0);

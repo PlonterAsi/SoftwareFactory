@@ -5,6 +5,7 @@ import { basename, isAbsolute, join, normalize, sep } from "node:path";
 import type { EventLog } from "../events.js";
 import { linkToProject, projectDetail } from "../projects/service.js";
 import { assessProject, detectForms, type IntegrationForm, type ReadinessCheck } from "./assess.js";
+import type { PluginHost } from "../plugins/host.js";
 import "./tables.js";
 
 /**
@@ -80,7 +81,8 @@ export function listIntegrations(log: EventLog, opts: { projectId?: number } = {
 
 /** The Features page: what is installed now (one per project and form). */
 export function installedFeatures(log: EventLog): Integration[] {
-  return listIntegrations(log).filter((i) => i.status === "installed");
+  // Plugins live on the Plugins page, not here.
+  return listIntegrations(log).filter((i) => i.status === "installed" && i.form !== "plugin");
 }
 
 /** Split an arguments line the way a shell would for simple cases: spaces, "double" and 'single' quotes. */
@@ -106,7 +108,7 @@ function measure(dir: string): { files: number; bytes: number } {
 }
 
 export class Integrations {
-  constructor(private log: EventLog, readonly extDir: string) {}
+  constructor(private log: EventLog, readonly extDir: string, private plugins?: PluginHost) {}
 
   assess(projectId: number) { return assessProject(this.log, projectId); }
 
@@ -141,7 +143,7 @@ export class Integrations {
     if (approve) {
       try {
         if (i.form === "source") this.log.append("integration.briefed", { id, brief: this.brief(i) });
-        else this.install(i);
+        else this.install(i, opts.by ?? "you");
       } catch (e) {
         this.log.append("integration.failed", { id, error: (e as Error).message });
       }
@@ -149,8 +151,17 @@ export class Integrations {
     return getIntegration(this.log, id)!;
   }
 
-  private install(i: Integration) {
+  private install(i: Integration, by = "you") {
     if (!existsSync(i.sourceDir)) throw new Error(`${i.sourceDir} is missing`);
+    if (i.form === "plugin") {
+      // Your approval here is the plugin's approval too: it is copied into the plugins folder and turned on.
+      if (!this.plugins) throw new Error("Plugins are not available in this core");
+      const p = this.plugins.install(i.sourceDir, { from: `project:${i.projectId}`, by: "integrate" });
+      // An update approved on its own never grants new permissions: it stays off until you turn it on.
+      if (p.status !== "enabled" && by !== "auto") this.plugins.enable(p.id, { by: `${by} (Integrate)` });
+      this.log.append("integration.installed", { id: i.id, dir: p.dir, head: i.sha, ...measure(p.dir) });
+      return;
+    }
     const dest = join(this.extDir, `${i.slug}-${i.id}`);
     mkdirSync(this.extDir, { recursive: true });
     rmSync(dest, { recursive: true, force: true });
@@ -168,7 +179,8 @@ export class Integrations {
     const i = getIntegration(this.log, id);
     if (!i) throw new Error(`No integration #${id}`);
     if (i.status === "removed") return i;
-    if (i.dir && i.dir.startsWith(this.extDir)) rmSync(i.dir, { recursive: true, force: true });
+    if (i.form === "plugin" && i.status === "installed" && i.entry && this.plugins?.get(i.entry)) this.plugins.remove(i.entry);
+    else if (i.dir && i.dir.startsWith(this.extDir)) rmSync(i.dir, { recursive: true, force: true });
     this.log.append("integration.removed", { id, by: opts.by ?? "you" });
     return getIntegration(this.log, id)!;
   }
