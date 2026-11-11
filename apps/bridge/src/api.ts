@@ -376,7 +376,7 @@ export const projectsApi = {
 };
 
 /** Events that can change a project's list or numbers. */
-const PROJECT_EVENT = (t: string) => t.startsWith("project.") || t.startsWith("integration.") || t.startsWith("order.") || t.startsWith("factory.run.") || t === "agent.run.completed";
+const PROJECT_EVENT = (t: string) => t.startsWith("project.") || t.startsWith("integration.") || t.startsWith("order.") || t.startsWith("factory.run.") || t === "agent.run.completed" || t === "launch.started" || t === "launch.exited";
 
 /** Every project with its rollup, refetched (debounced) when something that changes them lands. */
 export function useProjects(events: SfEvent[], online: boolean) {
@@ -427,3 +427,37 @@ export function orderFor(order: OrderState & { arrivals?: Record<number, number>
     canon: Object.fromEntries(Object.entries(order.canon).filter(([k]) => ids.has(Number(k)))),
   };
 }
+
+// ---- Run tab: start finished projects from their own folders ----
+export type RunKind = "web" | "static" | "cli" | "program";
+export interface RunProfileView { id: string; kind: RunKind; label: string; command: string; root?: string; args: boolean; recommended?: boolean; note?: string; utility?: boolean }
+export interface ProjectFolderView { dir: string; source: "folder" | "import" | "run"; label: string; ref?: number; exists: boolean }
+export type LaunchState = "starting" | "running" | "serving" | "exited" | "stopped" | "failed";
+export interface LaunchSession {
+  id: number; projectId: number; profileId: string; kind: RunKind; label: string; command: string; args: string | null; dir: string; root: string | null;
+  mode: "inline" | "window"; state: LaunchState; port: number | null; url: string | null; startedAt: string; endedAt: string | null; exitCode: number | null;
+  pid: number | null; stdinOpen: boolean; lines: number;
+}
+export interface OutputLine { n: number; ts: string; stream: "out" | "err" | "in" | "sys"; text: string }
+export interface LaunchInfo { projectId: number; folders: ProjectFolderView[]; dir: string | null; exists: boolean; stack: string[]; profiles: RunProfileView[]; sessions: LaunchSession[]; running: LaunchSession[] }
+
+export const launchApi = {
+  info: async (id: number, dir?: string | null) => {
+    const r = await fetch(`${API}/api/launch/projects/${id}${dir ? `?dir=${encodeURIComponent(dir)}` : ""}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error ?? "could not read the project folder");
+    return j as LaunchInfo;
+  },
+  start: (id: number, body: { profileId: string; args?: string; dir?: string; mode?: "inline" | "window" }) => post(`/api/launch/projects/${id}/start`, body) as Promise<LaunchSession>,
+  stop: (sid: number) => post(`/api/launch/sessions/${sid}/stop`) as Promise<LaunchSession>,
+  input: (sid: number, text: string | null) => post(`/api/launch/sessions/${sid}/input`, text == null ? { end: true } : { text }),
+  session: async (sid: number) => {
+    const r = await fetch(`${API}/api/launch/sessions/${sid}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error ?? "no such session");
+    return j as { session: LaunchSession; lines: OutputLine[]; dropped: number };
+  },
+  addFolder: (id: number, dir: string) => post(`/api/launch/projects/${id}/folder`, { dir }),
+  terminal: (id: number, dir?: string | null) => post(`/api/launch/projects/${id}/terminal`, { dir: dir ?? undefined }),
+  open: (url: string) => post(`/api/launch/open`, { url }),
+};

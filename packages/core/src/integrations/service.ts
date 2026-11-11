@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { splitArgs } from "../launch/detect.js";
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, normalize, sep } from "node:path";
 import type { EventLog } from "../events.js";
@@ -83,20 +84,7 @@ export function installedFeatures(log: EventLog): Integration[] {
 }
 
 /** Split an arguments line the way a shell would for simple cases: spaces, "double" and 'single' quotes. */
-export function splitArgs(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let quote: string | null = null;
-  let has = false;
-  for (const ch of line) {
-    if (quote) { if (ch === quote) quote = null; else cur += ch; continue; }
-    if (ch === '"' || ch === "'") { quote = ch; has = true; continue; }
-    if (/\s/.test(ch)) { if (has || cur) out.push(cur); cur = ""; has = false; continue; }
-    cur += ch;
-  }
-  if (has || cur) out.push(cur);
-  return out;
-}
+export { splitArgs } from "../launch/detect.js";
 
 export interface ToolRun { exitCode: number | null; stdout: string; stderr: string; ms: number; timedOut: boolean; args: string[] }
 
