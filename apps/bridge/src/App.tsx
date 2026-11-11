@@ -16,6 +16,7 @@ import { href, useRoute, type FactoryView } from "./projects/router";
 import "./projects/builtin";
 import { ImproveDeck, useImprove } from "./ImproveDeck";
 import "./projects/improvePanel";
+import "./projects/runPanel";
 import "./CodeMap";
 
 export function App() {

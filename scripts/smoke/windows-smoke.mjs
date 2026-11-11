@@ -10,6 +10,8 @@
 //   3. launches the app; the bundled Node core must answer on 127.0.0.1:4317
 //      and the Bridge window must open its event stream to the core
 //   4. builds one idea into a tested, tagged git repo on the free practice crew
+//      and runs it from inside the app (Run tab): the shipped CLI with arguments,
+//      and a small web app through a package.json script, previewed, then stopped
 //   5. checks the Data vault report (tables healthy, files tracked)
 //   6. kills the app mid-run, starts it again, and expects the run to resume
 //      from its last completed station and ship
@@ -198,6 +200,38 @@ console.log("seeded", db);
   check("the shipped repo is tagged v0.1.0", tag === "v0.1.0", `${fin1.dir}: tag "${tag}", ${commits} commits`);
   const testsRun = spawnSync(bundledNode, ["--test"], { cwd: fin1.dir, encoding: "utf8" });
   check("the shipped repo's tests pass on their own", testsRun.status === 0, testsRun.stdout.split("\n").filter((l) => /^# (pass|fail)/.test(l)).join(", "));
+
+  // ---------- 4b. run finished projects from inside the app (Run tab) ----------
+  try {
+    const pid1 = (await api(`/api/projects/of?kind=factory_run&ref=${run1}`)).body.projectId;
+    const li = (await api(`/api/launch/projects/${pid1}`)).body;
+    const cli = li.profiles?.find((p) => p.kind === "cli");
+    check("the Run tab finds the shipped CLI in its folder", cli && li.dir === fin1.dir, JSON.stringify({ dir: li.dir, profiles: li.profiles?.map((p) => p.id) }));
+    if (cli) {
+      const s = (await api(`/api/launch/projects/${pid1}/start`, { method: "POST", body: JSON.stringify({ profileId: cli.id, args: "SPEC.md" }) })).body;
+      const done = await until("the CLI ends", async () => { const r = (await api(`/api/launch/sessions/${s.id}`)).body; return r.session?.state !== "running" && r.session?.state !== "starting" ? r : null; }, 30_000);
+      const out = (done?.lines ?? []).filter((l) => l.stream === "out").map((l) => l.text);
+      check("the shipped CLI runs from the app with arguments (bundled Node, no command line)", done?.session.exitCode === 0 && out.some((t) => /^\d+$/.test(t.trim())), JSON.stringify({ state: done?.session.state, code: done?.session.exitCode, out: out.slice(0, 3), all: done?.lines?.slice(-4).map((l) => l.text) }));
+    }
+    const webDir = join(OUT, "web-app");
+    mkdirSync(webDir, { recursive: true });
+    writeFileSync(join(webDir, "package.json"), JSON.stringify({ name: "smoke-web", type: "module", scripts: { start: "node server.js" } }));
+    writeFileSync(join(webDir, "server.js"), `import { createServer } from "node:http";\nconst s = createServer((q, r) => { r.writeHead(200, { "content-type": "text/html" }); r.end("<h1>smoke web app</h1>"); });\ns.listen(Number(process.env.PORT), "127.0.0.1", () => console.log("Ready on http://localhost:" + s.address().port + "/"));\n`);
+    const wp = (await api("/api/projects", { method: "POST", body: JSON.stringify({ name: "Smoke web app", kind: "app" }) })).body.id;
+    await api(`/api/launch/projects/${wp}/folder`, { method: "POST", body: JSON.stringify({ dir: webDir }) });
+    const ws = (await api(`/api/launch/projects/${wp}/start`, { method: "POST", body: "{}" })).body;
+    const up = await until("the web app prints its address", async () => { const r = (await api(`/api/launch/sessions/${ws.id}`)).body; return r.session?.url ? r : null; }, 30_000);
+    let page = "";
+    try { page = await (await fetch(up?.session.url ?? "http://127.0.0.1:1/")).text(); } catch (e) { page = String(e); }
+    check("a web app starts from its npm script and its page is served for the preview", ws.profileId === "script:start" && page.includes("smoke web app"), JSON.stringify({ profile: ws.profileId, url: up?.session.url, page: page.slice(0, 80) }));
+    await api(`/api/launch/sessions/${ws.id}/stop`, { method: "POST", body: "{}" });
+    const stopped = await until("the web app stops", async () => { const r = (await api(`/api/launch/sessions/${ws.id}`)).body; return r.session?.state === "stopped" ? r : null; }, 15_000);
+    let gone = false;
+    try { await fetch(up?.session.url ?? "http://127.0.0.1:1/", { signal: AbortSignal.timeout(3000) }); } catch { gone = true; }
+    check("Stop ends the web app and everything it started (port closed)", stopped && gone, JSON.stringify({ state: stopped?.session.state, portClosed: gone }));
+  } catch (e) {
+    check("running projects from the app", false, (e && e.message) || String(e));
+  }
 
   // ---------- 5. Data vault ----------
   const vault = (await api("/api/store")).body;

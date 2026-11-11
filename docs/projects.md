@@ -62,7 +62,7 @@ The Bridge opens on **Projects**: every project, most recently active first, wit
 
 ![Projects](img/bridge-projects-home.png)
 
-Opening a project shows its **workspace**: a rail of panels and the chosen panel. Built in: **Overview** (what it is for, a Build box that starts runs inside the project, its numbers, latest activity), **Ideas** (the project's own star map and Order deck), **Runs** (the factory floor with only this project's runs), **Agents** (who worked here and what it cost), **History**, **Settings** (name, kind, status, folders). While a project is open, the Overseer's Build it starts runs in that project.
+Opening a project shows its **workspace**: a rail of panels and the chosen panel. Built in: **Overview** (what it is for, a Build box that starts runs inside the project, its numbers, latest activity), **Run** (start the finished project from its folder, see its output and its pages; see [run.md](run.md)), **Ideas** (the project's own star map and Order deck), **Runs** (the factory floor with only this project's runs), **Agents** (who worked here and what it cost), **History**, **Settings** (name, kind, status, folders). While a project is open, the Overseer's Build it starts runs in that project.
 
 ![A project's overview](img/bridge-project-overview.png)
 
