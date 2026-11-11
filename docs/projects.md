@@ -54,6 +54,7 @@ POST /api/projects/:id/runs           { idea, maxUsd? }   start a factory run in
 ## Extension points
 
 - **Core facets**: `registerProjectFacet({ id, compute(log, project, links) })` adds a section to every `GET /api/projects/:id` under `facets[id]`.
+- **Integrations**: a finished project can be added into SoftwareFactory as a tool, a panel, or a pull-request brief; see [integrations.md](integrations.md).
 - **Bridge panels**: `registerProjectPanel({ id, title, order, render })` in `apps/bridge/src/projects/panels.tsx` adds a tab to every project's workspace. `appliesTo(project)` limits it to some kinds.
 
 ## On the Bridge

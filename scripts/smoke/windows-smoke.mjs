@@ -222,6 +222,18 @@ console.log("seeded", db);
   const testsRun = spawnSync(bundledNode, ["--test"], { cwd: fin1.dir, encoding: "utf8" });
   check("the shipped repo's tests pass on their own", testsRun.status === 0, testsRun.stdout.split("\n").filter((l) => /^# (pass|fail)/.test(l)).join(", "));
 
+  // ---------- 4b. add the shipped project into SoftwareFactory as a tool, and use it ----------
+  try {
+    const owner = (await api(`/api/projects/of?kind=factory_run&ref=${run1}`)).body.projectId;
+    const asked = await api("/api/integrations", { method: "POST", body: JSON.stringify({ projectId: owner, form: "tool" }) });
+    const approved = asked.status === 201 ? await api(`/api/integrations/${asked.body.id}/decide`, { method: "POST", body: JSON.stringify({ approve: true }) }) : asked;
+    check("a shipped project is added as a feature after approval", approved.body?.status === "installed" && existsSync(approved.body.dir ?? ""), JSON.stringify(approved.body).slice(0, 300));
+    const used = await api(`/api/integrations/${asked.body.id}/run`, { method: "POST", body: JSON.stringify({ args: "", stdin: "one two three" }) });
+    check("the installed feature runs on the bundled Node.js", used.body?.exitCode === 0 && /3/.test(used.body.stdout ?? ""), JSON.stringify(used.body).slice(0, 300));
+  } catch (e) {
+    check("a shipped project is added as a feature after approval", false, e.message);
+  }
+
   // ---------- 5. Data vault ----------
   const vault = (await api("/api/store")).body;
   const broken = vault.database.projections.filter((p) => p.error || p.behind > 0);

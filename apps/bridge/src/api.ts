@@ -376,7 +376,7 @@ export const projectsApi = {
 };
 
 /** Events that can change a project's list or numbers. */
-const PROJECT_EVENT = (t: string) => t.startsWith("project.") || t.startsWith("order.") || t.startsWith("factory.run.") || t === "agent.run.completed";
+const PROJECT_EVENT = (t: string) => t.startsWith("project.") || t.startsWith("integration.") || t.startsWith("order.") || t.startsWith("factory.run.") || t === "agent.run.completed";
 
 /** Every project with its rollup, refetched (debounced) when something that changes them lands. */
 export function useProjects(events: SfEvent[], online: boolean) {
