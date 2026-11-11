@@ -91,6 +91,7 @@ describe("launch: finding how to run a project", () => {
     expect(splitArgs("  ")).toEqual([]);
     expect(quoteArg("notes.txt")).toBe("notes.txt");
     expect(quoteArg("my notes.txt")).toBe('"my notes.txt"');
+    expect(quoteArg("C:\\Users\\me\\my photos")).toBe('"C:\\Users\\me\\my photos"');
   });
 
   it("keeps preview paths inside the folder", () => {

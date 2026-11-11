@@ -60,7 +60,8 @@ const isDir = (p: string) => { try { return statSync(p).isDirectory(); } catch {
 
 /** Quote an argument for display or a shell line. */
 export function quoteArg(a: string): string {
-  return /^[\w@%+=:,./\\-]+$/.test(a) ? a : `"${a.replace(/(["\\$`])/g, "\\$1")}"`;
+  // Backslashes stay as they are: they are Windows path separators, not escapes.
+  return /^[\w@%+=:,./\\-]+$/.test(a) ? a : `"${a.replace(/(["$`])/g, "\\$1")}"`;
 }
 
 /** Split an arguments box the way a shell would: spaces separate, quotes group. */
