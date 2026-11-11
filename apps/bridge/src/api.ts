@@ -468,7 +468,25 @@ export interface LaunchSession {
 export interface OutputLine { n: number; ts: string; stream: "out" | "err" | "in" | "sys"; text: string }
 export interface LaunchInfo { projectId: number; folders: ProjectFolderView[]; dir: string | null; exists: boolean; stack: string[]; profiles: RunProfileView[]; sessions: LaunchSession[]; running: LaunchSession[] }
 
+export interface DataFileView { path: string; kind: "table" | "json" | "text"; bytes: number; modified: string; role: "sample" | "data" | "fixture" | "doc" | "file"; note?: string }
+export interface MadeSample { path: string; kind: DataFileView["kind"]; from: string }
+const qs = (o: Record<string, string | null | undefined>) => { const e = Object.entries(o).filter(([, v]) => v); return e.length ? "?" + e.map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join("&") : ""; };
+async function getJson(path: string, what: string) {
+  const r = await fetch(`${API}${path}`);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? what);
+  return j;
+}
+
 export const launchApi = {
+  /** One press: the best way to run it, on sample data made for it if it needs a file. */
+  go: (id: number, dir?: string | null, profileId?: string) => post(`/api/launch/projects/${id}/go`, { dir: dir ?? undefined, profileId }) as Promise<{ session: LaunchSession; why: string; made: MadeSample[] }>,
+  files: (id: number, dir?: string | null) => getJson(`/api/launch/projects/${id}/files${qs({ dir })}`, "could not list its files") as Promise<{ dir: string; files: DataFileView[] }>,
+  file: (id: number, path: string, dir?: string | null) => getJson(`/api/launch/projects/${id}/files${qs({ dir, path })}`, "could not open that file") as Promise<{ path: string; kind: DataFileView["kind"]; content: string; bytes: number }>,
+  saveFile: (id: number, path: string, content: string, dir?: string | null, create = false) => post(`/api/launch/projects/${id}/files`, { dir: dir ?? undefined, path, content, create }) as Promise<{ files: DataFileView[] }>,
+  deleteFile: (id: number, path: string, dir?: string | null) => post(`/api/launch/projects/${id}/files`, { dir: dir ?? undefined, path, delete: true }) as Promise<{ files: DataFileView[] }>,
+  renameFile: (id: number, from: string, to: string, dir?: string | null) => post(`/api/launch/projects/${id}/files`, { dir: dir ?? undefined, from, to }) as Promise<{ files: DataFileView[] }>,
+  samples: (id: number, dir?: string | null, want?: DataFileView["kind"]) => post(`/api/launch/projects/${id}/samples`, { dir: dir ?? undefined, want }) as Promise<{ made: MadeSample[]; files: DataFileView[] }>,
   info: async (id: number, dir?: string | null) => {
     const r = await fetch(`${API}/api/launch/projects/${id}${dir ? `?dir=${encodeURIComponent(dir)}` : ""}`);
     const j = await r.json();

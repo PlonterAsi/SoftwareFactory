@@ -188,7 +188,9 @@ export function readUsage(dir: string, profile: RunProfile): Usage {
     if (f.type === "file") {
       const ext = f.hint && /\.(\w+)$/.test(f.hint) ? f.hint.match(/\.(\w+)$/)![1] : f.label.match(/\b(csv|json|txt|md|log)\b/i)?.[1];
       const fit = ext ? samples.filter((s) => s.toLowerCase().endsWith(`.${ext.toLowerCase()}`)) : samples;
-      f.suggestions = (fit.length ? fit : samples).slice(0, 8).map((s) => join(dir, s));
+      // A field that names its kind (file.csv) only gets files of that kind: never the spec for a CSV.
+      const known = ext && /^(csv|tsv|json|txt|md|log|xml|ya?ml)$/i.test(ext);
+      f.suggestions = (known ? fit : fit.length ? fit : samples).slice(0, 8).map((s) => join(dir, s));
     } else if (f.type === "folder") {
       f.suggestions = sampleDirs.map((d) => join(dir, d)).slice(0, 6);
     }
@@ -230,10 +232,12 @@ export function sampleFiles(dir: string): string[] {
   for (const d of ["test/fixtures", "fixtures", "examples", "samples", "sample", "data", "test/data"]) {
     for (const n of list(join(dir, d))) {
       const rel = `${d}/${n}`;
+      if (rel === "data/db.json") continue; // the app's own store, not an input
       try { const st = statSync(join(dir, rel)); if (st.isFile() && st.size < 5_000_000) out.push(rel); } catch { /* gone */ }
     }
   }
-  for (const n of list(dir)) if (/\.(csv|json|txt|md|log|tsv|xml|yaml|yml)$/i.test(n) && !/^(package(-lock)?\.json|tsconfig.*\.json)$/i.test(n)) out.push(n);
+  // Loose files at the top, but not the project's own docs and settings.
+  for (const n of list(dir)) if (/\.(csv|json|txt|md|log|tsv|xml|yaml|yml)$/i.test(n) && !/^(package(-lock)?\.json|tsconfig.*\.json|run\.json|SPEC\.md|README\.md|CHANGELOG\.md|LICENSE.*|CLAUDE\.md|AGENTS\.md)$/i.test(n)) out.push(n);
   return out.slice(0, 40);
 }
 

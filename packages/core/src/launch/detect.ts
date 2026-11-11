@@ -118,7 +118,7 @@ export function detectProfiles(dir: string): Detection {
       }
       add({
         id: `script:${name}`, kind: web ? "web" : "program",
-        label: name === "test" ? "Run its tests" : name === "build" ? "Build it" : `npm run ${name}`,
+        label: name === "test" ? "Run its tests" : name === "build" ? "Build it" : web && (name === "start" || name === "dev") && profiles.every((p) => !(p.kind === "web" && p.label === "The app")) ? "The app" : `npm run ${name}`,
         command: `npm run ${name}`, exec: { shell: body }, args: !web && !utility, utility,
         note: installNote,
       });
