@@ -16,6 +16,7 @@ import { SLOTS, type Slot } from "./bay/agentfile.js";
 import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
+import { chatRoutes, projectHome } from "./chat/routes.js";
 import { RepoExplorer } from "./imports/explorer.js";
 import { importsRoute } from "./imports/routes.js";
 import { Launcher } from "./launch/launcher.js";
@@ -79,13 +80,31 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
   log.on("event", (e: SfEvent) => {
     if (e.type !== "signal.captured") return;
-    const p = e.payload as { text: string; source: string };
-    order.ingest({ id: e.id, text: p.text, source: p.source }).catch((err) => console.error("order ingest failed:", err));
+    const p = e.payload as { text: string; source: string; projectId?: number };
+    // Said in a project's chat: the Order Engine files it under that project unless the words point elsewhere.
+    const home = p.projectId != null ? projectHome(log, order.state(), Number(p.projectId)) : null;
+    order.ingest({ id: e.id, text: p.text, source: p.source, home }).catch((err) => console.error("order ingest failed:", err));
   });
   // Who is talking to the core: the desktop window sends its page origin (http://tauri.localhost
   // on Windows). Kept in memory only; /api/health shows it, so a smoke test can prove the window
   // reached the core, and the shell can tell a blank window from a dead core.
   const clients = { origins: new Map<string, string>(), streams: new Map<string, number>() };
+  /** A chat's project id from a request: null for General, false when that project is gone. */
+  const chatProject = (v: unknown): number | null | false => {
+    if (v == null || v === "" || v === "general") return null;
+    const id = Number(v);
+    if (!Number.isInteger(id)) return null;
+    return log.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(id) ? id : false;
+  };
+  /** What the Overseer reads first when asked in a project's chat: that project, not the whole factory. */
+  const projectBrief = (id: number): string => {
+    const p = log.db.prepare("SELECT name, kind, status, summary FROM projects WHERE id = ?").get(id) as { name: string; kind: string; status: string; summary: string } | undefined;
+    if (!p) return "";
+    const runs = log.db.prepare(`SELECT r.id, r.idea, r.outcome, r.reason FROM factory_runs r JOIN project_links l ON l.kind = 'factory_run' AND l.ref = CAST(r.id AS TEXT)
+      WHERE l.project_id = ? ORDER BY r.id DESC LIMIT 5`).all(id) as { id: number; idea: string; outcome: string | null; reason: string | null }[];
+    const lines = runs.map((r) => `- run #${r.id}: ${r.idea.slice(0, 120)} (${r.outcome ?? "running"}${r.reason ? `: ${r.reason.slice(0, 120)}` : ""})`);
+    return `You are in the chat of the project "${p.name}" (${p.kind}, ${p.status})${p.summary ? `: ${p.summary.slice(0, 400)}` : ""}. Answer about this project unless asked otherwise.\n${lines.length ? `Its latest factory runs:\n${lines.join("\n")}\n` : ""}\n`;
+  };
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const origin = typeof req.headers.origin === "string" ? req.headers.origin.slice(0, 100) : null;
     if (origin) clients.origins.set(origin, new Date().toISOString());
@@ -169,7 +188,12 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (req.method === "POST" && url.pathname === "/api/signals") {
         const body = await readJson(req);
-        return json(res, 201, captureSignal(log, String(body.text ?? ""), String(body.source ?? "bridge")));
+        const projectId = chatProject(body.projectId);
+        if (projectId === false) return json(res, 404, { error: "That project no longer exists, so its chat is closed. Pick another chat." });
+        return json(res, 201, captureSignal(log, String(body.text ?? ""), String(body.source ?? "bridge"), projectId ?? undefined));
+      }
+      if (req.method === "GET" && url.pathname === "/api/chat/routes") {
+        return json(res, 200, chatRoutes(log, order.state()));
       }
       if (req.method === "POST" && url.pathname === "/api/agent/run") {
         const body = await readJson(req);
@@ -177,15 +201,18 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (!prompt) return json(res, 400, { error: "prompt is required" });
         // The Overseer is an agent like the others: its prompt, model and cap live in the Agent Bay.
         const o = bay.crewFor("overseer")[0];
+        const projectId = chatProject(body.projectId);
+        if (projectId === false) return json(res, 404, { error: "That project no longer exists, so its chat is closed. Pick another chat." });
         // The Overseer reads a live status digest first, so it answers about this factory, not in general.
         const digest = statusDigest(log, order.state(), runtime.name);
+        const room = projectId != null ? projectBrief(projectId) : "";
         const run = await runAgent(log, runtime, o.id, {
-          prompt: `Status of the factory right now:\n${digest}\n\nThe person says:\n${prompt}`,
+          prompt: `Status of the factory right now:\n${digest}\n\n${room}The person says:\n${prompt}`,
           model: body.model ? String(body.model) : o.model,
           systemPrompt: o.role,
           budgetUsd: typeof body.budgetUsd === "number" ? body.budgetUsd : Math.min(budgetUsd, o.budgetUsd),
           pluginDirs: o.pluginDirs.length ? o.pluginDirs : undefined,
-        }, { agentVersion: o.version, station: "overseer" });
+        }, { agentVersion: o.version, station: "overseer", ...(projectId != null ? { projectId } : {}) });
         return json(res, run.error ? 502 : 200, { ...run, suggestion: run.result ? buildSuggestion(run.result.text).build : undefined });
       }
       if (req.method === "POST" && url.pathname === "/api/factory/runs") {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { API, setupApi, useBay, useFactory, useOrder, useProjects, type SinceView } from "./api";
+import { API, setupApi, useBay, useChatRoutes, useFactory, useOrder, useProjects, type SinceView } from "./api";
 import { Setup } from "./Setup";
 import { CoreDown } from "./CoreDown";
 import { AgentBay } from "./AgentBay";
@@ -31,6 +31,7 @@ export function App() {
   const features = useIntegrations(f.events);
   const featuresWaiting = features.data?.integrations.filter((i) => i.status === "awaiting").length ?? 0;
   const projects = useProjects(f.events, f.online);
+  const chatRoutes = useChatRoutes(f.events, f.online);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
   const view: FactoryView = route.page === "factory" ? route.view : "factory";
@@ -81,9 +82,9 @@ export function App() {
   }, [f.online]);
   const overseer = (
     <Overseer signals={f.signals} runs={f.runs} factoryRuns={f.factoryRuns} briefings={order.briefings} ingests={order.ingests}
-      onRunStarted={(r) => (projectId != null ? go({ page: "project", id: projectId, panel: "runs", run: r }) : showRun(r))}
+      onRunStarted={(r, pid) => (pid != null ? go({ page: "project", id: pid, panel: "runs", run: r }) : showRun(r))}
       mode={f.mode} since={since} onDismissSince={() => setSince(null)} onSetup={() => setSetupOpen(true)} onShowRun={showRun}
-      projectId={projectId} projectName={projectName} />
+      projectId={projectId} projectName={projectName} projects={projects.list} routes={chatRoutes} />
   );
   return (
     <div className="bridge">

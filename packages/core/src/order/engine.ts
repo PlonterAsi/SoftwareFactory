@@ -73,7 +73,8 @@ export class OrderEngine {
   private emit(type: EventType, payload: unknown) { return this.log.append(type, payload, this.opts.now().toISOString()); }
 
   /** File one Signal. Calls run one at a time, so the tree is always consistent. */
-  ingest(signal: { id: number; text: string; source?: string }): Promise<IngestResult> {
+  /** `home`: the root node of the project whose chat the Signal was said in. */
+  ingest(signal: { id: number; text: string; source?: string; home?: number | null }): Promise<IngestResult> {
     const next = this.queue.then(() => this.ingestNow(signal));
     this.queue = next.catch(() => {});
     return next;
@@ -82,7 +83,7 @@ export class OrderEngine {
   /** Wait until every queued Signal is filed. */
   idle(): Promise<unknown> { return this.queue; }
 
-  private async ingestNow(signal: { id: number; text: string; source?: string }): Promise<IngestResult> {
+  private async ingestNow(signal: { id: number; text: string; source?: string; home?: number | null }): Promise<IngestResult> {
     // An idea sent to the factory is a project by definition: give it its own
     // body on the star map at once, with no Archivist call (free, and never misfiled).
     if (signal.source === "factory") {
@@ -108,7 +109,7 @@ export class OrderEngine {
       const st = this.state();
       const m = this.opts.crew?.crewFor("order")[0];
       const run = await runAgent(this.log, this.runtime, m?.id ?? "archivist", {
-        prompt: archivistPrompt(signal.text, st), systemPrompt: m?.role ?? ARCHIVIST_ROLE, model: m?.model ?? this.opts.model,
+        prompt: archivistPrompt(signal.text, st, undefined, signal.home), systemPrompt: m?.role ?? ARCHIVIST_ROLE, model: m?.model ?? this.opts.model,
         budgetUsd: Math.min(this.opts.perCallUsd, m?.budgetUsd ?? Infinity), pluginDirs: m?.pluginDirs.length ? m.pluginDirs : undefined,
       }, { station: "order", agentVersion: m?.version });
       costUsd = run.result?.costUsd ?? 0;
@@ -122,7 +123,7 @@ export class OrderEngine {
         mode = "heuristic";
       }
     }
-    plan ??= heuristicArchivist(signal.text, this.state());
+    plan ??= heuristicArchivist(signal.text, this.state(), signal.home);
     const result = this.apply(signal, plan, mode === "agent" ? "archivist" : "heuristic");
     this.emit("order.ingest", { signalId: signal.id, mode, state: "done", costUsd, fragments: result.fragments.map((f) => f.id), note });
     return { ...result, signalId: signal.id, mode, costUsd, note };
