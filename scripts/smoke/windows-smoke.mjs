@@ -236,6 +236,18 @@ console.log("seeded", db);
       const out = (done?.lines ?? []).filter((l) => l.stream === "out").map((l) => l.text);
       check("the shipped CLI runs from the app with arguments (bundled Node, no command line)", done?.session.exitCode === 0 && out.some((t) => /^\d+$/.test(t.trim())), JSON.stringify({ state: done?.session.state, code: done?.session.exitCode, out: out.slice(0, 3), all: done?.lines?.slice(-4).map((l) => l.text) }));
     }
+    // visualizeEverything: the shipped project has a screen, it is the Run tab's first choice, and its page and modules are served.
+    const pg = li.profiles?.[0];
+    check("the shipped project has a screen, first on the Run tab", pg?.kind === "static" && pg.recommended && existsSync(join(fin1.dir, "index.html")), JSON.stringify(li.profiles?.map((p) => `${p.id}${p.recommended ? "*" : ""}`)));
+    if (pg?.kind === "static") {
+      const ps = (await api(`/api/launch/projects/${pid1}/start`, { method: "POST", body: JSON.stringify({ profileId: pg.id }) })).body;
+      const ready = await until("the page preview is ready", async () => { const r = (await api(`/api/launch/sessions/${ps.id}`)).body; return r.session?.url ? r : null; }, 15_000);
+      const at = (p) => new URL(p, ready?.session.url.startsWith("http") ? ready.session.url : `http://127.0.0.1:4317${ready?.session.url ?? "/"}`).href;
+      let html = "", app = "";
+      try { html = await (await fetch(at("index.html"))).text(); app = await (await fetch(at("web/app.js"))).text(); } catch (e) { html = String(e); }
+      check("the shipped page and its script are served for the in-app preview", /<script type="module" src="web\/app.js">/.test(html) && app.includes("../src/count.js"), JSON.stringify({ url: ready?.session.url, html: html.slice(0, 80), app: app.slice(0, 60) }));
+      await api(`/api/launch/sessions/${ps.id}/stop`, { method: "POST", body: "{}" });
+    }
     const webDir = join(OUT, "web-app");
     mkdirSync(webDir, { recursive: true });
     writeFileSync(join(webDir, "package.json"), JSON.stringify({ name: "smoke-web", type: "module", scripts: { start: "node server.js" } }));
