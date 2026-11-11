@@ -89,8 +89,8 @@ export const PRIORITIES = ["now", "this_week", "next", "someday"] as const;
 export type Priority = (typeof PRIORITIES)[number];
 export const PRIORITY_LABEL: Record<Priority, string> = { now: "Now", this_week: "This week", next: "Next", someday: "Someday" };
 
-export const SEVERITIES = ["blocking", "annoying", "cosmetic"] as const;
-export type Severity = (typeof SEVERITIES)[number];
+export const TICKET_SEVERITIES = ["blocking", "annoying", "cosmetic"] as const;
+export type TicketSeverity = (typeof TICKET_SEVERITIES)[number];
 
 export const RELATIONS = ["related", "duplicate_of", "derived_from", "blocks"] as const;
 export type Relation = (typeof RELATIONS)[number];
@@ -141,7 +141,7 @@ export interface TicketView {
   project: number | null;
   status: TicketStatus;
   priority: Priority | null;
-  severity: Severity | null;
+  severity: TicketSeverity | null;
   assignee: string | null;
   parentId: number | null;
   lineOrder: number | null;
