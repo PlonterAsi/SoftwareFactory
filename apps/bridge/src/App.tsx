@@ -27,6 +27,7 @@ import { LAYOUT_KEY, usePref, type Layout } from "./shell/prefs";
 import { Sidebar } from "./shell/Sidebar";
 import { Helm, HelmButton } from "./shell/Helm";
 import { NeedsYou } from "./shell/NeedsYou";
+import { ShortcutSheet, useShortcuts } from "./shell/Shortcuts";
 import { BasesPage, useBases } from "./Bases";
 
 export function App() {
@@ -115,6 +116,7 @@ export function App() {
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, [foundry, assist]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [keysOpen, setKeysOpen] = useShortcuts(foundry, go);
   const needsCount = f.factoryRuns.filter((r) => r.waiting && !r.finished).length + (featuresWaiting ? 1 : 0) + (open ? 1 : 0);
 
   const factoryGrid = (withOverseer: boolean) => (
@@ -168,6 +170,7 @@ export function App() {
           </div>
           {crewChip}
           <VersionChip u={updates} onOpen={() => setSetupOpen(true)} />
+          <button className="link sb-keys" onClick={() => setKeysOpen(true)}>Keyboard shortcuts <kbd>?</kbd></button>
         </Sidebar>
         <div className="s2-main">
           <header className="s2-top">
@@ -183,13 +186,14 @@ export function App() {
             <div className="s2-body"><div className="s2-page">{factoryGrid(assistOpen)}</div></div>
           ) : (
             <div className={`s2-body${assistOpen ? " with-assist" : ""}`}>
-              <div className="s2-page">{page}</div>
+              <div className="s2-page" key={route.page === "project" ? `p${route.id}` : route.page}>{page}</div>
               {assistOpen && <div className="s2-assist">{overseer}</div>}
             </div>
           )}
         </div>
         <Helm open={helmOpen} onClose={() => setHelmOpen(false)} projects={projects.list} projectId={projectId} projectName={projectName} go={go}
           onSystems={() => setSetupOpen(true)} onRunStarted={(r, pid) => (pid != null ? go({ page: "project", id: pid, panel: "runs", run: r }) : showRun(r))} />
+        <ShortcutSheet open={keysOpen} onClose={() => setKeysOpen(false)} />
         {setup}
         <CoreDown online={f.online} />
       </div>
