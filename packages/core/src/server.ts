@@ -18,6 +18,8 @@ import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
 import { RepoExplorer } from "./imports/explorer.js";
 import { importsRoute } from "./imports/routes.js";
+import { Launcher } from "./launch/launcher.js";
+import { launchRoute } from "./launch/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { ImproveCouncil, type Target } from "./improve/council.js";
@@ -65,6 +67,8 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     autoGate: () => ((runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime)) === "real" ? null : "the practice crew only answers when you press Look now; switch to the real crew in Systems for automatic sessions"),
   }).listen();
   improve.auto = settings.improveAuto ?? true;
+  // Finished projects run from their own folders; the Bridge shows their output and pages.
+  const launcher = new Launcher(log);
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
   log.on("event", (e: SfEvent) => {
     if (e.type !== "signal.captured") return;
@@ -225,6 +229,11 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await importsRoute({ log, explorer, readJson, canImport }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (url.pathname.startsWith("/api/launch/") || url.pathname.startsWith("/preview/")) {
+        const r = await launchRoute({ log, launcher, readJson, openUrl: openFolder }, req, res, url);
+        if (r === "handled") return;
+        if (r) return json(res, r[0], r[1]);
+      }
       if (url.pathname.startsWith("/api/improve/")) {
         const r = await improveRoute(improve, req, url.pathname, log, (idea) => {
           if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");
@@ -256,7 +265,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 400, { error: (e as Error).message });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop, improve, explorer });
+  return Object.assign(handler, { factory, order, bay, drop, improve, explorer, launcher });
 }
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
