@@ -5,6 +5,7 @@ import { runAgent } from "../agents.js";
 import type { AgentRuntime } from "../runtime.js";
 import type { AgentBay } from "../bay/bay.js";
 import { commitAll, git, parseFileBlocks, writeFiles } from "../factory/workspace.js";
+import { importOf } from "../imports/explorer.js";
 
 /**
  * Working a ticket inside an existing codebase (a project imported from a git
@@ -37,10 +38,8 @@ const TOOLS = ["Read", "Edit", "Write", "Glob", "Grep"];
 export function repoOfProject(log: EventLog, project: number | null): RepoRef | null {
   if (project == null) return null;
   const has = (t: string) => !!log.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
-  if (has("repo_imports")) {
-    const r = log.db.prepare("SELECT source, dir, branch FROM repo_imports WHERE project_id = ?").get(project) as { source: string; dir: string | null; branch: string | null } | undefined;
-    if (r?.dir && existsSync(join(r.dir, ".git"))) return { source: r.source, dir: r.dir, branch: r.branch ?? null };
-  }
+  const r = has("repo_imports") ? importOf(log, project) : null;
+  if (r?.dir && existsSync(join(r.dir, ".git"))) return { source: r.source, dir: r.dir, branch: r.branch ?? null };
   if (has("project_links")) {
     const rows = log.db.prepare("SELECT ref FROM project_links WHERE project_id = ? AND kind = 'repo'").all(project) as { ref: string }[];
     for (const { ref } of rows) if (existsSync(join(ref, ".git"))) return { source: ref, dir: ref, branch: null };

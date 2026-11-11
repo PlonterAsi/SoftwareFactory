@@ -8,9 +8,9 @@ import { projectOf, registerProjectFacet } from "../projects/service.js";
 import { EDITABLE } from "./tables.js";
 import { branchFor, repoOfProject, workInRepo, type RepoRef } from "./repowork.js";
 import {
-  FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, SEVERITIES, STATUSES, TASTE_KINDS,
+  FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS,
   ideaFromTicket, isClosed, nextMoves, refuseMove, titleFrom, workDocument,
-  type LinkView, type NoteView, type Priority, type Relation, type Severity, type TicketKind, type TicketStatus, type TicketView,
+  type LinkView, type NoteView, type Priority, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView,
 } from "./model.js";
 
 export interface OpenTicket {
@@ -20,7 +20,7 @@ export interface OpenTicket {
   answers?: Record<string, string>;
   project?: number | null;
   priority?: Priority | null;
-  severity?: Severity | null;
+  severity?: TicketSeverity | null;
   assignee?: string | null;
   parent?: number | null;
   tags?: string[];
@@ -206,7 +206,7 @@ export class Tickets {
     this.log.append("ticket.opened", {
       id, kind, title, body, answers, project, by, source: o.source ?? (by === "you" ? "you" : "agent"),
       priority: o.priority && PRIORITIES.includes(o.priority) ? o.priority : null,
-      severity: kind === "bug" && o.severity && SEVERITIES.includes(o.severity) ? o.severity : null,
+      severity: kind === "bug" && o.severity && TICKET_SEVERITIES.includes(o.severity) ? o.severity : null,
       assignee: o.assignee ?? null, parent: o.parent ?? null, tags: (o.tags ?? []).map(String).filter(Boolean).slice(0, 12), fingerprint: o.fingerprint ?? null,
       ...(o.request != null ? { request: o.request } : {}), ...(o.ref !== undefined ? { ref: o.ref } : {}),
     });
@@ -227,7 +227,7 @@ export class Tickets {
     if (!(field in EDITABLE)) throw new Error(`"${field}" cannot be edited`);
     if (field === "kind" && !KINDS.includes(value as TicketKind)) throw new Error(`Unknown kind "${value}"`);
     if (field === "priority" && value != null && value !== "" && !PRIORITIES.includes(value as Priority)) throw new Error(`Unknown priority "${value}"`);
-    if (field === "severity" && value != null && value !== "" && !SEVERITIES.includes(value as Severity)) throw new Error(`Unknown severity "${value}"`);
+    if (field === "severity" && value != null && value !== "" && !TICKET_SEVERITIES.includes(value as TicketSeverity)) throw new Error(`Unknown severity "${value}"`);
     if (field === "parent" && value != null && value !== "") {
       const p = this.get(Number(value));
       if (!p || p.kind !== "plan") throw new Error("Only a plan holds lines.");

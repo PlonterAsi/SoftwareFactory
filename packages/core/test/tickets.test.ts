@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventLog, MockRuntime, ClaudeCodeRuntime, Factory, AgentBay, Tickets, createCore, git, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal, OrderEngine, ImproveCouncil, listSignals, ErrorCapture, errorFingerprint, scrub, isFault } from "../src/index.js";
+import { EventLog, MockRuntime, ClaudeCodeRuntime, Factory, AgentBay, Tickets, createCore, git, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, captureSignal, OrderEngine, ImproveCouncil, listSignals, RepoExplorer, ErrorCapture, errorFingerprint, scrub, isFault } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-tickets-"));
 
@@ -263,6 +263,26 @@ describe("tickets: working inside an imported repo", () => {
     expect(t.get(a.id)!.branchDir).toBe(clone);
     // "new" still builds a fresh repo through the factory.
     expect(t.work(a.id, { where: "new", autoApprove: true }).run).toBeGreaterThan(0);
+  }, 30_000);
+
+  it("finds the repo of a project imported by the repo explorer, and works its ticket in a clone", async () => {
+    const log = new EventLog();
+    const rt = new MockRuntime({ delayMs: 0 });
+    const src = tmp();
+    git(src, "init", "-q", "-b", "main");
+    writeFileSync(join(src, "index.js"), "console.log('hi')\n");
+    git(src, "add", "-A"); git(src, "commit", "-q", "-m", "first");
+    const ex = new RepoExplorer(log, rt, join(tmp(), "imports"));
+    const { projectId, done } = ex.importRepo(src);
+    await done;
+    const t = new Tickets(log, { runtime: rt, workRoot: tmp() });
+    const a = t.open({ kind: "task", title: "Say hello louder", project: projectId });
+    expect(t.detail(a.id)!.repo).toMatchObject({ dir: src, branch: "main" });
+    t.work(a.id);
+    await t.waitRepo(a.id);
+    expect(t.get(a.id)).toMatchObject({ status: "built", branch: "sf/ticket-1-say-hello-louder" });
+    expect(git(src, "status", "--porcelain")).toBe("");
+    expect(git(src, "branch", "--list")).toBe("* main");
   }, 30_000);
 });
 

@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { projectsApi, PROJECT_KINDS, type ProjectSummary } from "../api";
 import { ago } from "./builtin";
 import { href } from "./router";
+import { ImportRepo } from "../CodeMap";
 
 type Filter = "live" | "archived" | "all";
 
@@ -46,6 +47,7 @@ export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err
           <button type="submit" disabled={!name.trim() || busy}>Create project</button>
         </form>
       </header>
+      <ImportRepo />
       <div className="fleet-tools">
         <div className="seg" role="tablist" aria-label="Which projects">
           {(["live", "archived", "all"] as Filter[]).map((f) => (
