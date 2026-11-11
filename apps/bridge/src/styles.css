@@ -1174,6 +1174,57 @@ tbody tr:hover, .pj-table tr:hover td { background: rgba(255, 255, 255, 0.025); 
 .pane-head { gap: 12px; padding: 12px 16px; font-size: 15px; }
 .msg-meta { font-size: 13px; }
 
+/* Bases: the factories this app hosts, shown like save slots (Bases.tsx). */
+.base-chip { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); text-decoration: none; font: 600 14px var(--display); padding: 5px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel); max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.base-chip:hover, .base-chip[aria-current="page"] { border-color: var(--accent); background: var(--accent-dim); }
+.base-chip-label { font-size: 11px; color: var(--accent); letter-spacing: 0.08em; }
+.bases .fleet-head p { max-width: 620px; }
+.bases-err { padding: 10px 24px 0; }
+.base-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; padding: 18px 24px 28px; }
+.base-card { display: grid; grid-template-columns: 52px 1fr; grid-template-rows: 1fr auto; gap: 10px 14px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); box-shadow: var(--shadow); transition: border-color 0.2s var(--ease); }
+.base-card:hover { border-color: var(--line-3); }
+.base-card.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim), var(--shadow); }
+.base-card.archived { opacity: 0.7; }
+.base-card.lost { border-style: dashed; }
+.base-emblem { width: 52px; height: 52px; border-radius: 12px; display: grid; place-items: center; font: 700 24px var(--display); color: var(--accent); background: radial-gradient(circle at 30% 25%, rgba(79, 209, 193, 0.28), rgba(79, 209, 193, 0.04) 70%); border: 1px solid rgba(79, 209, 193, 0.35); }
+.base-card.archived .base-emblem { color: var(--muted); filter: grayscale(1); }
+.base-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.base-body h2 { margin: 0; font: 600 18px/1.2 var(--display); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.base-body .place-path { overflow-wrap: anywhere; }
+.base-tag { font: 600 11.5px var(--mono); letter-spacing: 0.04em; padding: 2px 7px; border-radius: 999px; background: var(--accent-dim); color: var(--accent); }
+.base-tag.dim { background: var(--panel); color: var(--muted); border: 1px solid var(--line); }
+.base-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; font-size: 14px; color: var(--ink-2); }
+.base-stats b { color: var(--ink); font-family: var(--mono); font-weight: 600; }
+.base-when { margin: 0; font-size: 13.5px; }
+.base-actions { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--line); padding-top: 10px; }
+.base-rename { display: flex; gap: 6px; align-items: center; }
+.base-rename input { flex: 1; }
+.base-new { width: min(560px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 12px; padding: 22px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 14px; position: relative; }
+.base-new h2 { margin: 0; font: 600 22px var(--display); }
+.base-new p { margin: 0; }
+.base-field { display: flex; flex-direction: column; gap: 6px; }
+.base-field > span:first-child { font-weight: 600; font-size: 14px; }
+.base-folder-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.base-hint { font-size: 13px; }
+.base-check { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.base-new-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.base-loading > div { font: 600 20px var(--display); color: var(--ink); }
+.folder-picker { width: min(620px, calc(100vw - 32px)); max-height: min(640px, calc(100vh - 48px)); display: flex; flex-direction: column; gap: 10px; padding: 18px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 14px; }
+.fp-head { display: flex; justify-content: space-between; align-items: center; }
+.fp-head h3 { margin: 0; font: 600 17px var(--display); }
+.fp-places { display: flex; gap: 6px; flex-wrap: wrap; }
+.fp-path { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.fp-path .place-path { flex: 1; overflow-wrap: anywhere; }
+.fp-list { list-style: none; margin: 0; padding: 4px; overflow: auto; flex: 1; min-height: 160px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.fp-dir { width: 100%; text-align: left; background: transparent; color: var(--ink); font-weight: 500; padding: 6px 10px; border-radius: 6px; display: flex; gap: 8px; align-items: center; }
+.fp-dir:hover { background: var(--hover); }
+.fp-dir span[aria-hidden] { color: var(--muted); }
+.fp-none { padding: 10px; }
+.fp-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.fp-actions button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-paste summary { cursor: pointer; font-size: 13.5px; }
+.fp-paste .place-edit { margin-top: 8px; }
+
 /* ---- Shared components (Foundry Glass phase 2; see ui/ and #/_kit) ---- */
 /* GateBar: amber rail on the left, lit corner brackets on hover. Amber means "needs you" and nothing else. */
 .gatebar { position: relative; gap: 10px 12px; padding: 12px 16px 12px 18px; border: 1px solid rgba(245, 177, 76, 0.32); border-left: 3px solid var(--gate); border-radius: 8px; margin: 8px 12px; transition: border-color 160ms var(--ease), background-color 160ms var(--ease); }

@@ -23,6 +23,7 @@ import "./projects/runPanel";
 import "./CodeMap";
 import { FeaturesPage, useIntegrations } from "./Features";
 import { PluginsPage, syncPluginPanels, usePlugins } from "./Plugins";
+import { BasesPage, useBases } from "./Bases";
 
 export function App() {
   const f = useFactory();
@@ -39,6 +40,7 @@ export function App() {
   syncPluginPanels(plugins.data?.plugins, f.events);
   const pluginsOn = plugins.data?.plugins.filter((p) => p.status === "enabled").length ?? 0;
   const chatRoutes = useChatRoutes(f.events, f.online);
+  const bases = useBases(f.online);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
   const view: FactoryView = route.page === "factory" ? route.view : "factory";
@@ -98,6 +100,9 @@ export function App() {
       <header className="topbar">
         <div className="brand-nav">
           <a className="brand" href={href({ page: "home" })}><span className="logo" aria-hidden>◈</span> SoftwareFactory</a>
+          {bases.current && <a className="base-chip" href={href({ page: "bases" })} aria-current={route.page === "bases" ? "page" : undefined} title={`Base: ${bases.current.name} (${bases.current.folder}). Click to open another base or start a new one.`}>
+            <span className="base-chip-label mono">BASE</span> {bases.current.name} <span aria-hidden>▾</span>
+          </a>}
           <nav className="topnav" aria-label="Main">
             <a href={href({ page: "home" })} aria-current={route.page === "home" || route.page === "project" ? "page" : undefined}>Projects</a>
             <a href={href({ page: "features" })} aria-current={route.page === "features" ? "page" : undefined} className={featuresWaiting ? "alert-text" : undefined}>
@@ -141,7 +146,9 @@ export function App() {
         </main>
       ) : (
         <main className="grid projects-grid">
-          {route.page === "kit"
+          {route.page === "bases"
+            ? <BasesPage bases={bases.data} refresh={bases.refresh} />
+            : route.page === "kit"
             ? <KitPage />
             : route.page === "brain"
             ? <BrainPage events={f.events} />
