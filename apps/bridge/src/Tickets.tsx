@@ -16,7 +16,7 @@ export type TicketStatus = "open" | "ready" | "in_progress" | "built" | "closed"
 export interface TicketView {
   id: number; key: string; number: number | null; level: "epic" | "ticket" | "subtask"; blocked: boolean; children: { total: number; done: number }; kind: TicketKind; title: string; body: string; answers: Record<string, string>; project: number | null; status: TicketStatus;
   priority: string | null; severity: string | null; size: "S" | "M" | "L" | null; assignee: string | null; parentId: number | null; lineOrder: number | null; tags: string[];
-  source: string; openedBy: string; run: number | null; branch: string | null; branchDir: string | null; createdAt: string; updatedAt: string; closedAt: string | null; lastNote: string | null;
+  source: string; openedBy: string; run: number | null; pr: { repo: string; number: number; url: string; state: "open" | "merged" | "closed" } | null; branch: string | null; branchDir: string | null; createdAt: string; updatedAt: string; closedAt: string | null; lastNote: string | null;
 }
 interface NoteView { eventId: number; ts: string; by: string; kind: "note" | "reply" | "status" | "event"; text: string; status: TicketStatus | null; costUsd: number | null }
 interface LinkView { to: number; relation: string; title?: string; status?: TicketStatus; key?: string }
@@ -198,6 +198,7 @@ function List({ tickets, view, sel, onSelect, crew, counts }: { tickets: TicketV
               <span className="tk-sub">
                 <span className={`tk-status st-${t.status}`}>{STATUS_LABEL[t.status]}</span>
                 {t.priority && <span className={`tk-pri p-${t.priority}`}>{t.priority.replace("_", " ")}</span>}
+                {t.pr && <span className={`tk-prchip pr-${t.pr.state}`} title={`PR #${t.pr.number} ${t.pr.state}`}>PR #{t.pr.number}</span>}
                 {t.size && <span className="tk-size mono" title={`Size ${t.size}`}>{t.size}</span>}
                 {t.blocked && <span className="tk-blocked" title="Another ticket that is still open blocks this one">blocked</span>}
                 {t.children.total > 0 && <Progress c={t.children} label={t.kind === "plan" ? "tickets" : "subtasks"} />}
@@ -362,7 +363,14 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
           <span className="muted mono">{d.run.outcome ?? `${d.run.station ?? "starting"} ${d.run.state ?? ""}`}{d.run.spentUsd != null ? ` · $${Number(d.run.spentUsd).toFixed(4)}` : ""}</span>
         </div>
       )}
-      {t.branch && (
+      {t.pr && (
+        <div className={`tk-runstrip tk-pr pr-${t.pr.state}`} aria-label="Pull request">
+          <span className="mono">⇄ PR #{t.pr.number}</span>
+          <span className="muted">{t.pr.state === "open" ? "open as a draft · CI runs on it · a merge moves this ticket on" : t.pr.state === "merged" ? "merged" : "closed without merging"}</span>
+          <a className="ghost tiny" href={t.pr.url} target="_blank" rel="noreferrer">Open on GitHub</a>
+        </div>
+      )}
+      {t.branch && !t.pr && (
         <div className="tk-runstrip tk-branch" aria-label="Branch">
           <span className="mono">⑂ {t.branch}</span>
           <span className="muted mono tk-branch-dir" title={t.branchDir ?? ""}>{t.branchDir}</span>

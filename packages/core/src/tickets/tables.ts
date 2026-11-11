@@ -18,7 +18,7 @@ export const EDITABLE: Record<string, string> = {
 
 export const ticketsProjection: Projection = {
   name: "tickets",
-  version: 4,
+  version: 5,
   tables: ["tickets", "ticket_notes", "ticket_links", "ticket_keys"],
   describe: "Tickets: units of work per project, their append-only thread (notes, agent replies, status moves, events) and links",
   migrate(db) {
@@ -45,6 +45,10 @@ export const ticketsProjection: Projection = {
       run         INTEGER,
       branch      TEXT,
       branch_dir  TEXT,
+      pr_repo     TEXT,
+      pr_number   INTEGER,
+      pr_url      TEXT,
+      pr_state    TEXT,
       created_at  TEXT NOT NULL,
       updated_at  TEXT NOT NULL,
       closed_at   TEXT,
@@ -145,7 +149,11 @@ export const ticketsProjection: Projection = {
       note("event", `Factory run #${p.run} started on this ticket`);
     } else if (e.type === "ticket.branch") {
       db.prepare("UPDATE tickets SET branch = ?, branch_dir = ? WHERE id = ?").run(String(p.branch), String(p.dir), Number(p.id));
-      note("event", p.sha ? `Branch ${p.branch} at ${String(p.sha).slice(0, 7)}: ${(p.files ?? []).length} file(s) changed in ${p.dir}. Not pushed.` : `Branch ${p.branch} in ${p.dir}: nothing changed.`);
+      note("event", p.sha ? `Branch ${p.branch} at ${String(p.sha).slice(0, 7)}: ${(p.files ?? []).length} file(s) changed in ${p.dir}.` : `Branch ${p.branch} in ${p.dir}: nothing changed.`);
+    } else if (e.type === "ticket.pr") {
+      // The ticket's pull request: opened by the crew, then merged or closed on GitHub.
+      db.prepare("UPDATE tickets SET pr_repo = ?, pr_number = ?, pr_url = ?, pr_state = ?, updated_at = ? WHERE id = ?").run(String(p.repo), Number(p.number), String(p.url), String(p.state), e.ts, Number(p.id));
+      note("event", p.state === "open" ? `PR #${p.number} opened on ${p.repo}` : `PR #${p.number} ${p.state}`);
     } else if (e.type === "ticket.keyed") {
       // A project's ticket key ("SF"), given once; it stays when the project is renamed.
       db.prepare("INSERT OR IGNORE INTO ticket_keys (project, key) VALUES (?, ?)").run(Number(p.project), String(p.key));

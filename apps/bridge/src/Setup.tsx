@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { setupApi, type CrewMode, type SetupView, type ToolCheck } from "./api";
 import { UpdatesSection, type Updates } from "./Updates";
+import { CrewGitHub } from "./CrewGitHub";
 
 /**
  * Ship's systems: which crew works (free practice crew or real Claude Code
@@ -99,6 +100,7 @@ export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onCl
             <Place label="Database" hint="factory.db: the event log and every table. Open it in any SQLite browser." path={s.paths.data} onOpen={() => open_("data")} />
           </section>
           {updates && <UpdatesSection u={updates} />}
+          <CrewGitHub />
           {err && <div className="err">{err}</div>}
         </>}
       </aside>

@@ -63,6 +63,7 @@ export type EventType =
   | "ticket.run"
   | "ticket.line.moved"
   | "ticket.keyed"
+  | "ticket.pr"
   | "ticket.requested"
   | "ticket.branch"
   | "improve.session"

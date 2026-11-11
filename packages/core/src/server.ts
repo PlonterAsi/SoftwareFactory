@@ -25,6 +25,8 @@ import { Integrations } from "./integrations/service.js";
 import { integrationsRoute, serveExtension } from "./integrations/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
+import { GitHub, parseGitHubRepo } from "./tickets/github.js";
+import { linkToProject } from "./projects/service.js";
 import { ErrorCapture, isFault } from "./tickets/capture.js";
 import { classifyIntake, ensureSelfProject, projectToTicket } from "./tickets/intake.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
@@ -51,12 +53,17 @@ export interface CoreOptions {
   dataDir?: string;
   /** Improvement Council caps: daily USD and hours between automatic sessions. */
   improve?: { maxUsd?: number; everyHours?: number };
+  /** GitHub write access for the crew's PRs (tests pass one pointed at a fake GitHub). */
+  github?: GitHub;
   /** The installed app's version, from the shell (SF_APP_VERSION). A new one is recorded as `app.updated`. */
   appVersion?: string;
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion, github: githubIn }: CoreOptions) {
+  // GitHub write access for the crew's PRs; the token lives in the data folder, never in the log.
+  const github = githubIn ?? (dataDir ? new GitHub({ dataDir }) : undefined);
+  const crewMode = () => (runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime));
   const bay = new AgentBay(log, runtime);
   const settings = readSettings(log);
   const drop = new DropFolder(log, settings.dropDir ?? dropDir ?? join(homedir(), "SoftwareFactory", "Drop"));
@@ -82,6 +89,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const tickets = new Tickets(log, {
     runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1), workRoot: join(dirname(projectsDir), "ticket-work"),
     autoWork, canWork: () => (gitReady() ? null : "Git is not installed"),
+    github, canShip: () => (crewMode() === "real" ? null : "the practice crew never opens a PR; switch to the real crew in Systems for that"),
   });
   // Every fault becomes a bug ticket by itself (docs/tickets.md, "Errors become bugs").
   // SoftwareFactory's own project: the home of asks about the app and of the errors it catches. Made when first needed.
@@ -313,6 +321,17 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         return json(res, 201, projectToTicket(log, tickets, order.state(), Number(turn[1]), { to, kind: b.kind ? String(b.kind) as TicketKind : undefined }));
       }
       if (url.pathname === "/api/tickets" || url.pathname.startsWith("/api/tickets/")) {
+        if (url.pathname === "/api/tickets/github") {
+          // GitHub write access for the crew's PRs. The token is written to the data folder and never sent back.
+          if (!github) return json(res, 501, { error: "GitHub access needs a data folder." });
+          const self = selfGitHub(log);
+          if (req.method === "POST") {
+            const b = await readJson(req);
+            github.setToken(typeof b.token === "string" && b.token.trim() ? b.token : null);
+          }
+          const check = self && github.hasToken() ? await github.check(self) : null;
+          return json(res, 200, { hasToken: github.hasToken(), repo: self ? `${self.owner}/${self.name}` : null, canPush: check?.ok ?? false, why: check?.why ?? null });
+        }
         if (url.pathname === "/api/tickets/auto") {
           // The auto-work rule: GET reads it, POST changes any of on, maxUsd, dailyUsd, wip.
           if (req.method === "POST") {
@@ -378,7 +397,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop, tickets, improve, explorer, launcher, integrations, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, factory, order, bay, drop, tickets, improve, explorer, launcher, integrations, errors, fault, ensureSelf });
 }
 
 /**
@@ -406,6 +425,20 @@ export function updatesReport(log: EventLog, appVersion: string | undefined, act
   const history = (log.db.prepare("SELECT ts, from_version, to_version FROM app_versions ORDER BY id DESC LIMIT 10").all() as { ts: string; from_version: string | null; to_version: string }[])
     .map((r) => ({ ts: r.ts, from: r.from_version, to: r.to_version }));
   return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns, history };
+}
+
+/** Link SoftwareFactory's own project to its GitHub repo once, so its tickets are worked there. */
+export function linkSelfRepo(log: EventLog, project: number, repo: string) {
+  const g = parseGitHubRepo(repo);
+  if (!g) return;
+  const has = log.db.prepare("SELECT 1 FROM project_links WHERE project_id = ? AND kind = 'github'").get(project);
+  if (!has) linkToProject(log, project, "github", `${g.owner}/${g.name}`);
+}
+
+/** The GitHub repo of SoftwareFactory's own project, if linked. */
+function selfGitHub(log: EventLog) {
+  const row = log.db.prepare("SELECT l.ref FROM project_links l JOIN project_links s ON s.project_id = l.project_id AND s.kind = 'self' WHERE l.kind = 'github' LIMIT 1").get() as { ref: string } | undefined;
+  return row ? parseGitHubRepo(row.ref) : null;
 }
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
@@ -621,6 +654,12 @@ if (isMain) {
   core.drop.start();
   core.ensureSelf(); // SoftwareFactory has a project of its own from the first start
   core.tickets.backfillKeys(); // projects whose tickets came before keys get theirs (SF for SoftwareFactory)
+  // SoftwareFactory's own tickets are worked in its own repo, as PRs (Assaf, 11 Nov 2026: the crew may open PRs, never push to main).
+  linkSelfRepo(log, core.ensureSelf(), process.env.SF_SELF_REPO ?? "PlonterAsi/SoftwareFactory");
+  // Follow the crew's open PRs: a merge moves the ticket on. At start, then every 5 minutes.
+  const follow = () => core.tickets.followPrs().catch((e) => console.error("following PRs failed:", e));
+  follow();
+  setInterval(follow, 5 * 60_000).unref();
   const server = createServer(core);
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.
   const { order } = core;

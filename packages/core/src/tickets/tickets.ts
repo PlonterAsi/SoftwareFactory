@@ -7,6 +7,7 @@ import "./tables.js";
 import { projectOf, registerProjectFacet } from "../projects/service.js";
 import { EDITABLE } from "./tables.js";
 import { branchFor, repoOfProject, workInRepo, type RepoRef } from "./repowork.js";
+import { hideTokens, type GitHub } from "./github.js";
 import { selfProject } from "./intake.js";
 import {
   FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS,
@@ -107,7 +108,8 @@ const toView = (r: Row): TicketView => ({
   blocked: !!r.is_blocked, children: { total: Number(r.n_children ?? 0), done: Number(r.n_done ?? 0) }, kind: r.kind, title: r.title, body: r.body ?? "", answers: JSON.parse(r.answers ?? "{}"), project: r.project == null ? null : Number(r.project),
   status: r.status, priority: r.priority ?? null, severity: r.severity ?? null, size: r.size ?? null, assignee: r.assignee ?? null, parentId: r.parent_id == null ? null : Number(r.parent_id),
   lineOrder: r.line_order == null ? null : Number(r.line_order), tags: JSON.parse(r.tags ?? "[]"), source: r.source, openedBy: r.opened_by, fingerprint: r.fingerprint ?? null,
-  run: r.run == null ? null : Number(r.run), branch: r.branch ?? null, branchDir: r.branch_dir ?? null, createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at ?? null, lastNote: r.last_note ?? null,
+  run: r.run == null ? null : Number(r.run), branch: r.branch ?? null, branchDir: r.branch_dir ?? null,
+  pr: r.pr_number != null ? { repo: r.pr_repo, number: Number(r.pr_number), url: r.pr_url, state: r.pr_state } : null, createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at ?? null, lastNote: r.last_note ?? null,
 });
 
 /** The contract appended to any agent asked about a ticket. The practice crew answers it too. */
@@ -148,7 +150,12 @@ export class Tickets {
   private stuck = new Map<number, string>();
   private dispatchSoon: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private log: EventLog, private opts: { runtime?: AgentRuntime; factory?: Factory; bay?: AgentBay; budgetUsd?: number; workRoot?: string; autoWork?: () => AutoWork; canWork?: () => string | null } = {}) {
+  constructor(private log: EventLog, private opts: { runtime?: AgentRuntime; factory?: Factory; bay?: AgentBay; budgetUsd?: number; workRoot?: string; autoWork?: () => AutoWork; canWork?: () => string | null;
+    /** GitHub write access: push a ticket's branch and open a draft PR. */
+    github?: GitHub;
+    /** Why the crew may not open PRs right now (the practice crew never does), or null. */
+    canShip?: () => string | null;
+  } = {}) {
     log.on("event", (e: SfEvent) => {
       try { this.react(e); } catch (err) { console.error("tickets: reacting to", e.type, "failed:", err); }
       if (e.type.startsWith("ticket.") || e.type === "factory.run.finished") {
@@ -555,6 +562,60 @@ export class Tickets {
     return { ticket: this.get(id)!, run };
   }
 
+  /**
+   * The branch goes to GitHub as a draft PR, when the crew may ship: the real
+   * crew, a token that can write, and never main. The ticket waits for your
+   * look; CI runs on the PR, and its merge moves the ticket on (followPrs).
+   * Returns false when it stays a local branch, after saying why.
+   */
+  private async openPr(id: number, repo: RepoRef, r: { dir: string; branch: string; base: string; files: string[]; summary: string; costUsd: number }): Promise<boolean> {
+    const gh = this.opts.github;
+    const t = this.get(id)!;
+    const why = !gh ? "GitHub access is not set up in this core." : this.opts.canShip?.() ?? (gh.hasToken() ? null : "No GitHub access yet: add a token in Systems, GitHub access, and the crew opens a PR next time.");
+    if (why) { this.log.append("ticket.noted", { id, by: "factory", kind: "event", text: `The branch stays on this computer: ${why}` }); return false; }
+    let baseBranch = "main";
+    try { baseBranch = gh!.git(r.dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(/^origin\//, ""); } catch { /* main */ }
+    const pr = await gh!.openPr({
+      repo: repo.github!, dir: r.dir, branch: r.branch, base: baseBranch, title: `${t.key}: ${t.title}`.slice(0, 200),
+      body: [`Ticket **${t.key}** (${t.kind}) from SoftwareFactory, worked by the crew.`, "", r.summary || "", "", `Changed ${r.files.length} file(s).`, "", "_Opened as a draft by SoftwareFactory's crew. It never pushes to main; merging is a person's call or the auto-merge rule._"].join("\n").slice(0, 6000),
+    });
+    this.log.append("ticket.pr", { id, by: "factory", repo: `${repo.github!.owner}/${repo.github!.name}`, number: pr.number, url: pr.url, branch: r.branch, state: "open" });
+    const now = this.get(id)!;
+    this.log.append("ticket.noted", {
+      id, by: "factory", kind: "reply", costUsd: r.costUsd, status: now.status !== "built" && !isClosed(now.status) ? "built" : undefined,
+      text: `${r.summary || "Done."}\n\nOpened draft PR #${pr.number}: ${pr.url}. Windows CI runs on it; when it merges, this ticket moves on by itself.`,
+    });
+    return true;
+  }
+
+  /** Follow every open PR of a ticket: merged moves it on, closed without a merge sends it back. */
+  async followPrs(): Promise<number> {
+    const gh = this.opts.github;
+    if (!gh?.hasToken()) return 0;
+    const rows = this.log.db.prepare("SELECT id, pr_repo, pr_number FROM tickets WHERE pr_state = 'open' AND pr_number IS NOT NULL").all() as Row[];
+    let moved = 0;
+    for (const row of rows) {
+      const [owner, name] = String(row.pr_repo).split("/");
+      try {
+        const pr = await gh.pr({ owner, name }, Number(row.pr_number));
+        if (pr.state === "open") continue;
+        const id = Number(row.id);
+        this.log.append("ticket.pr", { id, by: "github", repo: row.pr_repo, number: pr.number, url: pr.url, state: pr.merged ? "merged" : "closed", sha: pr.mergeSha });
+        const t = this.get(id)!;
+        moved++;
+        if (isClosed(t.status)) continue;
+        if (pr.merged) {
+          // Merged after CI: work kinds are done; taste kinds wait for your look on the next version.
+          const done = !TASTE_KINDS.includes(t.kind);
+          this.log.append("ticket.noted", { id, by: "github", status: done ? "closed" : t.status === "built" ? undefined : "built", text: `PR #${pr.number} was merged.${done ? " Closed: it ships with the next version." : " It ships with the next version; take a look then."}` });
+        } else {
+          this.log.append("ticket.noted", { id, by: "github", status: "open", text: `PR #${pr.number} was closed without merging, so this ticket is open again.` });
+        }
+      } catch (e) { console.error("tickets: following PR", row.pr_number, "failed:", hideTokens((e as Error).message)); }
+    }
+    return moved;
+  }
+
   /** Wait for a ticket's repo work to finish (tests, the CLI). */
   waitRepo(id: number): Promise<void> { return this.inRepo.get(id) ?? Promise.resolve(); }
 
@@ -568,11 +629,14 @@ export class Tickets {
     if (!runtime || !workRoot) throw new Error("No crew or work folder in this core.");
     if (this.inRepo.has(t.id)) throw new Error("The Builder is already working this ticket in the repo.");
     const doc = this.document(t.id);
-    const branch = branchFor(t.id, t.title);
+    const branch = branchFor(t.key, t.title);
     const by = bay?.crewFor("build")[0]?.id ?? "builder";
-    this.log.append("ticket.noted", { id: t.id, by, status: t.status === "in_progress" ? undefined : "in_progress", text: `Working it in a clone of ${repo.source}, on a new branch. The original repo is not touched and nothing is pushed.` });
-    const job = workInRepo(this.log, runtime, bay, { id: t.id, title: t.title, document: doc, repo, workRoot, maxUsd: Math.min(maxUsd ?? 0.6, 1.5) })
-      .then((r) => {
+    this.log.append("ticket.noted", { id: t.id, by, status: t.status === "in_progress" ? undefined : "in_progress", text: `Working it in a clone of ${repo.source}, on branch ${branch}. ${repo.github ? "Only that branch is ever pushed, never main." : "The original repo is not touched and nothing is pushed."}` });
+    const gh = this.opts.github;
+    // A GitHub repo is cloned from where this core's GitHub access points (github.com; a local stand-in in tests).
+    if (repo.github && gh) repo = { ...repo, dir: gh.remote(repo.github) };
+    const job = workInRepo(this.log, runtime, bay, { id: t.id, key: t.key, title: t.title, document: doc, repo, workRoot, maxUsd: Math.min(maxUsd ?? 0.6, 1.5), git: gh ? (d, ...a) => gh.git(d, ...a) : undefined })
+      .then(async (r) => {
         if (!r.ok) {
           this.log.append("ticket.noted", { id: t.id, by, status: "open", text: `The Builder could not work it: ${r.error}` });
           return;
@@ -580,6 +644,10 @@ export class Tickets {
         this.log.append("ticket.branch", { id: t.id, by, source: repo.source, dir: r.dir, branch: r.branch, base: r.base, sha: r.sha, files: r.files.slice(0, 200), costUsd: r.costUsd });
         const now = this.get(t.id)!;
         if (isClosed(now.status)) return;
+        if (r.sha && repo.github) {
+          const shipped = await this.openPr(t.id, repo, r).catch((e) => { this.log.append("ticket.noted", { id: t.id, by, kind: "event", text: hideTokens(`Could not open a PR: ${(e as Error).message}`) }); return false; });
+          if (shipped) return;
+        }
         const take = `To take it into your repo: git fetch "${r.dir}" ${r.branch}, then review and merge it yourself.`;
         this.log.append("ticket.noted", {
           id: t.id, by, kind: "reply", costUsd: r.costUsd, status: r.sha && now.status !== "built" ? "built" : r.sha ? undefined : "open",

@@ -237,6 +237,8 @@ export interface TicketView {
   /** The branch the crew made for it in an imported repo's clone, and that clone's folder. */
   branch: string | null;
   branchDir: string | null;
+  /** The pull request the crew opened for it, and where it stands. */
+  pr: { repo: string; number: number; url: string; state: "open" | "merged" | "closed" } | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;

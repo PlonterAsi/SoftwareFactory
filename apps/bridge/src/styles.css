@@ -1141,3 +1141,10 @@ button.tool-raw { font-size: 12px; margin-left: auto; }
 .tk-auto { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .tk-auto-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .tk-auto.on .tk-auto-dot { background: var(--good); box-shadow: 0 0 6px var(--good); }
+
+/* The ticket's pull request */
+.tk-pr.pr-open { border-color: var(--accent); }
+.tk-pr.pr-merged { border-color: var(--good); }
+.tk-prchip { font: 600 10px var(--mono); padding: 2px 6px; border-radius: 10px; border: 1px solid var(--accent); color: var(--accent); white-space: nowrap; }
+.tk-prchip.pr-merged { border-color: var(--good); color: var(--good); }
+.tk-prchip.pr-closed { border-color: var(--line); color: var(--muted); }

@@ -245,7 +245,7 @@ describe("tickets: working inside an imported repo", () => {
     await t.waitRepo(a.id);
     const done = t.get(a.id)!;
     expect(done.status).toBe("built");
-    expect(done.branch).toMatch(/^sf\/ticket-1-login-button-does-nothing$/);
+    expect(done.branch).toMatch(/^sf\/LA-1-login-button-does-nothing$/);
     const clone = done.branchDir!;
     expect(clone.startsWith(work)).toBe(true);
     expect(git(clone, "branch", "--show-current")).toBe(done.branch);
@@ -256,7 +256,7 @@ describe("tickets: working inside an imported repo", () => {
     expect(existsSync(join(src, "docs"))).toBe(false);
     expect(rt.calls.at(-1)!.cwd).toBe(clone);
     expect(rt.calls.at(-1)!.tools).toEqual(["Read", "Edit", "Write", "Glob", "Grep"]);
-    expect(t.notes(a.id).at(-1)!.text).toMatch(/git fetch ".*" sf\/ticket-1/);
+    expect(t.notes(a.id).at(-1)!.text).toMatch(/git fetch ".*" sf\/LA-1/);
     // A bug worked in a repo never closes by rule: no locked tests ran.
     expect(t.notes(a.id).some((n) => n.by === "qa-rule")).toBe(false);
     // Working it again reuses the clone and its branch.
@@ -283,7 +283,8 @@ describe("tickets: working inside an imported repo", () => {
     expect(t.detail(a.id)!.repo).toMatchObject({ dir: src, branch: "main" });
     t.work(a.id);
     await t.waitRepo(a.id);
-    expect(t.get(a.id)).toMatchObject({ status: "built", branch: "sf/ticket-1-say-hello-louder" });
+    expect(t.get(a.id)!.status).toBe("built");
+    expect(t.get(a.id)!.branch).toMatch(/^sf\/[A-Z][A-Z0-9]*-1-say-hello-louder$/);
     expect(git(src, "status", "--porcelain")).toBe("");
     expect(git(src, "branch", "--list")).toBe("* main");
   }, 30_000);
