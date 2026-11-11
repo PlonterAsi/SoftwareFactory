@@ -79,6 +79,9 @@ export function parseReview(text: string): ReviewResult {
 
 export interface GateDecision { approve: boolean; note?: string; by?: string }
 
+/** What a waiting gate tells the Bridge besides its question: the button's word, and for a failed step, which one and how often. */
+interface GateOpts { neverAuto?: boolean; action?: string; kind?: "retry" | "council" | "rounds" | "budget"; station?: StationId; attempt?: number; error?: string; same?: boolean }
+
 export class StopRun extends Error {}
 
 interface Pending { gate: GateId; resolve: (d: GateDecision) => void }
@@ -304,7 +307,7 @@ class Run {
           try {
             const text = await this.ask(m, prompt, { seat, round });
             res.take = parseSeatTake(text);
-          } catch (e) { res.error = (e as Error).message; }
+          } catch (e) { if (e instanceof StopRun) throw e; res.error = (e as Error).message; }
           this.verdict(m, "council", !!res.take, round, res.error);
           return res;
         }));
@@ -319,7 +322,7 @@ class Run {
     }
     if (brief.outcome === "drop") {
       const why = brief.concerns.concat(brief.agreed).slice(0, 3).join("; ");
-      const d = await this.gate("escalation", `The Council advises against building this${why ? ` (${why})` : ""}. Build it anyway?`);
+      const d = await this.gate("escalation", `The Council advises against building this${why ? ` (${why})` : ""}. Build it anyway?`, { action: "Build anyway", kind: "council" });
       if (!d.approve) throw new StopRun("The Council advised against building it, and you agreed.");
     }
     this.brief = brief;
@@ -408,7 +411,7 @@ class Run {
       if (budget <= 0) reason = `Tests still fail after ${this.o.maxFixRounds} fix rounds.`;
       else if (failing && failing === lastFailing) reason = "The same tests failed twice in a row after a fix.";
       if (reason) {
-        const d = await this.gate("escalation", `${reason} Grant 2 more fix rounds?`);
+        const d = await this.gate("escalation", `${reason} Grant 2 more fix rounds?`, { action: "2 more fix rounds", kind: "rounds" });
         if (!d.approve) throw new StopRun(reason);
         budget = 2;
         lastFailing = "";
@@ -539,13 +542,19 @@ class Run {
 
   /** One agent call, inside both its own cap and what is left of the run's cap. */
   private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}): Promise<string> {
-    const left = this.o.maxUsd - this.spent;
-    if (left < 0.01) {
-      const d = await this.gate("escalation", `The run's budget of $${this.o.maxUsd.toFixed(2)} is spent. Add 50% more?`, { neverAuto: true });
-      if (!d.approve) throw new StopRun("Budget spent.");
-      this.o.maxUsd *= 1.5;
-      this.log.append("factory.budget", { run: this.id, maxUsd: this.o.maxUsd });
+    if (this.o.maxUsd - this.spent < 0.01) {
+      // Council seats ask at the same time: one question, and the others see the answer.
+      await this.gateTurn(async () => {
+        if (this.o.maxUsd - this.spent >= 0.01) return;
+        if (this.budgetRefused) throw new StopRun("Budget spent.");
+        const d = await this.gate("escalation", `The run's budget of $${this.o.maxUsd.toFixed(2)} is spent. Add 50% more?`, { neverAuto: true, action: "Add 50% more", kind: "budget" }, true);
+        if (!d.approve) { this.budgetRefused = true; throw new StopRun("Budget spent."); }
+        this.o.maxUsd *= 1.5;
+        this.log.append("factory.budget", { run: this.id, maxUsd: this.o.maxUsd });
+      });
     }
+    // A hint you gave with Retry reaches the next agent call of that station.
+    if (this.hint) prompt += `\n\nThe person retried this step after it failed (${this.hint.error.slice(0, 300)}) and said: ${this.hint.note}`;
     const cap = Math.max(0.01, Math.min(m.budgetUsd, this.o.maxUsd - this.spent));
     this.calls++;
     const r = await runAgent(this.log, this.runtime, m.id, {
@@ -559,8 +568,10 @@ class Run {
 
   /** Run one station: mark it active, do the work, require its visuals, mark it passed. Failures escalate once. */
   private async station<T>(id: StationId, work: () => Promise<T> | T, round?: number): Promise<T> {
+    let attempt = 1;
+    let lastError = "";
     for (;;) {
-      this.mark(id, "active", round);
+      this.mark(id, "active", round, attempt > 1 ? `retry ${attempt - 1}` : undefined);
       try {
         const out = await work();
         const v = visualCheck(this.log, this.id, id, round);
@@ -571,13 +582,22 @@ class Run {
         }
         const failing = (out as TestRun | undefined)?.failed;
         this.mark(id, failing ? "fail" : "pass", round, failing ? `${failing} failing` : undefined);
+        if (this.hint?.station === id) this.hint = null;
         return out;
       } catch (e) {
         if (e instanceof StopRun) throw e;
         const msg = (e as Error).message;
         this.mark(id, "fail", round, msg);
-        const d = await this.gate("escalation", `${stationName(id)} failed: ${msg.slice(0, 300)}. Retry it?`);
+        // The same error again means the retry changed nothing: say so, so a Retry that "does nothing" is visible.
+        const same = attempt > 1 && msg === lastError;
+        const q = same
+          ? `${stationName(id)} failed again the same way (attempt ${attempt}): ${msg.slice(0, 300)}. Retrying as is will likely fail again; add a hint or check Systems, then retry?`
+          : `${stationName(id)} failed${attempt > 1 ? ` again (attempt ${attempt})` : ""}: ${msg.slice(0, 300)}. Retry it?`;
+        const d = await this.gate("escalation", q, { action: "Retry", kind: "retry", station: id, attempt, error: msg.slice(0, 2000), same });
         if (!d.approve) throw new StopRun(`${stationName(id)} failed: ${msg}`);
+        this.hint = d.note ? { station: id, note: d.note, error: msg } : null;
+        lastError = msg;
+        attempt++;
       }
     }
   }
@@ -587,18 +607,33 @@ class Run {
   }
 
   private autoRetriesUsed = 0;
+  private budgetRefused = false;
+  private hint: { station: StationId; note: string; error: string } | null = null;
+  private gateQueue: Promise<unknown> = Promise.resolve();
 
-  private async gate(gate: GateId, question: string, opts: { neverAuto?: boolean } = {}): Promise<GateDecision> {
+  /** One question at a time per run: parallel work (Council seats) waits its turn instead of overwriting a waiting gate. */
+  private gateTurn<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.gateQueue.then(fn, fn);
+    this.gateQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  private gate(gate: GateId, question: string, opts: GateOpts = {}, queued = false): Promise<GateDecision> {
+    return queued ? this.askGate(gate, question, opts) : this.gateTurn(() => this.askGate(gate, question, opts));
+  }
+
+  private async askGate(gate: GateId, question: string, opts: GateOpts): Promise<GateDecision> {
     const station: StationId = gate === "escalation" ? "fix" : gate;
     if (gate !== "escalation") this.mark(station, "waiting");
-    this.log.append("factory.gate", { run: this.id, gate, state: "waiting", question });
+    const { neverAuto: _n, ...info } = opts;
+    this.log.append("factory.gate", { run: this.id, gate, state: "waiting", question, ...info });
     let auto = this.o.autoApprove && gate !== "escalation";
     if (this.o.autoApprove && gate === "escalation" && !opts.neverAuto && this.autoRetriesUsed < this.o.autoRetries) { this.autoRetriesUsed++; auto = true; }
     // An unattended run never hangs: an escalation it may not retry stops the run.
     const d: GateDecision = auto ? { approve: true, by: "auto" }
       : this.o.autoApprove ? { approve: false, by: "auto" }
       : await this.f.awaitGate(this.id, gate);
-    this.log.append("factory.gate", { run: this.id, gate, state: d.approve ? "approved" : "rejected", note: d.note, by: d.by ?? "you" });
+    this.log.append("factory.gate", { run: this.id, gate, state: d.approve ? "approved" : "rejected", note: d.note, by: d.by ?? "you", ...(info.kind ? { kind: info.kind, station: info.station, attempt: info.attempt } : {}) });
     if (gate !== "escalation") this.mark(station, d.approve ? "pass" : "fail", undefined, d.note);
     return d;
   }
