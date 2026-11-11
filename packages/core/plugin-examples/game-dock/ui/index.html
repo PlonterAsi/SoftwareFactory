@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Dock</title>
+<style>
+/* The Dock: practice shift. Flat 2D, DOM only, redraws on input. Tokens follow the Bridge. */
+:root {
+  color-scheme: dark;
+  --bg: #070b12; --panel: #0c1320; --panel-2: #101a2b; --line: #1c2a40; --grid: #142034;
+  --ink: #d9e4f2; --muted: #8195b0; --accent: #4fd6e8; --gate: #f2b34b; --bad: #ff6b6b; --good: #5ee0a0;
+  --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", Consolas, ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--body); padding: 14px max(16px, env(safe-area-inset-left, 0px)) 24px max(16px, env(safe-area-inset-right, 0px)); }
+.practice { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; color: var(--gate); border: 1px dashed rgba(242,179,75,.5); border-radius: 4px; padding: 5px 10px; margin-bottom: 12px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; margin-bottom: 12px; }
+h1 { font-family: var(--display); font-weight: 600; letter-spacing: .12em; font-size: 20px; margin: 0; text-transform: uppercase; }
+.hud { display: flex; flex-wrap: wrap; gap: 6px 18px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.hud b { color: var(--ink); font-weight: 500; }
+.hud .fuel b { color: var(--good); }
+.hud .idle b { color: var(--gate); }
+button { font: inherit; color: inherit; }
+
+.belt { position: relative; display: flex; gap: 8px; align-items: center; padding: 12px; background: repeating-linear-gradient(90deg, #0a111d 0 38px, #0d1626 38px 40px); border: 1px solid var(--line); border-radius: 6px; min-height: 92px; overflow: hidden; }
+.belt::before { content: "IN"; position: absolute; left: 6px; top: 4px; font: 11px var(--mono); color: var(--muted); letter-spacing: .14em; }
+.crate { flex: 0 0 auto; width: 118px; height: 64px; border: 1.5px solid var(--muted); background: var(--panel); padding: 6px 8px; font-size: 11px; line-height: 1.3; cursor: pointer; transition: transform .18s ease, opacity .18s ease; overflow: hidden; display: grid; align-content: start; gap: 2px; text-align: left; }
+.crate .k { font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.crate .t { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.crate.idea { border-radius: 22px; }
+.crate.gate { border-color: var(--gate); border-radius: 2px; box-shadow: inset 0 0 0 3px rgba(242,179,75,.14); }
+.crate.bug { border-color: var(--bad); border-style: dashed; border-radius: 2px; }
+.crate.proposal { border-color: var(--good); border-radius: 10px; }
+.crate.run { border-color: var(--accent); width: 150px; border-radius: 4px; }
+.crate.noise { border-style: dotted; opacity: .8; }
+.crate.focus { transform: translateY(-3px); outline: 2px solid var(--accent); outline-offset: 2px; }
+.crate.next { opacity: .38; }
+.crate.lashed::after { content: attr(data-lash); position: absolute; }
+.crate .lash { font: 11px var(--mono); color: var(--accent); }
+.belt .empty { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+
+.stage { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+@media (max-width: 760px) { .stage { grid-template-columns: 1fr; } }
+.focus-card { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 16px; display: grid; gap: 10px; align-content: start; min-height: 220px; }
+.focus-card .kind { font: 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.focus-card .text { font-size: 19px; line-height: 1.35; font-family: var(--display); font-weight: 500; }
+.focus-card .guess { font-size: 13px; color: var(--muted); }
+.focus-card .guess b { color: var(--accent); font-weight: 500; }
+.focus-card .price { font-family: var(--mono); font-size: 12px; color: var(--gate); }
+.focus-card .lashes { font-size: 12px; color: var(--accent); }
+.ghost { border: 1px dashed var(--accent); border-radius: 6px; padding: 10px 12px; font-size: 13px; display: grid; gap: 4px; background: rgba(79,214,232,.06); }
+.ghost .h { font: 11px var(--mono); letter-spacing: .14em; color: var(--accent); }
+.hint { font-size: 12px; color: var(--muted); }
+.hold { height: 4px; background: var(--grid); border-radius: 2px; overflow: hidden; }
+.hold span { display: block; height: 100%; width: 0; background: var(--gate); }
+
+.side { display: grid; gap: 12px; align-content: start; }
+.log { border: 1px solid var(--line); border-radius: 6px; padding: 12px; background: var(--panel); font-size: 12px; display: grid; gap: 5px; max-height: 260px; overflow: auto; }
+.log .h { font: 11px var(--mono); letter-spacing: .14em; color: var(--muted); }
+.log .row { display: flex; gap: 8px; }
+.log .row .key { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
+.log .row.park .key { color: var(--muted); }
+.log .row.ok .key { color: var(--good); }
+.agents { border: 1px solid var(--line); border-radius: 6px; padding: 12px; background: var(--panel); display: grid; gap: 6px; font-size: 12px; }
+.agents .h { font: 11px var(--mono); letter-spacing: .14em; color: var(--muted); }
+.agent { display: flex; justify-content: space-between; gap: 8px; }
+.agent .st { font-family: var(--mono); }
+.agent .st.idle { color: var(--gate); } .agent .st.busy { color: var(--accent); }
+
+.chutes { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; margin-top: 14px; }
+.chute { border: 1px solid var(--line); background: var(--panel-2); border-radius: 5px; padding: 9px 10px; text-align: left; cursor: pointer; display: grid; gap: 2px; transition: background .15s, border-color .15s; }
+.chute:hover, .chute:focus-visible { border-color: var(--accent); outline: none; }
+.chute .key { font: 11px var(--mono); color: var(--accent); }
+.chute .name { font-family: var(--display); font-weight: 600; font-size: 13px; }
+.chute .sub { font-size: 11px; color: var(--muted); }
+.chute.proj .key { color: var(--accent); }
+.chute.verb .key { color: var(--good); }
+.chute.meta .key { color: var(--muted); }
+.chute.flash { background: rgba(79,214,232,.18); border-color: var(--accent); }
+.chute.lit { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(79,214,232,.4); }
+.chute[disabled] { opacity: .35; cursor: default; }
+
+.toast { position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; font-size: 13px; pointer-events: none; opacity: 0; transition: opacity .2s; max-width: 90vw; }
+.toast.on { opacity: 1; }
+[hidden] { display: none !important; }
+.modal { position: fixed; inset: 0; background: rgba(7,11,18,.82); display: grid; place-items: center; padding: 16px; }
+.sheet { width: min(640px, 100%); max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px; display: grid; gap: 12px; }
+.sheet h2 { font-family: var(--display); letter-spacing: .1em; text-transform: uppercase; font-size: 18px; margin: 0; color: var(--good); }
+.sheet .big { font-family: var(--display); font-size: 28px; }
+.sheet ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+.sheet .muted, .muted { color: var(--muted); }
+.sheet .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { border: 1px solid var(--accent); background: rgba(79,214,232,.1); color: var(--ink); border-radius: 5px; padding: 8px 14px; cursor: pointer; font-family: var(--display); letter-spacing: .06em; }
+.btn.quiet { border-color: var(--line); background: transparent; }
+.reasons { display: grid; gap: 6px; }
+.reasons button { text-align: left; border: 1px solid var(--line); background: var(--panel-2); border-radius: 5px; padding: 8px 10px; cursor: pointer; }
+.reasons button:hover, .reasons button:focus-visible { border-color: var(--accent); outline: none; }
+kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; background: var(--panel-2); }
+.keys { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) { .crate, .chute, .toast { transition: none; } }
+</style>
+</head>
+<body>
+<div class="practice">Practice shift · practice data · nothing is written to SoftwareFactory · $0 real spend</div>
+<header>
+  <h1>The Dock</h1>
+  <div class="hud">
+    <span class="fuel">FUEL <b id="fuel">$10.00</b> practice cap</span>
+    <span>ON BELT <b id="left">14</b></span>
+    <span>ORDERS <b id="orders">0</b></span>
+    <span class="idle">IDLE AGENTS <b id="idle">2</b></span>
+    <span>SHIFT <b id="clock">0:00</b></span>
+    <button id="mute" class="btn quiet" style="padding:2px 8px;font-size:11px">Sound off</button>
+  </div>
+</header>
+
+<div class="belt" id="belt" aria-label="Incoming items"></div>
+
+<div class="stage">
+  <div class="focus-card" id="focus"></div>
+  <div class="side">
+    <div class="agents" id="agents"></div>
+    <div class="log" id="log"><div class="h">THIS SHIFT</div></div>
+  </div>
+</div>
+
+<div class="chutes" id="chutes"></div>
+<div class="keys">
+  <span><kbd>Enter</kbd> take the guess</span><span><kbd>1</kbd>–<kbd>4</kbd> send to project</span><span><kbd>A</kbd> approve</span><span><kbd>P</kbd> park</span><span><kbd>N</kbd> noise</span><span><kbd>L</kbd> lash to next</span><span>hold <kbd>Space</kbd> preview</span><span><kbd>U</kbd> undo</span><span><kbd>Esc</kbd> end shift</span>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="modal" id="modal" hidden></div>
+
+<script>
+"use strict";
+// ---- practice data -------------------------------------------------------
+const PROJECTS = [
+  { n: 1, name: "SoftwareFactory", key: "SF", kind: "SYSTEM", next: 43 },
+  { n: 2, name: "Word Counter", key: "WC", kind: "APP", next: 12 },
+  { n: 3, name: "Habit Tracker", key: "HT", kind: "APP", next: 8 },
+  { n: 4, name: "Recipe Box", key: "RB", kind: "APP", next: 1 },
+];
+const AGENTS = [
+  { name: "Mason", role: "builder", model: "Sonnet", waitsFor: 2 },
+  { name: "Warden", role: "tester", model: "Sonnet", waitsFor: 13 },
+  { name: "Scout", role: "sorter", model: "Haiku", waitsFor: null },
+];
+const ITEMS = [
+  { id: 1, kind: "idea", p: 1, text: "Show what each agent cost per loop, not just per day.", guess: { verb: "ticket", p: 1 } },
+  { id: 2, kind: "gate", p: 1, text: "Spec for Order Engine v2 is ready. Approve to start the build.", guess: { verb: "approve" }, price: 0.9, wakes: "Mason" },
+  { id: 3, kind: "idea", p: 2, text: "Count should ignore code blocks in markdown.", guess: { verb: "ticket", p: 2 } },
+  { id: 4, kind: "bug", p: 2, text: "Count shows NaN on an empty paste.", guess: { verb: "ticket", p: 2 } },
+  { id: 5, kind: "idea", p: 3, text: "Remind me at 8pm if I haven't ticked anything.", guess: { verb: "ticket", p: 3 }, family: "reminders" },
+  { id: 6, kind: "idea", p: 3, text: "Let reminders stay quiet on weekends.", guess: { verb: "ticket", p: 3 }, family: "reminders" },
+  { id: 7, kind: "idea", p: 3, text: "Weekly summary of my habits by email.", guess: { verb: "ticket", p: 3 }, family: "reminders" },
+  { id: 8, kind: "idea", p: 4, text: "Scale a recipe's servings up and down.", guess: { verb: "ticket", p: 4 } },
+  { id: 9, kind: "idea", p: 4, text: "Import a recipe from a photo of a cookbook page.", guess: { verb: "park", reason: "Too big for now" }, price: 4.2, explore: true },
+  { id: 10, kind: "proposal", p: 1, text: "Fix-loop retry limit is too high: it burned $6 last week. Lower it to 3.", guess: { verb: "approve" } },
+  { id: 11, kind: "idea", p: null, text: "make it feel faster", guess: { verb: "park", reason: "Needs a clearer ask" } },
+  { id: 12, kind: "noise", p: null, text: "asdf test test", guess: { verb: "noise" } },
+  { id: 13, kind: "run", p: 3, text: "Streak view is built. Review the diff and accept it.", guess: { verb: "approve" }, wakes: "Warden" },
+  { id: 14, kind: "idea", p: 2, text: "Count words but skip code blocks", guess: { verb: "lash", with: 3 }, dupOf: 3 },
+];
+const KIND = { idea: "Idea", gate: "Gate · waiting on you", bug: "Bug", proposal: "Improvement proposal", run: "Finished run", noise: "Raw note" };
+const PARK_REASONS = ["Too big for now", "Needs a clearer ask", "Waiting on something else"];
+
+// ---- state ---------------------------------------------------------------
+let belt, done, history, fuel, started, focusIdx, keyCounters, lashes;
+function reset() {
+  belt = ITEMS.map((x) => ({ ...x, lashed: [] }));
+  done = []; history = []; fuel = 10; started = null; focusIdx = 0; lashes = 0;
+  keyCounters = Object.fromEntries(PROJECTS.map((p) => [p.key, p.next]));
+  AGENTS.forEach((a) => (a.busy = false));
+  document.getElementById("log").innerHTML = '<div class="h">THIS SHIFT</div>';
+  closeModal(); draw();
+}
+const proj = (n) => PROJECTS.find((p) => p.n === n);
+const cur = () => belt[focusIdx];
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+// ---- sound (tiny, optional) ---------------------------------------------
+let ac = null, soundOn = false;
+function tone(f, d = 0.08, type = "sine", v = 0.05) {
+  if (!soundOn) return;
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = f; g.gain.value = v;
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + d);
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + d);
+  } catch (e) { /* no audio */ }
+}
+$("mute").onclick = () => { soundOn = !soundOn; $("mute").textContent = soundOn ? "Sound on" : "Sound off"; tone(660); };
+
+// ---- drawing -------------------------------------------------------------
+function draw() {
+  const b = $("belt");
+  const shown = belt.slice(0, 7);
+  b.innerHTML = shown.length ? shown.map((x, i) => `
+    <button class="crate ${x.kind}${i === focusIdx ? " focus" : ""}${i >= 5 ? " next" : ""}" data-i="${i}" aria-label="${esc(KIND[x.kind])}: ${esc(x.text)}">
+      <span class="k">${esc(x.kind === "gate" ? "gate" : x.kind)}${x.p ? " · " + proj(x.p).key : ""}</span>
+      <span class="t">${esc(x.text)}</span>
+      ${x.lashed.length ? `<span class="lash">+${x.lashed.length} lashed</span>` : ""}
+    </button>`).join("") : '<span class="empty">The belt is empty.</span>';
+  b.querySelectorAll(".crate").forEach((el) => (el.onclick = () => { focusIdx = +el.dataset.i; draw(); }));
+
+  const x = cur();
+  const f = $("focus");
+  if (!x) { f.innerHTML = '<div class="kind">Dock is quiet</div><div class="text">Everything is cleared.</div>'; }
+  else {
+    const g = x.guess, gp = g.p ? proj(g.p).name : null;
+    const guessText = g.verb === "ticket" ? `make a ticket in <b>${esc(gp)}</b>`
+      : g.verb === "approve" ? `<b>${x.kind === "gate" ? "approve" : "accept"}</b>`
+      : g.verb === "park" ? `<b>park</b> (${esc(g.reason)})`
+      : g.verb === "noise" ? `<b>noise</b>, archive it`
+      : g.verb === "lash" ? (dupDone(x) ? `<b>merge</b> into ${esc(dupDone(x).key)}, its duplicate` : `<b>lash</b> to the duplicate already on the belt`) : "";
+    f.innerHTML = `
+      <div class="kind">${esc(KIND[x.kind])}${x.p ? " · " + esc(proj(x.p).name) : ""}</div>
+      <div class="text">${esc(x.text)}</div>
+      ${x.lashed.length ? `<div class="lashes">Lashed with: ${x.lashed.map((l) => "“" + esc(l.text) + "”").join(", ")}</div>` : ""}
+      <div class="guess">Order Engine guess: ${guessText} · <kbd>Enter</kbd></div>
+      ${x.price ? `<div class="price">${x.explore ? "Sending it to a project starts an explorer" : "Approving starts a run"}: about $${x.price.toFixed(2)}. Hold ${x.explore ? "its project key" : "<kbd>Enter</kbd>"} or the chute to spend.</div><div class="hold"><span id="holdbar"></span></div>` : ""}
+      <div id="ghost"></div>
+      <div class="hint">Hold <kbd>Space</kbd> to see what a choice will do, without doing it.</div>`;
+  }
+  drawChutes(); drawAgents();
+  $("left").textContent = belt.length;
+  $("orders").textContent = done.filter((d) => d.verb === "ticket" || d.verb === "approve").length;
+  $("fuel").textContent = "$" + fuel.toFixed(2);
+  $("idle").textContent = AGENTS.filter((a) => !a.busy).length;
+}
+function drawChutes() {
+  const x = cur();
+  const lit = x && x.guess;
+  const c = PROJECTS.map((p) => `<button class="chute proj${lit && lit.verb === "ticket" && lit.p === p.n ? " lit" : ""}" data-act="p${p.n}" ${!x || x.kind === "gate" || x.kind === "run" || x.kind === "proposal" ? "disabled" : ""}>
+      <span class="key">${p.n}</span><span class="name">${esc(p.name)}</span><span class="sub">${p.kind} · ticket ${p.key}-${keyCounters[p.key]}</span></button>`).join("")
+    + `<button class="chute verb${lit && lit.verb === "approve" ? " lit" : ""}" data-act="a" ${!x || !["gate", "proposal", "run"].includes(x.kind) ? "disabled" : ""}><span class="key">A</span><span class="name">Approve</span><span class="sub">gate, proposal, run</span></button>`
+    + `<button class="chute meta${lit && lit.verb === "park" ? " lit" : ""}" data-act="park" ${!x ? "disabled" : ""}><span class="key">P</span><span class="name">Park</span><span class="sub">with a reason</span></button>`
+    + `<button class="chute meta${lit && lit.verb === "noise" ? " lit" : ""}" data-act="n" ${!x ? "disabled" : ""}><span class="key">N</span><span class="name">Noise</span><span class="sub">archive</span></button>`
+    + `<button class="chute meta${lit && lit.verb === "lash" ? " lit" : ""}" data-act="l" ${!x || (belt.length < 2 && !dupDone(x)) ? "disabled" : ""}><span class="key">L</span><span class="name">${dupDone(x) ? "Merge" : "Lash"}</span><span class="sub">${dupDone(x) ? "into " + esc(dupDone(x).key) : "join with " + (lit && lit.verb === "lash" ? "its duplicate" : "the next item")}</span></button>`;
+  $("chutes").innerHTML = c;
+  $("chutes").querySelectorAll(".chute").forEach((el) => {
+    el.onpointerdown = (e) => { if (el.disabled) return; e.preventDefault(); act(el.dataset.act, el); };
+    el.onpointerup = el.onpointerleave = () => cancelHold();
+    el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); act(el.dataset.act, el); } };
+  });
+}
+function drawAgents() {
+  $("agents").innerHTML = '<div class="h">AGENTS</div>' + AGENTS.map((a) => {
+    const blocked = a.waitsFor && belt.some((x) => x.id === a.waitsFor);
+    const st = a.busy ? "busy" : "idle";
+    const why = a.busy ? "working" : blocked ? `waiting on #${a.waitsFor}` : "idle";
+    return `<div class="agent"><span>${a.name} <span class="muted">· ${a.role}, ${a.model}</span></span><span class="st ${st}">${why}</span></div>`;
+  }).join("");
+}
+function logRow(cls, key, text) {
+  const r = document.createElement("div");
+  r.className = "row " + cls;
+  r.innerHTML = `<span class="key">${esc(key)}</span><span>${esc(text)}</span>`;
+  $("log").appendChild(r); $("log").scrollTop = 1e6;
+  return r;
+}
+let toastT;
+function toast(msg) { const t = $("toast"); t.innerHTML = msg; t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), 1800); }
+function flash(el) { if (!el) return; el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 260); }
+
+// ---- actions -------------------------------------------------------------
+/** A duplicate whose twin already became a ticket merges into that ticket. */
+function dupDone(x) {
+  if (!x || x.guess.verb !== "lash") return null;
+  if (belt.some((b) => b.id === x.guess.with)) return null;
+  return done.find((d) => d.item.id === x.guess.with && d.verb === "ticket") || null;
+}
+function chuteEl(act) { return $("chutes").querySelector(`[data-act="${act}"]`); }
+function begin() { if (!started) started = Date.now(); }
+function commit(rec, item, el) {
+  begin();
+  rec.item = item; rec.at = Date.now();
+  history.push({ rec, item, idx: focusIdx, fuel, counters: { ...keyCounters }, busy: AGENTS.map((a) => a.busy) });
+  done.push(rec);
+  belt.splice(focusIdx, 1);
+  if (focusIdx >= belt.length) focusIdx = Math.max(0, belt.length - 1);
+  rec.row = logRow(rec.cls, rec.key, rec.line);
+  flash(el);
+  draw();
+  if (!belt.length) setTimeout(receipt, 450);
+}
+function ticket(x, p, el, paid) {
+  if (x.kind === "gate" || x.kind === "run" || x.kind === "proposal") { toast("That item takes <kbd>A</kbd> or <kbd>P</kbd>."); tone(180, .1, "square", .03); return; }
+  if (x.explore && !paid) { startHold(() => ticket(x, p, el, true), el); return; }
+  if (x.explore) fuel = Math.max(0, fuel - x.price);
+  const pr = proj(p);
+  const key = `${pr.key}-${keyCounters[pr.key]++}`;
+  const extra = x.lashed.length ? ` (with ${x.lashed.length} lashed)` : "";
+  tone(320, .12, "triangle");
+  commit({ verb: "ticket", key, cls: "ok", line: `Ticket in ${pr.name}${extra}${x.explore ? ", explorer started" : ""}: ${x.text}`, project: pr.name, spent: x.explore ? x.price : 0 }, x, el);
+  toast(`<b>${key}</b> · ${esc(pr.name)} · practice${x.explore ? ` · $${x.price.toFixed(2)} from practice fuel` : ""}`);
+}
+function approve(x, el, paid) {
+  if (!["gate", "proposal", "run"].includes(x.kind)) { toast("Only gates, proposals and finished runs can be approved."); return; }
+  if (x.price && !paid) { startHold(() => approve(x, el, true), el); return; }
+  if (x.price) fuel = Math.max(0, fuel - x.price);
+  let line = x.kind === "gate" ? `Approved: ${x.text}` : x.kind === "proposal" ? `Accepted proposal, became ticket SF-${keyCounters.SF++}` : `Accepted run: ${x.text}`;
+  if (x.wakes) { const a = AGENTS.find((g) => g.name === x.wakes); if (a) { a.busy = true; line += ` ${a.name} starts.`; } }
+  tone(520, .1); tone(780, .12);
+  commit({ verb: "approve", key: x.kind === "gate" ? "GATE" : x.kind === "run" ? "RUN" : "PROP", cls: "ok", line, spent: x.price || 0 }, x, el);
+  toast(x.price ? `Approved · $${x.price.toFixed(2)} from practice fuel` : "Approved · practice");
+}
+function park(x, reason, el) {
+  tone(240, .06);
+  commit({ verb: "park", key: "PARK", cls: "park", line: `${x.text} (${reason})`, reason }, x, el);
+}
+function askPark(x, el) {
+  const g = x.guess.verb === "park" ? x.guess.reason : null;
+  openModal(`<div class="sheet"><h2 style="color:var(--ink)">Park with a reason</h2><p class="muted">${esc(x.text)}</p><div class="reasons">${PARK_REASONS.map((r, i) => `<button data-r="${i}">${i + 1} · ${esc(r)}${r === g ? " <span class=\"muted\">(guess)</span>" : ""}</button>`).join("")}</div><p class="muted">Parked items come back when they get stale, so nothing is lost.</p></div>`);
+  $("modal").querySelectorAll("[data-r]").forEach((b) => (b.onclick = () => { closeModal(); park(x, PARK_REASONS[+b.dataset.r], el); }));
+  modalKeys = (k) => { const n = +k; if (n >= 1 && n <= 3) { closeModal(); park(x, PARK_REASONS[n - 1], el); return true; } if (k === "Escape") { closeModal(); return true; } };
+  $("modal").querySelector("[data-r]").focus();
+}
+function noise(x, el) {
+  tone(140, .08, "sawtooth", .02);
+  commit({ verb: "noise", key: "NOISE", cls: "park", line: x.text }, x, el);
+}
+function lash(x, el) {
+  begin();
+  const twin = dupDone(x);
+  if (twin) {
+    tone(420, .07);
+    commit({ verb: "merge", key: twin.key, cls: "ok", line: `Merged into ${twin.key}: ${x.text}` }, x, el);
+    toast(`Merged into <b>${twin.key}</b> · practice`);
+    return;
+  }
+  let j = x.guess.verb === "lash" ? belt.findIndex((b) => b.id === x.guess.with) : -1;
+  if (j < 0) {
+    // lash to the next item on the belt
+    j = focusIdx + 1 < belt.length ? focusIdx + 1 : focusIdx - 1;
+  }
+  if (j < 0 || j === focusIdx) return;
+  const target = belt[j];
+  history.push({ lash: true, item: x, target, idx: focusIdx, fuel, counters: { ...keyCounters }, busy: AGENTS.map((a) => a.busy) });
+  target.lashed.push(x, ...x.lashed);
+  belt.splice(focusIdx, 1);
+  lashes++;
+  focusIdx = belt.indexOf(target);
+  tone(420, .07); tone(460, .07);
+  logRow("", "LASH", `“${x.text}” joined “${target.text}”`);
+  flash(el); draw();
+  toast("Lashed. They will become one order.");
+}
+function undo() {
+  const h = history.pop();
+  if (!h) { toast("Nothing to undo."); return; }
+  if (h.lash) {
+    h.target.lashed = h.target.lashed.filter((l) => l !== h.item && !h.item.lashed.includes(l));
+    belt.splice(h.idx, 0, h.item); lashes--;
+  } else {
+    done.pop(); if (h.rec.row) h.rec.row.remove();
+    belt.splice(h.idx, 0, h.item);
+  }
+  fuel = h.fuel; keyCounters = h.counters; AGENTS.forEach((a, i) => (a.busy = h.busy[i]));
+  focusIdx = h.idx; logRow("park", "UNDO", h.item.text); draw(); tone(300, .05);
+}
+function act(a, el) {
+  const x = cur(); if (!x) return;
+  el = el || chuteEl(a);
+  if (a[0] === "p" && a.length === 2) return ticket(x, +a[1], el);
+  if (a === "a") return approve(x, el);
+  if (a === "park") return askPark(x, el);
+  if (a === "n") return noise(x, el);
+  if (a === "l") return lash(x, el);
+  if (a === "guess") {
+    const g = x.guess;
+    if (x.price && x.explore && g.verb === "park") return park(x, g.reason, chuteEl("park"));
+    if (g.verb === "ticket") return ticket(x, g.p, chuteEl("p" + g.p));
+    if (g.verb === "approve") return approve(x, chuteEl("a"));
+    if (g.verb === "park") return park(x, g.reason, chuteEl("park"));
+    if (g.verb === "noise") return noise(x, chuteEl("n"));
+    if (g.verb === "lash") return lash(x, chuteEl("l"));
+  }
+}
+
+// ---- hold to spend --------------------------------------------------------
+let hold = null;
+function startHold(done, el) {
+  if (hold) return;
+  const x = cur();
+  if (fuel < (x.price || 0)) { toast("Not enough fuel left today. It stays on the belt."); return; }
+  const t0 = performance.now(), need = 1000;
+  hold = { raf: 0 };
+  toast(`Hold to spend $${x.price.toFixed(2)}…`);
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / need);
+    const bar = $("holdbar"); if (bar) bar.style.width = k * 100 + "%";
+    if (k >= 1) { hold = null; done(); return; }
+    hold.raf = requestAnimationFrame(step);
+  };
+  hold.raf = requestAnimationFrame(step);
+}
+function cancelHold() {
+  if (!hold) return;
+  cancelAnimationFrame(hold.raf); hold = null;
+  const bar = $("holdbar"); if (bar) bar.style.width = "0";
+  toast("Let go. Nothing was spent.");
+}
+
+// ---- ghost ship preview ---------------------------------------------------
+function ghost(on) {
+  const g = $("ghost"); const x = cur(); if (!g || !x) return;
+  if (!on) { g.innerHTML = ""; return; }
+  const v = x.guess.verb;
+  let lines = [];
+  if (v === "ticket") { const p = proj(x.guess.p); lines = [`New ticket ${p.key}-${keyCounters[p.key]} in ${p.name}`, x.lashed.length ? `${x.lashed.length} lashed notes go in its description` : "No agent wakes. No cost."]; }
+  if (v === "approve") lines = [x.kind === "gate" ? "The loop moves from Spec to Build" : x.kind === "proposal" ? `New ticket SF-${keyCounters.SF} with the proposal` : "The run is accepted and merged into the project", x.wakes ? `${x.wakes} wakes up and starts` : "No agent wakes", x.price ? `Costs about $${x.price.toFixed(2)} of today's fuel` : "No cost"];
+  if (v === "park") lines = [`Parked: ${x.guess.reason}`, x.explore ? `Saves the $${x.price.toFixed(2)} exploration for later` : "It returns when it gets stale", "No cost"];
+  if (v === "noise") lines = ["Archived as noise", "The Order Engine learns from it", "No cost"];
+  if (v === "lash") lines = dupDone(x) ? [`Merges into ${dupDone(x).key}, the ticket its twin became`, "No new ticket", "No cost"] : ["Joins the matching idea already on the belt", "Two notes become one order", "No cost"];
+  g.innerHTML = `<div class="ghost"><span class="h">PREVIEW · NOTHING CHANGES</span>${lines.map((l) => `<span>${esc(l)}</span>`).join("")}</div>`;
+}
+
+// ---- receipt --------------------------------------------------------------
+function receipt() {
+  const secs = started ? Math.round((Date.now() - started) / 1000) : 0;
+  const items = ITEMS.length - belt.length;
+  const tickets = done.filter((d) => d.verb === "ticket");
+  const approvals = done.filter((d) => d.verb === "approve");
+  const parks = done.filter((d) => d.verb === "park");
+  const noiseN = done.filter((d) => d.verb === "noise").length;
+  const merges = done.filter((d) => d.verb === "merge");
+  const spent = done.reduce((s, d) => s + (d.spent || 0), 0);
+  const notTaken = ITEMS.filter((i) => i.price && !done.some((d) => d.item.id === i.id && d.spent)).reduce((s, i) => s + i.price, 0);
+  const clicks = items * 9;
+  openModal(`<div class="sheet">
+    <h2>${belt.length ? "Shift ended early" : "Dock clear"}</h2>
+    <div class="big">${items} items · ${done.filter((d) => d.verb === "ticket" || d.verb === "approve").length} orders</div>
+    <div class="muted">Cleared in ${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s with about ${items + lashes} key presses. Our rough estimate for the normal screens is ${clicks} clicks (about 9 per item); the real version will measure both.</div>
+    ${tickets.length ? `<div><b>Tickets</b><ul>${tickets.map((t) => `<li><span style="font-family:var(--mono);color:var(--accent)">${t.key}</span> ${esc(t.line)}</li>`).join("")}</ul></div>` : ""}
+    ${approvals.length ? `<div><b>Approved</b><ul>${approvals.map((t) => `<li>${esc(t.line)}</li>`).join("")}</ul></div>` : ""}
+    ${parks.length ? `<div><b>Parked</b><ul>${parks.map((t) => `<li>${esc(t.line)}</li>`).join("")}</ul></div>` : ""}
+    ${merges.length ? `<div><b>Merged duplicates</b><ul>${merges.map((t) => `<li>${esc(t.line)}</li>`).join("")}</ul></div>` : ""}
+    ${noiseN ? `<div class="muted">${noiseN} noise archived.</div>` : ""}
+    ${belt.length ? `<div><b>Left on the belt</b><ul>${belt.map((t) => `<li>${esc(t.text)}</li>`).join("")}</ul></div>` : ""}
+    <div><b>Spend</b> $${spent.toFixed(2)} practice${notTaken ? ` · $${notTaken.toFixed(2)} priced but not spent` : ""}</div>
+    <div class="muted">In a real shift these would be ${tickets.length} tickets and ${approvals.length} approvals in SoftwareFactory, each linked to its record. This was practice, so nothing was written.</div>
+    <div class="row"><button class="btn" id="again">Run another practice shift</button>${belt.length ? '<button class="btn quiet" id="back">Back to the belt</button>' : ""}</div>
+  </div>`);
+  $("again").onclick = reset;
+  if ($("back")) $("back").onclick = closeModal;
+  modalKeys = (k) => { if (k === "Escape" && belt.length) { closeModal(); return true; } };
+  tone(660, .1); setTimeout(() => tone(880, .16), 110);
+}
+let modalKeys = null;
+function openModal(html) { const m = $("modal"); m.innerHTML = html; m.hidden = false; }
+function closeModal() { const m = $("modal"); m.hidden = true; m.innerHTML = ""; modalKeys = null; }
+
+// ---- keys ----------------------------------------------------------------
+let spaceDown = false, enterHold = false;
+document.addEventListener("keydown", (e) => {
+  if (!$("modal").hidden) { if (modalKeys && modalKeys(e.key)) e.preventDefault(); return; }
+  if (e.target.closest && e.target.closest(".chute") && (e.key === "Enter" || e.key === " ")) return;
+  const k = e.key.toLowerCase();
+  if (k === " ") { e.preventDefault(); if (!spaceDown) { spaceDown = true; ghost(true); } return; }
+  if (e.repeat) return;
+  if (k === "enter") {
+    e.preventDefault();
+    const x = cur(); if (!x) return;
+    if (x.price && x.guess.verb === "approve") { enterHold = true; approve(x, chuteEl("a")); return; }
+    return act("guess");
+  }
+  if (["1", "2", "3", "4"].includes(k)) {
+    const x = cur(); if (x && x.explore) enterHold = true;
+    return act("p" + k);
+  }
+  if (k === "a") { const x = cur(); if (x && x.price) enterHold = true; return act("a"); }
+  if (k === "p") return act("park");
+  if (k === "n") return act("n");
+  if (k === "l") return act("l");
+  if (k === "u") return undo();
+  if (k === "arrowright") { focusIdx = Math.min(belt.length - 1, focusIdx + 1); draw(); }
+  if (k === "arrowleft") { focusIdx = Math.max(0, focusIdx - 1); draw(); }
+  if (k === "escape") receipt();
+});
+document.addEventListener("keyup", (e) => {
+  if (e.key === " ") { spaceDown = false; ghost(false); }
+  if ((e.key === "Enter" || /^[1-4a]$/i.test(e.key)) && enterHold) { enterHold = false; cancelHold(); }
+});
+setInterval(() => {
+  if (!started || document.hidden || !$("modal").hidden) return;
+  const s = Math.round((Date.now() - started) / 1000);
+  $("clock").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}, 1000);
+reset();
+</script>
+</body>
+</html>

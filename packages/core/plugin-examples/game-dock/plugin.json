@@ -1,0 +1,10 @@
+{
+  "id": "game-dock",
+  "name": "Game demo: The Dock",
+  "version": "0.1.0",
+  "description": "Practice demo of a game door into SoftwareFactory: clear a belt of ideas, gates, bugs and proposals with one key each, then get a receipt. Practice data only; it writes nothing and spends nothing.",
+  "permissions": [],
+  "panels": [
+    { "id": "play", "title": "The Dock (demo)", "entry": "ui/index.html", "where": "page", "order": 60 }
+  ]
+}
