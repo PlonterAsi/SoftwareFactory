@@ -3,414 +3,1527 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The Sector</title>
+<title>Sector</title>
 <style>
-/* The Sector: practice map. Canvas 2D at 30 fps, paused when hidden. Tokens follow the Bridge. */
+/* Sector v2: a real-time base builder over SoftwareFactory. Canvas 2D, 30 fps cap, paused when hidden, no WebGL.
+   Tokens follow Foundry Glass (docs/design.md). Practice data only. */
 :root {
   color-scheme: dark;
-  --bg: #070b12; --panel: #0c1320; --panel-2: #101a2b; --line: #1c2a40; --grid: #142034;
-  --ink: #d9e4f2; --muted: #8195b0; --accent: #4fd6e8; --gate: #f2b34b; --bad: #ff6b6b; --good: #5ee0a0;
-  --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
-  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  --mono: "IBM Plex Mono", Consolas, ui-monospace, monospace;
+  --bg: #0b0d10; --shell: #0f1216; --panel: #14181d; --panel-2: #1a1f26; --hover: #20262e;
+  --line: rgba(255,255,255,.085); --line-2: rgba(255,255,255,.14); --line-3: rgba(255,255,255,.24);
+  --ink: #f2f0eb; --ink-2: #c4c9d1; --muted: #9aa2ad;
+  --accent: #4fd1c1; --gate: #f5b14c; --good: #8fd47a; --bad: #ff6b5e; --agent: #a99bff;
+  --sans: Geist, "Segoe UI", system-ui, sans-serif;
+  --mono: "Geist Mono", Consolas, ui-monospace, monospace;
+  --ease: cubic-bezier(.2,.7,.2,1);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html, body { margin: 0; }
-body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--body); padding: 14px max(16px, env(safe-area-inset-left, 0px)) 24px max(16px, env(safe-area-inset-right, 0px)); }
-.practice { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; color: var(--gate); border: 1px dashed rgba(242,179,75,.5); border-radius: 4px; padding: 5px 10px; margin-bottom: 12px; }
-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; margin-bottom: 10px; }
-h1 { font-family: var(--display); font-weight: 600; letter-spacing: .12em; font-size: 20px; margin: 0; text-transform: uppercase; }
-.hud { display: flex; flex-wrap: wrap; gap: 6px 18px; font-family: var(--mono); font-size: 12px; color: var(--muted); align-items: center; }
-.hud b { color: var(--ink); font-weight: 500; }
-.hud .fuel b { color: var(--good); } .hud .att b { color: var(--gate); }
-.layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 12px; }
-@media (max-width: 680px) { .layout { grid-template-columns: 1fr; } }
-.mapbox { position: relative; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
-canvas { display: block; width: 100%; height: auto; cursor: crosshair; touch-action: none; }
-.side { display: grid; gap: 10px; align-content: start; }
-.card { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 12px; display: grid; gap: 8px; }
-.card .h { font: 11px var(--mono); letter-spacing: .14em; color: var(--muted); text-transform: uppercase; }
-.card .title { font-family: var(--display); font-weight: 600; font-size: 16px; }
-.card p { margin: 0; font-size: 13px; }
-.muted { color: var(--muted); }
-.price { font-family: var(--mono); font-size: 12px; color: var(--gate); }
-.btns { display: flex; flex-wrap: wrap; gap: 6px; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.45 var(--sans); overflow: hidden; }
 button { font: inherit; color: inherit; }
-.btn { border: 1px solid var(--accent); background: rgba(79,214,232,.1); color: var(--ink); border-radius: 5px; padding: 6px 12px; cursor: pointer; font-family: var(--display); letter-spacing: .04em; font-size: 13px; position: relative; overflow: hidden; }
-.btn.gate { border-color: var(--gate); background: rgba(242,179,75,.1); }
-.btn.quiet { border-color: var(--line); background: transparent; }
-.btn .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(242,179,75,.35); pointer-events: none; }
-.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-input[type=text] { width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; color: var(--ink); padding: 7px 9px; font: inherit; }
-input[type=text]:focus { outline: none; border-color: var(--accent); }
-.agents { display: grid; gap: 4px; }
-.agent { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; padding: 5px 6px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; font-size: 12px; text-align: left; background: none; }
-.agent:hover, .agent.sel { border-color: var(--accent); }
-.agent .k { font-family: var(--mono); color: var(--accent); }
-.agent .st { font-family: var(--mono); font-size: 11px; }
-.st.idle { color: var(--gate); } .st.busy { color: var(--accent); } .st.walk { color: var(--muted); }
-.log { font-size: 12px; display: grid; gap: 4px; max-height: 190px; overflow: auto; }
-.log .row { display: flex; gap: 8px; }
-.log .row .t { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
-.keys { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; }
-kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; background: var(--panel-2); }
-.toast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 7px 14px; font-size: 13px; pointer-events: none; opacity: 0; transition: opacity .2s; max-width: 90%; text-align: center; }
-.toast.on { opacity: 1; }
-.modal { position: fixed; inset: 0; background: rgba(7,11,18,.84); display: grid; place-items: center; padding: 16px; }
-.sheet { width: min(620px, 100%); max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px; display: grid; gap: 12px; }
-.sheet h2 { font-family: var(--display); letter-spacing: .1em; text-transform: uppercase; font-size: 18px; margin: 0; color: var(--good); }
-.sheet ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
-@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+.app { height: 100vh; min-height: 480px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+
+/* Top bar: resources */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 8px 14px; background: var(--shell); border-bottom: 1px solid var(--line); }
+.brand { font-weight: 600; letter-spacing: .02em; font-size: 16px; display: flex; gap: 8px; align-items: baseline; }
+.brand small { color: var(--muted); font-weight: 400; font-size: 13px; }
+.res { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; font-size: 13px; color: var(--ink-2); }
+.res span { display: inline-flex; gap: 6px; align-items: baseline; white-space: nowrap; }
+.res b { font: 500 13px var(--mono); color: var(--ink); }
+.res .cr b { color: var(--good); } .res .pw b { color: var(--agent); } .res .rn b { color: var(--ink); }
+.res .bc b { color: var(--gate); }
+.res .low b { color: var(--bad); }
+.rankbar { display: inline-block; width: 70px; height: 5px; border-radius: 3px; background: var(--hover); overflow: hidden; vertical-align: middle; }
+.rankbar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .26s var(--ease); }
+.ctl { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.chip { border: 1px solid var(--line-2); background: var(--panel); border-radius: 6px; padding: 3px 9px; cursor: pointer; font: 500 12.5px var(--mono); color: var(--ink-2); transition: border-color .12s var(--ease), transform .12s var(--ease); }
+.chip:hover { border-color: var(--line-3); color: var(--ink); }
+.chip:active { transform: scale(.98); }
+.chip.on { border-color: var(--accent); color: var(--accent); }
+.clock { font: 500 12.5px var(--mono); color: var(--ink-2); }
+
+/* Middle: map and side panel */
+.mid { display: grid; grid-template-columns: minmax(0, 1fr) 290px; min-height: 0; }
+.stage { position: relative; min-height: 0; overflow: hidden; background: #090b0e; }
+#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; touch-action: none; }
+#mini { position: absolute; left: 10px; bottom: 10px; width: 200px; height: 136px; border: 1px solid var(--line-2); border-radius: 6px; background: rgba(11,13,16,.88); cursor: pointer; }
+.practice { position: absolute; top: 8px; left: 10px; font: 12.5px var(--mono); color: var(--muted); background: rgba(11,13,16,.75); border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; pointer-events: none; }
+.hint { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); font-size: 13px; color: var(--ink); background: rgba(20,24,29,.92); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 12px; pointer-events: none; white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; }
+.toasts { position: absolute; top: 74px; left: 50%; transform: translateX(-50%); display: grid; gap: 6px; justify-items: center; pointer-events: none; width: min(520px, calc(100% - 20px)); }
+.toast { font-size: 14px; background: rgba(20,24,29,.95); border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 14px; animation: tin .26s var(--ease); text-align: center; }
+.toast.big { font-size: 16px; border-color: var(--accent); padding: 10px 18px; }
+.toast.big b { color: var(--accent); }
+.toast.bad { border-color: var(--bad); }
+@keyframes tin { from { opacity: 0; transform: translateY(-6px); } }
+
+/* Gate bar: decisions waiting on you, shaped like the app's GateBar */
+.gate { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); width: min(600px, calc(100% - 230px)); min-width: 300px; background: var(--panel); border: 1px solid var(--gate); border-radius: 10px; padding: 12px 14px; display: grid; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.gate .gh { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.gate .gk { font: 500 12.5px var(--mono); color: var(--gate); }
+.gate .gt { font-weight: 600; }
+.gate .gn { margin-left: auto; font: 12.5px var(--mono); color: var(--muted); }
+.gate p { margin: 0; font-size: 14px; color: var(--ink-2); }
+.gate .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.gate input { flex: 1; min-width: 140px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); padding: 6px 9px; font: 14px var(--sans); }
+.btn { border: 1px solid var(--line-2); background: var(--panel-2); border-radius: 7px; padding: 6px 12px; cursor: pointer; font-size: 14px; transition: border-color .12s var(--ease), transform .12s var(--ease), background .12s var(--ease); }
+.btn:hover { border-color: var(--line-3); background: var(--hover); }
+.btn:active { transform: scale(.98); }
+.btn:focus-visible, .chip:focus-visible, .bb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.ok { border-color: var(--accent); color: var(--bg); background: var(--accent); font-weight: 600; }
+.btn.ok:hover { filter: brightness(1.08); }
+.btn kbd, .bb kbd { font: 12.5px var(--mono); opacity: .75; margin-left: 6px; }
+
+/* Side panel */
+.side { background: var(--shell); border-left: 1px solid var(--line); overflow-y: auto; display: grid; align-content: start; gap: 0; }
+.sec { padding: 12px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+.sec h3 { margin: 0; font-size: 13px; font-weight: 500; color: var(--muted); display: flex; justify-content: space-between; }
+.mis { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.mis .mt { font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; }
+.mis .mt span { font: 12.5px var(--mono); color: var(--accent); white-space: nowrap; }
+.mis p { margin: 0; font-size: 13px; color: var(--ink-2); }
+.bar { height: 5px; border-radius: 3px; background: var(--hover); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); transition: width .26s var(--ease); }
+.mis.done { border-color: rgba(143,212,122,.5); }
+.mis.done .bar i { background: var(--good); }
+.sel .st { font-weight: 600; font-size: 16px; }
+.sel .sf { font-size: 13px; color: var(--ink-2); border-left: 2px solid var(--accent); padding-left: 8px; }
+.sel .sf b { color: var(--accent); font-weight: 500; }
+.sel .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 13px; }
+.sel .kv dt { color: var(--muted); } .sel .kv dd { margin: 0; color: var(--ink); }
+.sel .acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.sel .acts .btn { font-size: 13px; padding: 5px 10px; }
+.sel .empty { font-size: 13px; color: var(--muted); }
+.feed { display: grid; gap: 5px; font-size: 13px; color: var(--ink-2); }
+.feed div { display: grid; grid-template-columns: 44px 1fr; gap: 6px; }
+.feed time { font: 12.5px var(--mono); color: var(--muted); }
+.feed .g { color: var(--good); } .feed .b { color: var(--bad); } .feed .a { color: var(--gate); } .feed .v { color: var(--agent); }
+
+/* Bottom: build and train */
+.dock { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: stretch; padding: 8px 12px; background: var(--shell); border-top: 1px solid var(--line); }
+.grp { display: flex; gap: 6px; flex-wrap: wrap; align-items: stretch; }
+.grp > em { font-style: normal; font-size: 13px; color: var(--muted); align-self: center; margin-right: 2px; }
+.bb { display: grid; grid-template-columns: 22px auto; grid-template-rows: auto auto; column-gap: 7px; align-items: center; text-align: left; border: 1px solid var(--line-2); background: var(--panel); border-radius: 8px; padding: 5px 9px 5px 7px; cursor: pointer; min-width: 104px; transition: border-color .12s var(--ease), transform .12s var(--ease); }
+.bb:hover { border-color: var(--line-3); background: var(--panel-2); }
+.bb:active { transform: scale(.98); }
+.bb svg { grid-row: span 2; width: 22px; height: 22px; }
+.bb .n { font-size: 13px; font-weight: 500; white-space: nowrap; }
+.bb .c { font: 12.5px var(--mono); color: var(--muted); white-space: nowrap; }
+.bb.on { border-color: var(--accent); }
+.bb.lock { opacity: .45; cursor: not-allowed; }
+.bb.lock .c { color: var(--muted); }
+.bb.cant .c { color: var(--bad); }
+
+/* Overlays: base menu and receipt */
+.ov { position: fixed; inset: 0; background: rgba(11,13,16,.86); display: grid; place-items: center; padding: 16px; z-index: 10; overflow-y: auto; }
+.card { width: min(860px, 100%); background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; padding: 22px; display: grid; gap: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.card h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: .01em; }
+.card h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.card p { margin: 0; color: var(--ink-2); max-width: 70ch; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.field input { background: var(--bg); border: 1px solid var(--line-2); border-radius: 7px; padding: 8px 10px; color: var(--ink); font: 14px var(--sans); }
+.field input.m { font-family: var(--mono); font-size: 13px; }
+.radios { display: grid; gap: 6px; }
+.radios label { display: flex; gap: 8px; align-items: baseline; font-size: 14px; color: var(--ink); }
+.radios label.dis { color: var(--muted); }
+.radios small { color: var(--muted); font-size: 13px; }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; color: var(--ink-2); margin: 0; }
+.keys dt { font: 12.5px var(--mono); color: var(--ink); white-space: nowrap; }
+.keys dd { margin: 0; }
+.bases { display: grid; gap: 6px; }
+.base-row { display: flex; justify-content: space-between; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+.base-row small { color: var(--muted); font: 12.5px var(--mono); }
+.rcpt { display: grid; grid-template-columns: 1fr auto; gap: 6px 18px; font-size: 14px; }
+.rcpt dt { color: var(--ink-2); } .rcpt dd { margin: 0; font-family: var(--mono); text-align: right; }
+
+@media (max-width: 900px) {
+  .mid { grid-template-columns: 1fr; grid-template-rows: minmax(300px, 1fr) auto; }
+  .side { border-left: 0; border-top: 1px solid var(--line); max-height: 34vh; }
+  body { overflow: auto; } .app { height: auto; min-height: 100vh; grid-template-rows: auto minmax(360px, 70vh) auto; }
+  .gate { width: calc(100% - 20px); min-width: 0; bottom: 156px; }
+  #mini { width: 150px; height: 102px; }
+}
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } * { transition: none !important; } }
 </style>
 </head>
 <body>
-<div class="practice">Practice map · practice data · nothing is written to SoftwareFactory · $0 real spend</div>
-<header>
-  <h1>The Sector</h1>
-  <div class="hud">
-    <span class="fuel">FUEL <b id="fuel">$5.00</b></span>
-    <span>POWER <b id="power">4 / 4</b> slots</span>
-    <span class="att">ATTENTION <b id="att">0</b> waiting on you</span>
-    <span>THREATS <b id="thr">0</b></span>
-    <span>CLOCK <b id="clock">Day 1, 09:00</b></span>
-    <button class="btn quiet" id="speed" style="padding:2px 8px;font-size:11px">Speed 1×</button>
-    <button class="btn quiet" id="pause" style="padding:2px 8px;font-size:11px">Pause</button>
-  </div>
-</header>
+<div class="app">
+  <header class="top">
+    <div class="brand">Sector <small id="baseName">Home base</small></div>
+    <div class="res">
+      <span class="cr" title="Budget: today's spend limit in dollars. Refills every morning at 08:00.">Budget <b id="rCr">$4.00</b></span>
+      <span class="pw" title="Agent slots: how many agents can work at once. Reactors add slots.">Slots <b id="rPw">0/2</b></span>
+      <span title="Blueprints: sorted tickets and specs, made by the Refinery from loose ideas.">Blueprints <b id="rBp">0</b></span>
+      <span title="Data: earned from refined ideas and shipped apps. Spent on research.">Data <b id="rDt">0</b></span>
+      <span class="bc" title="Decisions waiting for you">Needs you <b id="rBc">0</b></span>
+      <span class="rn" title="Renown comes only from real outcomes: missions, ships, fixes.">Renown <b id="rRn">0</b> <span id="rRank">Cadet</span> <span class="rankbar"><i id="rRankBar"></i></span></span>
+    </div>
+    <div class="ctl">
+      <span class="clock" id="clock">Day 1 08:00</span>
+      <button class="chip" id="pauseBtn" title="Pause (Space)">Pause</button>
+      <button class="chip on" data-speed="1">1×</button>
+      <button class="chip" data-speed="2">2×</button>
+      <button class="chip" data-speed="4">4×</button>
+      <button class="chip" id="menuBtn" title="Bases">Bases</button>
+    </div>
+  </header>
 
-<div class="layout">
-  <div class="mapbox">
-    <canvas id="map" width="960" height="580" aria-label="Sector map"></canvas>
-    <div class="toast" id="toast"></div>
+  <div class="mid">
+    <div class="stage" id="stage">
+      <canvas id="cv" aria-label="Base map"></canvas>
+      <canvas id="mini" width="200" height="136" aria-label="Minimap"></canvas>
+      <div class="practice">Practice data · writes nothing · spends nothing</div>
+      <div class="hint" id="hint" hidden></div>
+      <div class="toasts" id="toasts"></div>
+      <div class="gate" id="gate" hidden>
+        <div class="gh"><span class="gk" id="gKind">Your OK: plan</span><span class="gt" id="gTitle"></span><span class="gn" id="gCount"></span></div>
+        <p id="gBody"></p>
+        <div class="row" id="gRow"></div>
+      </div>
+    </div>
+    <aside class="side">
+      <section class="sec"><h3>Missions <span id="misCount"></span></h3><div id="missions" style="display:grid;gap:6px"></div></section>
+      <section class="sec sel" id="sel"><h3>Selected</h3><div class="empty">Click a building or an agent. Drag to select several agents.</div></section>
+      <section class="sec"><h3>What happened</h3><div class="feed" id="feed"></div></section>
+    </aside>
   </div>
-  <div class="side">
-    <div class="card" id="panel"></div>
-    <div class="card"><div class="h">Agents · press 1–4 or click</div><div class="agents" id="agents"></div></div>
-    <div class="card"><div class="h">Sector log</div><div class="log" id="log"></div></div>
+
+  <footer class="dock">
+    <div class="grp" id="buildBar"><em>Build</em></div>
+    <div class="grp" id="trainBar"><em>Agents</em></div>
+    <div class="grp"><button class="bb" id="connectBtn" title="Draw a conduit between two buildings"><svg viewBox="0 0 22 22"><circle cx="5" cy="11" r="3" fill="none" stroke="#4fd1c1" stroke-width="1.6"/><circle cx="17" cy="11" r="3" fill="none" stroke="#4fd1c1" stroke-width="1.6"/><path d="M8 11h6" stroke="#4fd1c1" stroke-width="1.6" stroke-dasharray="2 2"/></svg><span class="n">Connect <kbd>C</kbd></span><span class="c">dependency</span></button></div>
+  </footer>
+</div>
+
+<div class="ov" id="menu">
+  <div class="card">
+    <div style="display:grid;gap:6px">
+      <h1>Sector</h1>
+      <p>Your factory, seen from above. The Command Center is SoftwareFactory. Build around it, connect what you build, send agents to work, approve plans, and hold the line when bugs push back. Every building, agent and bug here stands for a real thing in SoftwareFactory.</p>
+    </div>
+    <div class="cols">
+      <div style="display:grid;gap:12px;align-content:start">
+        <h2>Bases</h2>
+        <div class="bases" id="baseList"></div>
+        <h2>New base</h2>
+        <label class="field">Name<input id="nbName" value="Home base" maxlength="40"></label>
+        <label class="field">Folder<input id="nbFolder" class="m" value="C:\Factories\home-base" maxlength="120"></label>
+        <div class="radios">
+          <label><input type="radio" name="nbStart" checked> Empty base <small>start with the Command Center only</small></label>
+          <label class="dis"><input type="radio" name="nbStart" disabled> From a git repo <small>arrives as a fogged ruin; comes with real data</small></label>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ok" id="startBtn">Start new base</button><button class="btn" id="resumeBtn" hidden>Continue</button></div>
+        <p style="font-size:13px;color:var(--muted)">Practice run: nothing is written to SoftwareFactory and no money is spent. A base here is only in this page. In the real app each base will be its own factory folder with its own projects, agents and plugins.</p>
+      </div>
+      <div style="display:grid;gap:10px;align-content:start">
+        <h2>How to play</h2>
+        <dl class="keys">
+          <dt>R B E A</dt><dd>Build a Refinery, Barracks, Reactor or App. Then click and hold to spend.</dd>
+          <dt>T F H G</dt><dd>Test Turret, Feature, Archive, Plugin Dock, as your rank unlocks them</dd>
+          <dt>C</dt><dd>Connect two buildings. Only connected buildings get power and work.</dd>
+          <dt>Z X V J</dt><dd>Train a Scout, Constructor, Warden or Judge at the Barracks</dd>
+          <dt>Right-click</dt><dd>Order selected agents: carry, build, fight, repair, move</dd>
+          <dt>Drag</dt><dd>Select several agents. Shift+1 to 5 saves a group, 1 to 5 picks it.</dd>
+          <dt>Tab · Enter</dt><dd>Jump to the next decision · approve it</dd>
+          <dt>Arrows · wheel</dt><dd>Move and zoom the map. Middle-drag or the minimap also move it.</dd>
+          <dt>Space</dt><dd>Pause</dd>
+        </dl>
+        <p style="font-size:13px">Goal: ship two apps and survive both release waves. About 10 to 15 minutes.</p>
+      </div>
+    </div>
   </div>
 </div>
-<div class="keys">
-  <span>Click a beacon or threat to act</span><span><kbd>1</kbd>–<kbd>4</kbd> pick agent, then click a target</span><span>hold <kbd>Space</kbd> or the button to spend</span><span><kbd>Enter</kbd> approve</span><span><kbd>Esc</kbd> park or cancel</span><span><kbd>Tab</kbd> next beacon</span><span><kbd>R</kbd> draw a campaign</span><span><kbd>P</kbd> pause</span>
+
+<div class="ov" id="end" hidden>
+  <div class="card" style="width:min(560px,100%)">
+    <h1 id="endTitle">Sector secured</h1>
+    <p id="endSub"></p>
+    <h2>What this would have done in SoftwareFactory</h2>
+    <dl class="rcpt" id="rcpt"></dl>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ok" id="keepBtn">Keep building</button><button class="btn" id="againBtn">New base</button></div>
+  </div>
 </div>
-<div class="modal" id="modal" hidden></div>
 
 <script>
-"use strict";
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-const C = { bg: "#0c1320", grid: "#142034", line: "#1c2a40", ink: "#d9e4f2", muted: "#8195b0", accent: "#4fd6e8", gate: "#f2b34b", bad: "#ff6b6b", good: "#5ee0a0", panel2: "#101a2b" };
-const cv = $("map"), g = cv.getContext("2d");
-const W = cv.width, H = cv.height;
-const SEC_PER_HOUR = 5; // demo time: one sector hour every 5 seconds
+'use strict';
+/* ============================================================
+   Sector v2. Two layers: this file is the GAME layer running on a
+   FAKE bridge (simulated SF data). Each game object carries an
+   `sf` line saying which real SoftwareFactory record it stands for.
+   ============================================================ */
+const $ = (s) => document.querySelector(s);
+const CELL = 40, COLS = 52, ROWS = 36, W = COLS * CELL, H = ROWS * CELL;
+const COL = { bg: '#0b0d10', s1: '#0f1216', s2: '#14181d', s3: '#1a1f26', s4: '#20262e', s5: '#2a313b', ink: '#f2f0eb', ink2: '#c4c9d1', mute: '#9aa2ad', teal: '#4fd1c1', amber: '#f5b14c', green: '#8fd47a', red: '#ff6b5e', violet: '#a99bff' };
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const GAME_HOUR = 6;          // real seconds per game hour at 1x
+const CAP = 4;                // daily Budget cap in practice dollars
+const BP_CAP = 12;            // Blueprint store: a ticket backlog has a sensible size
 
-// ---- world --------------------------------------------------------------
-let S;
-function newWorld() {
-  return {
-    t: 0, speed: 1, paused: false, ended: false, fuel: 5, cap: 5, spent: 0,
-    buildings: [
-      { id: "sf", name: "SoftwareFactory", kind: "SYSTEM", shape: "hex", x: 250, y: 300, r: 46, stage: "HQ" },
-      { id: "wc", name: "Word Counter", kind: "APP", shape: "box", x: 560, y: 150, r: 34, stage: "shipped" },
-      { id: "ht", name: "Habit Tracker", kind: "APP", shape: "box", x: 640, y: 400, r: 34, stage: "building", progress: 0.25, tickets: ["HT-1 Add a habit", "HT-2 Streak view", "HT-3 Reminders"] },
-      { id: "rb", name: "Recipe Box", kind: "IDEA", shape: "seed", x: 840, y: 250, r: 26, stage: "seed" },
-    ],
-    agents: [
-      { k: 1, name: "Scout", model: "Haiku", price: 0.04, slots: 1, role: "sort and triage", x: 0, y: 0, state: "idle" },
-      { k: 2, name: "Mason", model: "Sonnet", price: 0.35, slots: 1, role: "build", x: 0, y: 0, state: "idle" },
-      { k: 3, name: "Warden", model: "Sonnet", price: 0.2, slots: 1, role: "test and fix", x: 0, y: 0, state: "idle" },
-      { k: 4, name: "Oracle", model: "Opus", price: 1.2, slots: 2, role: "council and spec", x: 0, y: 0, state: "idle" },
-    ],
-    threats: [{ id: "T1", on: "wc", text: "Crash on empty input", born: -36 * SEC_PER_HOUR, kind: "bug" }],
-    beacons: [{ id: "B1", on: "sf", text: "Approve spec: Habit Tracker v1", kind: "gate", born: 0 }],
-    routes: [], log: [], done: [], scripted: new Set(), sel: null, mode: null, routeFrom: null, focus: null,
-  };
-}
-const B = (id) => S.buildings.find((b) => b.id === id);
-const powerUsed = () => S.agents.filter((a) => a.state !== "idle").reduce((s, a) => s + a.slots, 0);
-const hours = () => S.t / SEC_PER_HOUR;
-function clockText() { const h = 9 + hours(); const day = 1 + Math.floor(h / 24); const hh = Math.floor(h % 24); const mm = Math.floor((h % 1) * 60 / 10) * 10; return `Day ${day}, ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`; }
-function home(a, i) { const hq = B("sf"); return { x: hq.x - hq.r - 30 - (i % 2) * 24, y: hq.y - 4 + Math.floor(i / 2) * 24 }; }
-
-// ---- scripted sector events (practice) -----------------------------------
-const SCRIPT = [
-  { at: 1, id: "intro", run: () => toast("Day 1. Two things want you: the amber beacon and the red threat.") },
-  { at: 50, id: "B2", run: () => addBeacon("B2", "sf", "Improvement proposal: add a retry limit to fix loops", "proposal") },
-  { at: 75, id: "T2", run: () => addThreat("T2", "ht", "Streak resets at midnight") },
-  { at: 120, id: "B3", run: () => addBeacon("B3", "rb", "Recipe Box seed is ready: plant it?", "seed") },
-  { at: 150, id: "T3", run: () => addThreat("T3", "sf", "Smoke test failed on last merge", "breach") },
-  { at: 175, id: "N1", run: () => addBeacon("N1", "sf", "3 new raw notes in the inbox", "inbox") },
+const KINDS = {
+  hq:       { name: 'Command Center', sf: 'SoftwareFactory itself. Its level sets how big the base can grow.', size: 3, light: 7 },
+  refinery: { name: 'Refinery', sf: 'The Order Engine. It sorts loose ideas into tickets (Blueprints).', size: 2, cost: 0.40, key: 'r', rank: 0, light: 4, build: 6 },
+  barracks: { name: 'Barracks', sf: 'The Agent Bay, where agents are set up.', size: 2, cost: 0.30, key: 'b', rank: 0, light: 4, build: 6 },
+  reactor:  { name: 'Reactor', sf: 'Agent slots: how many agents may run at once. +2 slots.', size: 2, cost: 0.50, key: 'e', rank: 0, light: 4, build: 6 },
+  app:      { name: 'App', sf: 'A project: a real program with a UI, built by agent runs.', size: 2, cost: 1.20, bp: 3, key: 'a', rank: 0, light: 4, project: true },
+  turret:   { name: 'Test Turret', sf: 'A test suite. It catches bugs that come near, at no agent cost.', size: 1, cost: 0.30, key: 't', rank: 1, light: 3, build: 4 },
+  feature:  { name: 'Feature', sf: 'A feature added to a shipped app: one ticket, one build run.', size: 1, cost: 0.40, bp: 2, key: 'f', rank: 1, light: 3, project: true },
+  archive:  { name: 'Archive', sf: 'Project rules (the Brain). Research here adds rules and abilities.', size: 2, cost: 0.60, key: 'h', rank: 2, light: 4, build: 8 },
+  dock:     { name: 'Plugin Dock', sf: 'Plugins. Mounts a smoke scanner: turrets reach further, waves show early. +2 slots.', size: 2, cost: 0.80, key: 'g', rank: 3, light: 4, build: 8 },
+};
+const BUILD_ORDER = ['refinery', 'barracks', 'reactor', 'app', 'turret', 'feature', 'archive', 'dock'];
+const UNITS = {
+  scout:       { name: 'Scout', model: 'Haiku', job: 'Carries loose ideas to the Refinery', sf: 'An intake agent on Haiku. About $0.01 per idea carried.', speed: 96, power: 1, rank: 0, key: 'z', train: 3 },
+  constructor: { name: 'Constructor', model: 'Sonnet', job: 'Raises Apps and Features: spec, build, test', sf: 'A builder agent on Sonnet. Its work is the build run you paid for when you placed the App.', speed: 62, power: 1, rank: 0, key: 'x', train: 4 },
+  warden:      { name: 'Warden', model: 'Sonnet', job: 'Hunts bugs and repairs breaches', sf: 'A test-and-fix agent on Sonnet. About $0.03 per bug fixed, $0.10 per repair.', speed: 74, power: 1, rank: 0, key: 'v', train: 4 },
+  judge:       { name: 'Judge', model: 'Opus', job: 'Reviews an app in test: its release wave is 40% smaller', sf: 'A review agent on Opus, the quality gate. About $0.15 per review. Uses 2 slots.', speed: 58, power: 2, rank: 2, key: 'j', train: 5 },
+};
+const TRAIN_ORDER = ['scout', 'constructor', 'warden', 'judge'];
+const RANKS = [
+  { n: 'Cadet', at: 0, unlock: '' },
+  { n: 'Lieutenant', at: 40, unlock: 'Test Turret and Feature' },
+  { n: 'Captain', at: 120, unlock: 'Archive and Judge' },
+  { n: 'Commander', at: 220, unlock: 'Plugin Dock, Command Center level 2 (+2 slots)' },
+  { n: 'Admiral', at: 360, unlock: 'Nothing new: a title for a well-run factory' },
 ];
-function addBeacon(id, on, text, kind) { if (S.beacons.some((b) => b.id === id)) return; S.beacons.push({ id, on, text, kind, born: S.t }); log(`Beacon: ${text}`); }
-function addThreat(id, on, text, kind = "bug") { S.threats.push({ id, on, text, born: S.t, kind }); log(`Threat on ${B(on).name}: ${text}`); }
+const APPS = [
+  { n: 'Recipe Box', plan: 'Three screens: recipes, one recipe, shopping list. Saves on this computer. Add, edit and delete everything from the app.' },
+  { n: 'Habit Tracker', plan: 'A week grid with a tick per habit, streak view and reminders. Saves locally. Full add, edit and delete.' },
+  { n: 'Word Counter', plan: 'Paste or open a file, see words, reading time and top words. History of past counts with delete.' },
+  { n: 'Trip Planner', plan: 'Days, places and a packing list. Map preview. Export to PDF.' },
+  { n: 'Budget Book', plan: 'Monthly categories, entries and a chart. Import a bank CSV.' },
+];
+const IDEAS = ['Dark mode for Recipe Box', 'Export habits to CSV', 'Shopping list sharing', 'Faster app start', 'Undo for deletes', 'Weekly summary email', 'Tags on recipes', 'Keyboard shortcuts', 'Print a recipe card', 'Reminder at 9pm', 'Count words in PDFs', 'Bigger text option', 'Backup to a folder', 'Search everything', 'Ask before closing unsaved', 'Photo per recipe', 'Streak freeze day', 'Sort by most used', 'Import from old app', 'Show reading time'];
+const RIFTS = [
+  ['Always ask before spending', 'Retry failed builds on its own'],
+  ['Tests must pass before review', 'Review first, test after'],
+  ['Keep every old ticket', 'Archive tickets idle for 30 days'],
+];
+const RESEARCH = {
+  autosort: { name: 'Auto-sort', d: 'Refinery works twice as fast', cost: 15 },
+  lint:     { name: 'Lint module', d: 'Fewer bugs: spawns slower, waves 2 smaller', cost: 20 },
+  governor: { name: 'Budget governor', d: 'Agent fixes and repairs cost 40% less', cost: 15 },
+  fastbuild:{ name: 'Faster builds', d: 'Constructors work 50% faster', cost: 25 },
+};
+const MISSIONS = [
+  { id: 'm1', t: 'Establish the base', d: 'Build a Refinery and a Barracks and connect both to the Command Center (C).', r: 10, p: () => [Math.min(1, countOnline('refinery')) + Math.min(1, countOnline('barracks')), 2] },
+  { id: 'm2', t: 'Staff up', d: 'Train a Constructor (X) and a Warden (V) at the Barracks.', r: 10, p: () => [Math.min(1, S.stats.trained.constructor) + Math.min(1, S.stats.trained.warden), 2] },
+  { id: 'm3', t: 'First light', d: 'Refine 3 loose ideas into Blueprints.', r: 10, p: () => [Math.min(3, S.stats.refined), 3] },
+  { id: 'm4', t: 'Ship your first app', d: 'Place an App (A), approve its plan, let it build, survive its release wave.', r: 20, p: () => [Math.min(1, S.stats.shipped), 1] },
+  { id: 'm5', t: 'Hold the line', d: 'Survive a release wave with the app above 70% integrity. Wardens and Test Turrets help.', r: 20, p: () => [Math.min(1, S.stats.cleanWaves), 1] },
+  { id: 'm6', t: 'Clean house', d: 'Clear 10 bugs.', r: 15, p: () => [Math.min(10, S.stats.bugs), 10] },
+  { id: 'm7', t: 'Expand the grid', d: 'Attach a Feature (F) to a shipped App.', r: 20, p: () => [Math.min(1, S.stats.features), 1] },
+  { id: 'm8', t: 'Second release', d: 'Ship a second App and survive its wave. Finish every mission to secure the base.', r: 30, p: () => [Math.min(2, S.stats.shipped), 2], final: true },
+];
 
-// ---- actions --------------------------------------------------------------
-function log(text) { S.log.push({ at: clockText(), text }); drawLog(); }
-function record(kind, text, cost = 0) { S.done.push({ kind, text, cost }); }
-function approveBeacon(b) {
-  S.beacons = S.beacons.filter((x) => x !== b);
-  if (b.id === "B1") { const ht = B("ht"); ht.ready = true; log("Spec approved. Habit Tracker can be built: send Mason."); record("approve", "Approved spec: Habit Tracker v1"); }
-  else if (b.kind === "proposal") { log("Proposal accepted, became ticket SF-44."); record("ticket", "SF-44 Add a retry limit to fix loops"); }
-  else if (b.kind === "review") { const ht = B("ht"); ht.progress = Math.min(1, ht.progress + 0.25); log(`Build accepted. ${ht.name} is ${Math.round(ht.progress * 100)}% built.`); record("approve", b.text); if (ht.progress >= 1) { ht.stage = "shipped"; ht.shape = "box"; log("Habit Tracker shipped."); } }
-  else if (b.kind === "inbox") { log("Scout will sort the notes. Send Scout to HQ."); S.inboxReady = true; }
-  tone(520); select(null);
-}
-function parkBeacon(b) { S.beacons = S.beacons.filter((x) => x !== b); log(`Parked: ${b.text}`); record("park", b.text); select(null); tone(240); }
-function dismissThreat(t) { S.threats = S.threats.filter((x) => x !== t); log(`Filed as ticket and left for later: ${t.text}`); record("ticket", `${t.on.toUpperCase()}-bug ${t.text}`); select(null); }
-function plant(name) {
-  const rb = B("rb"); rb.shape = "box"; rb.stage = "planned"; rb.kind = "APP"; rb.oneLine = name;
-  S.beacons = S.beacons.filter((b) => b.id !== "B3");
-  log(`Planted Recipe Box: "${name}".`); record("project", `Planted Recipe Box: ${name}`); tone(440); tone(660);
-  select({ type: "building", ref: rb });
-}
-function canDeploy(a, target) {
-  if (a.state !== "idle") return "That agent is busy.";
-  if (powerUsed() + a.slots > 4) return "Not enough power: free a slot first.";
-  if (S.fuel < a.price) return "Out of fuel for today. Deploying is locked.";
-  if (target.type === "threat" && !["Warden", "Mason"].includes(a.name)) return `${a.name} cannot fix bugs. Warden can.`;
-  if (target.type === "building" && target.ref.id === "ht" && a.name !== "Mason") return "Building needs Mason.";
-  if (target.type === "building" && target.ref.id === "ht" && !target.ref.ready) return "Approve the Habit Tracker spec first (amber beacon at HQ).";
-  if (target.type === "building" && target.ref.id === "rb" && a.name !== "Oracle") return "Oracle runs councils on new projects.";
-  if (target.type === "building" && target.ref.id === "rb" && target.ref.stage === "seed") return "Plant the seed first.";
-  if (target.type === "building" && target.ref.id === "sf" && a.name !== "Scout") return "Only Scout has work at HQ right now.";
-  if (target.type === "building" && target.ref.id === "sf" && !S.inboxReady) return "No notes waiting at HQ yet.";
-  if (target.type === "building" && target.ref.id === "wc") return "Word Counter has nothing to build. Click its threat instead.";
-  return null;
-}
-function deploy(a, target) {
-  const why = canDeploy(a, target); if (why) { toast(why); return; }
-  S.fuel -= a.price; S.spent += a.price;
-  const tgtXY = target.type === "threat" ? threatXY(target.ref) : { x: target.ref.x, y: target.ref.y + target.ref.r + 18 };
-  Object.assign(a, { state: "walk", target, tx: tgtXY.x, ty: tgtXY.y, workLeft: 10 });
-  const what = target.type === "threat" ? target.ref.text : target.ref.name;
-  log(`${a.name} sent to ${what} ($${a.price.toFixed(2)}).`); tone(360, .1, "triangle");
-  S.mode = null; pendingAgent = null; select(null);
-}
-function finishWork(a) {
-  const t = a.target; a.state = "back";
-  const hp = home(a, a.k - 1); a.tx = hp.x; a.ty = hp.y;
-  if (t.type === "threat") { S.threats = S.threats.filter((x) => x !== t.ref); log(`${a.name} fixed: ${t.ref.text}.`); record("fix", `Fixed: ${t.ref.text}`, a.price); }
-  else if (t.ref.id === "ht") { addBeacon("R" + S.t.toFixed(0), "ht", `Review build: ${t.ref.tickets[0] || "next ticket"}`, "review"); t.ref.tickets.shift(); record("run", "Mason built a Habit Tracker ticket", a.price); }
-  else if (t.ref.id === "rb") { t.ref.stage = "specced"; log("Oracle's council wrote Recipe Box's first spec."); addBeacon("RB2", "rb", "Approve spec: Recipe Box v1", "gate2"); record("run", "Council spec for Recipe Box", a.price); }
-  else if (t.ref.id === "sf") { S.inboxReady = false; log("Scout sorted 3 notes: 2 into Habit Tracker, 1 noise."); record("sort", "Scout sorted 3 notes", a.price); }
-  tone(620); tone(820);
-}
-function draftRoute(from, to) {
-  if (from === to) { toast("Pick a different building."); return; }
-  S.routes.push({ from, to });
-  log(`Campaign drafted: ${from.name} to ${to.name}, 3 stops (spec, build, ship).`);
-  record("campaign", `Campaign ${from.name} to ${to.name}: 3 draft tickets`);
-  S.mode = null; S.routeFrom = null; tone(500); toast("Campaign drafted as 3 tickets (practice).");
-  drawPanel();
+/* ---------------- state ---------------- */
+let S, occ;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const money = (v) => '$' + v.toFixed(2);
+
+function newGame(name, folder) {
+  S = {
+    name: name || 'Home base', folder: folder || '', t: 0, clock: 8 * 3600, day: 1, credits: CAP, speed: 1, paused: false,
+    structs: [], conduits: [], units: [], signals: [], bugs: [], shots: [], floats: [], beacons: [],
+    blueprints: 0, data: 0, renown: 0, rankI: 0, nextId: 1, sigT: 1.5, riftT: 120, waveNo: 0,
+    research: {}, researching: null, trainQ: [], appIdx: 0, groups: {}, done: new Set(), ended: false, won: false,
+    feed: [], spent: 0, runs: 0, approvals: 0, sendBacks: 0, hqLevel: 1, netDirty: true,
+    stats: { trained: { scout: 0, constructor: 0, warden: 0, judge: 0 }, refined: 0, shipped: 0, waves: 0, cleanWaves: 0, bugs: 0, features: 0, repairs: 0, projects: 0, carried: 0 },
+  };
+  occ = new Int32Array(COLS * ROWS);
+  const hq = addStruct('hq', 24, 16);
+  hq.state = 'online'; hq.prog = 1;
+  addUnit('scout', hq.x - 70, hq.y + 10);
+  S.stats.trained.scout = 0;
+  for (let i = 0; i < 3; i++) spawnSignal(true);
+  sel = []; mode = null; ghost = null;
+  cam.z = 1; centerOn(hq.x + 60, hq.y);
+  log('Base online. The Command Center is SoftwareFactory itself.', 'g');
+  log('A Scout is holding loose ideas but has no Refinery to sort them. Build one with R.', 'a');
+  renderMissions(); renderBuildBar(); renderTrainBar(); renderSel();
 }
 
-// ---- selection and side panel --------------------------------------------
-function select(sel) { S.focus = sel; drawPanel(); }
-function holdButton(label, cost, onDone) {
-  return { label, cost, onDone };
+function addStruct(kind, gx, gy) {
+  const k = KINDS[kind];
+  const s = { id: S.nextId++, kind, gx, gy, size: k.size, x: (gx + k.size / 2) * CELL, y: (gy + k.size / 2) * CELL, r: k.size * CELL / 2,
+    state: 'building', prog: 0, integ: 100, linked: false, online: false, name: k.name, flash: 0, cool: 0, aim: 0, workers: 0 };
+  if (kind === 'app') { const a = APPS[S.appIdx++ % APPS.length]; s.name = a.n; s.plan = a.plan; s.phase = 'spec'; s.dataT = 0; s.spawnT = rnd(28, 40); }
+  if (kind === 'feature') { s.phase = 'build'; s.name = 'Feature'; }
+  if (kind === 'refinery') { s.queue = 0; s.work = 0; }
+  for (let y = gy; y < gy + k.size; y++) for (let x = gx; x < gx + k.size; x++) occ[y * COLS + x] = s.id;
+  S.structs.push(s); S.netDirty = true;
+  return s;
 }
-let holdState = null;
-function wireHold(btn, onDone) {
-  const start = (e) => { e.preventDefault(); if (holdState) return; const fill = btn.querySelector(".fill"); const t0 = performance.now();
-    holdState = { raf: 0 }; const step = (t) => { const k = Math.min(1, (t - t0) / 1000); fill.style.width = k * 100 + "%"; if (k >= 1) { holdState = null; onDone(); return; } holdState.raf = requestAnimationFrame(step); }; holdState.raf = requestAnimationFrame(step); };
-  const stop = () => { if (!holdState) return; cancelAnimationFrame(holdState.raf); holdState = null; const f = btn.querySelector(".fill"); if (f) f.style.width = "0"; toast("Let go. Nothing was spent."); };
-  btn.onpointerdown = start; btn.onpointerup = stop; btn.onpointerleave = stop;
-  btn._start = start; btn._stop = stop;
+function addUnit(type, x, y) {
+  const u = { id: S.nextId++, type, x, y, tx: x, ty: y, state: 'idle', task: null, order: null, carry: null, xp: 0, cool: 0, work: 0, face: 0, holdT: 0, powered: true };
+  S.units.push(u); return u;
 }
-function drawPanel() {
-  const p = $("panel"); const f = S.focus; const a = S.sel;
-  if (S.mode === "route") { p.innerHTML = `<div class="h">Campaign</div><div class="title">${S.routeFrom ? "Pick where it ends" : "Pick where it starts"}</div><p class="muted">Click two buildings. The route becomes a campaign with draft tickets for spec, build and ship. Free.</p><div class="btns"><button class="btn quiet" id="cancel">Cancel (Esc)</button></div>`; $("cancel").onclick = () => { S.mode = null; S.routeFrom = null; drawPanel(); }; return; }
-  if (a && !f) { p.innerHTML = `<div class="h">Agent selected</div><div class="title">${a.name} · ${a.model}</div><p>${esc(a.role)}. About $${a.price.toFixed(2)} a run, uses ${a.slots} power slot${a.slots > 1 ? "s" : ""}.</p><p class="muted">Click a threat or a building to send ${a.name}.</p>`; return; }
-  if (!f) {
-    const n = S.beacons.length;
-    p.innerHTML = `<div class="h">Sector</div><div class="title">${n ? `${n} thing${n > 1 ? "s" : ""} waiting on you` : "Sector steady"}</div><p class="muted">Click an amber beacon to decide, a red mark to defend, or pick an agent and click where to send it.</p>`; return;
+function spawnSignal(nearHQ) {
+  const hq = S.structs[0];
+  for (let tries = 0; tries < 30; tries++) {
+    const a = rnd(0, Math.PI * 2), d = nearHQ ? rnd(170, 300) : rnd(320, 820);
+    const x = clamp(hq.x + Math.cos(a) * d, 60, W - 60), y = clamp(hq.y + Math.sin(a) * d * 0.8, 60, H - 60);
+    const gx = Math.floor(x / CELL), gy = Math.floor(y / CELL);
+    if (occ[gy * COLS + gx]) continue;
+    S.signals.push({ id: S.nextId++, x, y, text: IDEAS[(S.ideaI = (S.ideaI || 0) + 1) % IDEAS.length], claimed: 0, ph: rnd(0, 6) });
+    return;
   }
-  if (f.type === "beacon") {
-    const b = f.ref;
-    if (b.kind === "seed") {
-      p.innerHTML = `<div class="h">Seed · Recipe Box</div><div class="title">Plant a new project</div><p>One line is enough. Planting is free and creates the project.</p><input type="text" id="seed" value="Save recipes and scale servings" aria-label="One line for the project"><div class="btns"><button class="btn" id="plant">Plant (Enter)</button><button class="btn quiet" id="park">Not now (Esc)</button></div>`;
-      const go = () => plant($("seed").value.trim() || "Recipe Box");
-      $("plant").onclick = go; $("park").onclick = () => parkBeacon(b);
-      $("seed").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } if (e.key === "Escape") parkBeacon(b); e.stopPropagation(); };
-      $("seed").focus(); return;
+}
+const byId = (id) => S.structs.find((s) => s.id === id) || S.units.find((u) => u.id === id) || S.bugs.find((b) => b.id === id) || S.signals.find((g) => g.id === id);
+const countOnline = (kind) => S.structs.filter((s) => s.kind === kind && s.online).length;
+const rankOf = (r) => { let i = 0; RANKS.forEach((k, j) => { if (r >= k.at) i = j; }); return i; };
+function power() {
+  let cap = S.hqLevel >= 2 ? 5 : 3;
+  for (const s of S.structs) if (s.online && (s.kind === 'reactor' || s.kind === 'dock')) cap += 2;
+  let used = 0; for (const u of S.units) used += UNITS[u.type].power;
+  for (const q of S.trainQ) used += UNITS[q.type].power;
+  return { cap, used };
+}
+function spend(v, why) {
+  if (S.research.governor && /fix|repair/.test(why)) v *= 0.6;
+  if (S.credits + 1e-9 < v) return false;
+  S.credits -= v; S.spent += v; S.runs++;
+  return true;
+}
+function log(text, cls) {
+  S.feed.unshift({ t: timeStr(), text, cls: cls || '' });
+  if (S.feed.length > 40) S.feed.pop();
+  feedDirty = true;
+}
+function floatText(x, y, text, color) { S.floats.push({ x, y, text, color: color || COL.ink, t: 0 }); }
+function toast(html, cls, ms) {
+  const el = document.createElement('div'); el.className = 'toast ' + (cls || ''); el.innerHTML = html;
+  $('#toasts').appendChild(el); setTimeout(() => el.remove(), ms || 2600);
+  while ($('#toasts').children.length > 3) $('#toasts').firstChild.remove();
+}
+function timeStr() { const h = Math.floor(S.clock / 3600), m = Math.floor((S.clock % 3600) / 60); return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); }
+function gainRenown(v, why, x, y) {
+  S.renown += v;
+  if (x !== undefined) floatText(x, y - 20, '+' + v + ' renown', COL.teal);
+  const ri = rankOf(S.renown);
+  if (ri > S.rankI) {
+    S.rankI = ri; const r = RANKS[ri];
+    toast('Promoted to <b>' + r.n + '</b>. Unlocked: ' + r.unlock, 'big', 4600);
+    log('Promoted to ' + r.n + '. Unlocked: ' + r.unlock + '.', 'g');
+    if (ri >= 3 && S.hqLevel < 2) { S.hqLevel = 2; S.structs[0].flash = 1; log('Command Center upgraded to level 2: +2 agent slots, wider build area.', 'g'); }
+    renderBuildBar(); renderTrainBar();
+  }
+}
+
+/* ---------------- network: conduits carry power from the Command Center ---------------- */
+function recomputeNet() {
+  const adj = new Map(); S.structs.forEach((s) => adj.set(s.id, []));
+  for (const c of S.conduits) { adj.get(c.a)?.push(c.b); adj.get(c.b)?.push(c.a); }
+  const map = new Map(S.structs.map((s) => [s.id, s]));
+  S.structs.forEach((s) => { s.linked = false; });
+  const hq = S.structs[0];
+  if (hq.state !== 'breached') {
+    hq.linked = true; const q = [hq];
+    while (q.length) {
+      const s = q.shift();
+      for (const nid of adj.get(s.id)) { const n = map.get(nid); if (!n || n.linked) continue; n.linked = true; if (passesPower(n)) q.push(n); }
     }
-    const verb = b.kind === "proposal" ? "Accept as ticket" : b.kind === "review" ? "Accept build" : b.kind === "inbox" ? "Hand to Scout" : "Approve";
-    p.innerHTML = `<div class="h">Waiting on you · ${esc(B(b.on).name)}</div><div class="title">${esc(b.text)}</div>
-      <p class="muted">${b.kind === "gate" ? "Spec: 5 screens, local storage, daily check-ins. Council voted 3 for, 0 against." : b.kind === "gate2" ? "Oracle's spec: list, search, scale servings. 4 screens." : b.kind === "review" ? "The diff adds one screen and 6 passing tests." : b.kind === "proposal" ? "Fix loops retried 5 times on one ticket last week and burned $4." : "Raw notes sit unsorted."}</p>
-      <div class="btns"><button class="btn gate" id="ok">${verb} (Enter)</button><button class="btn quiet" id="park">Park (Esc)</button></div><p class="muted">Free. No agent starts until you send one.</p>`;
-    $("ok").onclick = () => { if (b.kind === "gate2") { S.beacons = S.beacons.filter((x) => x !== b); B("rb").stage = "planned"; B("rb").ready = true; log("Recipe Box spec approved."); record("approve", "Approved spec: Recipe Box v1"); select(null); return; } approveBeacon(b); };
-    $("park").onclick = () => parkBeacon(b); return;
   }
-  if (f.type === "threat") {
-    const t = f.ref; const ageH = Math.round((S.t - t.born) / SEC_PER_HOUR);
-    const w = pendingAgent && !canDeploy(pendingAgent, f) ? pendingAgent : S.agents.find((x) => x.name === "Warden");
-    p.innerHTML = `<div class="h">Threat · ${esc(B(t.on).name)}</div><div class="title">${esc(t.text)}</div><p class="muted">Open ${ageH} hours. It grows the longer it waits.</p>
-      <p class="price">Send ${w.name}: about $${w.price.toFixed(2)}, ${w.slots} slot</p>
-      <div class="btns"><button class="btn gate" id="send"><span class="fill"></span>Hold to send ${w.name} (Space)</button><button class="btn quiet" id="later">Ticket it for later</button></div>`;
-    wireHold($("send"), () => deploy(w, f)); $("later").onclick = () => dismissThreat(t); return;
-  }
-  if (f.type === "building") {
-    const b = f.ref;
-    p.innerHTML = `<div class="h">${esc(b.kind)} · ${esc(b.stage)}</div><div class="title">${esc(b.name)}</div>
-      ${b.oneLine ? `<p>“${esc(b.oneLine)}”</p>` : ""}
-      ${b.progress != null ? `<p class="muted">${Math.round(b.progress * 100)}% built. Next: ${esc(b.tickets[0] || "ship")}.</p>` : ""}
-      ${S.routes.filter((r) => r.from === b || r.to === b).map((r) => `<p class="muted">Campaign: ${esc(r.from.name)} to ${esc(r.to.name)}</p>`).join("")}
-      <p class="muted">In the real app this opens the project's own tabs with full edit.</p>`;
-    const sug = pendingAgent ? pendingAgent : b.id === "ht" ? S.agents.find((x) => x.name === "Mason") : b.id === "rb" && b.stage === "planned" ? S.agents.find((x) => x.name === "Oracle") : b.id === "sf" && S.inboxReady ? S.agents.find((x) => x.name === "Scout") : null;
-    if (sug && !canDeploy(sug, f)) { p.innerHTML += `<p class="price">Send ${sug.name}: about $${sug.price.toFixed(2)}, ${sug.slots} slot${sug.slots > 1 ? "s" : ""}</p><div class="btns"><button class="btn gate" id="send"><span class="fill"></span>Hold to send ${sug.name} (Space)</button></div>`; wireHold($("send"), () => deploy(sug, f)); }
-  }
+  S.structs.forEach((s) => { s.online = s.linked && s.state === 'online'; });
+  S.netDirty = false;
 }
-function drawAgents() {
-  $("agents").innerHTML = S.agents.map((a) => `<button class="agent${S.sel === a ? " sel" : ""}" data-k="${a.k}"><span class="k">${a.k}</span><span>${a.name} <span class="muted">· ${a.model} · $${a.price.toFixed(2)}</span></span><span class="st ${a.state === "idle" ? "idle" : a.state === "work" ? "busy" : "walk"}">${a.state === "idle" ? "idle" : a.state === "work" ? "working" : "moving"}</span></button>`).join("");
-  $("agents").querySelectorAll(".agent").forEach((el) => (el.onclick = () => pickAgent(+el.dataset.k)));
+function passesPower(s) { return s.state === 'online' && (!KINDS[s.kind].project || s.phase === 'shipped'); }
+function lights() {
+  const out = [];
+  for (const s of S.structs) {
+    if (s.kind === 'hq') out.push({ x: s.x, y: s.y, r: (KINDS.hq.light + (S.hqLevel - 1) * 2) * CELL });
+    else if (s.online && passesPower(s)) out.push({ x: s.x, y: s.y, r: KINDS[s.kind].light * CELL });
+  }
+  return out;
 }
-function pickAgent(k) { const a = S.agents.find((x) => x.k === k); S.sel = S.sel === a ? null : a; S.focus = null; drawAgents(); drawPanel(); }
-function drawLog() { $("log").innerHTML = S.log.slice(-30).map((l) => `<div class="row"><span class="t">${esc(l.at.replace("Day ", "D"))}</span><span>${esc(l.text)}</span></div>`).join(""); $("log").scrollTop = 1e6; }
-let toastT;
-function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), 2600); }
 
-// ---- sound ----------------------------------------------------------------
-let ac = null;
-function tone(f, d = 0.08, type = "sine") { if (!S || !S.sound) return; try { ac = ac || new AudioContext(); const o = ac.createOscillator(), gn = ac.createGain(); o.type = type; o.frequency.value = f; gn.gain.value = .04; gn.gain.exponentialRampToValueAtTime(.0001, ac.currentTime + d); o.connect(gn).connect(ac.destination); o.start(); o.stop(ac.currentTime + d); } catch (e) {} }
-
-// ---- geometry and hit tests -----------------------------------------------
-function threatXY(t) { const b = B(t.on); const list = S.threats.filter((x) => x.on === t.on); const i = list.indexOf(t); return { x: b.x + b.r + 14 + i * 26, y: b.y - b.r - 6 }; }
-function beaconXY(bc) { const b = B(bc.on); const list = S.beacons.filter((x) => x.on === bc.on); const i = list.indexOf(bc); return { x: b.x - b.r - 10 - i * 26, y: b.y - b.r - 8 }; }
-function threatSize(t) { const ageH = (S.t - t.born) / SEC_PER_HOUR; return 6 + Math.min(14, ageH / 4); }
-function hit(px, py) {
-  for (const t of S.threats) { const p = threatXY(t); if (Math.hypot(px - p.x, py - p.y) < threatSize(t) + 8) return { type: "threat", ref: t }; }
-  for (const bc of S.beacons) { const p = beaconXY(bc); if (Math.hypot(px - p.x, py - p.y) < 18) return { type: "beacon", ref: bc }; }
-  for (const b of S.buildings) if (Math.hypot(px - b.x, py - b.y) < b.r + 10) return { type: "building", ref: b };
+/* ---------------- placement ---------------- */
+function canPlace(kind, gx, gy) {
+  const k = KINDS[kind];
+  if (gx < 1 || gy < 1 || gx + k.size > COLS - 1 || gy + k.size > ROWS - 1) return 'Off the map';
+  for (let y = gy; y < gy + k.size; y++) for (let x = gx; x < gx + k.size; x++) if (occ[y * COLS + x]) return 'Something is already there';
+  const cx = (gx + k.size / 2) * CELL, cy = (gy + k.size / 2) * CELL;
+  if (!lights().some((l) => Math.hypot(l.x - cx, l.y - cy) <= l.r)) return 'Outside the lit area: build near the Command Center or a connected building';
+  if (kind === 'feature' && !parentApp(gx, gy)) return 'A Feature must touch a shipped App';
+  if (k.bp && S.blueprints < k.bp) return 'Needs ' + k.bp + ' Blueprint' + (k.bp > 1 ? 's' : '') + ' (sort loose ideas at the Refinery)';
+  if (S.credits + 1e-9 < k.cost) return 'Over today\'s budget: refills at 08:00';
+  return '';
+}
+function parentApp(gx, gy) {
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const x = gx + dx, y = gy + dy; if (x < 0 || y < 0 || x >= COLS || y >= ROWS) continue;
+    const s = byId(occ[y * COLS + x]); if (s && s.kind === 'app' && s.phase === 'shipped') return s;
+  }
   return null;
 }
-cv.addEventListener("pointerdown", (e) => {
-  if (S.ended) return;
-  const r = cv.getBoundingClientRect(); const px = (e.clientX - r.left) * W / r.width, py = (e.clientY - r.top) * H / r.height;
-  const h = hit(px, py);
-  if (S.sound === undefined) S.sound = false;
-  if (S.mode === "route") { if (h && h.type === "building") { if (!S.routeFrom) { S.routeFrom = h.ref; drawPanel(); } else draftRoute(S.routeFrom, h.ref); } return; }
-  if (S.sel && h && h.type !== "beacon") { const a = S.sel; const why = canDeploy(a, h); if (why) { toast(why); return; } S.sel = null; drawAgents(); S.focus = h; drawPanel(); toast(`Hold Space or the button to send ${a.name} for $${a.price.toFixed(2)}.`); pendingAgent = a; return; }
-  pendingAgent = null; select(h);
+function place(kind, gx, gy) {
+  const why = canPlace(kind, gx, gy); if (why) { toast(why, 'bad'); return null; }
+  const k = KINDS[kind];
+  spend(k.cost, 'build ' + kind);
+  if (k.bp) S.blueprints -= k.bp;
+  const s = addStruct(kind, gx, gy);
+  if (kind === 'feature') { const p = parentApp(gx, gy); s.parent = p.id; s.name = 'Feature of ' + p.name; S.conduits.push({ a: p.id, b: s.id }); }
+  if (k.project) { S.stats.projects++; log((kind === 'app' ? 'Placed ' + s.name + ' (App): a new project. ' : 'Placed a Feature: a new ticket on ' + byId(s.parent).name + '. ') + money(k.cost) + ' held for its build run.', ''); }
+  else log('Building a ' + k.name + ' (' + money(k.cost) + ').', '');
+  S.netDirty = true;
+  return s;
+}
+function connect(a, b) {
+  if (a === b) return 'Pick a different building';
+  if (S.conduits.some((c) => (c.a === a.id && c.b === b.id) || (c.a === b.id && c.b === a.id))) return 'Already connected';
+  if (dist(a, b) > 9.5 * CELL) return 'Too far: conduits reach about 9 squares';
+  S.conduits.push({ a: a.id, b: b.id }); S.netDirty = true;
+  log('Connected ' + a.name + ' and ' + b.name + ' (a dependency between them).', '');
+  return '';
+}
+
+/* ---------------- simulation ---------------- */
+function update(dt) {
+  S.t += dt;
+  const prevClock = S.clock;
+  S.clock += dt * 3600 / GAME_HOUR;
+  if (S.clock >= 24 * 3600) { S.clock -= 24 * 3600; S.day++; }
+  if (prevClock < 8 * 3600 && S.clock >= 8 * 3600 || (S.clock < prevClock && S.clock >= 8 * 3600)) {
+    S.credits = CAP; log('08:00, day ' + S.day + ': budget refilled to ' + money(CAP) + '.', 'g'); toast('Morning: budget refilled to ' + money(CAP));
+  }
+  if (S.netDirty) recomputeNet();
+
+  // loose ideas drift in from the edges
+  S.sigT -= dt;
+  if (S.sigT <= 0) { S.sigT = rnd(6, 9); if (S.signals.length < 12) spawnSignal(false); }
+
+  updateStructs(dt);
+  updateTraining(dt);
+  updateUnits(dt);
+  updateBugs(dt);
+  for (const sh of S.shots) sh.t += dt; S.shots = S.shots.filter((sh) => sh.t < 0.18);
+  for (const f of S.floats) { f.t += dt; f.y -= dt * 18; } S.floats = S.floats.filter((f) => f.t < 1.8);
+  checkMissions();
+}
+
+function updateStructs(dt) {
+  for (const s of S.structs) {
+    if (s.flash > 0) s.flash = Math.max(0, s.flash - dt);
+    const k = KINDS[s.kind];
+    // self-building facilities (setup, not agent runs) need a connection to progress
+    if (s.state === 'building' && !k.project) {
+      if (!s.linked) continue;
+      s.prog += dt / k.build;
+      if (s.prog >= 1) { s.prog = 1; s.state = 'online'; s.flash = 1; S.netDirty = true; log(k.name + ' is online.', 'g'); floatText(s.x, s.y - s.r, k.name + ' online', COL.green); }
+      continue;
+    }
+    if (s.state === 'online' && s.integ < 100 && !S.bugs.some((b) => b.att === s.id)) s.integ = Math.min(100, s.integ + dt * 0.8);
+    if (s.kind === 'refinery' && s.online && s.queue > 0 && S.blueprints < BP_CAP) {
+      s.work += dt * (S.research.autosort ? 2 : 1);
+      if (s.work >= 7) { s.work = 0; s.queue--; S.blueprints++; S.data++; S.stats.refined++; floatText(s.x, s.y - s.r, '+1 blueprint', COL.teal); log('Refinery sorted an idea into a ticket (+1 Blueprint, +1 Data).', ''); }
+    }
+    if (s.kind === 'turret' && s.online) {
+      s.cool -= dt;
+      const range = 150 * (countOnline('dock') ? 1.4 : 1);
+      const b = nearest(S.bugs, s, range);
+      if (b) { s.aim = Math.atan2(b.y - s.y, b.x - s.x); if (s.cool <= 0) { s.cool = 0.8; hitBug(b, 9, s); S.shots.push({ x1: s.x, y1: s.y, x2: b.x, y2: b.y, t: 0, c: COL.teal }); } }
+    }
+    if (s.kind === 'app') updateApp(s, dt);
+    if (s.kind === 'feature' && s.phase === 'build' && s.state === 'building' && s.prog >= 1) {
+      s.state = 'online'; s.phase = 'shipped'; s.flash = 1; S.netDirty = true; S.stats.features++;
+      const p = byId(s.parent); log('Feature shipped on ' + (p ? p.name : 'an app') + ': its data output is up 50%.', 'g');
+      floatText(s.x, s.y - 20, 'Feature shipped', COL.green); gainRenown(10, 'feature', s.x, s.y);
+    }
+  }
+  // research
+  if (S.researching) {
+    const arc = S.structs.find((s) => s.kind === 'archive' && s.online);
+    if (arc && !S.beacons.some((b) => b.type === 'rift')) {
+      S.researching.t += dt;
+      if (S.researching.t >= 10) { S.research[S.researching.id] = true; log('Research done: ' + RESEARCH[S.researching.id].name + ' (a new project rule).', 'g'); toast('Research done: <b>' + RESEARCH[S.researching.id].name + '</b>', 'big'); S.researching = null; selDirty = true; }
+    }
+  }
+  // rifts: rule conflicts appear once the Archive exists
+  if (countOnline('archive')) {
+    S.riftT -= dt;
+    if (S.riftT <= 0 && !S.beacons.some((b) => b.type === 'rift')) {
+      S.riftT = rnd(110, 150);
+      const arc = S.structs.find((s) => s.kind === 'archive');
+      const pair = pick(RIFTS);
+      addBeacon({ type: 'rift', sid: arc.id, title: 'Two project rules conflict', a: pair[0], b: pair[1] });
+      log('Rule conflict in the Archive: research is blocked until you pick one.', 'a');
+    }
+  }
+}
+
+function updateApp(s, dt) {
+  // phases: spec -> gate (your OK) -> build -> test -> wave -> shipped
+  const work = workRate(s);
+  if (s.phase === 'spec' || s.phase === 'build' || s.phase === 'test') {
+    if (!s.linked) return;
+    const len = { spec: 20, build: 36, test: 16 }[s.phase];
+    s.prog += dt * work / len;
+    if (s.phase === 'test' && !s.testBug && s.prog > 0.45) { s.testBug = true; spawnBug(s, false); log('Testing ' + s.name + ' found a bug.', 'b'); }
+    if (s.prog >= 1) {
+      s.prog = 0;
+      if (s.phase === 'spec') { s.phase = 'gate'; addBeacon({ type: 'plan', sid: s.id, title: s.name, body: s.plan }); log(s.name + ': plan is ready. Your OK is needed before building.', 'a'); toast('<b>' + s.name + '</b>: plan ready for your OK', '', 2600); }
+      else if (s.phase === 'build') { s.phase = 'test'; log(s.name + ': built. Testing now.', ''); }
+      else if (s.phase === 'test') {
+        s.phase = 'wave'; S.waveNo++; s.waveIdx = S.waveNo;
+        const judged = S.units.some((u) => u.type === 'judge' && u.task === 'review' && u.target === s.id);
+        let n = 7 + (S.waveNo - 1) * 8;
+        if (judged) { n = Math.round(n * 0.6); spend(0.15, 'review'); log('A Judge reviewed ' + s.name + ': its release wave is 40% smaller.', 'v'); }
+        if (S.research.lint) n = Math.max(3, n - 2);
+        s.wave = { n, left: n, spawned: 0, t: countOnline('dock') ? 14 : 9, every: 0.55, min: s.integ, ids: new Set() };
+        const wa = rnd(0, Math.PI * 2), wd = rnd(520, 640);
+        s.wave.from = [clamp(s.x + Math.cos(wa) * wd, 40, W - 40), clamp(s.y + Math.sin(wa) * wd, 40, H - 40)];
+        log('Release wave incoming for ' + s.name + ': ' + n + ' edge cases. Hold it above 70%.', 'b');
+        toast('<b>Release wave</b> for ' + s.name + ' in ' + Math.round(s.wave.t) + 's', 'bad', 3400);
+      }
+    }
+  }
+  if (s.phase === 'wave') {
+    const w = s.wave;
+    if (w.t > 0) { w.t -= dt; return; }
+    w.every -= dt;
+    if (w.spawned < w.n && w.every <= 0) {
+      w.every = 0.55; w.spawned++;
+      const b = spawnBugAt(w.from[0] + rnd(-60, 60), w.from[1] + rnd(-60, 60), true, s.id);
+      w.ids.add(b.id);
+    }
+    w.min = Math.min(w.min, s.integ);
+    if (w.spawned >= w.n && ![...w.ids].some((id) => S.bugs.some((b) => b.id === id))) {
+      S.stats.waves++;
+      const clean = w.min > 70;
+      if (clean) S.stats.cleanWaves++;
+      gainRenown(15, 'wave', s.x, s.y);
+      log('Wave survived for ' + s.name + ' (lowest integrity ' + Math.round(w.min) + '%).', clean ? 'g' : 'a');
+      s.wave = null;
+      if (s.state === 'breached') { s.phase = 'repairs'; log(s.name + ' is breached: a Warden must repair it before it can ship.', 'b'); }
+      else shipApp(s);
+    }
+  }
+  if (s.phase === 'repairs' && s.state === 'online') shipApp(s);
+  if (s.phase === 'shipped' && s.online) {
+    const feats = S.structs.filter((f) => f.kind === 'feature' && f.parent === s.id && f.online).length;
+    s.dataT += dt * (1 + 0.5 * feats);
+    if (s.dataT >= 8) { s.dataT = 0; S.data++; floatText(s.x, s.y - s.r, '+1 data', COL.ink2); }
+    s.spawnT -= dt;
+    if (s.spawnT <= 0) { s.spawnT = rnd(30, 46) * (S.research.lint ? 1.6 : 1); spawnBug(s, false); log('A bug report came in for ' + s.name + '.', 'b'); }
+  }
+}
+function shipApp(s) {
+  s.phase = 'shipped'; s.state = 'online'; s.flash = 1.4; S.stats.shipped++; S.netDirty = true;
+  log(s.name + ' shipped. It runs, has a UI, and earns Data.', 'g');
+  toast('<b>' + s.name + '</b> shipped', 'big', 3200);
+  floatText(s.x, s.y - s.r - 10, s.name + ' shipped', COL.green);
+  gainRenown(30, 'ship', s.x, s.y);
+}
+function workRate(s) {
+  const ws = S.units.filter((u) => u.type === 'constructor' && u.task === 'build' && u.target === s.id && u.state === 'working' && u.powered);
+  let r = 0; ws.forEach((u, i) => { r += (i === 0 ? 1 : 0.6) * unitBonus(u); });
+  if (S.research.fastbuild) r *= 1.5;
+  s.workers = ws.length;
+  return r;
+}
+const unitBonus = (u) => (u.xp >= 15 ? 1.4 : u.xp >= 5 ? 1.2 : 1);
+const unitRank = (u) => (u.xp >= 15 ? 'Elite' : u.xp >= 5 ? 'Veteran' : 'Recruit');
+
+function updateTraining(dt) {
+  if (!S.trainQ.length) return;
+  const bar = S.structs.find((s) => s.kind === 'barracks' && s.online);
+  if (!bar) return;
+  const q = S.trainQ[0]; q.t += dt;
+  if (q.t >= UNITS[q.type].train) {
+    S.trainQ.shift();
+    const u = addUnit(q.type, bar.x + rnd(-10, 10), bar.y + bar.r + 14);
+    S.stats.trained[q.type]++;
+    log(UNITS[q.type].name + ' ready (an agent on ' + UNITS[q.type].model + ').', 'v');
+    floatText(u.x, u.y - 14, UNITS[q.type].name + ' ready', COL.violet);
+  }
+}
+function train(type) {
+  const k = UNITS[type];
+  if (S.rankI < k.rank) { toast(k.name + ' unlocks at ' + RANKS[k.rank].n, 'bad'); return; }
+  if (!S.structs.some((s) => s.kind === 'barracks')) { toast('Build a Barracks first (B)', 'bad'); return; }
+  const p = power();
+  if (p.used + k.power > p.cap) { toast('No free agent slots: build a Reactor (E)', 'bad'); return; }
+  S.trainQ.push({ type, t: 0 });
+  renderTrainBar();
+}
+
+function updateUnits(dt) {
+  // slots: if power drops, the newest agents wait
+  const p = power(); let used = 0;
+  for (const u of S.units) { used += UNITS[u.type].power; u.powered = used <= p.cap; }
+  for (const u of S.units) {
+    u.cool -= dt;
+    if (!u.powered) { u.state = 'waiting'; continue; }
+    if (u.order) runOrder(u, dt); else runAuto(u, dt);
+  }
+}
+function moveTo(u, x, y, dt, near) {
+  const d = Math.hypot(x - u.x, y - u.y);
+  if (d <= (near || 4)) return true;
+  const sp = UNITS[u.type].speed * unitBonus(u) * dt;
+  u.face = Math.atan2(y - u.y, x - u.x);
+  u.x += (x - u.x) / d * Math.min(sp, d); u.y += (y - u.y) / d * Math.min(sp, d);
+  u.state = 'moving';
+  return Math.hypot(x - u.x, y - u.y) <= (near || 4);
+}
+function nearest(list, from, max, filt) {
+  let best = null, bd = max || 1e9;
+  for (const o of list) { if (filt && !filt(o)) continue; const d = dist(o, from); if (d < bd) { bd = d; best = o; } }
+  return best;
+}
+function homeSpot(u) {
+  const hq = S.structs[0], i = S.units.indexOf(u);
+  const a = i * 0.9 + 2.4;
+  return { x: hq.x + Math.cos(a) * (hq.r + 40 + (i % 3) * 16), y: hq.y + Math.sin(a) * (hq.r + 40 + (i % 3) * 16) };
+}
+function idle(u, dt) { const h = homeSpot(u); u.task = null; u.target = null; if (moveTo(u, h.x, h.y, dt, 6)) u.state = 'idle'; }
+
+function runAuto(u, dt) {
+  if (u.holdT > 0) { u.holdT -= dt; if (u.type === 'warden') wardenFight(u, dt, 160); else u.state = 'idle'; return; }
+  if (u.type === 'scout') return scoutAuto(u, dt);
+  if (u.type === 'constructor') return constructorAuto(u, dt);
+  if (u.type === 'warden') return wardenAuto(u, dt);
+  if (u.type === 'judge') return judgeAuto(u, dt);
+}
+function scoutAuto(u, dt) {
+  if (u.carry) {
+    const ref = nearest(S.structs, u, 1e9, (s) => s.kind === 'refinery' && s.online);
+    if (!ref) { idle(u, dt); u.task = 'holding'; return; }
+    u.task = 'deliver'; u.target = ref.id;
+    if (moveTo(u, ref.x, ref.y, dt, ref.r + 6)) deliver(u, ref);
+    return;
+  }
+  if (S.blueprints >= BP_CAP && !u.order) { u.task = 'store full'; return idle(u, dt), void (u.task = 'store full'); }
+  let g = u.target && S.signals.find((x) => x.id === u.target && x.claimed === u.id);
+  if (!g) { g = nearest(S.signals, u, 1e9, (x) => !x.claimed); if (g) { g.claimed = u.id; u.target = g.id; } }
+  if (!g) return idle(u, dt);
+  u.task = 'fetch';
+  if (moveTo(u, g.x, g.y, dt, 6)) pickUp(u, g);
+}
+function pickUp(u, g) { u.carry = g.text; S.signals = S.signals.filter((x) => x !== g); u.target = null; }
+function deliver(u, ref) {
+  if (!spend(0.01, 'carry')) { u.state = 'idle'; u.task = 'no budget'; return; }
+  ref.queue++; S.stats.carried++; u.xp++;
+  log('Scout brought "' + u.carry + '" to the Refinery.', 'v');
+  u.carry = null; u.target = null;
+}
+function constructorAuto(u, dt) {
+  let s = u.target && byId(u.target);
+  const needs = (x) => x && KINDS[x.kind]?.project && x.linked && ((x.kind === 'app' && ['spec', 'build', 'test'].includes(x.phase)) || (x.kind === 'feature' && x.state === 'building'));
+  if (!needs(s)) {
+    const sites = S.structs.filter(needs);
+    if (!sites.length) return idle(u, dt);
+    const cnt = (x) => S.units.filter((v) => v !== u && v.type === 'constructor' && v.target === x.id).length;
+    sites.sort((a, b) => cnt(a) - cnt(b) || dist(a, u) - dist(b, u));
+    s = sites[0]; u.target = s.id;
+  }
+  u.task = 'build';
+  buildAt(u, s, dt);
+}
+function buildAt(u, s, dt) {
+  const i = S.units.filter((v) => v.target === s.id && v.type === 'constructor').indexOf(u);
+  const a = (i * 1.3) + 0.6, rr = s.r + 12;
+  if (moveTo(u, s.x + Math.cos(a) * rr, s.y + Math.sin(a) * rr, dt, 5)) {
+    u.state = 'working'; u.face = Math.atan2(s.y - u.y, s.x - u.x);
+    if (s.kind === 'feature') { s.prog += dt * unitBonus(u) * (S.research.fastbuild ? 1.5 : 1) / 8; if (s.prog >= 1) u.xp++; }
+    u.work += dt; if (u.work > 12) { u.work = 0; u.xp++; }
+  }
+}
+function wardenAuto(u, dt) {
+  if (wardenFight(u, dt, 520)) return;
+  const br = nearest(S.structs, u, 1e9, (s) => s.state === 'breached');
+  if (br) { u.task = 'repair'; return repairAt(u, br, dt); }
+  u.task = null; idle(u, dt);
+}
+function wardenFight(u, dt, reach) {
+  // defend: nearest bug close to any building, or close to me
+  let b = u.target && S.bugs.find((x) => x.id === u.target);
+  if (!b) b = nearest(S.bugs, u, reach);
+  if (!b) { if (u.task === 'fight') { u.task = null; u.target = null; } return false; }
+  u.task = 'fight'; u.target = b.id;
+  if (dist(u, b) > 105) moveTo(u, b.x, b.y, dt, 100);
+  else {
+    u.state = 'fighting'; u.face = Math.atan2(b.y - u.y, b.x - u.x);
+    if (u.cool <= 0) { u.cool = 0.65 / unitBonus(u); hitBug(b, 12, u); S.shots.push({ x1: u.x, y1: u.y, x2: b.x, y2: b.y, t: 0, c: COL.violet }); }
+  }
+  return true;
+}
+function repairAt(u, s, dt) {
+  if (moveTo(u, s.x, s.y, dt, s.r + 10)) {
+    u.state = 'working'; u.work += dt;
+    if (u.work >= 4) {
+      u.work = 0;
+      if (!spend(0.10, 'repair')) { u.task = 'no budget'; return; }
+      s.state = 'online'; s.integ = 60; s.flash = 1; S.netDirty = true; S.stats.repairs++; u.xp++;
+      log('Warden repaired ' + s.name + ' (a fix run).', 'g'); gainRenown(3, 'repair', s.x, s.y);
+      u.target = null; u.order = null;
+    }
+  }
+}
+function judgeAuto(u, dt) {
+  const s = nearest(S.structs, u, 1e9, (x) => x.kind === 'app' && x.phase === 'test');
+  if (!s) return idle(u, dt);
+  u.task = 'review'; u.target = s.id;
+  if (moveTo(u, s.x - s.r - 14, s.y - s.r - 6, dt, 5)) u.state = 'working';
+}
+function runOrder(u, dt) {
+  const o = u.order;
+  if (o.type === 'move') { if (moveTo(u, o.x, o.y, dt, 5)) { u.order = null; u.holdT = 10; u.state = 'idle'; } return; }
+  if (o.type === 'carry') {
+    if (u.type !== 'scout') { u.order = null; return; }
+    const g = S.signals.find((x) => x.id === o.id);
+    if (!g || u.carry) { u.order = null; return; }
+    S.signals.forEach((x) => { if (x.claimed === u.id && x !== g) x.claimed = 0; });
+    g.claimed = u.id; u.target = g.id; u.order = null; return;
+  }
+  if (o.type === 'attack') {
+    const b = S.bugs.find((x) => x.id === o.id);
+    if (!b || u.type !== 'warden') { u.order = null; return; }
+    u.target = b.id; if (!wardenFight(u, dt, 99999)) u.order = null; return;
+  }
+  if (o.type === 'build') {
+    const s = byId(o.id);
+    if (!s || u.type !== 'constructor') { u.order = null; return; }
+    u.target = s.id; u.order = null; return;
+  }
+  if (o.type === 'repair') {
+    const s = byId(o.id);
+    if (!s || s.state !== 'breached' || u.type !== 'warden') { u.order = null; return; }
+    u.task = 'repair'; repairAt(u, s, dt); return;
+  }
+  u.order = null;
+}
+
+/* bugs: real bug tickets. They grow if left alone and crawl along conduits. */
+function spawnBug(s, wave) { const a = rnd(0, Math.PI * 2); return spawnBugAt(s.x + Math.cos(a) * (s.r + 18), s.y + Math.sin(a) * (s.r + 18), wave, s.id, s.name); }
+function spawnBugAt(x, y, wave, target, from) {
+  const hp = wave ? 24 + S.waveNo * 6 : 22;
+  const b = { id: S.nextId++, x, y, hp, max: hp, wave, target, att: 0, ph: rnd(0, 6), speed: wave ? rnd(36, 44) : rnd(18, 24), from: from || 'a release test', age: 0 };
+  S.bugs.push(b); return b;
+}
+function hitBug(b, dmg, by) {
+  b.hp -= dmg;
+  if (b.hp <= 0 && S.bugs.includes(b)) {
+    S.bugs = S.bugs.filter((x) => x !== b);
+    S.stats.bugs++;
+    if (by && by.type === 'warden') { by.xp++; if (!spend(0.03, 'fix')) by.task = 'no budget'; }
+    floatText(b.x, b.y, 'fixed', COL.green);
+    gainRenown(2, 'bug', b.x, b.y);
+    if (by && by.target === b.id) { by.target = null; if (by.order) by.order = null; }
+  }
+}
+function updateBugs(dt) {
+  for (const b of S.bugs) {
+    b.ph += dt * 8; b.age += dt;
+    if (!b.wave && b.max < 60) { b.max += dt * 0.6; b.hp += dt * 0.6; }
+    let t = byId(b.target);
+    if (!t || !t.x || t.kind === undefined || t.state === 'breached') {
+      // crawl along a conduit to a neighbour, else to the nearest building
+      const from = t && t.kind ? t : null;
+      let next = null;
+      if (from) {
+        const ns = S.conduits.filter((c) => c.a === from.id || c.b === from.id).map((c) => byId(c.a === from.id ? c.b : c.a)).filter((n) => n && n.state !== 'breached');
+        next = ns.length ? pick(ns) : null;
+      }
+      if (!next) next = nearest(S.structs, b, 1e9, (s) => s.state !== 'breached');
+      if (!next) continue;
+      b.target = next.id; t = next;
+    }
+    const d = dist(b, t);
+    if (d > t.r + 4) { b.att = 0; b.x += (t.x - b.x) / d * b.speed * dt; b.y += (t.y - b.y) / d * b.speed * dt; }
+    else {
+      b.att = t.id;
+      t.integ -= dt * (b.wave ? 5 : 3.5) * (b.max / 30);
+      if (t.integ <= 0) {
+        t.integ = 0; t.state = 'breached'; S.netDirty = true; t.flash = 1;
+        log(t.name + ' is breached (like a failed build). It stops until a Warden repairs it.', 'b');
+        toast('<b>' + t.name + '</b> breached', 'bad');
+      }
+    }
+  }
+}
+
+/* beacons: decisions only you can make */
+function addBeacon(b) { b.id = S.nextId++; S.beacons.push(b); gateDirty = true; }
+function decide(b, choice, note) {
+  S.beacons = S.beacons.filter((x) => x !== b); gateDirty = true;
+  const s = byId(b.sid);
+  if (b.type === 'plan' && s) {
+    if (choice === 'approve') { s.phase = 'build'; s.prog = 0; S.approvals++; log('Your OK on the plan for ' + s.name + '. Building.', 'g'); }
+    else { s.phase = 'spec'; s.prog = 0.6; S.sendBacks++; log('Sent the plan for ' + s.name + ' back' + (note ? ': "' + note + '"' : '') + '. The spec gets another pass.', 'a'); }
+  }
+  if (b.type === 'rift') { log('Rule kept: "' + (choice === 'a' ? b.a : b.b) + '". Research unblocked.', 'g'); gainRenown(3, 'rift', s.x, s.y); }
+}
+
+function checkMissions() {
+  for (const m of MISSIONS) {
+    if (S.done.has(m.id)) continue;
+    const [v, n] = m.p();
+    if (v >= n) {
+      S.done.add(m.id);
+      log('Mission done: ' + m.t + '.', 'g');
+      toast('Mission done: <b>' + m.t + '</b> (+' + m.r + ' renown)', 'big', 3200);
+      gainRenown(m.r, 'mission');
+      if (S.done.size === MISSIONS.length && !S.won) { S.won = true; setTimeout(showEnd, 1600); }
+    }
+  }
+}
+
+/* ---------------- view: camera, input ---------------- */
+const cv = $('#cv'), ctx = cv.getContext('2d'), mini = $('#mini'), mctx = mini.getContext('2d');
+const cam = { x: 0, y: 0, z: 1 };
+let vw = 800, vh = 500, dpr = 1;
+let sel = [], mode = null, ghost = null, hover = null, mouse = { x: 0, y: 0, wx: 0, wy: 0, in: false };
+let drag = null, hold = null, connectFrom = null;
+let feedDirty = true, selDirty = true, gateDirty = true, gateIdx = 0;
+let terrain = null;
+
+function resize() {
+  const r = $('#stage').getBoundingClientRect();
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  const cx = cam.x + vw / 2 / cam.z, cy = cam.y + vh / 2 / cam.z;
+  vw = Math.max(200, r.width); vh = Math.max(200, r.height);
+  cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr);
+  if (S) centerOn(cx, cy); else clampCam();
+}
+function centerOn(x, y) { cam.x = x - vw / 2 / cam.z; cam.y = y - vh / 2 / cam.z; clampCam(); }
+function clampCam() { cam.x = clamp(cam.x, -80, W - vw / cam.z + 80); cam.y = clamp(cam.y, -80, H - vh / cam.z + 80); }
+const toWorld = (sx, sy) => ({ x: sx / cam.z + cam.x, y: sy / cam.z + cam.y });
+
+function buildTerrain() {
+  terrain = document.createElement('canvas'); terrain.width = W; terrain.height = H;
+  const t = terrain.getContext('2d');
+  t.fillStyle = '#0a0c0f'; t.fillRect(0, 0, W, H);
+  let seed = 7; const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 70; i++) { // soft ground patches
+    t.fillStyle = r() > 0.5 ? 'rgba(20,26,31,.22)' : 'rgba(8,10,12,.3)';
+    t.beginPath(); t.ellipse(r() * W, r() * H, 60 + r() * 200, 40 + r() * 140, r() * 3, 0, Math.PI * 2); t.fill();
+  }
+  t.strokeStyle = 'rgba(79,209,193,.045)'; t.lineWidth = 1.2; // contour lines
+  for (let i = 0; i < 26; i++) {
+    const cx = r() * W, cy = r() * H, rr = 50 + r() * 160;
+    for (let k = 0; k < 3; k++) { t.beginPath(); t.ellipse(cx, cy, rr + k * 22, (rr + k * 22) * (0.55 + r() * 0.3), r() * 3, 0, Math.PI * 2); t.stroke(); }
+  }
+  t.strokeStyle = 'rgba(255,255,255,.028)'; t.lineWidth = 1;
+  t.beginPath(); for (let x = 0; x <= W; x += CELL) { t.moveTo(x + .5, 0); t.lineTo(x + .5, H); } for (let y = 0; y <= H; y += CELL) { t.moveTo(0, y + .5); t.lineTo(W, y + .5); } t.stroke();
+  t.strokeStyle = 'rgba(255,255,255,.05)';
+  t.beginPath(); for (let x = 0; x <= W; x += CELL * 5) { t.moveTo(x + .5, 0); t.lineTo(x + .5, H); } for (let y = 0; y <= H; y += CELL * 5) { t.moveTo(0, y + .5); t.lineTo(W, y + .5); } t.stroke();
+  for (let i = 0; i < 90; i++) { // rocks, kept away from the centre
+    const x = r() * W, y = r() * H; if (Math.hypot(x - W / 2, y - H / 2) < 380) continue;
+    const s = 4 + r() * 10; t.fillStyle = 'rgba(32,38,46,.9)'; t.beginPath();
+    for (let k = 0; k < 6; k++) { const a = k / 6 * Math.PI * 2; t.lineTo(x + Math.cos(a) * s * (0.7 + r() * 0.5), y + Math.sin(a) * s * (0.7 + r() * 0.5)); }
+    t.fill(); t.fillStyle = 'rgba(255,255,255,.04)'; t.fillRect(x - s / 3, y - s / 2, s / 2, 2);
+  }
+  t.strokeStyle = 'rgba(255,107,94,.18)'; t.setLineDash([6, 8]); t.strokeRect(8, 8, W - 16, H - 16); t.setLineDash([]);
+}
+
+function hitTest(wx, wy) {
+  for (const u of S.units) if (Math.hypot(u.x - wx, u.y - wy) < 11) return { kind: 'unit', o: u };
+  for (const b of S.bugs) if (Math.hypot(b.x - wx, b.y - wy) < 12) return { kind: 'bug', o: b };
+  for (const g of S.signals) if (Math.hypot(g.x - wx, g.y - wy) < 11) return { kind: 'signal', o: g };
+  const gx = Math.floor(wx / CELL), gy = Math.floor(wy / CELL);
+  if (gx >= 0 && gy >= 0 && gx < COLS && gy < ROWS && occ[gy * COLS + gx]) { const s = byId(occ[gy * COLS + gx]); if (s) return { kind: 'struct', o: s }; }
+  return null;
+}
+function setMode(m) {
+  mode = m; connectFrom = null; hold = null;
+  if (m && m.startsWith('build:')) { const k = m.slice(6); ghost = { kind: k }; } else ghost = null;
+  cv.style.cursor = m ? 'crosshair' : 'default';
+  renderBuildBar();
+  $('#connectBtn').classList.toggle('on', m === 'connect');
+  updateHint();
+}
+function startBuild(kind) {
+  const k = KINDS[kind];
+  if (S.rankI < k.rank) { toast(k.name + ' unlocks at ' + RANKS[k.rank].n, 'bad'); return; }
+  setMode(mode === 'build:' + kind ? null : 'build:' + kind);
+}
+function updateHint() {
+  const h = $('#hint'); let t = '';
+  if (ghost) {
+    const k = KINDS[ghost.kind];
+    const why = ghost.gx !== undefined ? canPlace(ghost.kind, ghost.gx, ghost.gy) : '';
+    t = why ? k.name + ': ' + why : k.name + ': click and hold to spend ' + money(k.cost) + (k.bp ? ' and ' + k.bp + ' Blueprint' + (k.bp > 1 ? 's' : '') : '') + '. Esc cancels.';
+  } else if (mode === 'connect') t = connectFrom ? 'Connect ' + connectFrom.name + ' to… (click another building, Esc to stop)' : 'Connect: click a building, then another one nearby';
+  h.textContent = t; h.hidden = !t;
+}
+
+cv.addEventListener('contextmenu', (e) => e.preventDefault());
+cv.addEventListener('pointerdown', (e) => {
+  const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, w = toWorld(sx, sy);
+  cv.setPointerCapture(e.pointerId);
+  if (e.button === 1 || (e.button === 0 && e.altKey)) { drag = { pan: true, sx, sy, cx: cam.x, cy: cam.y }; return; }
+  if (e.button === 2) {
+    if (mode) { setMode(null); return; }
+    return order(w);
+  }
+  if (ghost) {
+    if (ghost.gx === undefined) return;
+    const why = canPlace(ghost.kind, ghost.gx, ghost.gy);
+    if (why) { toast(why, 'bad'); return; }
+    hold = { t: 0, need: 0.55, gx: ghost.gx, gy: ghost.gy };
+    return;
+  }
+  if (mode === 'connect') {
+    const h = hitTest(w.x, w.y);
+    if (!h || h.kind !== 'struct') return;
+    if (!connectFrom) { connectFrom = h.o; updateHint(); return; }
+    const why = connect(connectFrom, h.o);
+    if (why) toast(why, 'bad'); else { floatText(h.o.x, h.o.y - h.o.r, 'connected', COL.teal); connectFrom = null; if (S.lastPlaced) { S.lastPlaced = null; setMode(null); } }
+    updateHint(); return;
+  }
+  drag = { sx, sy, ex: sx, ey: sy, box: false };
 });
-let pendingAgent = null;
-
-// ---- draw -------------------------------------------------------------------
-function poly(n, x, y, r, rot = 0) { g.beginPath(); for (let i = 0; i < n; i++) { const a = rot + i * Math.PI * 2 / n; g[i ? "lineTo" : "moveTo"](x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); }
-function render() {
-  g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
-  g.strokeStyle = C.grid; g.lineWidth = 1; g.beginPath();
-  for (let x = 0; x <= W; x += 32) { g.moveTo(x + .5, 0); g.lineTo(x + .5, H); } for (let y = 0; y <= H; y += 32) { g.moveTo(0, y + .5); g.lineTo(W, y + .5); } g.stroke();
-  // conduits
-  g.setLineDash([4, 6]); g.strokeStyle = "#2a4466"; g.lineWidth = 2;
-  const hq = B("sf"); for (const b of S.buildings) if (b !== hq) { g.beginPath(); g.moveTo(hq.x, hq.y); g.lineTo(b.x, b.y); g.stroke(); }
-  g.setLineDash([]);
-  // campaigns
-  for (const r of S.routes) { g.strokeStyle = C.gate; g.lineWidth = 2.5; g.beginPath(); g.moveTo(r.from.x, r.from.y); g.quadraticCurveTo((r.from.x + r.to.x) / 2, Math.min(r.from.y, r.to.y) - 90, r.to.x, r.to.y); g.stroke();
-    for (let i = 1; i <= 3; i++) { const k = i / 4, cx = (r.from.x + r.to.x) / 2, cy = Math.min(r.from.y, r.to.y) - 90; const x = (1 - k) * (1 - k) * r.from.x + 2 * (1 - k) * k * cx + k * k * r.to.x, y = (1 - k) * (1 - k) * r.from.y + 2 * (1 - k) * k * cy + k * k * r.to.y; g.fillStyle = C.bg; g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); g.stroke(); } }
-  if (S.mode === "route" && S.routeFrom) { g.strokeStyle = C.gate; g.setLineDash([3, 4]); g.beginPath(); g.arc(S.routeFrom.x, S.routeFrom.y, S.routeFrom.r + 14, 0, 7); g.stroke(); g.setLineDash([]); }
-  // buildings
-  for (const b of S.buildings) {
-    const sel = S.focus && S.focus.ref === b;
-    g.lineWidth = sel ? 3 : 2;
-    if (b.shape === "hex") { poly(6, b.x, b.y, b.r, Math.PI / 6); g.fillStyle = C.panel2; g.fill(); g.strokeStyle = C.accent; g.stroke(); poly(6, b.x, b.y, b.r * .55, Math.PI / 6); g.fillStyle = "rgba(79,214,232,.18)"; g.fill(); }
-    else if (b.shape === "box") {
-      const s = b.r; g.fillStyle = C.panel2; g.fillRect(b.x - s, b.y - s, 2 * s, 2 * s);
-      g.strokeStyle = b.stage === "shipped" ? C.good : C.accent;
-      if (b.stage === "building" || b.stage === "planned" || b.stage === "specced") g.setLineDash([5, 4]);
-      g.strokeRect(b.x - s, b.y - s, 2 * s, 2 * s); g.setLineDash([]);
-      if (b.progress != null && b.stage !== "shipped") { g.fillStyle = "rgba(79,214,232,.28)"; const h = 2 * s * b.progress; g.fillRect(b.x - s + 3, b.y + s - h, 2 * s - 6, h - 3); }
-      if (b.stage === "shipped") { g.fillStyle = "rgba(94,224,160,.2)"; g.fillRect(b.x - s + 8, b.y - s + 8, 2 * s - 16, 10); g.fillRect(b.x - s + 8, b.y - s + 24, s, 10); }
-    } else { g.setLineDash([3, 5]); g.strokeStyle = C.muted; g.beginPath(); g.arc(b.x, b.y, b.r, 0, 7); g.stroke(); g.setLineDash([]); g.fillStyle = C.muted; g.beginPath(); g.arc(b.x, b.y, 4, 0, 7); g.fill(); }
-    if (sel) { g.strokeStyle = C.ink; g.lineWidth = 1; g.beginPath(); g.arc(b.x, b.y, b.r + 12, 0, 7); g.stroke(); }
-    g.textAlign = "center"; g.fillStyle = C.ink; g.font = "13px 'IBM Plex Mono', Consolas, monospace"; g.fillText(b.name, b.x, b.y + b.r + 34);
-    g.fillStyle = b.stage === "seed" ? C.muted : C.muted; g.font = "11px 'IBM Plex Mono', Consolas, monospace";
-    g.fillText(`${b.kind} · ${b.stage}${b.progress != null && b.stage !== "shipped" ? " " + Math.round(b.progress * 100) + "%" : ""}`, b.x, b.y + b.r + 50);
+cv.addEventListener('pointermove', (e) => {
+  const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top;
+  mouse.x = sx; mouse.y = sy; mouse.in = true;
+  const w = toWorld(sx, sy); mouse.wx = w.x; mouse.wy = w.y;
+  if (drag && drag.pan) { cam.x = drag.cx - (sx - drag.sx) / cam.z; cam.y = drag.cy - (sy - drag.sy) / cam.z; clampCam(); return; }
+  if (drag) { drag.ex = sx; drag.ey = sy; if (Math.abs(sx - drag.sx) + Math.abs(sy - drag.sy) > 6) drag.box = true; }
+  if (ghost) {
+    const k = KINDS[ghost.kind];
+    const gx = Math.round(w.x / CELL - k.size / 2), gy = Math.round(w.y / CELL - k.size / 2);
+    if (gx !== ghost.gx || gy !== ghost.gy) { ghost.gx = gx; ghost.gy = gy; if (hold) hold = null; updateHint(); }
   }
-  // threats
-  for (const t of S.threats) { const p = threatXY(t), r = threatSize(t); const sel = S.focus && S.focus.ref === t;
-    g.fillStyle = t.kind === "breach" ? "rgba(255,107,107,.35)" : C.bad; poly(5, p.x, p.y, r, -Math.PI / 2); g.fill();
-    g.strokeStyle = C.bad; g.lineWidth = sel ? 2.5 : 1; poly(5, p.x, p.y, r + 4, -Math.PI / 2 + .3); g.stroke(); }
-  // beacons
-  const pulse = (Math.sin(S.t * 3) + 1) / 2;
-  for (const bc of S.beacons) { const p = beaconXY(bc); const ageK = Math.min(1, (S.t - bc.born) / 60);
-    g.strokeStyle = C.gate; g.globalAlpha = .35 + .65 * (S.reduce ? 1 : pulse); g.lineWidth = 2; g.beginPath(); g.arc(p.x, p.y, 11 + ageK * 4, 0, 7); g.stroke(); g.globalAlpha = 1;
-    g.fillStyle = C.gate; g.beginPath(); g.arc(p.x, p.y, 5, 0, 7); g.fill(); }
-  // agents
-  S.agents.forEach((a, i) => { const sel = S.sel === a || pendingAgent === a;
-    g.fillStyle = C.panel2; g.strokeStyle = a.state === "idle" ? C.muted : C.ink; g.lineWidth = sel ? 2.5 : 1.5;
-    poly(3, a.x, a.y, a.slots > 1 ? 11 : 9, -Math.PI / 2); g.fill(); g.stroke();
-    g.fillStyle = C.ink; g.font = "10px 'IBM Plex Mono', Consolas, monospace"; g.textAlign = "center"; g.fillText(a.name[0], a.x, a.y + 4);
-    if (a.state === "work") { g.strokeStyle = C.accent; g.lineWidth = 2; g.beginPath(); g.arc(a.x, a.y, 15, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - a.workLeft / 10)); g.stroke(); }
-    if (sel) { g.fillStyle = C.accent; g.fillText(a.name, a.x, a.y - 16); } });
-  // legend
-  g.textAlign = "left"; g.font = "11px 'IBM Plex Mono', Consolas, monospace"; g.fillStyle = C.muted;
-  g.fillText("hexagon system · square app · dashed under construction · circle seed · red threat · amber waiting on you", 14, H - 12);
-}
-
-// ---- loop -------------------------------------------------------------------
-let last = performance.now(), acc = 0;
-function tick(now) {
-  requestAnimationFrame(tick);
-  const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  if (document.hidden || S.paused || S.ended || !$("modal").hidden) return;
-  acc += dt; if (acc < 1 / 30) return; const step = acc * S.speed; acc = 0;
-  S.t += step;
-  for (const ev of SCRIPT) if (S.t >= ev.at && !S.scripted.has(ev.id)) { S.scripted.add(ev.id); ev.run(); }
-  for (const a of S.agents) {
-    if (a.state === "walk" || a.state === "back") { const dx = a.tx - a.x, dy = a.ty - a.y, d = Math.hypot(dx, dy), v = 90 * step;
-      if (d <= v) { a.x = a.tx; a.y = a.ty; a.state = a.state === "walk" ? "work" : "idle"; drawAgents(); } else { a.x += dx / d * v; a.y += dy / d * v; } }
-    else if (a.state === "work") { a.workLeft -= step; if (a.workLeft <= 0) { finishWork(a); drawAgents(); drawPanel(); } }
+  const h = hitTest(w.x, w.y); hover = h ? h.o : null;
+});
+cv.addEventListener('pointerleave', () => { mouse.in = false; hover = null; });
+cv.addEventListener('pointerup', (e) => {
+  if (hold) { hold = null; return; }
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (d.pan) return;
+  const add = e.shiftKey;
+  if (d.box) {
+    const a = toWorld(Math.min(d.sx, d.ex), Math.min(d.sy, d.ey)), b = toWorld(Math.max(d.sx, d.ex), Math.max(d.sy, d.ey));
+    const got = S.units.filter((u) => u.x >= a.x && u.x <= b.x && u.y >= a.y && u.y <= b.y);
+    sel = add ? [...new Set([...sel, ...got])] : got;
+  } else {
+    const w = toWorld(d.sx, d.sy), h = hitTest(w.x, w.y);
+    if (!h) sel = add ? sel : [];
+    else if (add && h.kind === 'unit') sel = sel.includes(h.o) ? sel.filter((x) => x !== h.o) : [...sel.filter((x) => x.type), h.o];
+    else sel = [h.o];
   }
-  if (S.t >= 48 * SEC_PER_HOUR) return endShift("Day 3 reached");
-  if (S.t > 130 && !S.beacons.length && S.threats.every((t) => threatSize(t) < 9) && S.agents.every((a) => a.state === "idle") && B("rb").stage !== "seed") return endShift("Sector steady");
-  hud(); render();
-}
-function hud() {
-  $("fuel").textContent = "$" + S.fuel.toFixed(2); $("power").textContent = `${4 - powerUsed()} / 4`;
-  $("att").textContent = S.beacons.length; $("thr").textContent = S.threats.length; $("clock").textContent = clockText();
-}
-function endShift(why) {
-  S.ended = true; hud(); render();
-  const by = (k) => S.done.filter((d) => d.kind === k);
-  const lines = S.done.map((d) => `<li>${esc(d.text)}${d.cost ? ` <span class="muted">($${d.cost.toFixed(2)})</span>` : ""}</li>`).join("");
-  $("modal").innerHTML = `<div class="sheet"><h2>${esc(why)}</h2>
-    <p>${S.done.length} real actions in ${Math.round(S.t)} seconds. ${by("project").length ? "1 project planted. " : ""}${by("campaign").length ? by("campaign").length + " campaign drafted. " : ""}</p>
-    ${lines ? `<div><b>What changed</b><ul>${lines}</ul></div>` : "<p class=\"muted\">No actions this time.</p>"}
-    <p><b>Spend</b> $${S.spent.toFixed(2)} of the $${S.cap.toFixed(2)} practice cap.</p>
-    ${S.beacons.length || S.threats.length ? `<div><b>Still waiting</b><ul>${S.beacons.map((b) => `<li>${esc(b.text)}</li>`).join("")}${S.threats.map((t) => `<li>Threat: ${esc(t.text)}</li>`).join("")}</ul></div>` : ""}
-    <p class="muted">Practice only. Nothing was written to SoftwareFactory.</p>
-    <div class="btns"><button class="btn" id="again">Play again</button></div></div>`;
-  $("modal").hidden = false; $("again").onclick = start;
+  selDirty = true;
+});
+cv.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, before = toWorld(sx, sy);
+  cam.z = clamp(cam.z * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 0.5, 1.6);
+  cam.x = before.x - sx / cam.z; cam.y = before.y - sy / cam.z; clampCam();
+}, { passive: false });
+
+function order(w) {
+  const units = sel.filter((x) => x.type);
+  if (!units.length) return;
+  const h = hitTest(w.x, w.y);
+  let n = 0;
+  units.forEach((u, i) => {
+    u.holdT = 0;
+    if (h && h.kind === 'signal' && u.type === 'scout') { u.order = { type: 'carry', id: h.o.id }; n++; }
+    else if (h && h.kind === 'bug' && u.type === 'warden') { u.order = { type: 'attack', id: h.o.id }; n++; }
+    else if (h && h.kind === 'struct' && h.o.state === 'breached' && u.type === 'warden') { u.order = { type: 'repair', id: h.o.id }; n++; }
+    else if (h && h.kind === 'struct' && u.type === 'constructor' && KINDS[h.o.kind].project && (h.o.state === 'building' || ['spec', 'build', 'test'].includes(h.o.phase))) { u.order = { type: 'build', id: h.o.id }; n++; }
+    else { const a = i * 2.4, rr = i ? 14 + i * 4 : 0; u.order = { type: 'move', x: w.x + Math.cos(a) * rr, y: w.y + Math.sin(a) * rr }; u.task = null; u.target = null; n++; }
+  });
+  if (n) S.pings = { x: w.x, y: w.y, t: 0 };
 }
 
-// ---- keys -------------------------------------------------------------------
-document.addEventListener("keydown", (e) => {
-  if (S.ended || e.target.tagName === "INPUT") return;
+window.addEventListener('keydown', (e) => {
+  if (!$('#menu').hidden || !$('#end').hidden) return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input') { if (e.key === 'Enter') { const b = currentBeacon(); if (b && b.type === 'plan') decide(b, 'back', e.target.value.trim()); e.target.blur(); } if (e.key === 'Escape') e.target.blur(); return; }
   const k = e.key.toLowerCase();
-  if (k === " ") { e.preventDefault(); if (e.repeat) return; const b = $("send"); if (b && b._start) b._start(e); return; }
-  if (e.repeat) return;
-  if (["1", "2", "3", "4"].includes(k)) return pickAgent(+k);
-  if (k === "enter") { const ok = $("ok") || $("plant"); if (ok) { e.preventDefault(); ok.click(); } return; }
-  if (k === "escape") { if (S.mode) { S.mode = null; S.routeFrom = null; drawPanel(); return; } const pk = $("park"); if (pk) return pk.click(); S.sel = null; pendingAgent = null; select(null); drawAgents(); return; }
-  if (k === "tab") { e.preventDefault(); if (!S.beacons.length) return toast("Nothing is waiting on you."); const i = S.focus && S.focus.type === "beacon" ? (S.beacons.indexOf(S.focus.ref) + 1) % S.beacons.length : 0; select({ type: "beacon", ref: S.beacons[i] }); return; }
-  if (k === "r") { S.mode = "route"; S.routeFrom = null; S.sel = null; select(null); return; }
-  if (k === "p") return togglePause();
+  if (e.code && e.code.startsWith('Digit')) {
+    const n = e.code.slice(5);
+    if (e.shiftKey) { S.groups[n] = sel.filter((x) => x.type).map((u) => u.id); toast('Group ' + n + ' saved (' + S.groups[n].length + ' agents)'); }
+    else if (S.groups[n]) { sel = S.groups[n].map(byId).filter(Boolean); selDirty = true; if (sel[0]) centerOn(sel[0].x, sel[0].y); }
+    e.preventDefault(); return;
+  }
+  if (k === ' ' || k === 'p') { S.paused = !S.paused; $('#pauseBtn').classList.toggle('on', S.paused); $('#pauseBtn').textContent = S.paused ? 'Paused' : 'Pause'; e.preventDefault(); return; }
+  if (k === 'escape') { if (mode) setMode(null); else { sel = []; selDirty = true; } return; }
+  if (k === 'tab') { e.preventDefault(); if (S.beacons.length) { gateIdx = (gateIdx + 1) % S.beacons.length; gateDirty = true; const b = S.beacons[gateIdx], s = byId(b.sid); if (s) centerOn(s.x, s.y); } return; }
+  if (k === 'enter') { const b = currentBeacon(); if (b) decide(b, b.type === 'plan' ? 'approve' : 'a'); return; }
+  if (k === 'backspace') { const b = currentBeacon(); if (b && b.type === 'plan') { decide(b, 'back', ($('#gNote') || {}).value || ''); e.preventDefault(); } return; }
+  if (k === 'c') { setMode(mode === 'connect' ? null : 'connect'); return; }
+  const bk = BUILD_ORDER.find((x) => KINDS[x].key === k); if (bk) { startBuild(bk); return; }
+  const tk = TRAIN_ORDER.find((x) => UNITS[x].key === k); if (tk) { train(tk); return; }
+  const pan = 60 / cam.z;
+  if (k === 'arrowleft') cam.x -= pan; if (k === 'arrowright') cam.x += pan; if (k === 'arrowup') cam.y -= pan; if (k === 'arrowdown') cam.y += pan;
+  if (k.startsWith('arrow')) { clampCam(); e.preventDefault(); }
+  if (k === '+' || k === '=') setSpeed(Math.min(4, S.speed * 2)); if (k === '-') setSpeed(Math.max(1, S.speed / 2));
 });
-document.addEventListener("keyup", (e) => { if (e.key === " ") { const b = $("send"); if (b && b._stop) b._stop(); } });
-function togglePause() { S.paused = !S.paused; $("pause").textContent = S.paused ? "Resume" : "Pause"; toast(S.paused ? "Paused" : "Running"); }
-$("pause").onclick = togglePause;
-$("speed").onclick = () => { S.speed = S.speed === 1 ? 2 : 1; $("speed").textContent = `Speed ${S.speed}×`; };
+function setSpeed(v) { S.speed = v; document.querySelectorAll('[data-speed]').forEach((b) => b.classList.toggle('on', +b.dataset.speed === v)); }
+document.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('click', () => setSpeed(+b.dataset.speed)));
+$('#pauseBtn').addEventListener('click', () => { S.paused = !S.paused; $('#pauseBtn').classList.toggle('on', S.paused); $('#pauseBtn').textContent = S.paused ? 'Paused' : 'Pause'; });
+$('#connectBtn').addEventListener('click', () => setMode(mode === 'connect' ? null : 'connect'));
+function miniJump(e) { const r = mini.getBoundingClientRect(); centerOn((e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H); }
+mini.addEventListener('pointerdown', (e) => { miniJump(e); mini.setPointerCapture(e.pointerId); mini.onpointermove = miniJump; });
+mini.addEventListener('pointerup', () => { mini.onpointermove = null; });
 
-function start() {
-  S = newWorld();
-  S.reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  S.agents.forEach((a, i) => { const p = home(a, i); a.x = p.x; a.y = p.y; });
-  $("modal").hidden = true; pendingAgent = null;
-  log("Practice sector loaded. Nothing here touches your real projects.");
-  drawAgents(); drawPanel(); hud(); render();
+/* ---------------- drawing ---------------- */
+function draw(now) {
+  const t = now / 1000;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#07090b'; ctx.fillRect(0, 0, vw, vh);
+  // terrain: copy only the visible part
+  const sx = Math.max(0, cam.x), sy = Math.max(0, cam.y), sw = Math.min(W, cam.x + vw / cam.z) - sx, sh = Math.min(H, cam.y + vh / cam.z) - sy;
+  if (sw > 0 && sh > 0) ctx.drawImage(terrain, sx, sy, sw, sh, (sx - cam.x) * cam.z, (sy - cam.y) * cam.z, sw * cam.z, sh * cam.z);
+  ctx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, -cam.x * cam.z * dpr, -cam.y * cam.z * dpr);
+
+  // lit build area
+  const ls = lights();
+  ctx.fillStyle = 'rgba(79,209,193,.035)';
+  for (const l of ls) { ctx.beginPath(); ctx.arc(l.x, l.y, l.r, 0, Math.PI * 2); ctx.fill(); }
+  if (ghost) {
+    ctx.strokeStyle = 'rgba(79,209,193,.35)'; ctx.setLineDash([6, 6]); ctx.lineWidth = 1.5;
+    for (const l of ls) { ctx.beginPath(); ctx.arc(l.x, l.y, l.r, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.setLineDash([]);
+  }
+
+  // conduits with flowing dots
+  for (const c of S.conduits) {
+    const a = byId(c.a), b = byId(c.b); if (!a || !b) continue;
+    const live = a.linked && b.linked && (passesPower(a) || passesPower(b));
+    ctx.strokeStyle = '#1d232b'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.strokeStyle = live ? 'rgba(79,209,193,.55)' : 'rgba(154,162,173,.25)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    if (live && !REDUCED) {
+      const L = dist(a, b), n = Math.max(1, Math.floor(L / 46));
+      ctx.fillStyle = COL.teal;
+      for (let i = 0; i < n; i++) { const f = ((t * 40 / L) + i / n) % 1; ctx.beginPath(); ctx.arc(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, 2.2, 0, Math.PI * 2); ctx.fill(); }
+    }
+  }
+  if (mode === 'connect' && connectFrom && mouse.in) {
+    const ok = Math.hypot(mouse.wx - connectFrom.x, mouse.wy - connectFrom.y) <= 9.5 * CELL;
+    ctx.strokeStyle = ok ? 'rgba(79,209,193,.8)' : 'rgba(255,107,94,.8)'; ctx.setLineDash([8, 6]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(connectFrom.x, connectFrom.y); ctx.lineTo(mouse.wx, mouse.wy); ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // buildings
+  for (const s of S.structs) drawStruct(s, t);
+  // signals
+  for (const g of S.signals) {
+    const p = REDUCED ? 0.5 : (Math.sin(t * 3 + g.ph) + 1) / 2;
+    ctx.fillStyle = 'rgba(79,209,193,' + (0.10 + p * 0.12) + ')'; ctx.beginPath(); ctx.arc(g.x, g.y, 10 + p * 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#d9fbf6'; ctx.beginPath(); ctx.moveTo(g.x, g.y - 6); ctx.lineTo(g.x + 4.5, g.y); ctx.lineTo(g.x, g.y + 6); ctx.lineTo(g.x - 4.5, g.y); ctx.closePath(); ctx.fill();
+    if (hover === g) label(g.x, g.y - 16, '"' + g.text + '"', COL.ink);
+  }
+  // bugs
+  for (const b of S.bugs) drawBug(b, t);
+  // agents
+  for (const u of S.units) drawUnit(u, t);
+  // shots
+  for (const sh of S.shots) { ctx.strokeStyle = sh.c; ctx.globalAlpha = 1 - sh.t / 0.18; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sh.x1, sh.y1); ctx.lineTo(sh.x2, sh.y2); ctx.stroke(); ctx.globalAlpha = 1; }
+  // beacons
+  for (const b of S.beacons) {
+    const s = byId(b.sid); if (!s) continue;
+    const bob = REDUCED ? 0 : Math.sin(t * 4) * 3, y = s.y - s.r - 26 + bob;
+    const cur = b === currentBeacon();
+    if (!REDUCED) { const p = (t * 1.2) % 1; ctx.strokeStyle = 'rgba(245,177,76,' + (1 - p) * 0.6 + ')'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(s.x, s.y, s.r + 6 + p * 26, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.fillStyle = COL.amber; ctx.beginPath(); ctx.moveTo(s.x, y - 11); ctx.lineTo(s.x + 9, y); ctx.lineTo(s.x, y + 11); ctx.lineTo(s.x - 9, y); ctx.closePath(); ctx.fill();
+    if (cur) { ctx.strokeStyle = COL.ink; ctx.lineWidth = 1.5; ctx.stroke(); }
+    ctx.fillStyle = COL.bg; ctx.font = '700 12px ' + getComputedStyle(document.body).fontFamily; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', s.x, y + 1);
+  }
+  // wave warnings
+  for (const s of S.structs) if (s.wave && s.wave.t > 0) {
+    const [fx, fy] = s.wave.from;
+    ctx.strokeStyle = 'rgba(255,107,94,.5)'; ctx.setLineDash([10, 10]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(s.x, s.y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,107,94,.18)'; ctx.beginPath(); ctx.arc(fx, fy, 60, 0, Math.PI * 2); ctx.fill();
+    label(fx, fy - 70, 'Release wave in ' + Math.ceil(s.wave.t) + 's', COL.red);
+  }
+  // order ping
+  if (S.pings) { S.pings.t += 1 / 30; const p = S.pings; if (p.t < 0.5) { ctx.strokeStyle = 'rgba(169,155,255,' + (1 - p.t * 2) + ')'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, 6 + p.t * 30, 0, Math.PI * 2); ctx.stroke(); } }
+  // floating labels
+  for (const f of S.floats) { ctx.globalAlpha = 1 - f.t / 1.8; label(f.x, f.y, f.text, f.color, true); ctx.globalAlpha = 1; }
+  // placement ghost
+  if (ghost && ghost.gx !== undefined && mouse.in) drawGhost();
+
+  // screen space: selection box, off-screen wave arrows
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (drag && drag.box) { ctx.strokeStyle = COL.violet; ctx.fillStyle = 'rgba(169,155,255,.08)'; ctx.lineWidth = 1; const x = Math.min(drag.sx, drag.ex), y = Math.min(drag.sy, drag.ey), w = Math.abs(drag.ex - drag.sx), h = Math.abs(drag.ey - drag.sy); ctx.fillRect(x, y, w, h); ctx.strokeRect(x + .5, y + .5, w, h); }
+  for (const s of S.structs) if (s.wave) edgeArrow(s.wave.from[0], s.wave.from[1], COL.red);
+  for (const b of S.beacons) { const s = byId(b.sid); if (s) edgeArrow(s.x, s.y, COL.amber); }
 }
-start();
-requestAnimationFrame(tick);
+function edgeArrow(wx, wy, color) {
+  const sx = (wx - cam.x) * cam.z, sy = (wy - cam.y) * cam.z;
+  if (sx > 0 && sy > 0 && sx < vw && sy < vh) return;
+  const cx = vw / 2, cy = vh / 2, a = Math.atan2(sy - cy, sx - cx);
+  const m = 22, x = clamp(sx, m, vw - m), y = clamp(sy, m + 30, vh - m);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.fillStyle = color;
+  ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-6, -8); ctx.lineTo(-2, 0); ctx.lineTo(-6, 8); ctx.closePath(); ctx.fill(); ctx.restore();
+}
+let FONT = 'system-ui';
+function label(x, y, text, color, bold) {
+  ctx.font = (bold ? '600 ' : '500 ') + '12px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const w = ctx.measureText(text).width + 10;
+  ctx.fillStyle = 'rgba(11,13,16,.78)'; ctx.fillRect(x - w / 2, y - 8, w, 16);
+  ctx.fillStyle = color; ctx.fillText(text, x, y + 0.5);
+}
+function poly(cx, cy, r, n, rot) { ctx.beginPath(); for (let i = 0; i < n; i++) { const a = rot + i / n * Math.PI * 2; ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } ctx.closePath(); }
+function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); }
+
+function drawStruct(s, t) {
+  const k = KINDS[s.kind], x = s.x, y = s.y, r = s.r - 4;
+  const isSel = sel.includes(s), isHover = hover === s;
+  const built = s.state !== 'building' && !(k.project && s.phase !== 'shipped' && s.phase !== 'repairs' && s.phase !== 'wave');
+  const dark = s.state === 'breached' || (built && !s.online && s.kind !== 'hq');
+  // footprint shadow
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; rrect(x - r + 3, y - r + 5, r * 2, r * 2, 6); ctx.fill();
+  if (isSel || isHover) { ctx.strokeStyle = isSel ? COL.ink : 'rgba(242,240,235,.4)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); rrect(x - r - 6, y - r - 6, r * 2 + 12, r * 2 + 12, 8); ctx.stroke(); ctx.setLineDash([]); }
+
+  if (!built && s.kind !== 'hq') { drawScaffold(s, t); }
+  else {
+    const accent = s.state === 'breached' ? COL.red : dark ? COL.mute : s.kind === 'reactor' || s.kind === 'barracks' ? COL.violet : (k.project ? COL.green : COL.teal);
+    ctx.globalAlpha = dark && s.state !== 'breached' ? 0.55 : 1;
+    if (s.kind === 'hq') {
+      poly(x, y, r + 6, 6, Math.PI / 6); ctx.fillStyle = '#1c232b'; ctx.fill(); ctx.strokeStyle = '#3a4552'; ctx.lineWidth = 2; ctx.stroke();
+      poly(x, y - 3, r - 8, 6, Math.PI / 6); ctx.fillStyle = '#26303b'; ctx.fill();
+      poly(x, y - 5, r - 22, 6, Math.PI / 6); ctx.fillStyle = '#303c49'; ctx.fill();
+      const p = REDUCED ? 0.6 : (Math.sin(t * 2) + 1) / 2;
+      ctx.fillStyle = 'rgba(79,209,193,' + (0.25 + p * 0.25) + ')'; ctx.beginPath(); ctx.arc(x, y - 5, 16, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = s.state === 'breached' ? COL.red : COL.teal; ctx.beginPath(); ctx.arc(x, y - 5, 8, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i / 6 * Math.PI * 2; ctx.fillStyle = (Math.floor(t * 2) + i) % 6 === 0 && !REDUCED ? COL.ink : 'rgba(79,209,193,.7)'; ctx.beginPath(); ctx.arc(x + Math.cos(a) * (r - 2), y + Math.sin(a) * (r - 2), 2.4, 0, Math.PI * 2); ctx.fill(); }
+      if (S.hqLevel >= 2) { ctx.strokeStyle = 'rgba(79,209,193,.5)'; ctx.lineWidth = 1.5; poly(x, y, r + 14, 6, Math.PI / 6); ctx.stroke(); }
+    } else if (s.kind === 'refinery') {
+      rrect(x - r, y - r, r * 2, r * 2, 6); ctx.fillStyle = '#1b2229'; ctx.fill(); ctx.strokeStyle = '#323c47'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#26303a'; ctx.beginPath(); ctx.arc(x - 8, y + 2, r * 0.55, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.beginPath(); const sp = s.online && s.queue > 0 && !REDUCED ? t * 3 : 0; ctx.arc(x - 8, y + 2, r * 0.38, sp, sp + Math.PI * 1.2); ctx.stroke();
+      ctx.fillStyle = '#2d3843'; ctx.fillRect(x + r * 0.45, y - r + 4, 10, r * 1.1);
+      ctx.fillStyle = accent; ctx.fillRect(x + r * 0.45, y - r + 4, 10, 3);
+      if (s.queue) label(x, y + r + 24, S.blueprints >= BP_CAP ? 'store full: use Blueprints' : s.queue + ' in queue', S.blueprints >= BP_CAP ? COL.amber : COL.teal);
+    } else if (s.kind === 'barracks') {
+      rrect(x - r, y - r * 0.8, r * 2, r * 1.6, 5); ctx.fillStyle = '#1d2229'; ctx.fill(); ctx.strokeStyle = '#353d48'; ctx.lineWidth = 1.5; ctx.stroke();
+      for (let i = 0; i < 4; i++) { ctx.fillStyle = i < S.units.length ? 'rgba(169,155,255,.55)' : '#2a313b'; ctx.fillRect(x - r + 7 + i * (r * 2 - 14) / 4, y - r * 0.55, (r * 2 - 14) / 4 - 4, 8); }
+      ctx.fillStyle = '#2a313b'; ctx.fillRect(x - 8, y + r * 0.3, 16, r * 0.5); ctx.fillStyle = accent; ctx.fillRect(x - 8, y + r * 0.3, 16, 2);
+      if (S.trainQ.length && s.online) { const q = S.trainQ[0]; ctx.fillStyle = COL.violet; ctx.fillRect(x - r, y + r * 0.8 + 4, r * 2 * (q.t / UNITS[q.type].train), 3); }
+    } else if (s.kind === 'reactor') {
+      ctx.fillStyle = '#1b2027'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#353d48'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.setLineDash([4, 5]); ctx.lineDashOffset = REDUCED ? 0 : -t * 12; ctx.beginPath(); ctx.arc(x, y, r * 0.7, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+      const p = REDUCED ? 0.5 : (Math.sin(t * 3) + 1) / 2; ctx.fillStyle = s.online ? 'rgba(169,155,255,' + (0.5 + p * 0.4) + ')' : '#3a424d'; ctx.beginPath(); ctx.arc(x, y, r * 0.32, 0, Math.PI * 2); ctx.fill();
+    } else if (s.kind === 'app') {
+      rrect(x - r, y - r, r * 2, r * 2, 5); ctx.fillStyle = '#1a2026'; ctx.fill(); ctx.strokeStyle = '#34404b'; ctx.lineWidth = 1.5; ctx.stroke();
+      rrect(x - r + 6, y - r + 6, r * 2 - 12, r * 2 - 18, 3); ctx.fillStyle = '#222a33'; ctx.fill();
+      for (let i = 0; i < 9; i++) { const cx = x - r + 12 + (i % 3) * (r * 2 - 24) / 3, cy = y - r + 12 + Math.floor(i / 3) * (r * 2 - 30) / 3; ctx.fillStyle = s.online ? (i + Math.floor(t)) % 4 === 0 && !REDUCED ? 'rgba(143,212,122,.9)' : 'rgba(143,212,122,.45)' : '#323a44'; ctx.fillRect(cx, cy, (r * 2 - 24) / 3 - 5, (r * 2 - 30) / 3 - 5); }
+      ctx.fillStyle = accent; ctx.fillRect(x - r, y + r - 6, r * 2, 3);
+    } else if (s.kind === 'feature') {
+      rrect(x - r, y - r, r * 2, r * 2, 4); ctx.fillStyle = '#1e252d'; ctx.fill(); ctx.strokeStyle = accent; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = s.online ? 'rgba(143,212,122,.6)' : '#333b45'; ctx.fillRect(x - 5, y - 5, 10, 10);
+    } else if (s.kind === 'turret') {
+      ctx.fillStyle = '#1c2229'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#38424d'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.save(); ctx.translate(x, y); ctx.rotate(s.aim); ctx.fillStyle = accent; ctx.fillRect(0, -2.5, r + 4, 5); ctx.restore();
+      ctx.fillStyle = '#2b333d'; ctx.beginPath(); ctx.arc(x, y, r * 0.5, 0, Math.PI * 2); ctx.fill();
+      if (isSel) { ctx.strokeStyle = 'rgba(79,209,193,.25)'; ctx.beginPath(); ctx.arc(x, y, 150 * (countOnline('dock') ? 1.4 : 1), 0, Math.PI * 2); ctx.stroke(); }
+    } else if (s.kind === 'archive') {
+      poly(x, y, r, 8, Math.PI / 8); ctx.fillStyle = '#1c2229'; ctx.fill(); ctx.strokeStyle = '#38424d'; ctx.lineWidth = 1.5; ctx.stroke();
+      for (let i = 0; i < 4; i++) { ctx.fillStyle = i % 2 ? '#2e3742' : accent; ctx.globalAlpha *= 0.85; ctx.fillRect(x - 14 + i * 7, y - 12, 5, 24); ctx.globalAlpha = dark ? 0.55 : 1; }
+      if (S.researching) { ctx.strokeStyle = COL.teal; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * S.researching.t / 10); ctx.stroke(); }
+    } else if (s.kind === 'dock') {
+      rrect(x - r, y - r * 0.85, r * 2, r * 1.7, 5); ctx.fillStyle = '#1c2128'; ctx.fill(); ctx.strokeStyle = '#38424d'; ctx.lineWidth = 1.5; ctx.stroke();
+      for (let i = 0; i < 3; i++) { ctx.fillStyle = i === 0 ? accent : '#2b333d'; ctx.fillRect(x - r + 8 + i * (r * 2 - 16) / 3, y - 8, (r * 2 - 16) / 3 - 6, 16); }
+    }
+    ctx.globalAlpha = 1;
+    if (s.state === 'breached') {
+      const fl = REDUCED ? 0.5 : (Math.sin(t * 10) + 1) / 2;
+      ctx.strokeStyle = 'rgba(255,107,94,' + (0.5 + fl * 0.5) + ')'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x - 10, y - 10); ctx.lineTo(x + 10, y + 10); ctx.moveTo(x + 10, y - 10); ctx.lineTo(x - 10, y + 10); ctx.stroke();
+    }
+  }
+  if (s.flash > 0) { ctx.strokeStyle = 'rgba(143,212,122,' + s.flash + ')'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, s.r + 10 + (1 - s.flash) * 30, 0, Math.PI * 2); ctx.stroke(); }
+  // integrity
+  if (s.integ < 100) { const w = s.r * 2 - 8; ctx.fillStyle = '#2a1416'; ctx.fillRect(x - w / 2, y - s.r - 8, w, 4); ctx.fillStyle = s.integ > 70 ? COL.green : s.integ > 30 ? COL.amber : COL.red; ctx.fillRect(x - w / 2, y - s.r - 8, w * s.integ / 100, 4); }
+  // name and status
+  let name = s.kind === 'feature' ? 'Feature' : s.name;
+  if (s.kind === 'app' && s.phase !== 'shipped') name += ' · ' + ({ spec: 'spec', gate: 'needs your OK', build: 'build', test: 'test', wave: 'release wave', repairs: 'needs repair' }[s.phase] || '');
+  label(x, y + s.r + 9, name, s.state === 'breached' ? COL.red : s.phase === 'gate' ? COL.amber : COL.ink2);
+  if (s.kind !== 'hq' && !s.linked && (s.state !== 'building' || k.project || true) && s.kind !== 'feature') {
+    if (!s.linked) label(x, y - s.r - 18, 'not connected: press C', COL.amber);
+  }
+}
+function drawScaffold(s, t) {
+  const k = KINDS[s.kind], x = s.x, y = s.y, r = s.r - 4;
+  ctx.strokeStyle = 'rgba(79,209,193,.55)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); rrect(x - r, y - r, r * 2, r * 2, 5); ctx.stroke(); ctx.setLineDash([]);
+  ctx.save(); rrect(x - r, y - r, r * 2, r * 2, 5); ctx.clip();
+  ctx.strokeStyle = 'rgba(79,209,193,.12)'; ctx.lineWidth = 1;
+  ctx.beginPath(); for (let i = -r * 2; i < r * 2; i += 9) { ctx.moveTo(x + i, y - r); ctx.lineTo(x + i + r * 2, y + r); } ctx.stroke();
+  let f = s.prog;
+  if (k.project && s.kind === 'app') { const done = { spec: 0, gate: 1, build: 1, test: 2, wave: 3 }[s.phase] || 0; f = (done + (s.phase === 'gate' || s.phase === 'wave' ? 0 : s.prog)) / 3; }
+  ctx.fillStyle = 'rgba(79,209,193,.16)'; ctx.fillRect(x - r, y + r - r * 2 * f, r * 2, r * 2 * f);
+  ctx.restore();
+  if (s.kind === 'app') {
+    const ph = ['spec', 'build', 'test', 'ship'], cur = { spec: 0, gate: 0, build: 1, test: 2, wave: 3 }[s.phase];
+    for (let i = 0; i < 4; i++) { ctx.fillStyle = i < cur ? COL.green : i === cur ? (s.phase === 'gate' ? COL.amber : COL.teal) : '#2a313b'; ctx.fillRect(x - r + i * (r * 2) / 4 + 1, y - r - 2, (r * 2) / 4 - 2, 3); }
+    if (s.phase !== 'gate' && s.phase !== 'wave') { ctx.fillStyle = COL.teal; ctx.fillRect(x - r, y + r + 1, r * 2 * s.prog, 2); }
+    if (s.linked && !s.workers && ['spec', 'build', 'test'].includes(s.phase)) label(x, y, S.units.some((u) => u.type === 'constructor') ? 'waiting for a Constructor' : 'needs a Constructor (X)', COL.amber);
+  } else {
+    ctx.fillStyle = COL.teal; ctx.fillRect(x - r, y + r + 1, r * 2 * s.prog, 2);
+    ctx.font = '500 12px ' + FONT; ctx.fillStyle = COL.ink2; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(Math.round(s.prog * 100) + '%', x, y);
+  }
+}
+function drawBug(b, t) {
+  const sz = 5 + (b.max / 60) * 7, x = b.x, y = b.y, a = Math.atan2((byId(b.target)?.y || y) - y, (byId(b.target)?.x || x) - x);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+  ctx.strokeStyle = b.wave ? '#ff8a7f' : COL.red; ctx.lineWidth = 1.4;
+  for (let i = -1; i <= 1; i++) { const w = REDUCED ? 0 : Math.sin(b.ph + i) * 2.5; ctx.beginPath(); ctx.moveTo(i * sz * 0.5, 0); ctx.lineTo(i * sz * 0.5 + w, -sz - 3); ctx.moveTo(i * sz * 0.5, 0); ctx.lineTo(i * sz * 0.5 - w, sz + 3); ctx.stroke(); }
+  ctx.fillStyle = b.wave ? '#c9473e' : '#b8382f'; ctx.beginPath(); ctx.ellipse(0, 0, sz * 1.2, sz * 0.8, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = COL.red; ctx.beginPath(); ctx.arc(sz * 1.1, 0, sz * 0.45, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  if (b.hp < b.max - 0.5) { ctx.fillStyle = '#2a1416'; ctx.fillRect(x - 9, y - sz - 8, 18, 3); ctx.fillStyle = COL.red; ctx.fillRect(x - 9, y - sz - 8, 18 * Math.max(0, b.hp / b.max), 3); }
+  if (sel.includes(b) || hover === b) { ctx.strokeStyle = COL.ink; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x, y, sz + 6, 0, Math.PI * 2); ctx.stroke(); }
+}
+function drawUnit(u, t) {
+  const x = u.x, y = u.y, isSel = sel.includes(u);
+  if (isSel) { ctx.strokeStyle = COL.ink; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(x, y + 3, 11, 6, 0, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(x + 1, y + 5, 7, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+  const c = u.powered ? COL.violet : '#5b5670';
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = c; ctx.strokeStyle = '#e9e5ff'; ctx.lineWidth = 1;
+  if (u.type === 'scout') { ctx.rotate(u.face); ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-6, -6); ctx.lineTo(-3, 0); ctx.lineTo(-6, 6); ctx.closePath(); ctx.fill(); }
+  else if (u.type === 'constructor') { ctx.fillRect(-6, -6, 12, 12); ctx.fillStyle = COL.bg; ctx.fillRect(-2, -2, 4, 4); if (u.state === 'working' && !REDUCED) { ctx.rotate(t * 6); ctx.strokeStyle = COL.teal; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 10, 0, 1.4); ctx.stroke(); } }
+  else if (u.type === 'warden') { ctx.rotate(u.face); ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(0, -7); ctx.lineTo(-8, 0); ctx.lineTo(0, 7); ctx.closePath(); ctx.fill(); ctx.fillStyle = COL.bg; ctx.fillRect(1, -1.5, 6, 3); }
+  else if (u.type === 'judge') { ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#e9e5ff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.restore();
+  if (u.carry) { ctx.fillStyle = '#d9fbf6'; ctx.beginPath(); ctx.moveTo(x, y - 15); ctx.lineTo(x + 3.5, y - 11); ctx.lineTo(x, y - 7); ctx.lineTo(x - 3.5, y - 11); ctx.closePath(); ctx.fill(); }
+  if (u.xp >= 5) { ctx.strokeStyle = COL.amber; ctx.lineWidth = 1.5; for (let i = 0; i < (u.xp >= 15 ? 2 : 1); i++) { ctx.beginPath(); ctx.moveTo(x + 7, y + 8 + i * 3); ctx.lineTo(x + 9.5, y + 6 + i * 3); ctx.lineTo(x + 12, y + 8 + i * 3); ctx.stroke(); } }
+  if (!u.powered) label(x, y - 18, 'no slot', COL.red);
+  else if (u.task === 'no budget') label(x, y - 18, 'budget cap', COL.amber);
+  if (hover === u && !isSel) label(x, y - 18, UNITS[u.type].name, COL.violet);
+}
+function drawGhost() {
+  const k = KINDS[ghost.kind], why = canPlace(ghost.kind, ghost.gx, ghost.gy);
+  const x0 = ghost.gx * CELL, y0 = ghost.gy * CELL, sz = k.size * CELL;
+  ctx.fillStyle = why ? 'rgba(255,107,94,.18)' : 'rgba(79,209,193,.16)'; ctx.fillRect(x0, y0, sz, sz);
+  ctx.strokeStyle = why ? COL.red : COL.teal; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(x0 + 1, y0 + 1, sz - 2, sz - 2); ctx.setLineDash([]);
+  const cx = x0 + sz / 2, cy = y0 + sz / 2;
+  label(cx, y0 - 12, k.name + ' · ' + money(k.cost) + (k.bp ? ' + ' + k.bp + ' bp' : ''), why ? COL.red : COL.ink);
+  // nearest connectable building, as a hint
+  if (!why) {
+    const n = nearest(S.structs, { x: cx, y: cy }, 9.5 * CELL, (s) => s.linked);
+    if (n) { ctx.strokeStyle = 'rgba(79,209,193,.4)'; ctx.setLineDash([4, 6]); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(n.x, n.y); ctx.stroke(); ctx.setLineDash([]); }
+  }
+  if (hold) {
+    ctx.strokeStyle = COL.amber; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, sz / 2 + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, hold.t / hold.need)); ctx.stroke();
+    label(cx, cy, 'spending ' + money(k.cost), COL.amber, true);
+  }
+}
+function drawMini() {
+  const sx = mini.width / W, sy = mini.height / H;
+  mctx.clearRect(0, 0, mini.width, mini.height);
+  mctx.fillStyle = 'rgba(79,209,193,.08)';
+  for (const l of lights()) { mctx.beginPath(); mctx.arc(l.x * sx, l.y * sy, l.r * sx, 0, Math.PI * 2); mctx.fill(); }
+  mctx.strokeStyle = 'rgba(79,209,193,.5)'; mctx.lineWidth = 1;
+  for (const c of S.conduits) { const a = byId(c.a), b = byId(c.b); if (a && b) { mctx.beginPath(); mctx.moveTo(a.x * sx, a.y * sy); mctx.lineTo(b.x * sx, b.y * sy); mctx.stroke(); } }
+  for (const s of S.structs) { mctx.fillStyle = s.state === 'breached' ? COL.red : s.kind === 'hq' ? COL.teal : s.online ? COL.ink2 : '#59616c'; const z = s.size * CELL * sx; mctx.fillRect(s.x * sx - z / 2, s.y * sy - z / 2, z, z); }
+  mctx.fillStyle = COL.teal; for (const g of S.signals) mctx.fillRect(g.x * sx - 1, g.y * sy - 1, 2, 2);
+  mctx.fillStyle = COL.violet; for (const u of S.units) mctx.fillRect(u.x * sx - 1, u.y * sy - 1, 2.5, 2.5);
+  mctx.fillStyle = COL.red; for (const b of S.bugs) mctx.fillRect(b.x * sx - 1.5, b.y * sy - 1.5, 3, 3);
+  mctx.fillStyle = COL.amber; for (const b of S.beacons) { const s = byId(b.sid); if (s) { mctx.beginPath(); mctx.arc(s.x * sx, s.y * sy - 6, 3, 0, Math.PI * 2); mctx.fill(); } }
+  mctx.strokeStyle = COL.ink; mctx.strokeRect(cam.x * sx + .5, cam.y * sy + .5, vw / cam.z * sx, vh / cam.z * sy);
+}
+
+/* ---------------- panels (DOM, refreshed a few times a second) ---------------- */
+const ICON = {
+  refinery: '<rect x="3" y="4" width="16" height="15" rx="2" fill="none" stroke="#4fd1c1" stroke-width="1.5"/><circle cx="9" cy="12" r="3.5" fill="none" stroke="#4fd1c1" stroke-width="1.5"/><rect x="14" y="5" width="3" height="8" fill="#4fd1c1"/>',
+  barracks: '<rect x="2" y="6" width="18" height="12" rx="2" fill="none" stroke="#a99bff" stroke-width="1.5"/><path d="M5 9h3M10 9h3M15 9h2" stroke="#a99bff" stroke-width="2"/><rect x="9" y="13" width="4" height="5" fill="#a99bff"/>',
+  reactor: '<circle cx="11" cy="11" r="8" fill="none" stroke="#a99bff" stroke-width="1.5"/><circle cx="11" cy="11" r="3" fill="#a99bff"/>',
+  app: '<rect x="3" y="3" width="16" height="16" rx="2" fill="none" stroke="#8fd47a" stroke-width="1.5"/><path d="M6 7h3M11 7h3M6 11h3M11 11h3" stroke="#8fd47a" stroke-width="2"/><path d="M3 16h16" stroke="#8fd47a" stroke-width="1.5"/>',
+  turret: '<circle cx="11" cy="12" r="6" fill="none" stroke="#4fd1c1" stroke-width="1.5"/><path d="M11 12l7-7" stroke="#4fd1c1" stroke-width="2.5"/>',
+  feature: '<rect x="2" y="7" width="10" height="10" rx="1" fill="none" stroke="#8fd47a" stroke-width="1.5"/><rect x="13" y="10" width="6" height="6" fill="#8fd47a"/>',
+  archive: '<path d="M7 3h8l4 4v8l-4 4H7l-4-4V7z" fill="none" stroke="#4fd1c1" stroke-width="1.5"/><path d="M8 8v6M11 8v6M14 8v6" stroke="#4fd1c1" stroke-width="1.6"/>',
+  dock: '<rect x="2" y="5" width="18" height="12" rx="2" fill="none" stroke="#4fd1c1" stroke-width="1.5"/><rect x="5" y="9" width="3" height="4" fill="#4fd1c1"/><path d="M10 9h3v4h-3zM15 9h2v4h-2z" fill="none" stroke="#4fd1c1"/>',
+  scout: '<path d="M18 11L5 5l3 6-3 6z" fill="#a99bff"/>', constructor: '<rect x="5" y="5" width="12" height="12" fill="#a99bff"/><rect x="9" y="9" width="4" height="4" fill="#0b0d10"/>',
+  warden: '<path d="M19 11l-8-7-8 7 8 7z" fill="#a99bff"/>', judge: '<circle cx="11" cy="11" r="5" fill="#a99bff"/><circle cx="11" cy="11" r="8" fill="none" stroke="#a99bff" stroke-width="1.5"/>',
+};
+function renderBuildBar() {
+  const box = $('#buildBar'); box.querySelectorAll('.bb').forEach((b) => b.remove());
+  for (const kind of BUILD_ORDER) {
+    const k = KINDS[kind], locked = S && S.rankI < k.rank;
+    const b = document.createElement('button'); b.className = 'bb' + (locked ? ' lock' : '') + (mode === 'build:' + kind ? ' on' : ''); b.dataset.kind = kind;
+    b.innerHTML = '<svg viewBox="0 0 22 22">' + ICON[kind] + '</svg><span class="n">' + k.name + ' <kbd>' + k.key.toUpperCase() + '</kbd></span><span class="c">' + (locked ? RANKS[k.rank].n : money(k.cost) + (k.bp ? ' · ' + k.bp + ' bp' : '')) + '</span>';
+    b.title = k.sf; b.addEventListener('click', () => startBuild(kind));
+    box.appendChild(b);
+  }
+}
+function renderTrainBar() {
+  const box = $('#trainBar'); box.querySelectorAll('.bb').forEach((b) => b.remove());
+  for (const type of TRAIN_ORDER) {
+    const k = UNITS[type], locked = S && S.rankI < k.rank;
+    const queued = S ? S.trainQ.filter((q) => q.type === type).length : 0;
+    const b = document.createElement('button'); b.className = 'bb' + (locked ? ' lock' : ''); b.dataset.unit = type;
+    b.innerHTML = '<svg viewBox="0 0 22 22">' + ICON[type] + '</svg><span class="n">' + k.name + ' <kbd>' + k.key.toUpperCase() + '</kbd></span><span class="c">' + (locked ? RANKS[k.rank].n : k.model + ' · ' + k.power + ' slot' + (k.power > 1 ? 's' : '') + (queued ? ' · +' + queued : '')) + '</span>';
+    b.title = k.sf; b.addEventListener('click', () => train(type));
+    box.appendChild(b);
+  }
+}
+function renderMissions() {
+  const act = MISSIONS.filter((m) => !S.done.has(m.id)).slice(0, 3);
+  const last = MISSIONS.filter((m) => S.done.has(m.id)).slice(-1);
+  $('#misCount').textContent = S.done.size + ' of ' + MISSIONS.length;
+  $('#missions').innerHTML = [...last, ...act].map((m) => {
+    const [v, n] = m.p(), d = S.done.has(m.id);
+    return '<div class="mis' + (d ? ' done' : '') + '"><div class="mt">' + m.t + '<span>' + (d ? 'done' : '+' + m.r) + '</span></div><p>' + m.d + '</p><div class="bar"><i style="width:' + Math.round(Math.min(1, v / n) * 100) + '%"></i></div></div>';
+  }).join('') || '<div class="mis done"><div class="mt">All missions done</div><p>Keep building, or start a new base.</p></div>';
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function renderSel() {
+  const box = $('#sel');
+  sel = sel.filter((o) => S.structs.includes(o) || S.units.includes(o) || S.bugs.includes(o) || S.signals.includes(o));
+  let h = '<h3>Selected</h3>';
+  if (!sel.length) h += '<div class="empty">Click a building or an agent. Drag to select several agents. Right-click gives orders.</div>';
+  else if (sel.length > 1) {
+    const c = {}; sel.forEach((u) => { c[u.type] = (c[u.type] || 0) + 1; });
+    h += '<div class="st">' + sel.length + ' agents</div><div class="sf">' + Object.entries(c).map(([k, v]) => v + ' ' + UNITS[k].name + (v > 1 ? 's' : '')).join(', ') + '. Right-click: Scouts carry ideas, Constructors build, Wardens fight and repair, everyone moves.</div>';
+  } else {
+    const o = sel[0];
+    if (o.type) {
+      const k = UNITS[o.type];
+      const task = !o.powered ? 'Waiting for a free slot' : o.task === 'no budget' ? 'Stopped at the budget cap' : o.order ? ({ move: 'Moving', attack: 'Attacking a bug', repair: 'Repairing', build: 'Building', carry: 'Fetching an idea' }[o.order.type]) : ({ fetch: 'Fetching a loose idea', deliver: 'Carrying an idea to the Refinery', holding: 'Holding an idea: no Refinery yet', 'store full': 'Waiting: Blueprint store is full (12)', build: 'Building ' + (byId(o.target)?.name || ''), fight: 'Fighting a bug', repair: 'Repairing ' + (byId(o.target)?.name || ''), review: 'Reviewing ' + (byId(o.target)?.name || '') }[o.task] || (o.holdT > 0 ? 'Holding position' : 'Idle near the Command Center'));
+      h += '<div class="st">' + k.name + '</div><div class="sf"><b>In SoftwareFactory:</b> ' + k.sf + '</div><dl class="kv"><dt>Doing</dt><dd>' + esc(task) + '</dd><dt>Model</dt><dd>' + k.model + '</dd><dt>Rank</dt><dd>' + unitRank(o) + ' · ' + o.xp + ' jobs done</dd>' + (o.carry ? '<dt>Carrying</dt><dd>"' + esc(o.carry) + '"</dd>' : '') + '</dl>';
+    } else if (o.kind) {
+      const k = KINDS[o.kind];
+      let state = o.state === 'breached' ? 'Breached: needs a Warden' : o.state === 'building' && !k.project ? 'Setting up ' + Math.round(o.prog * 100) + '%' : o.online ? 'Online' : o.linked ? 'Linked' : 'Not connected: press C, then click it and a connected building';
+      if (o.kind === 'app') state = ({ spec: 'Writing the spec', gate: 'Plan ready: needs your OK', build: 'Building', test: 'Testing', wave: 'Release wave', repairs: 'Breached during release: repair to ship', shipped: o.state === 'breached' ? 'Shipped, now breached' : 'Shipped' }[o.phase]) + (['spec', 'build', 'test'].includes(o.phase) ? ' ' + Math.round(o.prog * 100) + '%' : '') + (!o.linked ? ' · not connected' : '');
+      h += '<div class="st">' + esc(o.name) + (o.kind === 'app' ? ' · App' : '') + '</div><div class="sf"><b>In SoftwareFactory:</b> ' + k.sf + '</div><dl class="kv"><dt>State</dt><dd>' + esc(state) + '</dd><dt>Integrity</dt><dd>' + Math.round(o.integ) + '%</dd><dt>Links</dt><dd>' + S.conduits.filter((c) => c.a === o.id || c.b === o.id).length + ' conduits</dd>';
+      if (o.kind === 'refinery') h += '<dt>Queue</dt><dd>' + o.queue + ' ideas</dd>';
+      if (o.kind === 'app' && o.workers) h += '<dt>Crew</dt><dd>' + o.workers + ' Constructor' + (o.workers > 1 ? 's' : '') + '</dd>';
+      h += '</dl><div class="acts">';
+      if (o.kind === 'barracks') h += TRAIN_ORDER.filter((t) => S.rankI >= UNITS[t].rank).map((t) => '<button class="btn" data-train="' + t + '">Train ' + UNITS[t].name + '</button>').join('');
+      if (o.kind === 'archive') {
+        if (S.beacons.some((b) => b.type === 'rift')) h += '<span class="empty">A rule conflict blocks research. Resolve it first.</span>';
+        else if (S.researching) h += '<span class="empty">Researching ' + RESEARCH[S.researching.id].name + ' ' + Math.round(S.researching.t * 10) + '%</span>';
+        else h += Object.entries(RESEARCH).filter(([id]) => !S.research[id]).map(([id, r]) => '<button class="btn" data-research="' + id + '" title="' + r.d + '"' + (S.data < r.cost || !o.online ? ' disabled' : '') + '>' + r.name + ' · ' + r.cost + ' data</button>').join('') || '<span class="empty">All research done.</span>';
+      }
+      if (o.state === 'breached') h += '<button class="btn" data-send="repair">Send nearest Warden</button>';
+      if (o.phase === 'gate') h += '<button class="btn" data-gate="1">Review the plan</button>';
+      if (!o.linked && o.kind !== 'hq') h += '<button class="btn" data-connect="1">Connect it</button>';
+      h += '</div>';
+    } else if (o.hp !== undefined) {
+      h += '<div class="st">Bug</div><div class="sf"><b>In SoftwareFactory:</b> a bug ticket' + (o.wave ? ' from a release test (an edge case)' : ' reported against ' + esc(o.from)) + '. Clearing it is a fix run.</div><dl class="kv"><dt>Size</dt><dd>' + Math.round(o.hp) + ' of ' + Math.round(o.max) + '</dd><dt>Age</dt><dd>' + Math.round(o.age) + 's, it grows if left alone</dd></dl><div class="acts"><button class="btn" data-send="attack">Send nearest Warden</button></div>';
+    } else if (o.text) {
+      h += '<div class="st">Loose idea</div><div class="sf"><b>In SoftwareFactory:</b> a note or request waiting to be sorted. A Scout carries it to the Refinery, which turns it into a ticket.</div><dl class="kv"><dt>Says</dt><dd>"' + esc(o.text) + '"</dd></dl>';
+    }
+  }
+  box.innerHTML = h;
+  box.querySelectorAll('[data-train]').forEach((b) => b.addEventListener('click', () => train(b.dataset.train)));
+  box.querySelectorAll('[data-research]').forEach((b) => b.addEventListener('click', () => { const id = b.dataset.research; if (S.data >= RESEARCH[id].cost) { S.data -= RESEARCH[id].cost; S.researching = { id, t: 0 }; log('Researching ' + RESEARCH[id].name + '.', ''); selDirty = true; } }));
+  box.querySelectorAll('[data-send]').forEach((b) => b.addEventListener('click', () => {
+    const o = sel[0], w = nearest(S.units, o, 1e9, (u) => u.type === 'warden');
+    if (!w) { toast('No Warden yet: train one (V)', 'bad'); return; }
+    w.order = b.dataset.send === 'repair' ? { type: 'repair', id: o.id } : { type: 'attack', id: o.id }; w.holdT = 0;
+  }));
+  box.querySelectorAll('[data-gate]').forEach((b) => b.addEventListener('click', () => { const i = S.beacons.findIndex((x) => x.sid === sel[0].id); if (i >= 0) { gateIdx = i; gateDirty = true; } }));
+  box.querySelectorAll('[data-connect]').forEach((b) => b.addEventListener('click', () => { const o = sel[0]; setMode('connect'); connectFrom = o; updateHint(); }));
+}
+function currentBeacon() { if (!S.beacons.length) return null; gateIdx = Math.min(gateIdx, S.beacons.length - 1); return S.beacons[gateIdx]; }
+function renderGate() {
+  const b = currentBeacon(), g = $('#gate');
+  if (!b) { g.hidden = true; return; }
+  g.hidden = false;
+  $('#gCount').textContent = S.beacons.length > 1 ? (gateIdx + 1) + ' of ' + S.beacons.length + ' · Tab for next' : '';
+  if (b.type === 'plan') {
+    $('#gKind').textContent = 'Your OK: plan'; $('#gTitle').textContent = b.title;
+    $('#gBody').textContent = b.body + ' Build run already held in your budget.';
+    $('#gRow').innerHTML = '<button class="btn ok" id="gOk">Approve<kbd>Enter</kbd></button><input id="gNote" placeholder="Note for the agent (optional)" maxlength="120"><button class="btn" id="gBack">Send back<kbd>⌫</kbd></button>';
+    $('#gOk').onclick = () => decide(b, 'approve');
+    $('#gBack').onclick = () => decide(b, 'back', $('#gNote').value.trim());
+  } else {
+    $('#gKind').textContent = 'Rule conflict'; $('#gTitle').textContent = b.title;
+    $('#gBody').textContent = 'These two project rules contradict each other. Keep one; research is blocked until you do.';
+    $('#gRow').innerHTML = '<button class="btn ok" id="gA">Keep: ' + esc(b.a) + '<kbd>Enter</kbd></button><button class="btn" id="gB">Keep: ' + esc(b.b) + '</button>';
+    $('#gA').onclick = () => decide(b, 'a'); $('#gB').onclick = () => decide(b, 'b');
+  }
+}
+let last = {};
+function setText(id, v) { if (last[id] !== v) { last[id] = v; document.getElementById(id).textContent = v; } }
+function renderHud() {
+  const p = power();
+  setText('rCr', money(S.credits) + ' / ' + money(CAP));
+  document.querySelector('.res .cr').classList.toggle('low', !!(S.credits < 0.5));
+  setText('rPw', p.used + '/' + p.cap);
+  setText('rBp', String(S.blueprints)); setText('rDt', String(S.data)); setText('rBc', String(S.beacons.length)); setText('rRn', String(S.renown));
+  const r = RANKS[S.rankI], nx = RANKS[S.rankI + 1];
+  setText('rRank', r.n);
+  document.getElementById('rRankBar').style.width = (nx ? Math.round((S.renown - r.at) / (nx.at - r.at) * 100) : 100) + '%';
+  setText('clock', 'Day ' + S.day + ' ' + timeStr());
+  if (feedDirty) { feedDirty = false; $('#feed').innerHTML = S.feed.slice(0, 14).map((f) => '<div><time>' + f.t + '</time><span class="' + f.cls + '">' + esc(f.text) + '</span></div>').join(''); }
+  if (gateDirty) { gateDirty = false; renderGate(); }
+  const tq = S.trainQ.map((q) => q.type).join(',');
+  if (tq !== last.tq) { last.tq = tq; renderTrainBar(); }
+  renderMissions();
+  // build bar: mark what you cannot afford right now
+  document.querySelectorAll('#buildBar .bb').forEach((b) => { const k = KINDS[b.dataset.kind]; b.classList.toggle('cant', !!(S.rankI >= k.rank && (S.credits + 1e-9 < k.cost || (k.bp && S.blueprints < k.bp)))); });
+}
+function showEnd() {
+  const m = Math.round(S.t / 60);
+  $('#endTitle').textContent = S.name + ' secured';
+  $('#endSub').textContent = 'Two apps shipped and both release waves held, in about ' + m + ' minute' + (m === 1 ? '' : 's') + ' of play. Rank: ' + RANKS[S.rankI].n + ', ' + S.renown + ' renown.';
+  const rows = [
+    ['Projects created', S.stats.projects], ['Loose ideas sorted into tickets', S.stats.refined], ['Apps shipped', S.stats.shipped], ['Plans you approved', S.approvals], ['Plans you sent back', S.sendBacks],
+    ['Bugs fixed', S.stats.bugs], ['Breaches repaired', S.stats.repairs], ['Agents set up', Object.values(S.stats.trained).reduce((a, b) => a + b, 0) + 1], ['Agent runs paid for', S.runs], ['Practice budget spent', money(S.spent)],
+  ];
+  $('#rcpt').innerHTML = rows.map(([a, b]) => '<dt>' + a + '</dt><dd>' + b + '</dd>').join('');
+  $('#end').hidden = false; S.paused = true;
+}
+
+/* ---------------- loop ---------------- */
+let lastT = 0, acc = 0, hudT = 0, miniT = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (document.hidden || !S) { lastT = now; return; }
+  if (!lastT) lastT = now;
+  const el = (now - lastT) / 1000;
+  if (el < 1 / 32) return;          // about 30 frames a second, never more
+  lastT = now;
+  const step = Math.min(0.1, el);
+  if (!S.paused && $('#menu').hidden && $('#end').hidden) {
+    const n = S.speed; for (let i = 0; i < n; i++) update(step);
+  }
+  if (hold) { hold.t += step; if (hold.t >= hold.need) { const g = hold; hold = null; const s = place(ghost.kind, g.gx, g.gy); if (s) { S.lastPlaced = s; if (s.kind !== 'feature') { setMode('connect'); connectFrom = s; S.lastPlaced = s; updateHint(); } else setMode(null); sel = [s]; selDirty = true; } } }
+  draw(now);
+  hudT += step; miniT += step;
+  if (hudT > 0.2) { hudT = 0; renderHud(); if (selDirty || sel.length) { selDirty = false; renderSelThrottled(); } updateHint(); }
+  if (miniT > 0.2) { miniT = 0; drawMini(); }
+}
+let selKey = '';
+function renderSelThrottled() {
+  const o = sel[0];
+  const key = sel.map((x) => x.id).join(',') + '|' + (o ? [o.state, o.phase, Math.round((o.prog || 0) * 20), Math.round(o.integ || 0), o.task, o.order && o.order.type, o.queue, o.xp, o.linked, o.hp && Math.round(o.hp), S.researching && Math.round(S.researching.t), S.data, S.beacons.length, S.rankI].join(',') : '');
+  if (key === selKey) return; selKey = key; renderSel();
+}
+lastT = 0;
+new ResizeObserver(resize).observe($('#stage'));
+
+/* ---------------- bases menu ---------------- */
+function bases() { try { return JSON.parse(localStorage.getItem('sector.bases') || '[]'); } catch { return []; } }
+function saveBases(list) { try { localStorage.setItem('sector.bases', JSON.stringify(list)); } catch { /* storage may be off in the sandbox */ } }
+function renderBases() {
+  const list = bases();
+  $('#baseList').innerHTML = list.length ? list.slice(-4).reverse().map((b) => '<div class="base-row"><span>' + esc(b.name) + '<br><small>' + esc(b.folder) + '</small></span><small>' + esc(b.when) + '</small></div>').join('') : '<div class="base-row"><span style="color:var(--muted)">No bases yet. Start one below.</span></div>';
+  $('#resumeBtn').hidden = !S;
+}
+$('#startBtn').addEventListener('click', () => {
+  const name = $('#nbName').value.trim() || 'Home base', folder = $('#nbFolder').value.trim() || 'C:\\Factories\\home-base';
+  const list = bases(); list.push({ name, folder, when: new Date().toISOString().slice(0, 16).replace('T', ' ') }); saveBases(list.slice(-8));
+  newGame(name, folder); $('#baseName').textContent = name; $('#menu').hidden = true; setSpeed(1); S.paused = false;
+});
+$('#resumeBtn').addEventListener('click', () => { $('#menu').hidden = true; });
+$('#menuBtn').addEventListener('click', () => { renderBases(); $('#menu').hidden = false; });
+$('#keepBtn').addEventListener('click', () => { $('#end').hidden = true; S.paused = false; });
+$('#againBtn').addEventListener('click', () => { $('#end').hidden = true; renderBases(); $('#menu').hidden = false; });
+$('#nbName').addEventListener('input', (e) => { $('#nbFolder').value = 'C:\\Factories\\' + (e.target.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'base'); });
+
+FONT = getComputedStyle(document.body).fontFamily;
+buildTerrain(); resize(); renderBuildBar(); renderTrainBar(); renderBases();
+requestAnimationFrame(frame);
+
+// test hooks for play-tests (no effect on play)
+window.__sector = { get S() { return S; }, update, place, connect, train, decide, byId, newGame, canPlace, setSpeed };
 </script>
 </body>
 </html>

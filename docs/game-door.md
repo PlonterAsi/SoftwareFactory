@@ -31,3 +31,16 @@ If a later version needs tilemaps, pathfinding or many sprites, Phaser in Canvas
 ## What the real version needs
 
 Plugins can read events and post timeline notes today, but cannot take actions. The game door needs an `actions` permission: a short list of verbs (sort, approve, ticket, split, park, plant, deploy, commit), each calling the same core command the normal screens call, tagged with where it came from so the game can be measured against the normal screens.
+
+## Sector v2 (2026-11-11)
+
+Assaf picked the Sector direction and asked for a real strategy game. The design doc is the Claude Doc "Sector: game design". The example plugin `game-sector` is now v0.2: a real-time base builder.
+
+- Command Center (SoftwareFactory) in the middle. Build a Refinery (Order Engine), Barracks (Agent Bay), Reactor (agent slots), Apps (projects), and later Test Turrets, Features, Archive (project rules) and a Plugin Dock.
+- Conduits (C) are dependencies. Only buildings connected to the Command Center get power and work; connecting extends the lit build area.
+- Agents: Scout (Haiku, carries loose ideas), Constructor (builds spec → build → test), Warden (fixes bugs, repairs breaches), Judge (review, smaller release wave). Agent ranks come from jobs done.
+- Resources: Budget (daily cap, hold to spend), agent slots, Blueprints (tickets), Data (research), Renown (only from real outcomes).
+- Threats: bugs grow and crawl along conduits; breaches stop a building; rule conflicts block research; each App ships only after its release wave.
+- Missions, five Commander ranks with unlocks, research. Practice data only; the base menu mirrors the bases model in docs/bases.md.
+
+Next: the plugin actions permission, then a read-only bridge to real records, then orders from the map.
