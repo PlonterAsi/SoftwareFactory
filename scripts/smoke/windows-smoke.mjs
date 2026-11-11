@@ -236,6 +236,14 @@ console.log("seeded", db);
       const out = (done?.lines ?? []).filter((l) => l.stream === "out").map((l) => l.text);
       check("the shipped CLI runs from the app with arguments (bundled Node, no command line)", done?.session.exitCode === 0 && out.some((t) => /^\d+$/.test(t.trim())), JSON.stringify({ state: done?.session.state, code: done?.session.exitCode, out: out.slice(0, 3), all: done?.lines?.slice(-4).map((l) => l.text) }));
     }
+    // No arguments to know: the Run tab offers example runs; the sample-text one types into the tool.
+    const sample = cli?.usage?.examples?.find((x) => x.stdin);
+    if (sample) {
+      const s2 = (await api(`/api/launch/projects/${pid1}/start`, { method: "POST", body: JSON.stringify({ profileId: cli.id, argv: sample.argv, stdin: sample.stdin }) })).body;
+      const d2 = await until("the sample run ends", async () => { const r = (await api(`/api/launch/sessions/${s2.id}`)).body; return r.session?.state === "exited" ? r : null; }, 30_000);
+      const o2 = (d2?.lines ?? []).filter((l) => l.stream === "out").map((l) => l.text);
+      check("a tool runs from an example button with no arguments typed (sample text as its input)", d2?.session.exitCode === 0 && o2.some((t) => /^\d+$/.test(t.trim())), JSON.stringify({ examples: cli.usage.examples.map((x) => x.label), out: o2.slice(0, 3) }));
+    } else check("a tool runs from an example button with no arguments typed (sample text as its input)", false, JSON.stringify(cli?.usage ?? null));
     const webDir = join(OUT, "web-app");
     mkdirSync(webDir, { recursive: true });
     writeFileSync(join(webDir, "package.json"), JSON.stringify({ name: "smoke-web", type: "module", scripts: { start: "node server.js" } }));

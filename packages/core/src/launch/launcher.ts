@@ -49,6 +49,10 @@ export interface StartInput {
   profile: RunProfile;
   /** The arguments box, as typed. */
   args?: string;
+  /** The arguments as a list (from the options form or an example); wins over `args`. */
+  argv?: string[];
+  /** Text to type into it, then close its input (for tools that read to the end). */
+  stdin?: string;
   /** "window" opens it in a console window of its own; the app does not watch it. */
   mode?: "inline" | "window";
 }
@@ -161,8 +165,9 @@ export class Launcher extends EventEmitter {
     const mode = input.mode === "window" && profile.kind !== "static" ? "window" : "inline";
     const busy = [...this.sessions.values()].find((s) => s.projectId === projectId && s.profileId === profile.id && isLive(s.state));
     if (busy) return strip(busy);
-    const argList = profile.args && input.args ? splitArgs(input.args) : [];
+    const argList = profile.args ? (input.argv ? input.argv.map(String).slice(0, 64) : input.args ? splitArgs(input.args) : []) : [];
     const command = [profile.command, ...argList.map(quoteArg)].join(" ");
+    const argText = argList.length ? argList.map(quoteArg).join(" ") : null;
     const port = profile.kind === "web" || profile.kind === "program" ? await freePort().catch(() => null) : null;
 
     if (profile.kind === "static") {
@@ -177,7 +182,7 @@ export class Launcher extends EventEmitter {
 
     const env = projectEnv(dir, this.nodePath, port);
     if (mode === "window") {
-      const e = this.log.append("launch.started", { projectId, profileId: profile.id, kind: profile.kind, label: profile.label, command, args: input.args ?? null, dir, mode, port });
+      const e = this.log.append("launch.started", { projectId, profileId: profile.id, kind: profile.kind, label: profile.label, command, args: argText, dir, mode, port });
       openConsoleWindow(dir, this.lineFor(profile, argList), `${profile.label}`, env);
       return this.view(e.id)!;
     }
@@ -190,13 +195,18 @@ export class Launcher extends EventEmitter {
       const file = profile.exec.file === "node" ? this.nodePath : profile.exec.file;
       proc = spawn(file, [...profile.exec.args, ...argList], { ...opts, shell: false });
     }
-    const e = this.log.append("launch.started", { projectId, profileId: profile.id, kind: profile.kind, label: profile.label, command, args: input.args ?? null, dir, mode, port, pid: proc.pid ?? null });
-    const s = this.track(e.id, e.ts, input, { command, args: input.args ?? null, mode, port, url: null, state: "starting", proc });
+    const e = this.log.append("launch.started", { projectId, profileId: profile.id, kind: profile.kind, label: profile.label, command, args: argText, dir, mode, port, pid: proc.pid ?? null });
+    const s = this.track(e.id, e.ts, input, { command, args: argText, mode, port, url: null, state: "starting", proc });
     this.sys(s, `${command}   (in ${dir})`);
     proc.on("spawn", () => { if (s.state === "starting") { s.state = "running"; this.emit("state", strip(s)); } });
     proc.stdout?.on("data", (d: Buffer) => this.chunk(s, "out", d.toString("utf8")));
     proc.stderr?.on("data", (d: Buffer) => this.chunk(s, "err", d.toString("utf8")));
     proc.stdin?.on("error", () => { s.stdinOpen = false; });
+    if (input.stdin != null) {
+      for (const l of input.stdin.split("\n").slice(0, 200)) this.line(s, "in", l);
+      proc.stdin?.end(input.stdin.endsWith("\n") ? input.stdin : input.stdin + "\n");
+      s.stdinOpen = false;
+    }
     proc.on("error", (err: NodeJS.ErrnoException) => {
       const hint = err.code === "ENOENT" ? ` (is ${"file" in profile.exec! ? profile.exec.file : "it"} installed and on PATH?)` : "";
       this.sys(s, `Could not start: ${err.message}${hint}`, "err");
@@ -205,7 +215,8 @@ export class Launcher extends EventEmitter {
     proc.on("close", (code, signal) => {
       for (const k of ["out", "err"] as const) if (s.partial[k]) { this.line(s, k, s.partial[k]); s.partial[k] = ""; }
       if (s.state === "failed") return;
-      this.sys(s, s.stopping ? "Stopped." : `Exited with code ${code ?? signal}.`);
+      const printed = s.out.some((l) => l.stream === "out" || l.stream === "err");
+      this.sys(s, s.stopping ? "Stopped." : code === 0 && !printed ? "Finished without printing anything (it found nothing to do, or it works silently)." : `Exited with code ${code ?? signal}.`);
       this.finish(s, code, s.stopping ? "stopped" : "exited");
     });
     return strip(s);

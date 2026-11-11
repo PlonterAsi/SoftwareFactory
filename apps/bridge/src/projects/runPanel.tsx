@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { API, launchApi, type LaunchInfo, type LaunchSession, type OutputLine, type RunProfileView } from "../api";
 import { registerProjectPanel, type PanelContext } from "./panels";
 import { ago } from "./builtin";
+import { ToolForm, type ToolRunRequest } from "./useTool";
 
 /**
  * The Run tab: start a finished project from its own folder without a command line.
@@ -64,10 +65,10 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
   }, [info, picked]);
 
   const liveByProfile = new Map((info?.running ?? []).filter((s) => s.dir === dir).map((s) => [s.profileId, s]));
-  async function start(p: RunProfileView, mode: "inline" | "window" = "inline") {
+  async function start(p: RunProfileView, mode: "inline" | "window" = "inline", run?: ToolRunRequest) {
     setBusy(p.id); setActErr(null);
     try {
-      const s = await launchApi.start(pid, { profileId: p.id, args: args[p.id], dir: dir ?? undefined, mode });
+      const s = await launchApi.start(pid, { profileId: p.id, ...(run ? { argv: run.argv, stdin: run.stdin } : { args: args[p.id] }), dir: dir ?? undefined, mode });
       if (mode === "inline") setPicked(s.id);
       reload();
     } catch (x) { setActErr((x as Error).message); } finally { setBusy(null); }
@@ -114,7 +115,7 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
         {main.length > 0 && <h3>Launch pad</h3>}
         <ul className="rn-profiles">
           {main.map((p) => <ProfileCard key={p.id} p={p} s={liveByProfile.get(p.id)} args={args[p.id] ?? ""} setArgs={(v) => setArgs((a) => ({ ...a, [p.id]: v }))}
-            busy={busy === p.id} onStart={(m) => start(p, m)} onStop={stop} onShow={setPicked} picked={picked} />)}
+            busy={busy === p.id} onStart={(m, r) => start(p, m, r)} onStop={stop} onShow={setPicked} picked={picked} />)}
         </ul>
         {util.length > 0 && (
           <>
@@ -150,9 +151,10 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
 
 function ProfileCard({ p, s, args, setArgs, busy, onStart, onStop, onShow, picked }: {
   p: RunProfileView; s?: LaunchSession; args: string; setArgs: (v: string) => void; busy: boolean;
-  onStart: (mode?: "inline" | "window") => void; onStop: (id: number) => void; onShow: (id: number) => void; picked: number | null;
+  onStart: (mode?: "inline" | "window", run?: ToolRunRequest) => void; onStop: (id: number) => void; onShow: (id: number) => void; picked: number | null;
 }) {
   const on = !!s;
+  const tool = p.kind === "cli" && !!p.usage;
   return (
     <li className={`rn-card k-${p.kind}${on ? " live" : ""}${p.recommended ? " best" : ""}${s && picked === s.id ? " shown" : ""}`}>
       <div className="rn-card-head">
@@ -162,7 +164,8 @@ function ProfileCard({ p, s, args, setArgs, busy, onStart, onStop, onShow, picke
       </div>
       <code className="rn-cmd">{p.command}</code>
       {p.note && <p className="rn-card-note">{p.note}</p>}
-      {p.args && !on && (
+      {tool && <ToolForm usage={p.usage!} command={p.command} busy={busy || on} onRun={(r) => onStart("inline", r)} onWindow={(r) => onStart("window", r)} />}
+      {p.args && !on && !tool && (
         <input className="rn-args" value={args} onChange={(e) => setArgs(e.target.value)} placeholder="arguments (optional)" aria-label={`Arguments for ${p.label}`}
           onKeyDown={(e) => { if (e.key === "Enter") onStart(); }} />
       )}
@@ -172,7 +175,7 @@ function ProfileCard({ p, s, args, setArgs, busy, onStart, onStop, onShow, picke
             <button className="sm" onClick={() => onShow(s!.id)}>Show</button>
             <button className="sm stop" onClick={() => onStop(s!.id)}>Stop</button>
           </>
-        ) : (
+        ) : tool ? null : (
           <>
             <button className="sm" onClick={() => onStart()} disabled={busy}>{busy ? "Starting…" : p.kind === "static" ? "Preview" : "Start"}</button>
             {p.kind !== "static" && <button className="ghost sm" onClick={() => onStart("window")} disabled={busy} title="Run it in a console window of its own (for big programs, or ones that need a real terminal)">Own window</button>}
@@ -203,7 +206,8 @@ function Stage({ id, onStop, recommended, onStart }: { id: number | null; onStop
         <div className="rn-idle">
           <div className="rn-ring" aria-hidden><span>▶</span></div>
           <p>{id != null ? "Connecting…" : recommended ? `Ready to start ${recommended.label}.` : "Nothing is running."}</p>
-          {id == null && recommended && <button onClick={() => onStart(recommended)}>{recommended.kind === "static" ? "Preview" : "Start"} {recommended.label}</button>}
+          {id == null && recommended && !(recommended.kind === "cli" && recommended.usage) && <button onClick={() => onStart(recommended)}>{recommended.kind === "static" ? "Preview" : "Start"} {recommended.label}</button>}
+          {id == null && recommended?.kind === "cli" && recommended.usage && <p>{recommended.usage.examples.length ? "Press one of its example runs on the left, or fill in its form." : "Fill in its form on the left and press Run."}</p>}
           <p className="muted">Its output shows here, and anything that serves pages opens right inside the app.</p>
         </div>
       </section>

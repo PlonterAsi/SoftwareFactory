@@ -20,6 +20,26 @@ Node projects run on the Node.js the app ships with, with the project's `node_mo
 
 **Own window** runs it in a console window of its own instead (a big program, or one that needs a real terminal); the app does not watch that one. **Terminal here** opens a terminal in the folder.
 
+## Using a tool without knowing its arguments
+
+A command-line tool's card is a small form, so nobody has to know its arguments (`packages/core/src/launch/usage.ts`, nothing is run to find out):
+
+- **What it does**: the summary from its `SPEC.md` (the factory writes one) or its README.
+- **Example runs**, one press each: from `run.json` at the project root first, then concrete command lines in its README (a trailing `# comment` is the button's label), then a run on a sample file it ships (`test/fixtures/`, `examples/`, `samples/`, data files at the top), and "Try it on a sample text" for tools that read their input.
+- **A form** read from its usage line (the `usage:` text in its bin file, the `CLI:` line in SPEC.md, or a README usage line): `<dir>` becomes a folder field with **Browse**, `<file>`/`<csv-file>` a file field with the project's own files offered, `[--apply]` a switch, `[--top <n>]` a number. Required fields must be filled before Run.
+- **Text to give it** for tools that read their input; it is typed in and the input closed.
+- The command it will run is always shown, and **Type arguments yourself** switches to a plain arguments box.
+
+`run.json` (written by the factory, optional):
+
+```json
+{ "summary": "Counts words", "examples": [{ "label": "Count words in the spec", "profile": "cli", "args": "SPEC.md" }, { "label": "Count typed text", "input": "one two three" }] }
+```
+
+`profile` is a kind (`cli`) or a profile id (`bin:wc`); `argv` (a list) wins over `args`; `input` is typed into the tool.
+
+![Example runs and the form for a word counter](img/bridge-run-tool.png)
+
 ## Which folder
 
 `projectFolders(log, projectId)`: a folder you added (**Use another folder**, link kind `folder`), then the imported repo, then the newest shipped factory build, then other builds. Pick another from the Folder list.
@@ -37,8 +57,8 @@ Events `launch.started`, `launch.url`, `launch.stopped`, `launch.exited` (with t
 ## API
 
 ```
-GET  /api/launch/projects/:id?dir=        folders, profiles found in one, running and recent sessions
-POST /api/launch/projects/:id/start       { profileId?, args?, dir?, mode?: "inline" | "window" }   no profileId = the best guess
+GET  /api/launch/projects/:id?dir=        folders, profiles found in one (CLIs carry `usage`), running and recent sessions
+POST /api/launch/projects/:id/start       { profileId?, args?, argv?, stdin?, dir?, mode?: "inline" | "window" }   no profileId = the best guess
 POST /api/launch/projects/:id/folder      { dir } add a folder of yours; { dir, remove: true } forget it
 POST /api/launch/projects/:id/terminal    { dir? }
 GET  /api/launch/sessions/:sid?after=n    session and output lines after n
@@ -46,6 +66,7 @@ GET  /api/launch/sessions/:sid/stream     server-sent events: `state`, `line`
 POST /api/launch/sessions/:sid/stop
 POST /api/launch/sessions/:sid/input      { text } or { end: true }
 POST /api/launch/open                     { url } a local address, in your browser
+GET  /api/launch/browse?path=             a folder's folders and files, for the pickers (starts at home; lists drives on Windows)
 GET  /preview/:id/...                     plain pages, while that project's preview is on
 ```
 
