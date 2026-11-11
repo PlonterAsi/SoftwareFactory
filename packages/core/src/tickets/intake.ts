@@ -2,7 +2,7 @@ import type { EventLog } from "../events.js";
 import type { OrderState } from "../order/model.js";
 import { createProject, linkToProject, listProjects, projectDetail, projectOf, updateProject } from "../projects/service.js";
 import type { Tickets } from "./tickets.js";
-import type { TicketKind, TicketView } from "./model.js";
+import { titleFrom, type TicketKind, type TicketView } from "./model.js";
 
 /**
  * Not every idea is a project. "UI/UX improvement of SoftwareFactory" and
@@ -49,6 +49,17 @@ export interface IntakeVerdict {
   why?: string;
   /** high: it names the project. low: it only sounds like an ask. */
   confidence?: "high" | "low";
+  /** The same ask is already an open ticket there: open it rather than file it twice. */
+  existing?: { id: number; title: string; status: string };
+}
+
+/** An open ticket on the project with the same title as this text, if there is one. */
+export function filedAlready(log: EventLog, projectId: number, text: string): IntakeVerdict["existing"] | undefined {
+  const has = log.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tickets'").get();
+  if (!has) return undefined;
+  const r = log.db.prepare("SELECT id, title, status FROM tickets WHERE project = ? AND status NOT IN ('closed', 'rejected') AND lower(trim(title)) = lower(trim(?)) ORDER BY id LIMIT 1")
+    .get(projectId, titleFrom(text)) as { id: number; title: string; status: string } | undefined;
+  return r ? { id: Number(r.id), title: r.title, status: r.status } : undefined;
 }
 
 const SELF_WORDS = /\b(software\s?factory|the factory|the bridge|this app|the app itself|the overseer|agent bay|order (engine|deck)|star map|data vault|ticket system|improvement council|all (of )?(my |the )?projects|every project|each project)\b/i;

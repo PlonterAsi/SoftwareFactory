@@ -9,6 +9,7 @@ function fakeFactory(log: EventLog) {
     started: [] as { run: number; idea: string; opts: any }[],
     start(idea: string, opts: any) { const run = next++; active.add(run); f.started.push({ run, idea, opts }); return run; },
     isActive(run: number) { return active.has(run); },
+    duplicateOf(_idea: string) { return null; },
     finish(run: number, outcome = "stopped") { active.delete(run); log.append("factory.run.finished", { run, outcome }); },
   };
   return f;

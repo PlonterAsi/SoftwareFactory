@@ -45,7 +45,7 @@ const VIEWS: { id: View; label: string }[] = [
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(`${API}${path}`, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   const j = await r.json();
-  if (!r.ok) throw new Error(j.error ?? `${method} ${path} failed`);
+  if (!r.ok) throw Object.assign(new Error(j.error ?? `${method} ${path} failed`), { body: j });
   return j as T;
 }
 
@@ -67,7 +67,7 @@ export const ticketsApi = {
   say: (id: number, text: string, status?: TicketStatus) => call<TicketView>("POST", `/api/tickets/${id}/say`, { text, status }),
   link: (id: number, to: number | string, relation: string) => call<TicketView>("POST", `/api/tickets/${id}/link`, { to, relation }),
   line: (id: number, dir: "up" | "down") => call<TicketView[]>("POST", `/api/tickets/${id}/line`, { dir }),
-  work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number) => call<{ run: number | null; branch?: string }>("POST", `/api/tickets/${id}/work`, { maxUsd, where }),
+  work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number, again?: boolean) => call<{ run: number | null; branch?: string }>("POST", `/api/tickets/${id}/work`, { maxUsd, where, again }),
   ask: (id: number, agent?: string) => call<{ reply?: string; error?: string }>("POST", `/api/tickets/${id}/ask`, { agent }),
 };
 
@@ -298,6 +298,8 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   const [busy, setBusy] = useState<string | null>(null);
   const [linkTo, setLinkTo] = useState("");
   const [showDoc, setShowDoc] = useState(false);
+  // A Work it the factory held back because that idea is built or building (hooks stay above the early return).
+  const [dup, setDup] = useState<{ run: number; error: string } | null>(null);
   useEffect(() => { ticketsApi.get(id).then(setD).catch((e) => onError((e as Error).message)); }, [id, last]);
   if (!d) return <aside className="tk-page"><div className="empty">Loading…</div></aside>;
   const t = d.ticket;
@@ -308,6 +310,15 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
     try { await fn(); setD(await ticketsApi.get(id)); } catch (e) { onError((e as Error).message); } finally { setBusy(null); }
   };
   const edit = (field: string, value: unknown, key?: string) => act("edit", () => ticketsApi.edit(id, field, value, key));
+  // The factory builds one idea once a day: when this one is already built or building, say so and offer both ways on.
+  const work = async (where: "auto" | "repo" = "auto", again = false) => {
+    setBusy("work"); setDup(null);
+    try { await ticketsApi.work(id, where, undefined, again); setD(await ticketsApi.get(id)); }
+    catch (e) {
+      const b = (e as { body?: { duplicateOf?: number } }).body;
+      if (b?.duplicateOf != null) setDup({ run: b.duplicateOf, error: (e as Error).message }); else onError((e as Error).message);
+    } finally { setBusy(null); }
+  };
   const closed = t.status === "closed" || t.status === "rejected";
   const stationAt = d.run?.station ? STATION_ORDER.indexOf(d.run.station) : -1;
   return (
@@ -333,12 +344,12 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
 
       <div className="tk-crew">
         {d.repo ? (
-          <button disabled={closed || busy != null || d.working} onClick={() => act("work", () => ticketsApi.work(id, "repo"))}
+          <button disabled={closed || busy != null || d.working} onClick={() => work("repo")}
             title={`The Builder works it on a new branch of a clone of ${d.repo.source}. The original repo is not touched and nothing is pushed.`}>
             {busy === "work" ? "Starting…" : d.working ? "Builder at work in the repo" : t.branch ? "Work it again in the repo" : "Work it in the repo"}
           </button>
         ) : (
-          <button disabled={closed || busy != null} onClick={() => act("work", () => ticketsApi.work(id))} title="The factory loop builds it: Council, plan, locked tests, build, review, fix, ship. The run writes back here.">
+          <button disabled={closed || busy != null} onClick={() => work()} title="The factory loop builds it: Council, plan, locked tests, build, review, fix, ship. The run writes back here.">
             {busy === "work" ? "Starting…" : d.run && !d.run.outcome ? "Crew at work" : "Work it with the crew"}
           </button>
         )}
@@ -352,6 +363,13 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
           {d.queue.position != null
             ? d.queue.position === 1 ? "Next in line: the crew starts it as soon as a slot is free." : `Number ${d.queue.position} in line for the crew.`
             : d.queue.why}
+        </div>
+      )}
+      {dup && (
+        <div className="tk-dup" role="alert">
+          <span>{dup.error}</span>
+          {onShowRun && <button className="sm" onClick={() => onShowRun(dup.run)}>Open run #{dup.run}</button>}
+          <button className="sm ghost" onClick={() => work("auto", true)}>Work it again anyway</button>
         </div>
       )}
       {d.run && (

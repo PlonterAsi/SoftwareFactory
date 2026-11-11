@@ -547,7 +547,7 @@ export class Tickets {
    * work document, the ticket moves to in progress, and the run writes back
    * onto the ticket when it ends (see react()).
    */
-  work(id: number, o: { maxUsd?: number; autoApprove?: boolean; where?: "auto" | "repo" | "new"; by?: string } = {}): { ticket: TicketView; run: number | null; branch?: string } {
+  work(id: number, o: { maxUsd?: number; autoApprove?: boolean; where?: "auto" | "repo" | "new"; by?: string; again?: boolean } = {}): { ticket: TicketView; run: number | null; branch?: string } {
     const t = this.must(id);
     if (isClosed(t.status)) throw new Error("This ticket is closed; reopen it first.");
     const repo = o.where === "new" ? null : repoOfProject(this.log, t.project);
@@ -556,7 +556,14 @@ export class Tickets {
     const factory = this.opts.factory;
     if (!factory) throw new Error("The factory is not running in this core.");
     if (t.run != null && factory.isActive(t.run)) throw new Error(`Run #${t.run} is already working this ticket.`);
-    const run = factory.start(ideaFromTicket(t, this.document(id)), { maxUsd: o.maxUsd, autoApprove: o.autoApprove, ...(t.project != null ? { projectId: t.project } : {}) });
+    const idea = ideaFromTicket(t, this.document(id));
+    // The factory's duplicate check (one idea, one build a day): reworking this ticket's own shipped run is fine, anything else needs "again".
+    const d = o.again ? null : factory.duplicateOf(idea);
+    if (d && (d.run !== t.run || d.state === "stopped")) {
+      const what = d.state === "running" ? "is already building it" : d.state === "stopped" ? "already started it and can resume" : "already built it today";
+      throw Object.assign(new Error(`Run #${d.run} ${what}. Open that run, or work it again anyway.`), { duplicate: { duplicateOf: d.run, state: d.state, projectId: d.projectId } });
+    }
+    const run = factory.start(idea, { maxUsd: o.maxUsd, autoApprove: o.autoApprove, ...(t.project != null ? { projectId: t.project } : {}) });
     this.log.append("ticket.run", { id, run, by: o.by ?? "you" });
     if (t.status !== "in_progress") this.log.append("ticket.noted", { id, by: "factory", status: "in_progress", text: `The crew took it: factory run #${run}` });
     return { ticket: this.get(id)!, run };

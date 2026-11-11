@@ -8,7 +8,7 @@ import { EventLog, type SfEvent } from "./events.js";
 import { captureSignal, listSignals } from "./signals.js";
 import { costSummary, runAgent } from "./agents.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
-import { Factory, type GateId } from "./factory/loop.js";
+import { duplicateReply, Factory, type GateId } from "./factory/loop.js";
 import { OrderEngine, type OrderOptions } from "./order/engine.js";
 import { canonFor, type NodeKind } from "./order/model.js";
 import { AgentBay } from "./bay/bay.js";
@@ -16,6 +16,7 @@ import { SLOTS, type Slot } from "./bay/agentfile.js";
 import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
+import { projectOf } from "./projects/service.js";
 import { chatRoutes, projectHome } from "./chat/routes.js";
 import { RepoExplorer } from "./imports/explorer.js";
 import { importsRoute } from "./imports/routes.js";
@@ -23,12 +24,14 @@ import { Launcher } from "./launch/launcher.js";
 import { launchRoute } from "./launch/routes.js";
 import { Integrations } from "./integrations/service.js";
 import { integrationsRoute, serveExtension } from "./integrations/routes.js";
+import { PluginHost } from "./plugins/host.js";
+import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
 import { GitHub, parseGitHubRepo } from "./tickets/github.js";
 import { linkToProject } from "./projects/service.js";
 import { ErrorCapture, isFault } from "./tickets/capture.js";
-import { classifyIntake, ensureSelfProject, projectToTicket } from "./tickets/intake.js";
+import { classifyIntake, ensureSelfProject, filedAlready, projectToTicket } from "./tickets/intake.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { ImproveCouncil, type Target } from "./improve/council.js";
@@ -102,7 +105,9 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   // Imported repos are cloned next to the factory's own projects, in imports/.
   const explorer = new RepoExplorer(log, runtime, join(dirname(projectsDir), "imports"), bay, { createNode: (title) => order.createNode("project", title) });
   // Finished projects added into SoftwareFactory: their frozen copies live in extensions/, next to projects/.
-  const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"));
+  // Plugins: folders with a plugin.json, copied into plugins/ next to projects/, each backend in its own locked-down process.
+  const plugins = new PluginHost(log, join(dirname(projectsDir), "plugins"), { bay });
+  const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"), plugins);
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
   const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
     maxUsd: settings.improveMaxUsd ?? improveOpts?.maxUsd, everyHours: settings.improveEveryHours ?? improveOpts?.everyHours,
@@ -146,6 +151,9 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") return end(res, 204);
     const url = new URL(req.url ?? "/", "http://localhost");
+    // Plugin pages run in sandboxed frames (origin "null"): they reach the core only through the
+    // Bridge, which checks their permissions, never by calling the API themselves.
+    if (origin === "null" && url.pathname.startsWith("/api/")) return json(res, 403, { error: "Plugin pages talk to SoftwareFactory through sf.js, not the API" });
     try {
       if (req.method === "GET" && url.pathname === "/api/health") return json(res, 200, {
         ok: true, runtime: runtime.name, mode: runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime),
@@ -252,6 +260,8 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (req.method === "POST" && url.pathname === "/api/factory/runs") {
         const body = await readJson(req);
         if (!gitReady()) return json(res, 409, { error: "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again." });
+        const dup = duplicateReply(factory, String(body.idea ?? ""), body.again);
+        if (dup) return json(res, dup[0], dup[1]);
         const run = factory.start(String(body.idea ?? ""), {
           maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined,
           autoApprove: body.autoApprove === true,
@@ -311,6 +321,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const b = await readJson(req);
         const v = classifyIntake(log, String(b.text ?? ""), typeof b.exclude === "number" ? b.exclude : undefined);
         if (v.verdict === "ask" && v.projectId == null) v.projectId = ensureSelf();
+        if (v.verdict === "ask" && v.projectId != null) { const x = filedAlready(log, v.projectId, String(b.text ?? "")); if (x) v.existing = x; }
         return json(res, 200, v);
       }
       if (req.method === "GET" && url.pathname === "/api/tickets/self") return json(res, 200, { projectId: ensureSelf() });
@@ -363,10 +374,15 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname.startsWith("/ext/") && serveExtension(integrations, req, res, url)) return;
+      if (url.pathname === "/api/plugins" || url.pathname.startsWith("/api/plugins/")) {
+        const r = await pluginsRoute({ plugins, readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
+      if (url.pathname.startsWith("/plugins/") && servePluginFile(plugins, req, res, url)) return;
       if (url.pathname.startsWith("/api/improve/")) {
-        const r = await improveRoute(improve, req, url.pathname, log, (idea) => {
+        const r = await improveRoute(improve, req, url.pathname, log, factory, (idea, projectId) => {
           if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");
-          return factory.start(idea, {});
+          return factory.start(idea, projectId != null ? { projectId } : {});
         });
         if (r) return json(res, r[0], r[1]);
       }
@@ -397,7 +413,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { github, factory, order, bay, drop, tickets, improve, explorer, launcher, integrations, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, factory, order, bay, drop, tickets, improve, explorer, launcher, integrations, plugins, errors, fault, ensureSelf });
 }
 
 /**
@@ -544,14 +560,20 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
     case "spawn": return [201, tickets.spawn(id, { ...(body as object), by: "you" } as any)];
     case "work":
       if (!gitReady()) return [409, { error: "Git is not installed, so the crew has nowhere to keep what it builds. Install Git for Windows (git-scm.com/download/win), then press Work it again." }];
-      return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true, where: body.where === "repo" || body.where === "new" ? body.where : "auto" })];
+      try {
+        return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true, again: body.again === true, where: body.where === "repo" || body.where === "new" ? body.where : "auto" })];
+      } catch (e) {
+        const dup = (e as { duplicate?: Record<string, unknown> }).duplicate;
+        if (dup) return [409, { error: (e as Error).message, ...dup }];
+        throw e;
+      }
     case "ask": return [200, await tickets.ask(id, body.agent ? String(body.agent) : undefined)];
   }
   return null;
 }
 
 /** The Improvement Council's API. Every write is an event, so the Bridge sees it on the stream. */
-async function improveRoute(improve: ImproveCouncil, req: IncomingMessage, path: string, log: EventLog, build: (idea: string) => number): Promise<[number, unknown] | null> {
+async function improveRoute(improve: ImproveCouncil, req: IncomingMessage, path: string, log: EventLog, factory: Pick<Factory, "duplicateOf">, build: (idea: string, projectId?: number) => number): Promise<[number, unknown] | null> {
   if (req.method === "GET" && path === "/api/improve/state") return [200, improve.state()];
   if (req.method !== "POST") return null;
   const body = await readJson(req);
@@ -588,8 +610,17 @@ async function improveRoute(improve: ImproveCouncil, req: IncomingMessage, path:
     }
     const p = improve.proposals().find((x) => x.id === id);
     if (!p) return [404, { error: `No proposal #${id}` }];
+    const idea = improve.buildIdea(id);
+    const dup = duplicateReply(factory, idea, body.again);
+    if (dup) return dup;
     if (p.status !== "accepted") improve.decide(id, "accepted");
-    try { return [202, { run: build(improve.buildIdea(id)) }]; } catch (e) { return [409, { error: (e as Error).message }]; }
+    // A proposal about a project builds in that project, not as a new one beside it.
+    // (Proposal targets name Order Engine nodes and factory runs; the project is whoever owns that.)
+    const owner = p.target.id == null ? null
+      : p.target.kind === "run" ? projectOf(log, { kind: "factory_run", ref: p.target.id })
+      : p.target.kind === "project" || p.target.kind === "idea" ? projectOf(log, { kind: "order_node", ref: p.target.id }) : null;
+    const projectId = owner ?? undefined;
+    try { return [202, { run: build(idea, projectId) }]; } catch (e) { return [409, { error: (e as Error).message }]; }
   }
   return null;
 }
@@ -684,6 +715,9 @@ if (isMain) {
   setTimeout(improveTick, 3 * 60_000).unref();
   setInterval(improveTick, 15 * 60_000).unref();
   // Runs the app closed on pick up again from their last completed station (SF_AUTO_RESUME=0 leaves them for the Resume button).
+  // Plugins you turned on start with the core and stop with it.
+  for (const id of core.plugins.startAll()) console.log(`Plugin ${id} started`);
+  process.on("exit", () => core.plugins.stopAll());
   if (process.env.SF_AUTO_RESUME !== "0" && core.factory.interrupted.length) {
     if (!checkGit().found) console.log("Not resuming interrupted runs: Git is not installed.");
     else for (const id of core.factory.resumeInterrupted()) console.log(`Resumed run #${id} where it left off`);
@@ -701,5 +735,23 @@ if (isMain) {
       }
     }, 1000).unref();
   }
-  server.listen(port, "127.0.0.1", () => console.log(`SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, db ${dbPath})`));
+  // Keep idle connections longer than any client's keep-alive pool (the Bridge, the smoke test),
+  // so a client never sends on a socket the core is closing at that same moment.
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
+  // A connection that breaks before a request is understood is otherwise dropped without a word.
+  server.on("clientError", (err: NodeJS.ErrnoException, socket) => {
+    if (err.code !== "ECONNRESET") console.error(`${new Date().toISOString()} connection error: ${err.code ?? ""} ${err.message}`);
+    if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"); else socket.destroy();
+  });
+  // A core that stops answering for a while (synchronous work hogging the event loop) says so in core.log,
+  // with the time, so a frozen-looking window can be matched to what the core was doing.
+  let tick = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const stalled = now - tick - 500;
+    if (stalled >= 2_000) console.error(`${new Date(now).toISOString()} the core was busy for ${(stalled / 1000).toFixed(1)} s and could not answer`);
+    tick = now;
+  }, 500).unref();
+  server.listen(port, "127.0.0.1", () => console.log(`${new Date().toISOString()} SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, db ${dbPath})`));
 }

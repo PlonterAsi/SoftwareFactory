@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEven
 import { GateActions, STEP } from "./GateActions";
 import { AskNotProject, checkIntake, type IntakeVerdict } from "./Intake";
 import { showTicket } from "./BugReport";
-import { askOverseer, captureSignal, setupApi, splitBuild, startFactoryRun, type AgentRunView, type ChatRoutes, type CrewMode, type FactoryRunView, type OrderState, type ProjectSummary, type Signal, type SinceView } from "./api";
+import { DuplicateNotice } from "./DuplicateNotice";
+import { askOverseer, captureSignal, duplicateOf, normIdea, setupApi, splitBuild, startFactoryRun, type AgentRunView, type DuplicateRun, type ChatRoutes, type CrewMode, type FactoryRunView, type OrderState, type ProjectSummary, type Signal, type SinceView } from "./api";
 
 type Item = {
   key: string; ts: string; kind: "signal" | "reply" | "error" | "factory" | "briefing" | "filed" | "gate"; text: string; meta?: string; build?: string; run?: number; open?: boolean;
@@ -121,27 +122,44 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
   // Keep the newest message in view.
   useEffect(() => { feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight }); }, [items.length, channel]);
 
-  async function build(e: MouseEvent, idea?: string, askChecked = false) {
+  // A Build the core held back because a run already does that idea: what to offer instead.
+  const [dup, setDup] = useState<{ d: DuplicateRun; idea: string; project?: number; fromBox: boolean } | null>(null);
+
+  /**
+   * Start a run. A suggestion builds in the chat it was given in (home), not whichever chat is open now;
+   * typed ideas build in the open chat. The core refuses a repeat of a running or just-shipped idea.
+   */
+  async function build(e: MouseEvent, idea?: string, home?: number | null, again = false, askChecked = false) {
     e.preventDefault();
     const t = (idea ?? text).trim();
     if (!t || busy) return;
-    // In General, a new build is a new project: when it reads like an ask about one you have, offer a ticket there first.
-    if (chatProject == null && !askChecked) {
+    const project = home !== undefined ? home ?? undefined : chatProject;
+    // A build with no project is a new project: when it reads like an ask about one you have (SoftwareFactory included), offer a ticket there first.
+    if (project == null && !again && !askChecked) {
       const v = await checkIntake(t);
       if (v) { setAsk({ text: t, v }); return; }
     }
     setAsk(null);
     setBusy(true);
     setErr(null);
+    setDup(null);
     try {
-      onRunStarted(await startFactoryRun(t, undefined, chatProject), chatProject);
+      onRunStarted(await startFactoryRun(t, undefined, project, again), project);
       if (!idea) setText("");
     } catch (x) {
-      setErr((x as Error).message);
+      const d = duplicateOf(x);
+      if (d) setDup({ d, idea: t, project, fromBox: !idea });
+      else setErr((x as Error).message);
     } finally {
       setBusy(false);
     }
   }
+  /** The run a suggestion already started: the first run of the same idea after the suggestion was made. */
+  const builtFrom = (i: Item) => {
+    if (!i.build) return undefined;
+    const n = normIdea(i.build);
+    return factoryRuns.filter((r) => r.startedAt >= i.ts && normIdea(r.idea) === n).sort((a, b) => a.run - b.run)[0];
+  };
 
   async function submit(e: FormEvent | KeyboardEvent | MouseEvent, ask: boolean) {
     e.preventDefault();
@@ -204,7 +222,12 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
             {i.meta && <div className="mono muted msg-meta">{i.meta}</div>}
             {(i.build || i.open || (i.kind === "gate" && i.run)) && (
               <div className="msg-actions">
-                {i.build && <button className="sm" disabled={busy} onClick={(e) => build(e, i.build)} title={i.build}>Build: {i.build.length > 48 ? i.build.slice(0, 46) + "…" : i.build}</button>}
+                {i.build && (() => {
+                  // Pressed already: say where it went instead of offering another copy.
+                  const r = builtFrom(i);
+                  if (r) return <button className="sm ghost" onClick={() => onShowRun(r.run)} title={i.build}>{r.finished ? (r.finished.outcome === "shipped" ? "Built" : "Tried") : "Building"} as run #{r.run} · Show</button>;
+                  return <button className="sm" disabled={busy} onClick={(e) => build(e, i.build, i.home)} title={`${i.build}\nBuilds in ${nameOf(i.home)}`}>Build: {i.build.length > 48 ? i.build.slice(0, 46) + "…" : i.build}</button>;
+                })()}
                 {i.open && i.run && <button className="ghost sm" onClick={() => setupApi.open("run", i.run).catch((x) => setErr((x as Error).message))}>Open folder</button>}
                 {i.kind === "gate" && i.run && <button className="ghost sm" onClick={() => onShowRun(i.run!)}>Show me</button>}
               </div>
@@ -234,8 +257,10 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
         {mode === "practice" && <div className="composer-note">Practice crew: Build it makes a sample word counter, free. <button type="button" className="link" onClick={onSetup}>Use real agents</button></div>}
         {err && <div className="err">{err}</div>}
         {ask && <AskNotProject text={ask.text} verdict={ask.v} onCancel={() => setAsk(null)}
-          onProject={() => { const t = ask.text; setAsk(null); void build({ preventDefault() {} } as MouseEvent, t, true).then(() => setText("")); }}
+          onProject={() => { const t = ask.text; setAsk(null); void build({ preventDefault() {} } as MouseEvent, t, undefined, false, true).then(() => setText("")); }}
           onFiled={(id, project) => { setAsk(null); setText(""); showTicket(id, project); }} />}
+        {dup && <DuplicateNotice dup={dup.d} busy={busy} onShow={onShowRun} onDismiss={() => setDup(null)}
+          onAgain={() => build({ preventDefault() {} } as MouseEvent, dup.fromBox ? undefined : dup.idea, dup.project ?? null, true)} />}
       </form>
     </section>
   );

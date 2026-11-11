@@ -1092,6 +1092,38 @@ button.tool-raw { font-size: 12px; margin-left: auto; }
 .pk:not(.dir):hover .pk-name { color: var(--accent); }
 .pk-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ---------------- Plugins ---------------- */
+.pl .ft-main { overflow: auto; }
+.pl-lead { margin: 0 0 6px; font-size: 12px; }
+.pl-dot { font-size: 14px; color: var(--muted); }
+.pl-dot.s-enabled { color: var(--good); border-color: #2a6b52; box-shadow: 0 0 10px rgba(94, 224, 160, 0.25); }
+.pl-dot.bad { color: var(--bad); border-color: var(--bad); }
+.pl-add { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.pl-add h4, .pl-card h4, .pl-log h4 { margin: 0; font: 600 11px var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+.pl-add input { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: 12px var(--mono); }
+.pl-add button { align-self: flex-start; }
+.pl-dir { font-size: 11px; overflow-wrap: anywhere; }
+.pl-example { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px dashed var(--line); border-radius: 8px; }
+.pl-example .muted { font-size: 12px; }
+.pl-detail { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.pl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.pl-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.pl-card p { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.pl-perms { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pl-perms li { display: flex; flex-direction: column; padding-left: 10px; border-left: 2px solid var(--accent); }
+.pl-perms li.new { border-left-color: var(--gate); }
+.pl-perms li b { font-weight: 500; }
+.pl-perms li .muted { font-size: 11px; }
+.pl-frame { flex: 1; width: 100%; min-height: 480px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.pl-page { display: flex; flex-direction: column; gap: 6px; min-height: 480px; }
+.pl-tabs { display: flex; gap: 10px; }
+.pl-tabs a { color: var(--muted); text-decoration: none; }
+.pl-tabs a.on { color: var(--accent); }
+.pl-log ol { list-style: none; margin: 6px 0 0; padding: 8px; max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.pl-log li { padding: 1px 0; overflow-wrap: anywhere; }
+.pl-log li.lv-warn { color: var(--gate); }
+.pl-log li.lv-error { color: var(--bad); }
+
 /* Project chats: General plus one per project, switched from the Overseer's head. */
 .chat-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
 .chat-tab { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--muted); font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1148,3 +1180,10 @@ button.tool-raw { font-size: 12px; margin-left: auto; }
 .tk-prchip { font: 600 10px var(--mono); padding: 2px 6px; border-radius: 10px; border: 1px solid var(--accent); color: var(--accent); white-space: nowrap; }
 .tk-prchip.pr-merged { border-color: var(--good); color: var(--good); }
 .tk-prchip.pr-closed { border-color: var(--line); color: var(--muted); }
+
+/* A Build held back because a run already does that idea */
+.dup-notice { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--warn, #c9a227); border-radius: 6px; font-size: 12.5px; background: color-mix(in srgb, var(--warn, #c9a227) 10%, transparent); }
+.dup-notice .dup-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.hull-twin { align-self: flex-start; font-size: 11px; color: var(--warn, #c9a227); cursor: pointer; text-decoration: underline dotted; }
+.pj-merge select { min-width: 0; flex: 1; }
+.tk-dup { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; padding: 8px 10px; border: 1px solid var(--gate); border-radius: 8px; }

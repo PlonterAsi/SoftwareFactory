@@ -56,3 +56,8 @@ export * from "./launch/tables.js";
 export * from "./launch/launcher.js";
 export * from "./launch/routes.js";
 export * from "./launch/usage.js";
+export * from "./plugins/manifest.js";
+export * from "./plugins/tables.js";
+export * from "./plugins/host.js";
+export * from "./plugins/routes.js";
+export { RUNNER_SOURCE, FRAME_SDK_SOURCE } from "./plugins/runner.js";

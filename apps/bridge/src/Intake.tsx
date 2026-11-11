@@ -10,7 +10,7 @@ import { showTicket } from "./BugReport";
  * ticket there instead. It only offers: "Start a new project" is one tap.
  */
 
-export interface IntakeVerdict { verdict: "project" | "ask"; projectId?: number; projectName?: string; kind?: string; why?: string; confidence?: "high" | "low" }
+export interface IntakeVerdict { verdict: "project" | "ask"; projectId?: number; projectName?: string; kind?: string; why?: string; confidence?: "high" | "low"; existing?: { id: number; title: string; status: string } }
 export interface TurnedIntoTicket { ticket: { id: number; project: number | null }; from: number; to: number; moved: number }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -49,6 +49,14 @@ export function AskNotProject({ text, verdict, onProject, onFiled, onCancel }: {
   return (
     <div className="intake-card" role="alertdialog" aria-label="This sounds like an ask">
       <p><strong>This sounds like {kind === "bug" ? "a bug in" : "an ask about"} {verdict.projectName}</strong>, not a new project. {verdict.why}</p>
+      {verdict.existing ? (
+        <div className="row">
+          <span>It is already filed there as #{verdict.existing.id} ({verdict.existing.status.replace("_", " ")}).</span>
+          <button onClick={() => onFiled(verdict.existing!.id, verdict.projectId ?? null)}>Open #{verdict.existing.id}</button>
+          <button className="ghost" onClick={file} disabled={busy}>File it again</button>
+          <button className="ghost" onClick={onCancel}>Cancel</button>
+        </div>
+      ) : (
       <div className="row">
         <button onClick={file} disabled={busy}>{busy ? "Filing…" : `File as a ${kind} on ${verdict.projectName}`}</button>
         <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Ticket kind">
@@ -57,6 +65,7 @@ export function AskNotProject({ text, verdict, onProject, onFiled, onCancel }: {
         <button className="ghost" onClick={onProject} disabled={busy}>Start a new project anyway</button>
         <button className="ghost" onClick={onCancel} disabled={busy}>Cancel</button>
       </div>
+      )}
       {err && <p className="alert-text">{err}</p>}
     </div>
   );

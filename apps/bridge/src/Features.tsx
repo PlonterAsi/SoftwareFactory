@@ -9,7 +9,7 @@ import { registerProjectPanel, type PanelContext } from "./projects/panels";
  *   Features page (top bar)         every installed feature: a tool gets an arguments box and its output,
  *                                   a panel (a web page) opens inside the app
  */
-export type IntegrationForm = "tool" | "panel" | "source";
+export type IntegrationForm = "tool" | "panel" | "source" | "plugin";
 export interface ReadinessCheck { id: string; label: string; state: "pass" | "warn" | "fail"; detail: string }
 export interface FormOption { form: IntegrationForm; available: boolean; entry: string | null; why: string }
 export interface Integration {
@@ -54,6 +54,7 @@ export function useIntegrations(events: SfEvent[]) {
 const FORM_TEXT: Record<IntegrationForm, { name: string; line: string }> = {
   tool: { name: "Tool", line: "Run it from the Features page: an arguments box and its output." },
   panel: { name: "Panel", line: "Its web page opens inside SoftwareFactory, on the Features page." },
+  plugin: { name: "Plugin", line: "Installed as a plugin: its tabs, backend and agents join the app. Your approval turns it on; manage it on the Plugins page." },
   source: { name: "Into the source", line: "A brief for a pull request that builds it into SoftwareFactory itself. Never straight to main." },
 };
 const STATUS_TEXT: Record<Integration["status"], string> = {
@@ -110,7 +111,7 @@ function IntegratePanel({ ctx }: { ctx: PanelContext }) {
         <section className="ig-gate" aria-label="Approval">
           <div>
             <b>Add {open.title} as a {FORM_TEXT[open.form].name.toLowerCase()}?</b>
-            <p className="muted">{FORM_TEXT[open.form].line} {open.form !== "source" && <>A frozen copy of <span className="mono">{open.sourceDir}</span>{open.sha ? <> at <span className="mono">{open.sha}</span></> : null} goes into SoftwareFactory's data folder; the project's own folder is not touched.</>}</p>
+            <p className="muted">{FORM_TEXT[open.form].line} {open.form === "plugin" && <>Approving also turns it on with the permissions listed below its option. </>}{open.form !== "source" && <>A frozen copy of <span className="mono">{open.sourceDir}</span>{open.sha ? <> at <span className="mono">{open.sha}</span></> : null} goes into SoftwareFactory's data folder; the project's own folder is not touched.</>}</p>
           </div>
           <div className="ig-gate-actions">
             <button className="sm gate" disabled={busy} onClick={() => act(() => integrationsApi.decide(open.id, true))}>Approve</button>
@@ -143,7 +144,7 @@ function IntegratePanel({ ctx }: { ctx: PanelContext }) {
               <div className="ig-card-head">
                 <b>{FORM_TEXT[i.form].name}</b>
                 <span className="muted">{STATUS_TEXT[i.status]}{i.uses ? ` · used ${i.uses}×` : ""}{i.files ? ` · ${i.files} files, ${kb(i.bytes)}` : ""}</span>
-                {i.form !== "source" && <a className="ig-open" href={`#/features/${i.id}`}>Open</a>}
+                {i.form === "plugin" ? <a className="ig-open" href={`#/plugins/${i.entry}`}>Open on the Plugins page</a> : i.form !== "source" && <a className="ig-open" href={`#/features/${i.id}`}>Open</a>}
               </div>
               {i.brief && <Brief text={i.brief} />}
             </div>
