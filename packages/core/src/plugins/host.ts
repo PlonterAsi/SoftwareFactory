@@ -291,6 +291,8 @@ export class PluginHost {
     createInterface({ input: child.stdout! }).on("line", (line) => this.onMessage(id, r, line));
     child.stderr!.on("data", (b: Buffer) => { r.stderr = (r.stderr + b.toString()).slice(-2000); });
     child.on("error", (e) => { r.stderr += `\n${e.message}`; });
+    // A backend that exits while we write to it must never take the core down (EPIPE on Windows).
+    child.stdin!.on("error", () => { /* the exit handler reports it */ });
     child.on("exit", (code, signal) => this.onExit(id, r, code, signal));
     this.send(r, { t: "init", manifest: v.manifest, data: this.data(id) });
     return true;
@@ -342,7 +344,8 @@ export class PluginHost {
   }
 
   private send(r: Running, m: unknown) {
-    if (r.child.stdin?.writable) r.child.stdin.write(JSON.stringify(m) + "\n");
+    if (r.child.exitCode != null || r.child.signalCode != null || !r.child.stdin?.writable) return;
+    try { r.child.stdin.write(JSON.stringify(m) + "\n"); } catch { /* gone */ }
   }
 
   private allow(r: Running, kind: keyof typeof LIMITS.perMinute): boolean {
