@@ -1,0 +1,23 @@
+# Design system: Foundry Glass
+
+Approved by Assaf on 2026-11-11 after a UI and UX council. Proposal, mockups and live prototype: https://claude.ai/artifact/BUevHm6B2yRRUC7f837Dze
+
+Tokens live at the top of `apps/bridge/src/styles.css`. Use them; do not add raw colours.
+
+## Colour
+- Surfaces, nearer is lighter: `--bg` #0b0d10, `--shell` #0f1216, `--panel` #14181d, `--panel-2` #1a1f26, `--hover` #20262e.
+- Borders: `--line` (8.5% white), `--line-2` (14%), `--line-3` (24%, hover and focus).
+- Text: `--ink` #f2f0eb (15.7:1), `--ink-2` #c4c9d1 (10.7:1), `--muted` #9aa2ad (6.9:1).
+- Roles, one meaning each, always with a glyph or a word too: `--accent` teal = working or primary action; `--gate` amber = needs you, and nothing else; `--good` green = done; `--bad` red = failed or conflict; `--agent` violet = an agent.
+
+## Type
+- Geist Sans for everything, Geist Mono only for ids, money, paths, keys and code. Both are bundled (`@fontsource`), so the app looks the same offline.
+- Base 15px. Nothing under 13px except mono tags (12.5px). No uppercase labels.
+
+## Motion
+- 120 to 260 ms, `--ease`, transform and opacity only. No blur, no animated shadows.
+- Hover on everything clickable, `scale(0.98)` on press, a 2px focus ring.
+- Reduced motion turns every loop and transition off.
+
+## Rollout
+0. UI tour and bundled fonts (done, PR #32). 1. Tokens, type and hover on the current layout. 2. Shared components and plain words. 3. New shell behind a Systems switch. 4. Project cards, short names, five sections. 5. Approval screen, motion, shortcuts. 6. Retire Whole factory and the old shell.

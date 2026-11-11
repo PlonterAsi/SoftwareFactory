@@ -96,7 +96,7 @@ export function App() {
     <div className="bridge">
       <header className="topbar">
         <div className="brand-nav">
-          <a className="brand" href={href({ page: "home" })}><span className="logo" aria-hidden>◈</span> SOFTWAREFACTORY</a>
+          <a className="brand" href={href({ page: "home" })}><span className="logo" aria-hidden>◈</span> SoftwareFactory</a>
           <nav className="topnav" aria-label="Main">
             <a href={href({ page: "home" })} aria-current={route.page === "home" || route.page === "project" ? "page" : undefined}>Projects</a>
             <a href={href({ page: "features" })} aria-current={route.page === "features" ? "page" : undefined} className={featuresWaiting ? "alert-text" : undefined}>
@@ -109,16 +109,11 @@ export function App() {
             <a href={href({ page: "factory", view })} aria-current={route.page === "factory" ? "page" : undefined}>Whole factory</a>
           </nav>
         </div>
-        <div className="stats mono">
-          <span className={f.online ? "dot on" : "dot"} /> core {f.online ? "online" : "offline"}
-          <span className="sep">·</span> <button className={`crew-chip ${f.mode ?? ""}`} onClick={() => setSetupOpen(true)} title={`Runtime: ${f.runtime}. Click for crew, checks and folders.`}>{f.mode === "real" ? "real crew" : f.mode === "practice" ? "practice crew" : "crew …"}</button>
-          <span className="sep">·</span> {projects.list?.filter((p) => p.status !== "archived").length ?? "…"} projects
-          <span className="sep">·</span> {f.signals.length} signals
-          {open > 0 && <><span className="sep">·</span><a className="alert-text" href={href({ page: "factory", view: "order" })}>{open} conflict{open > 1 ? "s" : ""}</a></>}
-          <span className="sep">·</span> {bay.agents.filter((a) => !a.retired).length} agents
-          <span className="sep">·</span> {f.factoryRuns.length} factory runs
-          <span className="sep">·</span> {f.runs.length} agent calls
-          <span className="sep">·</span> spend ${f.totalUsd.toFixed(4)}
+        <div className="stats" title={`${projects.list?.filter((p) => p.status !== "archived").length ?? "…"} projects · ${f.signals.length} signals · ${bay.agents.filter((a) => !a.retired).length} agents · ${f.factoryRuns.length} factory runs · ${f.runs.length} agent calls`}>
+          <span className={f.online ? "dot on" : "dot"} /> {f.online ? "Online" : "Offline"}
+          <button className={`crew-chip ${f.mode ?? ""}`} onClick={() => setSetupOpen(true)} title={`Runtime: ${f.runtime}. Click for crew, checks and folders.`}>{f.mode === "real" ? "Real crew" : f.mode === "practice" ? "Practice crew · free" : "Crew …"}</button>
+          {open > 0 && <a className="alert-text" href={href({ page: "factory", view: "order" })}>{open} conflict{open > 1 ? "s" : ""}</a>}
+          <span className="num">${f.totalUsd.toFixed(4)}</span>
           <VersionChip u={updates} onOpen={() => setSetupOpen(true)} />
           <button className="ghost sm systems" onClick={() => setSetupOpen(true)} aria-label="Ship's systems: crew, checks and folders">Systems</button>
         </div>

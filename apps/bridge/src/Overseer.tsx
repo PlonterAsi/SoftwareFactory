@@ -201,7 +201,7 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
             {i.kind === "gate" && i.run && factoryRuns.find((r) => r.run === i.run)?.waiting
               ? <GateActions run={factoryRuns.find((r) => r.run === i.run)!} compact />
               : <div className="msg-text">{i.text}</div>}
-            {i.meta && <div className="mono muted msg-meta">{i.meta}</div>}
+            {i.meta && <div className="muted msg-meta">{i.meta}</div>}
             {(i.build || i.open || (i.kind === "gate" && i.run)) && (
               <div className="msg-actions">
                 {i.build && (() => {
