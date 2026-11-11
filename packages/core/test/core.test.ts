@@ -40,7 +40,23 @@ describe("event log and signals", () => {
 describe("agent runtime", () => {
   it("lean profile skips MCP and tools, sets model and budget", () => {
     const args = new ClaudeCodeRuntime({ profile: "lean" }).buildArgs({ prompt: "hi", model: "haiku", budgetUsd: 0.1, pluginDirs: ["/p/superpowers"] });
-    expect(args).toEqual(["-p", "hi", "--output-format", "json", "--model", "haiku", "--max-budget-usd", "0.1", "--plugin-dir", "/p/superpowers", "--strict-mcp-config", "--tools", ""]);
+    expect(args).toEqual(["-p", "--output-format", "json", "--model", "haiku", "--max-budget-usd", "0.1", "--plugin-dir", "/p/superpowers", "--strict-mcp-config", "--tools", ""]);
+  });
+
+  it("sends a prompt longer than a Windows command line on stdin", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sf-cli-"));
+    const fake = join(dir, "fake-claude.mjs");
+    writeFileSync(fake, `let s = ""; process.stdin.on("data", (d) => (s += d)); process.stdin.on("end", () => console.log(JSON.stringify({ result: process.argv.slice(2).join(" ").length + ":" + s.length + ":" + s.slice(-6), total_cost_usd: 0 })));`);
+    const rt = new ClaudeCodeRuntime({ command: process.execPath, commandArgs: [fake], profile: "lean" });
+    const prompt = "x".repeat(100_000) + " done.";
+    const r = await rt.run({ prompt, systemPrompt: "role", model: "haiku" });
+    const [argLen, inLen, tail] = r.text.split(":");
+    expect(Number(argLen)).toBeLessThan(1000);
+    expect(Number(inLen)).toBe(prompt.length);
+    expect(tail).toBe(" done.");
+    const long = "r".repeat(20_000);
+    expect(rt.buildArgs({ prompt: "p", systemPrompt: long })).not.toContain(long);
+    expect(rt.stdinFor({ prompt: "p", systemPrompt: long })).toContain(long);
   });
 
   it("full profile loads everything installed", () => {
@@ -61,7 +77,7 @@ describe("agent runtime", () => {
     const dir = mkdtempSync(join(tmpdir(), "sf-bin-"));
     // A Node script run by this Node, the same way SF_CLAUDE_JS runs an npm install of Claude Code (also on Windows).
     const bin = join(dir, "claude.js");
-    writeFileSync(bin, `const p=process.argv[process.argv.indexOf('-p')+1];console.log(JSON.stringify({result:'echo:'+p,total_cost_usd:0.002,duration_ms:5,usage:{input_tokens:1},modelUsage:{'fake-model':{}}}))\n`);
+    writeFileSync(bin, `let p='';process.stdin.on('data',(d)=>p+=d);process.stdin.on('end',()=>console.log(JSON.stringify({result:'echo:'+p,total_cost_usd:0.002,duration_ms:5,usage:{input_tokens:1},modelUsage:{'fake-model':{}}})))\n`);
     const r = await new ClaudeCodeRuntime({ command: process.execPath, commandArgs: [bin] }).run({ prompt: "ping" });
     expect(r.text).toBe("echo:ping");
     expect(r.costUsd).toBe(0.002);

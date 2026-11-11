@@ -57,6 +57,9 @@ export interface ClaudeCodeOptions {
 }
 
 /** Option A of the spike: drive Claude Code headless (`claude -p`). */
+/** Longest role kept on the command line; longer ones go on stdin (Windows command lines stop near 32,000 characters). */
+const MAX_ARG_ROLE = 8000;
+
 export class ClaudeCodeRuntime implements AgentRuntime {
   readonly name: string;
   private readonly opts: Required<ClaudeCodeOptions>;
@@ -72,10 +75,15 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     this.name = `claude-code:${this.opts.profile}`;
   }
 
+  /**
+   * The prompt goes in on stdin, never on the command line: Windows caps a command line at
+   * about 32,000 characters, and a Fixer prompt with the failing tests and the code is longer
+   * ("spawn ENAMETOOLONG"). A very long role moves to stdin too, ahead of the prompt.
+   */
   buildArgs(req: AgentRequest): string[] {
-    const args = ["-p", req.prompt, "--output-format", "json", "--model", req.model ?? this.opts.defaultModel];
+    const args = ["-p", "--output-format", "json", "--model", req.model ?? this.opts.defaultModel];
     if (req.budgetUsd !== undefined) args.push("--max-budget-usd", String(req.budgetUsd));
-    if (req.systemPrompt) args.push("--append-system-prompt", req.systemPrompt);
+    if (req.systemPrompt && req.systemPrompt.length <= MAX_ARG_ROLE) args.push("--append-system-prompt", req.systemPrompt);
     for (const dir of req.pluginDirs ?? []) args.push("--plugin-dir", dir);
     if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", (req.tools ?? []).join(","));
     else if (req.tools?.length) args.push("--tools", req.tools.join(","));
@@ -84,10 +92,18 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     return args;
   }
 
+  /** What the CLI reads on stdin: the prompt, with the role in front when it was too long for the command line. */
+  stdinFor(req: AgentRequest): string {
+    return req.systemPrompt && req.systemPrompt.length > MAX_ARG_ROLE ? `<your-role>\n${req.systemPrompt}\n</your-role>\n\n${req.prompt}` : req.prompt;
+  }
+
   run(req: AgentRequest): Promise<AgentResult> {
     const started = Date.now();
     return new Promise((resolve, reject) => {
-      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...this.buildArgs(req)], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, ...(req.cwd ? { cwd: req.cwd } : {}) });
+      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...this.buildArgs(req)], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, ...(req.cwd ? { cwd: req.cwd } : {}) });
+      // A CLI that dies before reading stdin closes the pipe; the exit code says what happened.
+      child.stdin.on("error", () => {});
+      child.stdin.end(this.stdinFor(req), "utf8");
       let out = "";
       let err = "";
       const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error(`Agent timed out after ${this.opts.timeoutMs} ms`)); }, this.opts.timeoutMs);

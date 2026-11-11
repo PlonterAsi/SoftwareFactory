@@ -46,6 +46,8 @@ export interface ProjectPanel {
 const registry = new Map<string, ProjectPanel>();
 
 export function registerProjectPanel(p: ProjectPanel) { registry.set(p.id, p); }
+export function unregisterProjectPanel(id: string) { registry.delete(id); }
+export function registeredPanelIds(): string[] { return [...registry.keys()]; }
 
 export function panelsFor(p: ProjectSummary): ProjectPanel[] {
   return [...registry.values()].filter((x) => !x.appliesTo || x.appliesTo(p)).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));

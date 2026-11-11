@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { EventLog } from "../events.js";
 import { importOf } from "../imports/explorer.js";
 import { projectDetail } from "../projects/service.js";
+import { PERMISSION_TEXT, readManifest } from "../plugins/manifest.js";
 
 /**
  * Can a finished project be added into SoftwareFactory, and in which form?
@@ -11,13 +12,14 @@ import { projectDetail } from "../projects/service.js";
  *   tool    a command-line program: the Features page gives it an arguments box and its output
  *   panel   a web page (an index.html): the Features page shows it inside the app
  *   source  part of SoftwareFactory's own code: prepared as a brief for a pull request, never straight to main
+ *   plugin  a folder with a plugin.json: installed as a plugin (tabs, a backend, agents), see docs/plugins.md
  *
  * A project may say what it wants with a `softwarefactory.json` in its root:
  *   { "form": "tool" | "panel", "title": "Runner", "entry": "bin/run.js", "web": "dist", "summary": "…" }
  * Without one, the form is detected from package.json (bin, main, start) and index.html files.
  */
-export type IntegrationForm = "tool" | "panel" | "source";
-export const INTEGRATION_FORMS: IntegrationForm[] = ["tool", "panel", "source"];
+export type IntegrationForm = "tool" | "panel" | "source" | "plugin";
+export const INTEGRATION_FORMS: IntegrationForm[] = ["plugin", "tool", "panel", "source"];
 
 export interface ReadinessCheck { id: string; label: string; state: "pass" | "warn" | "fail"; detail: string }
 
@@ -74,7 +76,19 @@ export function detectForms(dir: string): { forms: FormOption[]; manifest: Manif
     .filter((x): x is string => typeof x === "string")
     .map((x) => x.replace(/^\.\/?/, "").replace(/\/$/, ""));
   const webEntry = webCandidates.find((x) => isFile(join(dir, x, "index.html")));
+  // plugin: a valid plugin.json in the root.
+  let plugin: FormOption;
+  if (!isFile(join(dir, "plugin.json"))) plugin = { form: "plugin", available: false, entry: null, why: "No plugin.json in the root" };
+  else {
+    try {
+      const m = readManifest(dir);
+      const adds = [m.panels.length ? `${m.panels.length} tab${m.panels.length > 1 ? "s" : ""}` : "", m.main ? "a backend" : "", m.agents.length ? `${m.agents.length} agent${m.agents.length > 1 ? "s" : ""}` : ""].filter(Boolean).join(", ");
+      const may = m.permissions.length ? ` It may: ${m.permissions.map((x) => PERMISSION_TEXT[x].toLowerCase()).join("; ")}.` : " It asks for no permissions.";
+      plugin = { form: "plugin", available: true, entry: m.id, why: `Plugin ${m.id} ${m.version}: adds ${adds}.${may}` };
+    } catch (e) { plugin = { form: "plugin", available: false, entry: null, why: `plugin.json has a problem: ${(e as Error).message}` }; }
+  }
   const forms: FormOption[] = [
+    plugin,
     { form: "tool", available: !!toolEntry, entry: toolEntry, why: toolEntry ? `Runs node ${toolEntry}` : "No runnable script found (package.json bin, main, or index.js)" },
     { form: "panel", available: webEntry != null, entry: webEntry ?? null, why: webEntry != null ? `Shows ${webEntry ? webEntry + "/" : ""}index.html` : "No index.html found (root, dist, build, public or web)" },
     { form: "source", available: true, entry: null, why: "A brief for a pull request that builds it into SoftwareFactory's own code" },
@@ -155,7 +169,7 @@ export function assessProject(log: EventLog, projectId: number): Assessment | nu
   }
   const ready = !!source && present && !checks.some((c) => c.state === "fail");
   const pick = (f?: IntegrationForm) => (f && forms.find((x) => x.form === f && x.available) ? f : null);
-  const recommended = !source || !present ? null : pick(manifest?.form) ?? pick("panel") ?? pick("tool") ?? "source";
+  const recommended = !source || !present ? null : pick(manifest?.form) ?? pick("plugin") ?? pick("panel") ?? pick("tool") ?? "source";
   const name = manifest?.title?.trim() || d.name;
   return {
     projectId, name, slug: featureSlug(String(pkg?.name ?? name)), summary: manifest?.summary ?? d.summary ?? String(pkg?.description ?? ""),
