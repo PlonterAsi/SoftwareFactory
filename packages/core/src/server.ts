@@ -26,6 +26,7 @@ import { Integrations } from "./integrations/service.js";
 import { integrationsRoute, serveExtension } from "./integrations/routes.js";
 import { PluginHost } from "./plugins/host.js";
 import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
+import { brainRoute } from "./brain/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { ImproveCouncil, type Target } from "./improve/council.js";
@@ -296,6 +297,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname.startsWith("/plugins/") && servePluginFile(plugins, req, res, url)) return;
+      if (url.pathname === "/api/brain" || url.pathname.startsWith("/api/brain/")) {
+        const r = await brainRoute({ log, bay, readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
       if (url.pathname.startsWith("/api/improve/")) {
         const r = await improveRoute(improve, req, url.pathname, log, factory, (idea, projectId) => {
           if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");

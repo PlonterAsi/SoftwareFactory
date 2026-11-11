@@ -1,5 +1,7 @@
 # Every project has a screen
 
+> Superseded by [apps.md](apps.md): every project is now a real program on the app kit (full CRUD, a System view, one-press Start), and "Add a screen" became "Turn into an app". This page describes the earlier page-only default, still used for plans from before.
+
 visualizeEverything applies to what the factory makes, not only to the factory itself. A project the crew finishes opens as a page inside SoftwareFactory (the project's **Run** tab), not as a command you have to type.
 
 ## What the crew builds
