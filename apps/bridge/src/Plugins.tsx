@@ -261,7 +261,7 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
             {tabs.map((t) => <li key={t.id}><b>Tab "{t.title}"</b><span className="muted">in every project</span></li>)}
             {pages.map((t) => <li key={t.id}><b>Page "{t.title}"</b><span className="muted">here, below</span></li>)}
             {m.main && <li><b>A backend</b><span className="muted mono">{m.main}{m.subscribe.length ? ` · hears ${m.subscribe.join(", ")}` : ""}</span></li>}
-            {m.agents.map((a) => <li key={a}><b>Agent</b><span className="muted mono">{a} · in the Agent Bay while on</span></li>)}
+            {m.agents.map((a) => <li key={a}><b>Agent</b><span className="muted mono">{a} · in Agents while on</span></li>)}
           </ul>
           <p className="muted mono">{p.dir}{p.dataKeys ? ` · ${p.dataKeys} stored keys` : ""}</p>
         </div>

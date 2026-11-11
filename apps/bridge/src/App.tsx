@@ -1,4 +1,5 @@
 import { BrainPage } from "./Brain";
+import { KitPage } from "./Kit";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API, setupApi, useBay, useChatRoutes, useFactory, useOrder, useProjects, type SinceView } from "./api";
 import { Setup } from "./Setup";
@@ -120,7 +121,7 @@ export function App() {
           {open > 0 && <a className="alert-text" href={href({ page: "factory", view: "order" })}>{open} conflict{open > 1 ? "s" : ""}</a>}
           <span className="num">${f.totalUsd.toFixed(4)}</span>
           <VersionChip u={updates} onOpen={() => setSetupOpen(true)} />
-          <button className="ghost sm systems" onClick={() => setSetupOpen(true)} aria-label="Ship's systems: crew, checks and folders">Systems</button>
+          <button className="ghost sm systems" onClick={() => setSetupOpen(true)} aria-label="Systems: crew, checks and folders">Systems</button>
         </div>
       </header>
       <UpdateBanner u={updates} />
@@ -130,7 +131,7 @@ export function App() {
           <div className={`center view-${view}`}>
             <nav className="viewbar" role="tablist" aria-label="Center view">
               <button role="tab" aria-selected={view === "factory"} className={view === "factory" ? "tab on" : "tab"} onClick={() => setView("factory")}>Factory floor</button>
-              <button role="tab" aria-selected={view === "bay"} className={view === "bay" ? "tab on" : "tab"} onClick={() => setView("bay")}>Agent Bay{Object.values(bay.stats).some((s) => s.state === "thinking") ? " · working" : ""}</button>
+              <button role="tab" aria-selected={view === "bay"} className={view === "bay" ? "tab on" : "tab"} onClick={() => setView("bay")}>Agents{Object.values(bay.stats).some((s) => s.state === "thinking") ? " · working" : ""}</button>
               <button role="tab" aria-selected={view === "order"} className={(view === "order" ? "tab on" : "tab") + (open ? " alert" : "")} onClick={() => setView("order")}>Order deck{open ? ` · ${open}` : ""}</button>
               <button role="tab" aria-selected={view === "improve"} className={view === "improve" ? "tab on" : "tab"} onClick={() => setView("improve")}>Improve{improve.busy ? " · looking" : waiting ? ` · ${waiting}` : ""}</button>
               <button role="tab" aria-selected={view === "data"} className={view === "data" ? "tab on" : "tab"} onClick={() => setView("data")}>Data vault</button>
@@ -147,6 +148,8 @@ export function App() {
         <main className="grid projects-grid">
           {route.page === "bases"
             ? <BasesPage bases={bases.data} refresh={bases.refresh} />
+            : route.page === "kit"
+            ? <KitPage />
             : route.page === "brain"
             ? <BrainPage events={f.events} />
             : route.page === "plugins"

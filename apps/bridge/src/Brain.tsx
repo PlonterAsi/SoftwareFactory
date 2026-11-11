@@ -16,7 +16,7 @@ interface BrainState { principles: Principle[]; stations: string[]; crew: Record
 
 const STATION_NAMES: Record<string, string> = {
   council: "Council", plan: "Planner", tests: "Tester", build: "Builder", review: "Reviewer", fix: "Fixer",
-  order: "Archivist", overseer: "Overseer", improve: "Improvement Council", map: "Cartographer", survey: "Surveyor",
+  order: "Archivist", overseer: "Assistant", improve: "Improvement Council", map: "Cartographer", survey: "Surveyor",
 };
 
 async function put(path: string, body: unknown) {
