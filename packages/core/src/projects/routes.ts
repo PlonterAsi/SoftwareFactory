@@ -15,6 +15,7 @@ import { createProject, linkToProject, listProjects, projectDetail, projectOf, u
  *   POST /api/projects/:id/links          { kind, ref }   move a thing into this project
  *   POST /api/projects/:id/unlink         { kind, ref }
  *   POST /api/projects/:id/runs           { idea, maxUsd? }   start a factory run in this project
+ *   POST /api/projects/:id/screen         { maxUsd? }   give the project's newest shipped build a screen (a page), same folder, next version
  */
 export async function projectsRoute(
   ctx: { log: EventLog; order: OrderEngine; factory: Factory; readJson: (req: IncomingMessage) => Promise<Record<string, unknown>>; canBuild?: () => string | null },
@@ -37,7 +38,7 @@ export async function projectsRoute(
     linkToProject(log, id, "order_node", node);
     return [201, projectDetail(log, id)];
   }
-  const m = path.match(/^\/api\/projects\/(\d+)(?:\/(links|unlink|runs))?$/);
+  const m = path.match(/^\/api\/projects\/(\d+)(?:\/(links|unlink|runs|screen))?$/);
   if (!m) return null;
   const id = Number(m[1]);
   if (req.method === "GET" && !m[2]) {
@@ -63,6 +64,21 @@ export async function projectsRoute(
     if (blocked) return [409, { error: blocked }];
     const run = ctx.factory.start(String(body.idea ?? ""), { projectId: id, maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined });
     return [202, { run, projectId: id }];
+  }
+  if (m[2] === "screen") {
+    if (!projectDetail(log, id)) return [404, { error: `No project #${id}` }];
+    const blocked = ctx.canBuild?.();
+    if (blocked) return [409, { error: blocked }];
+    // The newest build of this project that shipped.
+    const base = log.list({ type: "factory.run.finished", limit: 1e6 }).map((e) => e.payload as { run: number; outcome: string })
+      .filter((p) => p.outcome === "shipped" && projectOf(log, { kind: "factory_run", ref: String(p.run) }) === id).at(-1);
+    if (!base) return [409, { error: "This project has no finished factory build to add a screen to. Imported projects can get one through an improvement or a ticket." }];
+    try {
+      const run = ctx.factory.addScreen(base.run, { projectId: id, maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined });
+      return [202, { run, projectId: id, baseRun: base.run }];
+    } catch (e) {
+      return [409, { error: (e as Error).message }];
+    }
   }
   return null;
 }
