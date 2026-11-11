@@ -159,3 +159,36 @@ describe("setup", () => {
     } finally { server.close(); }
   });
 });
+
+describe("in-app updates", () => {
+  it("records each installed version once and reports update settings and history", async () => {
+    const log = new EventLog();
+    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp(), appVersion: "0.2.5" });
+    // A restart on the same version records nothing new; a newer one records the step.
+    createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp(), appVersion: "0.2.5" });
+    createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp(), appVersion: "0.2.9" });
+    expect(log.list({ type: "app.updated" }).map((e) => e.payload)).toEqual([{ from: null, to: "0.2.5" }, { from: "0.2.5", to: "0.2.9" }]);
+
+    const server = createServer(core);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    try {
+      const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+      const h = await (await fetch(`${base}/api/health`)).json();
+      expect(h.appVersion).toBe("0.2.5");
+      expect(h.activeRuns).toBe(0);
+      const u = await (await fetch(`${base}/api/updates`)).json();
+      expect(u.auto).toBe(true);
+      expect(u.history.map((x: { from: string | null; to: string }) => `${x.from}->${x.to}`)).toEqual(["0.2.5->0.2.9", "null->0.2.5"]);
+      const off = await (await fetch(`${base}/api/updates`, { method: "POST", body: JSON.stringify({ auto: false }) })).json();
+      expect(off.auto).toBe(false);
+      expect(readSettings(log).autoUpdate).toBe(false);
+      expect((await fetch(`${base}/api/updates`, { method: "POST", body: JSON.stringify({ auto: "yes" }) })).status).toBe(400);
+    } finally { server.close(); }
+  });
+
+  it("records nothing when the shell does not say its version (dev runs, tests)", () => {
+    const log = new EventLog();
+    createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp() });
+    expect(log.list({ type: "app.updated" })).toEqual([]);
+  });
+});

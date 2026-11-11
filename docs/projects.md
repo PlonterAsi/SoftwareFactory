@@ -54,6 +54,7 @@ POST /api/projects/:id/runs           { idea, maxUsd? }   start a factory run in
 ## Extension points
 
 - **Core facets**: `registerProjectFacet({ id, compute(log, project, links) })` adds a section to every `GET /api/projects/:id` under `facets[id]`.
+- **Integrations**: a finished project can be added into SoftwareFactory as a tool, a panel, or a pull-request brief; see [integrations.md](integrations.md).
 - **Bridge panels**: `registerProjectPanel({ id, title, order, render })` in `apps/bridge/src/projects/panels.tsx` adds a tab to every project's workspace. `appliesTo(project)` limits it to some kinds.
 
 ## On the Bridge
@@ -62,9 +63,24 @@ The Bridge opens on **Projects**: every project, most recently active first, wit
 
 ![Projects](img/bridge-projects-home.png)
 
-Opening a project shows its **workspace**: a rail of panels and the chosen panel. Built in: **Overview** (what it is for, a Build box that starts runs inside the project, its numbers, latest activity), **Ideas** (the project's own star map and Order deck), **Runs** (the factory floor with only this project's runs), **Agents** (who worked here and what it cost), **History**, **Settings** (name, kind, status, folders). While a project is open, the Overseer's Build it starts runs in that project.
+Opening a project shows its **workspace**: a rail of panels and the chosen panel. Built in: **Overview** (what it is for, a Build box that starts runs inside the project, its numbers, latest activity), **Run** (start the finished project from its folder, see its output and its pages; see [run.md](run.md)), **Ideas** (the project's own star map and Order deck), **Runs** (the factory floor with only this project's runs), **Agents** (who worked here and what it cost), **History**, **Settings** (name, kind, status, folders). While a project is open, the Overseer's Build it starts runs in that project.
 
 ![A project's overview](img/bridge-project-overview.png)
+
+## Project chats
+
+The Overseer pane is split into chats: **General** plus one chat per project. Opening a project opens its chat; the tabs at the top of the pane switch by hand, and "Other chats…" opens any other project's chat.
+
+- **A project's chat** shows only that project: what you said there, notes from General that the Order Engine filed into it (marked "from General"), the Overseer's answers to questions asked there, its builds, and its gates. Words said there are filed under the project (the Archivist is told where they were said, and heuristics send words with no clearer home there instead of to Unsorted). A new topic opened from a project's chat becomes an idea in that project, never a stray project of its own. Asking there gives the Overseer that project's name, summary and latest runs first. Build it starts runs in that project.
+- **General** is for cross-project talk and anything not yet tied to a project, plus the Order Engine's daily briefing and each project's headlines only: what shipped, what failed, and what waits for you, each tagged with its project.
+
+Nothing new is stored. A Signal carries `projectId` when said in a project's chat, an Overseer call carries `projectId` in `agent.run.started`, and everything else is read from `project_links` and the Order Engine's fragments (`packages/core/src/chat/routes.ts`):
+
+```
+POST /api/signals     { text, projectId? }            404 when that project is gone
+POST /api/agent/run   { prompt, model?, projectId? }
+GET  /api/chat/routes                                  { filed: { signalId: [projectId] }, factoryRuns: { runId: projectId } }
+```
 
 **Whole factory** in the top bar is the cross-project view from before (star map, factory floor, Agent Bay, Order deck, Data vault).
 

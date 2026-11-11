@@ -19,6 +19,7 @@ import type { OrderState } from "../order/model.js";
  *   - a factory run started without a project is a project of its own, with the run's id;
  *     the root node its intake Signal grows joins that same project;
  *   - a run started with { projectId } joins that project, and so does its intake node;
+ *   - a root node grown from a Signal said in a project's chat joins that project;
  *   - when the Order Engine merges a root node into another, its project follows;
  *   - a project that was only adopted (not made by you) disappears once nothing is linked to it.
  *
@@ -70,7 +71,7 @@ export function nameFromIdea(idea: string): string {
 export function foldProjects(events: SfEvent[], order?: Pick<OrderState, "nodes">): ProjectsState {
   const projects = new Map<number, Project>();
   const owner = new Map<string, ProjectLink>();
-  const signals = new Map<number, { source: string; text: string }>();
+  const signals = new Map<number, { source: string; text: string; projectId?: number }>();
   const runs: { id: number; idea: string; nodeTaken: boolean }[] = [];
 
   const linksOf = (pid: number) => [...owner.values()].filter((l) => l.projectId === pid);
@@ -94,7 +95,7 @@ export function foldProjects(events: SfEvent[], order?: Pick<OrderState, "nodes"
     const p = (e.payload ?? {}) as Record<string, any>;
     switch (e.type) {
       case "signal.captured":
-        signals.set(e.id, { source: String(p.source ?? ""), text: String(p.text ?? "").trim() });
+        signals.set(e.id, { source: String(p.source ?? ""), text: String(p.text ?? "").trim(), ...(p.projectId != null ? { projectId: Number(p.projectId) } : {}) });
         break;
       case "project.created":
         projects.set(e.id, {
@@ -153,6 +154,9 @@ export function foldProjects(events: SfEvent[], order?: Pick<OrderState, "nodes"
         if (run && runOwner) {
           run.nodeTaken = true;
           setOwner(runOwner.projectId, "order_node", String(e.id), e.ts);
+        } else if (sig?.projectId != null && projects.has(sig.projectId)) {
+          // Said in a project's chat: a new topic it opens stays in that project, never a stray project of its own.
+          setOwner(sig.projectId, "order_node", String(e.id), e.ts);
         } else {
           adopt(e.id, String(p.title ?? `#${e.id}`), "general", "order", e.ts);
           setOwner(e.id, "order_node", String(e.id), e.ts);

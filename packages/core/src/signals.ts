@@ -6,12 +6,14 @@ export interface Signal {
   ts: string;
   text: string;
   source: string;
+  /** The project chat it was said in; absent: the General chat. */
+  projectId?: number;
 }
 
-export function captureSignal(log: EventLog, text: string, source = "bridge"): Signal {
+export function captureSignal(log: EventLog, text: string, source = "bridge", projectId?: number): Signal {
   const clean = text.replace(/\r\n/g, "\n");
   if (!clean.trim()) throw new Error("A Signal needs some text");
-  const e = log.append("signal.captured", { text: clean, source });
+  const e = log.append("signal.captured", { text: clean, source, ...(projectId != null && Number.isFinite(projectId) ? { projectId } : {}) });
   return toSignal(e);
 }
 
@@ -22,6 +24,6 @@ export function listSignals(log: EventLog, limit = 1000): Signal[] {
 }
 
 function toSignal(e: SfEvent): Signal {
-  const p = e.payload as { text: string; source: string };
-  return { id: e.id, ts: e.ts, text: p.text, source: p.source };
+  const p = e.payload as { text: string; source: string; projectId?: number };
+  return { id: e.id, ts: e.ts, text: p.text, source: p.source, ...(p.projectId != null ? { projectId: p.projectId } : {}) };
 }

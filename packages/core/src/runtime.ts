@@ -225,9 +225,12 @@ const MOCK = {
   plan: "```json\n" + JSON.stringify({
     name: "Word Counter", slug: "word-counter", summary: "Counts words in text from stdin or a file.",
     interface: "src/count.js exports countWords(text: string): number. bin/wc.js prints countWords of the file given as argv[2].",
+    ui: "A text box prefilled with a sample paragraph; the word count updates as you type, shown as a big number with a bar per line.",
+    cli: "usage: wc [file]",
+    examples: [{ label: "Count the words in the spec", args: "SPEC.md" }],
     acceptance: ["empty text has 0 words", "words are split on any whitespace", "punctuation-only tokens still count"],
     tasks: [{ id: "t1", title: "countWords", dependsOn: [] }, { id: "t2", title: "CLI wrapper", dependsOn: ["t1"] }, { id: "t3", title: "README", dependsOn: ["t2"] }],
-    files: ["package.json", "src/count.js", "bin/wc.js"],
+    files: ["package.json", "src/count.js", "bin/wc.js", "index.html", "web/app.js", "web/style.css"],
   }) + "\n```",
   tests: `<<<FILE test/count.test.js
 import { test } from "node:test";
@@ -249,7 +252,50 @@ FILE>>>
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { countWords } from "../src/count.js";
+if (process.argv[2] === "--help") { console.log("usage: wc [file]"); process.exit(0); }
 console.log(countWords(readFileSync(process.argv[2] ?? 0, "utf8")));
+FILE>>>
+<<<FILE index.html
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Word Counter</title><link rel="stylesheet" href="web/style.css"></head>
+<body>
+<main>
+  <h1>Word Counter</h1>
+  <textarea id="text" rows="8">SoftwareFactory builds every project with a screen.
+Type here and watch the count change.</textarea>
+  <p class="total"><span id="count">0</span> words</p>
+  <div id="lines"></div>
+</main>
+<script type="module" src="web/app.js"></script>
+</body>
+</html>
+FILE>>>
+<<<FILE web/app.js
+import { countWords } from "../src/count.js";
+const text = document.getElementById("text");
+const count = document.getElementById("count");
+const lines = document.getElementById("lines");
+function draw() {
+  count.textContent = String(countWords(text.value));
+  lines.replaceChildren(...text.value.split("\\n").map((line) => {
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    bar.style.width = Math.min(100, countWords(line) * 8) + "%";
+    bar.title = countWords(line) + " words";
+    return bar;
+  }));
+}
+text.addEventListener("input", draw);
+draw();
+FILE>>>
+<<<FILE web/style.css
+body { font: 15px system-ui, sans-serif; background: #0b1020; color: #e6ecff; margin: 0; }
+main { max-width: 640px; margin: 32px auto; padding: 0 16px; }
+textarea { width: 100%; background: #111a33; color: inherit; border: 1px solid #2a3a66; border-radius: 8px; padding: 10px; }
+.total { font-size: 28px; }
+#count { color: #7cf; font-weight: 700; }
+.bar { height: 8px; margin: 4px 0; background: #7cf; border-radius: 4px; }
 FILE>>>`,
 };
 

@@ -8,6 +8,7 @@ import { builtinCrew, type CrewMember, type CrewSource } from "./crew.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
+import { checkUi, uiCase } from "./uicheck.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
 } from "./workspace.js";
@@ -34,6 +35,12 @@ export interface Plan {
   slug: string;
   summary: string;
   interface: string;
+  /** The screen (visualizeEverything): what the page shows and does. Plans from before the GUI default have none. */
+  ui?: string;
+  /** The CLI usage line, or "" when there is no command line. */
+  cli?: string;
+  /** Ready-to-run inputs for the CLI; written to run.json for the Run tab. */
+  examples?: { label: string; args: string; input?: string }[];
   acceptance: string[];
   tasks: { id: string; title: string; dependsOn: string[] }[];
   files: string[];
@@ -57,6 +64,9 @@ export interface RunOptions {
   projectId?: number;
 }
 
+/** A run that adds a screen to a project the factory already shipped: same folder, same locked tests. */
+export interface ScreenRun { kind: "screen"; baseRun: number; baseSha: string; tag: string }
+
 export interface ReviewResult { verdict: "pass" | "fix"; findings: { severity: "high" | "low"; text: string }[] }
 
 export function parseReview(text: string): ReviewResult {
@@ -68,6 +78,9 @@ export function parseReview(text: string): ReviewResult {
 }
 
 export interface GateDecision { approve: boolean; note?: string; by?: string }
+
+/** What a waiting gate tells the Bridge besides its question: the button's word, and for a failed step, which one and how often. */
+interface GateOpts { neverAuto?: boolean; action?: string; kind?: "retry" | "council" | "rounds" | "budget"; station?: StationId; attempt?: number; error?: string; same?: boolean }
 
 export class StopRun extends Error {}
 
@@ -129,7 +142,7 @@ export class Factory {
   resume(run: number, opts: { auto?: boolean } = {}): number {
     const ok = this.resumable(run);
     if (!ok.ok) throw new Error(`Run #${run} cannot resume: ${ok.why}`);
-    const started = this.log.get(run)!.payload as { idea: string; maxUsd?: number; maxFixRounds?: number; autoApprove?: boolean; autoRetries?: number; runtime?: string; council?: "auto" | "always" | "never"; review?: boolean; models?: Record<string, string> };
+    const started = this.log.get(run)!.payload as { idea: string; maxUsd?: number; maxFixRounds?: number; autoApprove?: boolean; autoRetries?: number; runtime?: string; council?: "auto" | "always" | "never"; review?: boolean; models?: Record<string, string>; screen?: ScreenRun };
     const st = restoreState(this.log, run);
     // A run keeps the crew it started with: a practice run stays on the free mock crew.
     const current = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
@@ -141,7 +154,7 @@ export class Factory {
       try { git(st.dir, "reset", "-q", "--hard"); git(st.dir, "clean", "-fdq"); } catch { /* a repo with no commit yet: the plan station runs again */ }
     }
     this.log.append("factory.run.resumed", { run, from: st.from, auto: !!opts.auto, spentUsd: Number(st.spent.toFixed(6)), runtime: runtime.name });
-    const r = new Run(this, this.log, runtime, run, started.idea, o);
+    const r = new Run(this, this.log, runtime, run, started.idea, o, started.screen ?? null);
     const done = r.go(st).finally(() => this.active.delete(run));
     this.active.set(run, done);
     return run;
@@ -160,10 +173,50 @@ export class Factory {
     return ev.id;
   }
 
+  /**
+   * Give a shipped project a screen. The run works in the project's own folder on
+   * top of what shipped: the plan and locked tests are kept (no Council, no plan gate),
+   * the Builder adds the page, the locked tests and the page check must pass, the
+   * Reviewer looks, you accept, and it ships as the next version. A run that does
+   * not ship puts the folder back the way it was.
+   */
+  addScreen(baseRun: number, opts: Pick<RunOptions, "maxUsd" | "autoApprove" | "autoRetries" | "models" | "projectId"> = {}): number {
+    const fin = this.log.list({ type: "factory.run.finished", sinceId: baseRun - 1, limit: 1e6 }).map((e) => e.payload as { run: number; outcome: string }).filter((p) => p.run === baseRun).at(-1);
+    if (fin?.outcome !== "shipped") throw new Error(`Run #${baseRun} has not shipped, so there is nothing to add a screen to yet.`);
+    const base = restoreState(this.log, baseRun);
+    if (!base.plan || !base.dir || !existsSync(join(base.dir, ".git"))) throw new Error(`The folder of run #${baseRun} is gone${base.dir ? ` (${base.dir})` : ""}.`);
+    const dir = base.dir;
+    for (const id of this.active.keys()) if (restoreState(this.log, id).dir === dir) throw new Error(`Run #${id} is already working in that folder.`);
+    if (git(dir, "status", "--porcelain")) throw new Error(`The folder has changes that are not committed (${dir}). Commit or undo them first, so nothing of yours is lost.`);
+    const tags = git(dir, "tag", "--list", "v*").split("\n").map((t) => t.match(/^v(\d+)\.(\d+)\.(\d+)$/)).filter(Boolean) as RegExpMatchArray[];
+    const minor = Math.max(0, ...tags.map((m) => Number(m[1]) * 1000 + Number(m[2]))) + 1;
+    const screen: ScreenRun = { kind: "screen", baseRun, baseSha: git(dir, "rev-parse", "HEAD"), tag: `v${Math.floor(minor / 1000)}.${minor % 1000}.0` };
+    const plan: Plan = { ...base.plan, ui: base.plan.ui?.trim() || defaultUi(base.plan) };
+    const idea = `Add a screen to ${plan.name}`;
+    const o = { maxUsd: opts.maxUsd ?? 1, maxFixRounds: 4, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: "never" as const, review: true };
+    const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
+    const ev = this.log.append("factory.run.started", { idea, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}) });
+    const id = ev.id;
+    // What is kept from the shipped run is on the floor too, so the run reads whole.
+    const kept = `kept from run #${baseRun}`;
+    for (const station of ["intake", "council"] as const) this.log.append("factory.station", { run: id, station, state: "skipped", note: kept, spentUsd: 0, maxUsd: o.maxUsd });
+    this.log.append("factory.plan", { run: id, plan, dir, sha: git(dir, "rev-parse", "--short", "HEAD"), written: [], kept: baseRun });
+    this.log.append("factory.station", { run: id, station: "plan", state: "skipped", note: kept, spentUsd: 0, maxUsd: o.maxUsd });
+    this.log.append("factory.gate", { run: id, gate: "gateA", state: "approved", note: "You asked for a screen on a plan you already approved.", by: "you" });
+    const files = Object.keys(readTree(dir)).filter(isLockedTest);
+    this.log.append("factory.tests.locked", { run: id, hash: testsHash(dir), files, sha: screen.baseSha.slice(0, 7), kept: baseRun });
+    this.log.append("factory.station", { run: id, station: "tests", state: "skipped", note: `${files.length} locked test file${files.length === 1 ? "" : "s"} ${kept}`, spentUsd: 0, maxUsd: o.maxUsd });
+    const done = new Run(this, this.log, runtime, id, idea, o, screen).go(restoreState(this.log, id)).finally(() => this.active.delete(id));
+    this.active.set(id, done);
+    return id;
+  }
+
   /** Wait for a run to finish (tests and the CLI). */
   /** A run working right now in this core. */
   isActive(run: number): boolean { return this.active.has(run); }
 
+  /** How many runs are working right now (an update waits for this to reach 0). */
+  activeCount(): number { return this.active.size; }
   wait(run: number): Promise<void> { return this.active.get(run) ?? Promise.resolve(); }
 
   waitingGate(run: number): GateId | null { return this.pending.get(run)?.gate ?? null; }
@@ -196,6 +249,7 @@ class Run {
     private f: Factory, private log: EventLog, private runtime: AgentRuntime,
     private id: number, private idea: string,
     private o: Required<Omit<RunOptions, "models" | "projectId">> & { models: Record<string, string> },
+    private screen: ScreenRun | null = null,
   ) {}
 
   async go(from?: RestoredState) {
@@ -256,7 +310,7 @@ class Run {
           try {
             const text = await this.ask(m, prompt, { seat, round });
             res.take = parseSeatTake(text);
-          } catch (e) { res.error = (e as Error).message; }
+          } catch (e) { if (e instanceof StopRun) throw e; res.error = (e as Error).message; }
           this.verdict(m, "council", !!res.take, round, res.error);
           return res;
         }));
@@ -271,7 +325,7 @@ class Run {
     }
     if (brief.outcome === "drop") {
       const why = brief.concerns.concat(brief.agreed).slice(0, 3).join("; ");
-      const d = await this.gate("escalation", `The Council advises against building this${why ? ` (${why})` : ""}. Build it anyway?`);
+      const d = await this.gate("escalation", `The Council advises against building this${why ? ` (${why})` : ""}. Build it anyway?`, { action: "Build anyway", kind: "council" });
       if (!d.approve) throw new StopRun("The Council advised against building it, and you agreed.");
     }
     this.brief = brief;
@@ -330,7 +384,15 @@ class Run {
 
   private async build() {
     this.builder = this.one("build");
-    const text = await this.ask(this.builder, `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nLocked acceptance tests:\n${this.testsText()}`);
+    const text = await this.ask(this.builder, this.screen
+      ? [
+        `This project already shipped and its locked acceptance tests pass, but it has no screen. Add its page now, as the spec's "ui" says, on top of the existing code.`,
+        `Keep every existing export, file and command working (the CLI too, if there is one). If the logic the page needs lives in a module that imports node: modules, move that logic into a browser-safe module under src/ and have the old module import it from there; the locked tests must still pass. Return only the files you add or change, each in full, and update README.md to say how to open the page.`,
+        `Spec:\n${JSON.stringify(this.plan, null, 2)}`,
+        `Locked acceptance tests (read only):\n${this.testsText()}`,
+        `Current code:\n${this.codeText()}`,
+      ].join("\n\n")
+      : `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nLocked acceptance tests:\n${this.testsText()}`);
     const files = parseFileBlocks(text);
     if (!files.length) throw new Error("The Builder returned no files");
     const res = writeFiles(this.dir, files, { lockTests: true });
@@ -352,7 +414,7 @@ class Run {
       if (budget <= 0) reason = `Tests still fail after ${this.o.maxFixRounds} fix rounds.`;
       else if (failing && failing === lastFailing) reason = "The same tests failed twice in a row after a fix.";
       if (reason) {
-        const d = await this.gate("escalation", `${reason} Grant 2 more fix rounds?`);
+        const d = await this.gate("escalation", `${reason} Grant 2 more fix rounds?`, { action: "2 more fix rounds", kind: "rounds" });
         if (!d.approve) throw new StopRun(reason);
         budget = 2;
         lastFailing = "";
@@ -377,8 +439,7 @@ class Run {
 
   private async fix(run: TestRun, round: number, note: string): Promise<CrewMember> {
     const failures = run.cases.filter((c) => !c.pass).map((c) => `- ${c.name} (${c.file}): ${c.error ?? "failed"}`).join("\n");
-    const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md")
-      .map(([p, c]) => `<<<FILE ${p}\n${c}FILE>>>`).join("\n");
+    const src = this.codeText();
     const prompt = [
       `Spec:\n${JSON.stringify(this.plan, null, 2)}`,
       failures ? `Failing tests:\n${failures}\n\nTest output (tail):\n${run.output.slice(-1500)}` : "All tests pass.",
@@ -431,8 +492,14 @@ class Run {
   }
 
   private async ship(): Promise<string> {
-    commitAll(this.dir, "Ship");
-    git(this.dir, "tag", "-f", "v0.1.0");
+    // Ready-to-run inputs for the Run tab, so nobody has to guess the arguments.
+    const examples = (this.plan.examples ?? []).filter((x) => x && x.args != null).slice(0, 5);
+    if (examples.length && !existsSync(join(this.dir, "run.json"))) {
+      const runJson = { summary: this.plan.summary, examples: examples.map((x) => ({ label: String(x.label || x.args), profile: "cli", args: String(x.args), ...(x.input ? { input: String(x.input) } : {}) })) };
+      writeFiles(this.dir, [{ path: "run.json", content: JSON.stringify(runJson, null, 2) + "\n" }], { lockTests: true });
+    }
+    commitAll(this.dir, this.screen ? `Ship: ${this.plan.name} with a screen` : "Ship");
+    git(this.dir, "tag", "-f", this.screen?.tag ?? "v0.1.0");
     return git(this.dir, "rev-parse", "--short", "HEAD");
   }
 
@@ -441,8 +508,23 @@ class Run {
   private async runSuite(round: number): Promise<TestRun> {
     if (testsHash(this.dir) !== this.lockedHash) throw new Error("The locked acceptance tests were changed. Refusing to run.");
     const r = await runTests(this.dir);
+    // Every project ships a screen: the page check is one more cell in the grid, fixed like a failing test.
+    // Plans written before the GUI default have no "ui" and are not held to it.
+    if (this.plan?.ui) {
+      const ui = checkUi(this.dir);
+      this.log.append("factory.ui", { run: this.id, round, ...ui });
+      r.cases.push(uiCase(ui));
+      if (!ui.pass) { r.failed++; r.output = `Page check:\n${ui.problems.join("\n")}\n\n${r.output}`.slice(0, 4000); }
+      else r.passed++;
+    }
     this.log.append("factory.tests", { run: this.id, round, cases: r.cases, passed: r.passed, failed: r.failed, timedOut: r.timedOut });
     return r;
+  }
+
+  /** The project's code (not the locked tests, not the spec) as file blocks. */
+  private codeText() {
+    return Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md")
+      .map(([p, c]) => `<<<FILE ${p}\n${c}FILE>>>`).join("\n");
   }
 
   private testsText() {
@@ -463,13 +545,19 @@ class Run {
 
   /** One agent call, inside both its own cap and what is left of the run's cap. */
   private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}): Promise<string> {
-    const left = this.o.maxUsd - this.spent;
-    if (left < 0.01) {
-      const d = await this.gate("escalation", `The run's budget of $${this.o.maxUsd.toFixed(2)} is spent. Add 50% more?`, { neverAuto: true });
-      if (!d.approve) throw new StopRun("Budget spent.");
-      this.o.maxUsd *= 1.5;
-      this.log.append("factory.budget", { run: this.id, maxUsd: this.o.maxUsd });
+    if (this.o.maxUsd - this.spent < 0.01) {
+      // Council seats ask at the same time: one question, and the others see the answer.
+      await this.gateTurn(async () => {
+        if (this.o.maxUsd - this.spent >= 0.01) return;
+        if (this.budgetRefused) throw new StopRun("Budget spent.");
+        const d = await this.gate("escalation", `The run's budget of $${this.o.maxUsd.toFixed(2)} is spent. Add 50% more?`, { neverAuto: true, action: "Add 50% more", kind: "budget" }, true);
+        if (!d.approve) { this.budgetRefused = true; throw new StopRun("Budget spent."); }
+        this.o.maxUsd *= 1.5;
+        this.log.append("factory.budget", { run: this.id, maxUsd: this.o.maxUsd });
+      });
     }
+    // A hint you gave with Retry reaches the next agent call of that station.
+    if (this.hint) prompt += `\n\nThe person retried this step after it failed (${this.hint.error.slice(0, 300)}) and said: ${this.hint.note}`;
     const cap = Math.max(0.01, Math.min(m.budgetUsd, this.o.maxUsd - this.spent));
     this.calls++;
     const r = await runAgent(this.log, this.runtime, m.id, {
@@ -483,8 +571,10 @@ class Run {
 
   /** Run one station: mark it active, do the work, require its visuals, mark it passed. Failures escalate once. */
   private async station<T>(id: StationId, work: () => Promise<T> | T, round?: number): Promise<T> {
+    let attempt = 1;
+    let lastError = "";
     for (;;) {
-      this.mark(id, "active", round);
+      this.mark(id, "active", round, attempt > 1 ? `retry ${attempt - 1}` : undefined);
       try {
         const out = await work();
         const v = visualCheck(this.log, this.id, id, round);
@@ -495,13 +585,22 @@ class Run {
         }
         const failing = (out as TestRun | undefined)?.failed;
         this.mark(id, failing ? "fail" : "pass", round, failing ? `${failing} failing` : undefined);
+        if (this.hint?.station === id) this.hint = null;
         return out;
       } catch (e) {
         if (e instanceof StopRun) throw e;
         const msg = (e as Error).message;
         this.mark(id, "fail", round, msg);
-        const d = await this.gate("escalation", `${stationName(id)} failed: ${msg.slice(0, 300)}. Retry it?`);
+        // The same error again means the retry changed nothing: say so, so a Retry that "does nothing" is visible.
+        const same = attempt > 1 && msg === lastError;
+        const q = same
+          ? `${stationName(id)} failed again the same way (attempt ${attempt}): ${msg.slice(0, 300)}. Retrying as is will likely fail again; add a hint or check Systems, then retry?`
+          : `${stationName(id)} failed${attempt > 1 ? ` again (attempt ${attempt})` : ""}: ${msg.slice(0, 300)}. Retry it?`;
+        const d = await this.gate("escalation", q, { action: "Retry", kind: "retry", station: id, attempt, error: msg.slice(0, 2000), same });
         if (!d.approve) throw new StopRun(`${stationName(id)} failed: ${msg}`);
+        this.hint = d.note ? { station: id, note: d.note, error: msg } : null;
+        lastError = msg;
+        attempt++;
       }
     }
   }
@@ -511,23 +610,42 @@ class Run {
   }
 
   private autoRetriesUsed = 0;
+  private budgetRefused = false;
+  private hint: { station: StationId; note: string; error: string } | null = null;
+  private gateQueue: Promise<unknown> = Promise.resolve();
 
-  private async gate(gate: GateId, question: string, opts: { neverAuto?: boolean } = {}): Promise<GateDecision> {
+  /** One question at a time per run: parallel work (Council seats) waits its turn instead of overwriting a waiting gate. */
+  private gateTurn<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.gateQueue.then(fn, fn);
+    this.gateQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  private gate(gate: GateId, question: string, opts: GateOpts = {}, queued = false): Promise<GateDecision> {
+    return queued ? this.askGate(gate, question, opts) : this.gateTurn(() => this.askGate(gate, question, opts));
+  }
+
+  private async askGate(gate: GateId, question: string, opts: GateOpts): Promise<GateDecision> {
     const station: StationId = gate === "escalation" ? "fix" : gate;
     if (gate !== "escalation") this.mark(station, "waiting");
-    this.log.append("factory.gate", { run: this.id, gate, state: "waiting", question });
+    const { neverAuto: _n, ...info } = opts;
+    this.log.append("factory.gate", { run: this.id, gate, state: "waiting", question, ...info });
     let auto = this.o.autoApprove && gate !== "escalation";
     if (this.o.autoApprove && gate === "escalation" && !opts.neverAuto && this.autoRetriesUsed < this.o.autoRetries) { this.autoRetriesUsed++; auto = true; }
     // An unattended run never hangs: an escalation it may not retry stops the run.
     const d: GateDecision = auto ? { approve: true, by: "auto" }
       : this.o.autoApprove ? { approve: false, by: "auto" }
       : await this.f.awaitGate(this.id, gate);
-    this.log.append("factory.gate", { run: this.id, gate, state: d.approve ? "approved" : "rejected", note: d.note, by: d.by ?? "you" });
+    this.log.append("factory.gate", { run: this.id, gate, state: d.approve ? "approved" : "rejected", note: d.note, by: d.by ?? "you", ...(info.kind ? { kind: info.kind, station: info.station, attempt: info.attempt } : {}) });
     if (gate !== "escalation") this.mark(station, d.approve ? "pass" : "fail", undefined, d.note);
     return d;
   }
 
   private finish(outcome: "shipped" | "stopped" | "failed", reason: string, sha?: string) {
+    // A screen run that does not ship leaves the shipped project exactly as it was.
+    if (this.screen && outcome !== "shipped" && this.dir && existsSync(join(this.dir, ".git"))) {
+      try { git(this.dir, "reset", "-q", "--hard", this.screen.baseSha); git(this.dir, "clean", "-fdq"); reason += ` The folder is back at ${this.screen.baseSha.slice(0, 7)}, as it shipped.`; } catch { /* leave it; the reason says what happened */ }
+    }
     this.log.append("factory.run.finished", {
       run: this.id, outcome, reason, dir: this.dir || null, sha: sha ?? null, plan: this.plan?.name ?? null,
       totalUsd: Number(this.spent.toFixed(6)), agentCalls: this.calls, fixRounds: this.fixRounds,
@@ -546,16 +664,29 @@ export function validatePlan(p: Plan): Plan {
   if (!Array.isArray(p.tasks) || !p.tasks.length) throw new Error("The plan has no tasks");
   const slug = p.slug.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "project";
   const ids = new Set(p.tasks.map((t) => String(t.id)));
+  const examples = (Array.isArray(p.examples) ? p.examples : []).filter((x: any) => x && typeof x === "object" && (typeof x.args === "string" || Array.isArray(x.args)))
+    .map((x: any) => ({ label: String(x.label ?? x.args).slice(0, 80), args: Array.isArray(x.args) ? x.args.map(String).join(" ") : String(x.args), ...(x.input ? { input: String(x.input) } : {}) })).slice(0, 5);
   return {
     ...p, slug, files: Array.isArray(p.files) ? p.files.map(String) : [],
+    // A plan always has a screen (visualizeEverything); a planner that forgot gets the default one.
+    ui: typeof p.ui === "string" && p.ui.trim() ? p.ui.trim() : defaultUi(p),
+    cli: typeof p.cli === "string" ? p.cli.trim() : "",
+    examples,
     tasks: p.tasks.map((t) => ({ id: String(t.id), title: String(t.title ?? t.id), dependsOn: (Array.isArray(t.dependsOn) ? t.dependsOn : []).map(String).filter((d) => ids.has(d)) })),
   };
+}
+
+/** The screen a plan gets when nobody described one. */
+export function defaultUi(p: Pick<Plan, "summary" | "interface">): string {
+  return `One page for: ${p.summary.trim()} It opens with a built-in sample already filled in and its result shown, has inputs for what the core takes (${p.interface.trim().slice(0, 300)}), a button that runs the core, and draws the result visually (a table, bars or a preview), with any error shown on the page.`;
 }
 
 export function specMarkdown(idea: string, p: Plan): string {
   return [
     `# ${p.name}`, "", `> ${idea}`, "", p.summary, "",
     "## Interface", "", p.interface, "",
+    ...(p.ui ? ["## Screen", "", p.ui, "", "Open it from the project's Run tab in SoftwareFactory (it serves the folder and shows `index.html`).", ""] : []),
+    ...(p.cli ? ["## Command line", "", "```", p.cli, "```", ""] : []),
     "## Acceptance criteria", "", ...p.acceptance.map((a, i) => `${i + 1}. ${a}`), "",
     "## Tasks", "", ...p.tasks.map((t) => `- **${t.id}** ${t.title}${t.dependsOn.length ? ` (after ${t.dependsOn.join(", ")})` : ""}`), "",
     "Built by SoftwareFactory. The tests in `test/` were written from this spec before the code and were locked.", "",
