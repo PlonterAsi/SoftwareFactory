@@ -11,7 +11,7 @@ const out = {};
   for (const n of readdirSync(d).sort()) {
     const p = join(d, n);
     if (statSync(p).isDirectory()) walk(p);
-    else out[relative(kit, p).split(sep).join("/")] = readFileSync(p, "utf8");
+    else out[relative(kit, p).split(sep).join("/")] = readFileSync(p, "utf8").replace(/\r\n/g, "\n");
   }
 })(kit);
 const ts = `// Generated from packages/core/kit/ by scripts/kit.mjs. Do not edit here: edit the kit and run \`npm run kit -w @sf/core\`.\n/** The app kit every factory-built app ships with, by path inside the project. */\nexport const KIT_FILES: Record<string, string> = ${JSON.stringify(out, null, 2)};\n`;

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { EventLog, Factory, MockRuntime, AgentBay, writeFiles, installKit, checkApp, checkAppLive, KIT_PATHS, principles, savePrinciple, resetPrinciple, DEFAULT_PRINCIPLES } from "../src/index.js";
 import { KIT_FILES } from "../src/factory/kitFiles.js";
 import { systemPromptFor, CONTRACTS } from "../src/bay/builtin.js";
@@ -11,9 +12,9 @@ const events = (log: EventLog, type: string) => log.list({ limit: 1e6 }).filter(
 
 describe("the app kit", () => {
   it("ships in the core exactly as it is in packages/core/kit (run `npm run kit` after editing it)", () => {
-    const root = new URL("../kit/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    const root = fileURLToPath(new URL("../kit/", import.meta.url));
     const onDisk: Record<string, string> = {};
-    (function walk(d: string) { for (const n of readdirSync(d)) { const p = join(d, n); if (statSync(p).isDirectory()) walk(p); else onDisk[relative(root, p).split(sep).join("/")] = readFileSync(p, "utf8"); } })(root);
+    (function walk(d: string) { for (const n of readdirSync(d)) { const p = join(d, n); if (statSync(p).isDirectory()) walk(p); else onDisk[relative(root, p).split(sep).join("/")] = readFileSync(p, "utf8").replace(/\r\n/g, "\n"); } })(root);
     expect(KIT_FILES).toEqual(onDisk);
     expect(KIT_PATHS.sort()).toEqual(["server.js", "web/kit/db.js", "web/kit/kit.css", "web/kit/shell.js", "web/kit/store.js"]);
   });
