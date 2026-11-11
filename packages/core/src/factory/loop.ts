@@ -149,7 +149,7 @@ export class Factory {
       if (normIdea(r.idea) !== norm) continue;
       const running = r.outcome == null || this.active.has(r.id);
       const stopped = r.outcome === "stopped" && this.resumable(r.id).ok;
-      const shipped = r.outcome === "shipped" && (r.finished_at ?? r.started_at) >= since;
+      const shipped = r.outcome === "shipped" && (r.finished_at ?? r.started_at) > since;
       if (!running && !stopped && !shipped) continue;
       let own: { project_id: number } | undefined;
       try { own = this.log.db.prepare("SELECT project_id FROM project_links WHERE kind = 'factory_run' AND ref = ?").get(String(r.id)) as typeof own; } catch { /* projects not loaded */ }

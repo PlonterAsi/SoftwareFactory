@@ -8,6 +8,8 @@ import { detectProfiles } from "./detect.js";
 import { openConsoleWindow, type Launcher, type OutputLine } from "./launcher.js";
 import { serveStatic } from "./static.js";
 import { readUsage } from "./usage.js";
+import { deleteDataFile, listDataFiles, makeSamples, readDataFile, renameDataFile, writeDataFile } from "./files.js";
+import { planQuickRun } from "./quick.js";
 
 /** A folder a project can run from, and where it came from. */
 export interface ProjectFolder { dir: string; source: "folder" | "import" | "run"; label: string; ref?: number; exists: boolean }
@@ -43,6 +45,10 @@ export function projectFolders(log: EventLog, projectId: number): ProjectFolder[
  *
  *   GET  /api/launch/projects/:id?dir=        its folders, the run profiles found in one, running and recent sessions
  *   POST /api/launch/projects/:id/start       { profileId, args?, dir?, mode? }   mode "window" opens a console window of its own
+ *   POST /api/launch/projects/:id/go          { dir?, profileId? }  one press: the best way to run it, on samples made if it needs a file
+ *   GET  /api/launch/projects/:id/files?dir=  its data files (tables, JSON, text) and the one at ?path=
+ *   POST /api/launch/projects/:id/files       { dir?, path, content, create? } save  · { path, delete: true } · { from, to } rename
+ *   POST /api/launch/projects/:id/samples     { dir?, want? }  make sample input files from its tests and spec
  *   POST /api/launch/projects/:id/folder      { dir }   run it from a folder of yours (links kind "folder"); { dir, remove: true } forgets it
  *   POST /api/launch/projects/:id/terminal    { dir? }  open a terminal in the folder
  *   GET  /api/launch/sessions/:sid?after=     the session and its output after line n
@@ -81,7 +87,7 @@ export async function launchRoute(
     return [200, { ok: true }];
   }
 
-  let m = path.match(/^\/api\/launch\/projects\/(\d+)(?:\/(start|folder|terminal))?$/);
+  let m = path.match(/^\/api\/launch\/projects\/(\d+)(?:\/(start|go|folder|terminal|files|samples))?$/);
   if (m) {
     const id = Number(m[1]);
     if (!log.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(id)) return [404, { error: `No project #${id}` }];
@@ -92,6 +98,12 @@ export async function launchRoute(
       if (w && !f) throw new Error("That folder does not belong to this project. Add it first.");
       return f ?? null;
     };
+    if (req.method === "GET" && m[2] === "files") {
+      const f = pick(url.searchParams.get("dir"));
+      if (!f?.exists) return [404, { error: "This project has no folder on disk yet." }];
+      const p = url.searchParams.get("path");
+      try { return [200, p ? readDataFile(f.dir, p) : { dir: f.dir, files: listDataFiles(f.dir) }]; } catch (e) { return [400, { error: (e as Error).message }]; }
+    }
     if (req.method === "GET" && !m[2]) {
       const f = pick(url.searchParams.get("dir"));
       const det = f ? detectProfiles(f.dir) : null;
@@ -114,6 +126,27 @@ export async function launchRoute(
       if (!f?.exists) return [404, { error: "This project has no folder on disk yet." }];
       openConsoleWindow(f.dir, null, "SoftwareFactory");
       return [200, { ok: true, dir: f.dir }];
+    }
+    if (m[2] === "files" || m[2] === "samples" || m[2] === "go") {
+      const f = pick(body.dir);
+      if (!f?.exists) return [404, { error: "This project has no folder on disk yet. Build it, import a repo, or add a folder on the Run tab." }];
+      try {
+        if (m[2] === "samples") {
+          const want = ["table", "json", "text"].includes(String(body.want)) ? (body.want as "table" | "json" | "text") : undefined;
+          let made = makeSamples(f.dir, { want });
+          if (!made.length && !want) made = makeSamples(f.dir, { want: "text" });
+          return [200, { made: made.map(({ path, kind, from }) => ({ path, kind, from })), files: listDataFiles(f.dir) }];
+        }
+        if (m[2] === "files") {
+          if (body.delete === true) deleteDataFile(f.dir, String(body.path ?? ""));
+          else if (body.from != null) renameDataFile(f.dir, String(body.from), String(body.to ?? ""));
+          else writeDataFile(f.dir, String(body.path ?? ""), String(body.content ?? ""), { create: body.create === true });
+          return [200, { files: listDataFiles(f.dir) }];
+        }
+        const plan = planQuickRun(f.dir, typeof body.profileId === "string" && body.profileId ? body.profileId : undefined);
+        const s = await launcher.start({ projectId: id, dir: f.dir, profile: plan.profile, argv: plan.argv, stdin: plan.stdin, mode: "inline" });
+        return [202, { session: s, why: plan.why, made: plan.made.map(({ path, kind, from }) => ({ path, kind, from })) }];
+      } catch (e) { return [400, { error: (e as Error).message }]; }
     }
     if (m[2] === "start") {
       const f = pick(body.dir);
