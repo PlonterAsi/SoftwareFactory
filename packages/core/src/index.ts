@@ -5,6 +5,7 @@ export * from "./agents.js";
 export { createCore, OVERSEER_ROLE, readSettings, openFolder, recordAppVersion, updatesReport } from "./server.js";
 export * from "./factory/crew.js";
 export * from "./factory/loop.js";
+export { checkUi, uiCase, importsOf as pageImportsOf, type UiCheck } from "./factory/uicheck.js";
 export * from "./factory/workspace.js";
 export * from "./factory/visualize.js";
 export * from "./order/text.js";

@@ -3,6 +3,7 @@ import { API, launchApi, type LaunchInfo, type LaunchSession, type OutputLine, t
 import { registerProjectPanel, type PanelContext } from "./panels";
 import { ago } from "./builtin";
 import { ToolForm, type ToolRunRequest } from "./useTool";
+import { AddScreen } from "./addScreen";
 
 /**
  * The Run tab: start a finished project from its own folder without a command line.
@@ -126,6 +127,7 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
           </>
         )}
         {actErr && <p className="error rn-note" role="alert">{actErr}</p>}
+        {info.exists && folder?.source === "run" && folder.ref != null && main.length > 0 && !main.some((p) => p.kind === "web" || p.kind === "static") && <AddScreen ctx={ctx} baseRun={folder.ref} />}
 
         {info.sessions.length > 0 && (
           <section className="rn-history">

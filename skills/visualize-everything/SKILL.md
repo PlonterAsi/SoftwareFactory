@@ -34,6 +34,7 @@ For each thing the station produced, confirm a visual exists and is fed from the
 | Computation (agent call, tool run) | A pulse on the computation timeline: model, time, tokens, cost |
 | Plan, spec | A task graph or flow diagram, not only a document |
 | Code, tests | Changed files as a heat map; tests as a pass and fail grid |
+| A finished project | Its own screen: `index.html` at the project root that the Run tab previews, held by the page check (`packages/core/src/factory/uicheck.ts`) like a failing test. A CLI comes only next to the page. |
 
 ## What to do when a visual is missing
 
