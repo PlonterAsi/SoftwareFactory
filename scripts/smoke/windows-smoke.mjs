@@ -77,7 +77,7 @@ function must(name, ok, detail) {
 // Connection errors the test met and got past (a GET retried once). Listed in the report,
 // so a flaky core shows up as a warning with its cause instead of failing the run silently.
 const blips = [];
-let corePid = null;
+let launchedCorePid = null;
 let polling = 0;
 /** Why a fetch failed, in one line: undici hides the socket error in `cause`. */
 function why(e) {
@@ -92,7 +92,7 @@ async function api(path, init) {
     // Polling while the core starts or stops: a refused connection is the expected answer.
     if (polling) throw e;
     const method = init?.method ?? "GET";
-    const detail = `${method} ${path}: ${why(e)}; core pid ${corePid ?? "?"} ${corePid ? (alive(corePid) ? "alive" : "GONE") : ""}`;
+    const detail = `${method} ${path}: ${why(e)}; core pid ${launchedCorePid ?? "?"} ${launchedCorePid ? (alive(launchedCorePid) ? "alive" : "GONE") : ""}`;
     // Only a GET is safe to send twice; a POST that failed might have been half done.
     if (method !== "GET") throw new Error(detail, { cause: e });
     log("connection blip, retrying once:", detail);
@@ -224,7 +224,7 @@ console.log("seeded", db);
   const h = await until("the core to answer", health, 120_000, 1000);
   saveLogs("installed-start");
   must("bundled core answers on 127.0.0.1:4317", h?.ok, h ? JSON.stringify(h) : readTail(join(DATA, "core.log")));
-  corePid = h.pid ?? null;
+  launchedCorePid = h.pid ?? null;
   check("practice crew is on", h.runtime === "mock" && h.mode === "practice", `${h.runtime} / ${h.mode}`);
   const nodeV = spawnSync(bundledNode, ["-p", "process.version"], { encoding: "utf8" }).stdout.trim();
   check("the core runs on the bundled Node.js", h.node === nodeV, `core ${h.node}, bundled ${nodeV}`);
@@ -550,7 +550,7 @@ function report() {
 /** After a fatal error: say in the job log whether the core is alive, answering, listening and what it last printed. */
 async function diagnose() {
   try {
-    log("diagnosis: core pid", corePid ?? "unknown", corePid ? (alive(corePid) ? "is alive" : "is GONE") : "");
+    log("diagnosis: core pid", launchedCorePid ?? "unknown", launchedCorePid ? (alive(launchedCorePid) ? "is alive" : "is GONE") : "");
     let h = null;
     try { h = await (await fetch(API + "/api/health")).json(); } catch (e) { h = `no answer: ${why(e)}`; }
     log("diagnosis: /api/health now:", typeof h === "string" ? h : JSON.stringify(h).slice(0, 400));
