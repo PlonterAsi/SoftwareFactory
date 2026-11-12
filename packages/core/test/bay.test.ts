@@ -93,6 +93,11 @@ describe("Agent Bay", () => {
     const bay = new AgentBay(new EventLog(), new MockRuntime());
     const a = await bay.draft("a critic that pokes holes in ideas");
     expect(a).toMatchObject({ version: 1, def: { station: "council" } });
+    // The Overseer's draft names the agent; its id follows the name, not an id the draft picked.
+    const rt = scripted((req) => (req.systemPrompt?.includes("Station contract: draft") ? "```json\n" + JSON.stringify({ id: "council-seat", name: "Game Designer", station: "council", prompt: "You are the Game Designer." }) + "\n```" : undefined));
+    Object.defineProperty(rt, "name", { value: "scripted" });
+    const g = await new AgentBay(new EventLog(), rt).draft("A Council seat called Game Designer: asks what makes it fun");
+    expect(g.def).toMatchObject({ id: "game-designer", name: "Game Designer" });
   });
 
   it("test-runs agents on their sample task with their station's verifier", async () => {
