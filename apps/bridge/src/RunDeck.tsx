@@ -137,7 +137,7 @@ function Visuals({ run }: { run: FactoryRunView }) {
 
 const VOTE_LABEL: Record<Vote, string> = { build: "build", reshape: "reshape", drop: "drop" };
 
-/** The Council as a round table: three seats, each coloured by its vote; a line joins seats that agree on a point. */
+/** The Council as a round table: three to six seats, each coloured by its vote; a line joins seats that agree on a point. */
 function CouncilView({ run }: { run: FactoryRunView }) {
   const st = run.stations.council;
   const [round, setRound] = useState<number | null>(null);

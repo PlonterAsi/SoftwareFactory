@@ -36,7 +36,7 @@ const X = [0, 190, 380, 570, 760];
 // id, label, what it does, x, y, gate?, later?
 const STATIONS: [string, string, string, number, number, boolean?, boolean?][] = [
   ["intake", "One-line idea", "saved as a note", X[0], 0],
-  ["council", "Council", "3 seats · big ideas", X[1], -95],
+  ["council", "Council", "up to 6 seats · big ideas", X[1], -95],
   ["plan", "Spec and plan", "Planner", X[1], 0],
   ["gateA", "Your OK: plan", "one tap", X[2], 0, true],
   ["tests", "Acceptance tests", "Tester, then locked", X[0], 130],

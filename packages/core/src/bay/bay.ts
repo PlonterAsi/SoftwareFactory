@@ -243,7 +243,7 @@ export class AgentBay implements CrewSource {
     this.visual(`agent ${id}`);
   }
 
-  /** Put agents on a station. The Council takes up to three seats; every other station takes one. */
+  /** Put agents on a station. The Council takes up to six seats; every other station takes one. */
   assign(slot: Slot, ids: string[], by = "you"): Record<Slot, string[]> {
     if (!SLOTS.includes(slot)) throw new Error(`Unknown station "${slot}"`);
     const live = new Set(this.agents().filter((a) => !a.retired).map((a) => a.def.id));
@@ -274,7 +274,8 @@ export class AgentBay implements CrewSource {
       }, { agentVersion: overseer.version, station: "draft" });
       try {
         const j = parseJsonBlock<Partial<AgentDef>>(r.result?.text ?? "");
-        def = normalizeAgent({ ...def, ...j, budgetUsd: Math.min(0.6, Number(j.budgetUsd ?? def.budgetUsd)) } as any);
+        // The id always comes from the name, never from a word the draft picked ("council-seat").
+        def = normalizeAgent({ ...def, ...j, id: undefined, budgetUsd: Math.min(0.6, Number(j.budgetUsd ?? def.budgetUsd)) } as any);
         note = "drafted by the Overseer";
       } catch { note = "drafted from a description (the Overseer's draft was unusable)"; }
     }

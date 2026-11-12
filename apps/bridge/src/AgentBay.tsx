@@ -83,6 +83,8 @@ function StationBoard({ bay, onSelect, onAssign }: { bay: BayState; onSelect: (i
   const live = bay.agents.filter((a) => !a.retired);
   const put = (slot: Slot, seat: number, id: string) => {
     const cur = [...(bay.slots[slot] ?? [])];
+    // Emptying a seat: only while another agent still sits on the station.
+    if (!id) { if (cur.length > 1) onAssign(slot, cur.filter((_, i) => i !== seat)); return; }
     const without = cur.filter((x) => x !== id);
     const next = seat < cur.length ? cur.map((x, i) => (i === seat ? id : x)) : [...without, id];
     onAssign(slot, [...new Set(next)].slice(0, bay.seats[slot] ?? 1));
@@ -104,8 +106,8 @@ function StationBoard({ bay, onSelect, onAssign }: { bay: BayState; onSelect: (i
                     onDragOver={(e) => { e.preventDefault(); setOver(key); }} onDragLeave={() => setOver(null)}
                     onDrop={(e) => { e.preventDefault(); setOver(null); const id = e.dataTransfer.getData("text/agent"); if (id) put(slot, i, id); }}>
                     {a ? <button className="seat-agent" onClick={() => onSelect(a.def.id)} title={`${a.def.name} v${a.version} · ${a.def.model}`}><span className="seat-av">{a.def.avatar}</span>{a.def.name}</button> : <span className="muted">drop here</span>}
-                    <select className="seat-pick" title="Choose who sits here" aria-label={`${SLOT_LABEL[slot]} seat ${i + 1}`} value={a?.def.id ?? ""} onChange={(e) => e.target.value && put(slot, i, e.target.value)}>
-                      {!a && <option value="">choose…</option>}
+                    <select className="seat-pick" title="Choose who sits here" aria-label={`${SLOT_LABEL[slot]} seat ${i + 1}`} value={a?.def.id ?? ""} onChange={(e) => put(slot, i, e.target.value)}>
+                      {(!a || ids.length > 1) && <option value="">{a ? "empty this seat" : "choose…"}</option>}
                       {live.map((x) => <option key={x.def.id} value={x.def.id}>{x.def.name}</option>)}
                     </select>
                   </span>
