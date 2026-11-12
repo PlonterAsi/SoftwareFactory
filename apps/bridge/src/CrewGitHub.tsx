@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { API } from "./api";
 
-interface Access { hasToken: boolean; repo: string | null; canPush: boolean; why: string | null }
+interface Access { hasToken: boolean; source?: "pasted" | "gh" | null; login?: string | null; repo: string | null; canPush: boolean; why: string | null }
 
 /**
  * GitHub write access for the crew: with it, SoftwareFactory's own tickets come
@@ -25,7 +25,8 @@ export function CrewGitHub() {
   };
   useEffect(() => { call(); }, []);
   if (!a) return err ? <p className="setup-blocker">{err}</p> : null;
-  const state = !a.hasToken ? "no token: the crew leaves branches on this PC" : a.canPush ? `the crew opens draft PRs on ${a.repo}` : a.why ?? "the token cannot write";
+  const via = a.source === "gh" ? `signed in with the GitHub CLI${a.login ? ` as ${a.login}` : ""}` : a.login ? `pasted token, ${a.login}` : "pasted token";
+  const state = !a.hasToken ? "no token and no GitHub CLI login: the crew leaves branches on this PC" : a.canPush ? `the crew opens draft PRs on ${a.repo}, ${via}` : a.why ?? "the token cannot write";
   return (
     <section className="setup-sec">
       <h3>Crew pull requests</h3>
@@ -34,8 +35,8 @@ export function CrewGitHub() {
           <span className="place-label">GitHub write access</span>
           <span className={`mono ${a.canPush ? "" : "muted"}`}>{busy ? "checking…" : state}</span>
           <span className="place-actions">
-            <button className="ghost sm" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : a.hasToken ? "Replace" : "Add token"}</button>
-            {a.hasToken && !editing && <button className="ghost sm" disabled={busy} onClick={() => call({ token: null })}>Remove</button>}
+            <button className="ghost sm" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : a.source === "pasted" ? "Replace" : a.source === "gh" ? "Use a token instead" : "Add token"}</button>
+            {a.source === "pasted" && !editing && <button className="ghost sm" disabled={busy} onClick={() => call({ token: null })}>Remove</button>}
           </span>
         </div>
         {editing && <>

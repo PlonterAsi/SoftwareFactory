@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { git } from "../factory/workspace.js";
 
@@ -20,6 +21,7 @@ export interface GitHubRepo { owner: string; name: string }
 export interface PullRequest { number: number; url: string; state: "open" | "closed"; merged: boolean; draft: boolean; mergeSha: string | null }
 
 const TOKEN_FILE = "github-token";
+const TOKEN_RE = /^(gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}$/;
 /** Branches the crew never pushes to, whatever a caller asks. */
 const PROTECTED = /^(main|master|production|prod|release(\/.*)?)$/i;
 
@@ -32,8 +34,16 @@ export function parseGitHubRepo(s: string): GitHubRepo | null {
 /** Remove anything that looks like a GitHub token from text before it is written anywhere. */
 export const hideTokens = (s: string) => s.replace(/\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, "[token]");
 
+/** The GitHub CLI's login on this PC (`gh auth token`), or null when gh is missing or signed out. */
+export function ghCliToken(): string | null {
+  try {
+    const r = spawnSync("gh", ["auth", "token", "-h", "github.com"], { windowsHide: true, timeout: 5000, encoding: "utf8" });
+    return r.status === 0 ? String(r.stdout ?? "").trim() || null : null;
+  } catch { return null; }
+}
+
 export class GitHub {
-  constructor(private o: { dataDir: string; api?: string; fetch?: typeof fetch; gitUrl?: (r: GitHubRepo) => string }) {}
+  constructor(private o: { dataDir: string; api?: string; fetch?: typeof fetch; gitUrl?: (r: GitHubRepo) => string; cli?: () => string | null }) {}
 
   private get file() { return join(this.o.dataDir, TOKEN_FILE); }
   private get api() { return this.o.api ?? "https://api.github.com"; }
@@ -42,13 +52,31 @@ export class GitHub {
   remote(r: GitHubRepo): string { return this.o.gitUrl ? this.o.gitUrl(r) : `https://github.com/${r.owner}/${r.name}.git`; }
 
   hasToken(): boolean { return !!this.token(); }
-  private token(): string | null {
+  private pasted(): string | null {
     try { const t = readFileSync(this.file, "utf8").trim(); return t || null; } catch { return null; }
+  }
+  private ghCache: { at: number; t: string | null } | null = null;
+  /** The GitHub CLI login on this PC (`gh auth token`), if any. Held in memory for a minute, never written anywhere. */
+  private cli(): string | null {
+    // Only the installed app passes ghCliToken; tests and cores without it never read the real login.
+    if (!this.o.cli) return null;
+    if (this.ghCache && Date.now() - this.ghCache.at < 60_000) return this.ghCache.t;
+    let t: string | null = null;
+    try { const s = this.o.cli()?.trim() ?? ""; if (TOKEN_RE.test(s)) t = s; } catch { /* no login */ }
+    this.ghCache = { at: Date.now(), t };
+    return t;
+  }
+  private token(): string | null { return this.pasted() ?? this.cli(); }
+  /** Where the token in use comes from, for Systems. */
+  tokenSource(): "pasted" | "gh" | null { return this.pasted() ? "pasted" : this.cli() ? "gh" : null; }
+  /** The GitHub login the token belongs to, or null when it cannot be read. */
+  async login(): Promise<string | null> {
+    try { return String((await this.call<any>("GET", "/user")).login ?? "") || null; } catch { return null; }
   }
   setToken(token: string | null) {
     if (!token) { if (existsSync(this.file)) unlinkSync(this.file); return; }
     const t = token.trim();
-    if (!/^(gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}$/.test(t)) throw new Error("That does not look like a GitHub token (they start with github_pat_ or ghp_).");
+    if (!TOKEN_RE.test(t)) throw new Error("That does not look like a GitHub token (they start with github_pat_ or ghp_).");
     writeFileSync(this.file, t, { mode: 0o600 });
     try { chmodSync(this.file, 0o600); } catch { /* Windows keeps it in the user's own data folder */ }
   }

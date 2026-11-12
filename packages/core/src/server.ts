@@ -32,7 +32,7 @@ import { brainRoute } from "./brain/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { askForApp } from "./factory/appagent.js";
 import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
-import { GitHub, parseGitHubRepo } from "./tickets/github.js";
+import { GitHub, ghCliToken, parseGitHubRepo } from "./tickets/github.js";
 import { linkToProject } from "./projects/service.js";
 import { ErrorCapture, isFault } from "./tickets/capture.js";
 import { classifyIntake, ensureSelfProject, filedAlready, projectToTicket } from "./tickets/intake.js";
@@ -356,7 +356,9 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
             github.setToken(typeof b.token === "string" && b.token.trim() ? b.token : null);
           }
           const check = self && github.hasToken() ? await github.check(self) : null;
-          return json(res, 200, { hasToken: github.hasToken(), repo: self ? `${self.owner}/${self.name}` : null, canPush: check?.ok ?? false, why: check?.why ?? null });
+          const source = github.tokenSource();
+          const login = source && check?.ok ? await github.login() : null;
+          return json(res, 200, { hasToken: github.hasToken(), source, login, repo: self ? `${self.owner}/${self.name}` : null, canPush: check?.ok ?? false, why: check?.why ?? null });
         }
         if (url.pathname === "/api/tickets/auto") {
           // The auto-work rule: GET reads it, POST changes any of on, maxUsd, dailyUsd, wip.
@@ -702,7 +704,8 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
   const orderMax = process.env.SF_ORDER_MAX_USD ? Number(process.env.SF_ORDER_MAX_USD) : undefined;
   const improveMax = process.env.SF_IMPROVE_MAX_USD ? Number(process.env.SF_IMPROVE_MAX_USD) : undefined;
   const improveEvery = process.env.SF_IMPROVE_EVERY_H ? Number(process.env.SF_IMPROVE_EVERY_H) : undefined;
-  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
+  // The installed app may use the GitHub CLI's login for crew PRs; tests build a core without it, so they never reach the real GitHub.
+  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir, github: new GitHub({ dataDir, cli: process.env.VITEST ? undefined : ghCliToken }), order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
   core.drop.start();
   const timers: NodeJS.Timeout[] = [];
   faultCore = core; // the open base hears what the process throws
