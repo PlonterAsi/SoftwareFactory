@@ -65,7 +65,7 @@ function Overview({ project: p, events, go, showRun }: PanelContext) {
         {dup && <DuplicateNotice dup={dup} busy={busy} onShow={showRun} onDismiss={() => setDup(null)} onAgain={() => build(undefined, true)} />}
       </section>
       <section className="pj-gauges" aria-label="Project numbers">
-        <Gauge label="Runs" value={String(r.runs)} sub={r.running ? `${r.running} running` : r.runs ? `${r.shipped} shipped, ${r.failed} failed` : "none yet"} onClick={() => go("runs")} />
+        <Gauge label="Builds" value={String(r.runs)} sub={r.running ? `${r.running} running` : r.runs ? `${r.shipped} shipped, ${r.failed} failed` : "none yet"} onClick={() => go("runs")} />
         <Gauge label="Ideas and notes" value={String(r.fragments)} sub={`${r.important} important, ${r.nodes} nodes`} onClick={() => go("ideas")} />
         <Gauge label="Conflicts" value={String(r.openConflicts)} sub={r.openConflicts ? "need your call" : "none open"} alert={r.openConflicts > 0} onClick={() => go("ideas")} />
         <Gauge label="Spend" value={usd(r.spendUsd)} sub={`${r.agentCalls} agent calls`} onClick={() => go("agents")} />
@@ -288,14 +288,14 @@ function MergeInto({ project: p }: { project: ProjectDetail }) {
   );
 }
 
-registerProjectPanel({ id: "overview", title: "Overview", order: 0, render: (c) => <Overview {...c} /> });
+registerProjectPanel({ id: "overview", section: "brief", title: "Overview", order: 0, render: (c) => <Overview {...c} /> });
 registerProjectPanel({
-  id: "ideas", title: "Ideas", order: 10, render: (c) => <Ideas {...c} />,
+  id: "ideas", section: "brief", title: "Ideas", order: 10, render: (c) => <Ideas {...c} />,
   badge: (c) => c.project.rollup.fragments || null, alert: (c) => c.project.rollup.openConflicts > 0,
 });
-registerProjectPanel({ id: "runs", title: "Runs", order: 20, render: (c) => <Runs {...c} />, badge: (c) => c.project.rollup.running ? `${c.project.rollup.running} live` : c.project.rollup.runs || null });
-registerProjectPanel({ id: "agents", title: "Agents", order: 60, render: (c) => <Agents {...c} />, badge: (c) => c.project.agents.length || null });
-registerProjectPanel({ id: "history", title: "History", order: 90, render: (c) => <History {...c} /> });
-registerProjectPanel({ id: "settings", title: "Settings", order: 99, render: (c) => <Settings key={c.project.id + c.project.updatedAt} {...c} /> });
+registerProjectPanel({ id: "runs", section: "build", title: "Builds", order: 20, render: (c) => <Runs {...c} />, badge: (c) => c.project.rollup.running ? `${c.project.rollup.running} live` : c.project.rollup.runs || null });
+registerProjectPanel({ id: "agents", section: "build", title: "Agents", order: 60, render: (c) => <Agents {...c} />, badge: (c) => c.project.agents.length || null });
+registerProjectPanel({ id: "history", section: "know", title: "History", order: 90, render: (c) => <History {...c} /> });
+registerProjectPanel({ id: "settings", section: "know", title: "Settings", order: 99, render: (c) => <Settings key={c.project.id + c.project.updatedAt} {...c} /> });
 
 export type { ProjectDetail };

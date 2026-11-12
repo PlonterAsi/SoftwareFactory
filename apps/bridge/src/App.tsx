@@ -122,7 +122,7 @@ export function App() {
     return () => window.removeEventListener("keydown", k);
   }, [foundry, assist]); // eslint-disable-line react-hooks/exhaustive-deps
   const [keysOpen, setKeysOpen] = useShortcuts(foundry, go);
-  const needsCount = f.factoryRuns.filter((r) => r.waiting && !r.finished).length + (featuresWaiting ? 1 : 0) + (open ? 1 : 0);
+  const needsCount = f.factoryRuns.filter((r) => r.waiting && !r.finished).length + (featuresWaiting ? 1 : 0) + (open ? 1 : 0) + (ticketCounts?.you ? 1 : 0);
 
   const factoryGrid = (withOverseer: boolean) => (
     <main className={`grid${withOverseer ? "" : " no-assist"}`}>
@@ -150,7 +150,7 @@ export function App() {
     </main>
   );
   const pageInner = route.page === "needs"
-    ? <NeedsYou factoryRuns={f.factoryRuns} featuresWaiting={featuresWaiting} conflicts={open} onShowRun={showRun} />
+    ? <NeedsYou factoryRuns={f.factoryRuns} featuresWaiting={featuresWaiting} conflicts={open} ticketsForYou={ticketCounts?.you ?? 0} onShowRun={showRun} />
     : route.page === "bases"
     ? <BasesPage bases={bases.data} refresh={bases.refresh} />
     : route.page === "kit"
@@ -163,7 +163,7 @@ export function App() {
     ? <FeaturesPage events={f.events} id={route.id} onOpenProject={(id) => go({ page: "project", id, panel: "integrate" })} />
     : route.page === "project"
     ? <Workspace id={route.id} panel={route.panel} run={route.run} factory={f} order={order} bay={bay} go={go} />
-    : <Home list={projects.list} err={projects.err} events={f.events} onOpen={(id) => go({ page: "project", id })} />;
+    : <Home list={projects.list} err={projects.err} events={f.events} cards={foundry} onOpen={(id) => go({ page: "project", id })} />;
   const page = <ErrorBoundary key={route.page === "project" ? `p${route.id}` : route.page} where={`bridge ${href(route)}`}>{pageInner}</ErrorBoundary>;
   const bugButton = <button className="ghost sm bug-btn" onClick={() => setBugOpen(true)} aria-label="Report a bug" title="Report a bug: what went wrong, with the screen attached">Bug</button>;
   const crewChip = <button className={`crew-chip ${f.mode ?? ""}`} onClick={() => setSetupOpen(true)} title={`Runtime: ${f.runtime}. Click for crew, checks and folders.`}>{f.mode === "real" ? "Real crew" : f.mode === "practice" ? "Practice crew · free" : "Crew …"}</button>;

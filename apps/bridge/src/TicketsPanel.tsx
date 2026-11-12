@@ -3,7 +3,7 @@ import { Tickets } from "./Tickets";
 
 /** Every project's workspace gets a Tickets tab: the same list, board and ticket page, scoped to the project. */
 registerProjectPanel({
-  id: "tickets",
+  id: "tickets", section: "build",
   title: "Tickets",
   order: 40,
   // Open tickets (from the core's tickets facet), else how many are linked at all.

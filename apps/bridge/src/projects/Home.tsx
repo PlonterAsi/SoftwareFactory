@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { EmptyState } from "../ui";
+import { EmptyState, StatusGlyph, type Status } from "../ui";
+import { shortName } from "./shortName";
 import { projectsApi, PROJECT_KINDS, type ProjectSummary } from "../api";
 import { ago } from "./builtin";
 import { href } from "./router";
@@ -15,7 +16,7 @@ type Filter = "live" | "archived" | "all";
  * The fleet: every project, most recently active first. Each row's hull bar shows
  * its runs (shipped, failed, running) at a glance; the numbers say the rest.
  */
-export function Home({ list, err, onOpen, events }: { list: ProjectSummary[] | null; err: string | null; onOpen: (id: number) => void; events: SfEvent[] }) {
+export function Home({ list, err, onOpen, events, cards }: { list: ProjectSummary[] | null; err: string | null; onOpen: (id: number) => void; events: SfEvent[]; cards?: boolean }) {
   const [filter, setFilter] = useState<Filter>("live");
   const [q, setQ] = useState("");
   const [name, setName] = useState("");
@@ -85,8 +86,10 @@ export function Home({ list, err, onOpen, events }: { list: ProjectSummary[] | n
       {list && !list.length ? (
         <EmptyState title="No projects yet">Name one above, or tell the Assistant an idea and press Build it: every build starts its own project, and the notes you file grow projects on their own.</EmptyState>
       ) : (
-        <ul className="manifest">
-          {shown.map((p) => <Row key={p.id} p={p} onOpen={onOpen} twins={(twins.get(p.name) ?? 1) - 1} />)}
+        <ul className={cards ? "pj-cards" : "manifest"}>
+          {shown.map((p) => cards
+            ? <Card key={p.id} p={p} onOpen={onOpen} twins={(twins.get(p.name) ?? 1) - 1} />
+            : <Row key={p.id} p={p} onOpen={onOpen} twins={(twins.get(p.name) ?? 1) - 1} />)}
           {list && !shown.length && <li className="empty">Nothing matches.</li>}
         </ul>
       )}
@@ -128,6 +131,52 @@ function Row({ p, onOpen, twins }: { p: ProjectSummary; onOpen: (id: number) => 
       {r.shipped > 0 && (
         <a className="button sm hull-use" href={href({ page: "project", id: p.id, panel: "run" })} title="Open the finished app and use it here">▶ Use</a>
       )}
+    </li>
+  );
+}
+
+/** What a project is doing, as one status mark. */
+export function projectStatus(p: ProjectSummary): Status {
+  const r = p.rollup;
+  return r.running ? "working" : r.failed && !r.shipped ? "failed" : r.shipped ? "done" : "idle";
+}
+
+const STATUS_LINE: Record<Status, string> = { working: "Building now", needs: "Needs you", done: "Shipped", failed: "Last build failed", idle: "Not built yet", agent: "" };
+
+/** The project as a card (Foundry Glass shell): short name first, then what it is and how it stands. */
+function Card({ p, onOpen, twins }: { p: ProjectSummary; onOpen: (id: number) => void; twins: number }) {
+  const r = p.rollup;
+  const st = projectStatus(p);
+  const short = shortName(p.name);
+  const other = Math.max(0, r.runs - r.shipped - r.failed - r.running);
+  return (
+    <li className={`pj-card st-${st} status-${p.status}`}>
+      <a className="pj-card-link" href={href({ page: "project", id: p.id })} onClick={(e) => { e.preventDefault(); onOpen(p.id); }} title={p.name}>
+        <span className="pj-card-top">
+          <StatusGlyph status={st} size={14} label="" />
+          <span className="pj-card-state">{STATUS_LINE[st]}</span>
+          <span className="pj-card-kind">{p.kind}</span>
+        </span>
+        <span className="pj-card-name">{short}</span>
+        <span className="pj-card-sub">{short !== p.name ? p.name : p.summary || (p.origin === "factory" ? "Started from a build" : p.origin === "order" ? "Grown from your notes" : "No description yet")}</span>
+        <span className="hull-bar pj-card-bar" aria-label={`${r.shipped} shipped, ${r.failed} failed, ${r.running} running, ${other} stopped`}>
+          {r.runs ? <>
+            <i className="seg-shipped" style={{ flexGrow: r.shipped }} />
+            <i className="seg-running" style={{ flexGrow: r.running }} />
+            <i className="seg-other" style={{ flexGrow: other }} />
+            <i className="seg-failed" style={{ flexGrow: r.failed }} />
+          </> : <i className="seg-none" />}
+        </span>
+        <span className="pj-card-nums">
+          <span><b>{r.runs}</b> {r.runs === 1 ? "build" : "builds"}</span>
+          <span><b>{r.fragments}</b> {r.fragments === 1 ? "note" : "notes"}</span>
+          {r.openConflicts > 0 && <span className="alert-text"><b>{r.openConflicts}</b> conflict{r.openConflicts > 1 ? "s" : ""}</span>}
+          <span className="num">${r.spendUsd.toFixed(2)}</span>
+          <span className="pj-card-when">{ago(r.lastActive)}</span>
+        </span>
+        {twins > 0 && <span className="pj-card-twin">Same name as {twins === 1 ? "1 other project" : `${twins} others`}: open Settings to merge</span>}
+      </a>
+      {r.shipped > 0 && <a className="button sm pj-card-use" href={href({ page: "project", id: p.id, panel: "run" })} title="Open the finished app and use it here">Use</a>}
     </li>
   );
 }

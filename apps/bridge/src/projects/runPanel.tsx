@@ -341,7 +341,7 @@ function clock(ms: number) {
 }
 
 registerProjectPanel({
-  id: "run",
+  id: "run", section: "ship",
   title: "Use",
   order: 5,
   badge: (ctx) => {

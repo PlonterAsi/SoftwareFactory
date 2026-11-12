@@ -177,7 +177,7 @@ function Brief({ text }: { text: string }) {
 }
 
 registerProjectPanel({
-  id: "integrate",
+  id: "integrate", section: "ship",
   title: "Integrate",
   order: 80,
   badge: (c) => {

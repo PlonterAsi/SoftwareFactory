@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { captureSignal, startFactoryRun, type ProjectSummary } from "../api";
 import type { Route } from "../projects/router";
+import { shortName } from "../projects/shortName";
 
 /**
  * The helm (Ctrl K): one line to file an idea, build it, or jump anywhere.
@@ -14,6 +15,7 @@ const PAGES: { label: string; to: Route; words: string }[] = [
   { label: "Needs you", to: { page: "needs" }, words: "approvals waiting gates ok" },
   { label: "Projects", to: { page: "home" }, words: "all projects home" },
   { label: "Agents", to: { page: "factory", view: "bay" }, words: "crew agent bay models" },
+  { label: "Tickets", to: { page: "factory", view: "tickets" }, words: "tickets bugs tasks work" },
   { label: "Whole factory", to: { page: "factory", view: "factory" }, words: "floor runs builds" },
   { label: "Project rules and loose ideas", to: { page: "factory", view: "order" }, words: "order canon unsorted conflicts rules" },
   { label: "Improve", to: { page: "factory", view: "improve" }, words: "council improvements proposals" },
@@ -38,12 +40,12 @@ export function Helm({ open, onClose, projects, projectId, projectName, go, onSy
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
     if (q) {
-      out.push({ key: "note", kind: "note", label: `File as a note: “${text.trim()}”`, hint: projectName ? `in ${projectName} · Enter` : "Enter" });
+      out.push({ key: "note", kind: "note", label: `File as a note: “${text.trim()}”`, hint: projectName ? `in ${shortName(projectName)} · Enter` : "Enter" });
       out.push({ key: "build", kind: "build", label: `Build it: “${text.trim()}”`, hint: "Ctrl Enter" });
     }
     const ps = (projects ?? []).filter((p) => p.status !== "archived" && (!q || p.name.toLowerCase().includes(q)))
       .sort((a, b) => b.rollup.lastActive.localeCompare(a.rollup.lastActive)).slice(0, q ? 6 : 4);
-    for (const p of ps) out.push({ key: `p${p.id}`, kind: "go", label: p.name, hint: "project", to: { page: "project", id: p.id } });
+    for (const p of ps) out.push({ key: `p${p.id}`, kind: "go", label: shortName(p.name, 48), hint: "project", to: { page: "project", id: p.id } });
     for (const pg of PAGES) if (!q || pg.label.toLowerCase().includes(q) || pg.words.includes(q)) out.push({ key: pg.label, kind: "go", label: pg.label, hint: "page", to: pg.to });
     if (!q || "systems crew settings updates".includes(q)) out.push({ key: "systems", kind: "act", label: "Systems", hint: "crew, checks, folders, updates", act: onSystems });
     return out;
@@ -77,7 +79,7 @@ export function Helm({ open, onClose, projects, projectId, projectName, go, onSy
         <div className="helm-field">
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="helm-mark"><path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" /></svg>
           <input ref={input} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} disabled={busy}
-            placeholder={projectName ? `An idea for ${projectName}, or where to go…` : "Type an idea, or where to go…"} aria-label="Idea or search"
+            placeholder={projectName ? `An idea for ${shortName(projectName)}, or where to go…` : "Type an idea, or where to go…"} aria-label="Idea or search"
             role="combobox" aria-expanded aria-controls="helm-list" aria-activedescendant={rows[sel] ? `helm-${rows[sel].key}` : undefined} />
           <kbd>Esc</kbd>
         </div>
@@ -101,7 +103,7 @@ export function HelmButton({ onOpen, projectName }: { onOpen: () => void; projec
   return (
     <button className="helm-btn" onClick={onOpen} aria-keyshortcuts="Control+K">
       <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden><path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" /></svg>
-      <span>{projectName ? `Idea for ${projectName}, or go to…` : "Type an idea, or go to…"}</span>
+      <span>{projectName ? `Idea for ${shortName(projectName)}, or go to…` : "Type an idea, or go to…"}</span>
       <kbd>Ctrl K</kbd>
     </button>
   );
