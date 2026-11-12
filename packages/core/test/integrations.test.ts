@@ -98,7 +98,7 @@ describe("integrations", () => {
     // The project's detail knows it lives inside SoftwareFactory now.
     expect(projectDetail(log, projectId)!.facets.integration).toMatchObject({ installed: [{ id: req.id, form: "tool" }] });
 
-    integrations.remove(req.id);
+    await integrations.remove(req.id);
     expect(installedFeatures(log)).toEqual([]);
     expect(existsSync(done.dir!)).toBe(false);
   });

@@ -204,13 +204,15 @@ export class PluginHost {
     return this.get(id)!;
   }
 
-  remove(id: string, opts: { by?: string } = {}): { id: string; removed: true } {
+  async remove(id: string, opts: { by?: string } = {}): Promise<{ id: string; removed: true }> {
     const v = this.get(id);
     if (!v) throw new Error(`No plugin ${id}`);
-    this.stop(id);
+    // The backend runs with the plugin's folder as its working directory, and Windows will not
+    // delete a folder a live process sits in (EBUSY). Wait for the backend to exit first.
+    await this.stop(id);
     this.syncAgents(v, false);
     const dir = resolve(v.dir);
-    if (dir.startsWith(resolve(this.root) + sep)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); // Windows holds a just-stopped backend's files for a moment (EBUSY)
+    if (dir.startsWith(resolve(this.root) + sep)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     this.log.append("plugin.removed", { id, by: opts.by ?? "you" });
     return { id, removed: true };
   }
@@ -298,18 +300,22 @@ export class PluginHost {
     return true;
   }
 
-  /** Stop a plugin's backend (calls still waiting are refused). */
-  stop(id: string) {
+  /** Stop a plugin's backend (calls still waiting are refused). Resolves once the process has exited (at most ~3 s). */
+  stop(id: string): Promise<void> {
     const t = this.restartTimers.get(id);
     if (t) { clearTimeout(t); this.restartTimers.delete(id); }
     const r = this.running.get(id);
-    if (!r) return;
+    if (!r) return Promise.resolve();
+    const exited = r.child.exitCode != null || r.child.signalCode != null
+      ? Promise.resolve()
+      : new Promise<void>((res) => { r.child.once("exit", () => res()); setTimeout(res, 3000).unref(); });
     r.stopping = true;
     this.running.delete(id);
     for (const c of r.calls.values()) { clearTimeout(c.timer); c.rej(new Error("The plugin stopped")); }
     r.calls.clear();
     try { this.send(r, { t: "stop" }); } catch { /* gone */ }
     setTimeout(() => { try { r.child.kill(); } catch { /* gone */ } }, 500).unref();
+    return exited;
   }
 
   stopAll() { for (const id of [...this.running.keys()]) this.stop(id); }
