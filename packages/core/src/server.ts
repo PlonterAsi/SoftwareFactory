@@ -737,7 +737,7 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
     disposed = true;
     for (const t of timers) clearTimeout(t);
     try { core.drop.stop(); } catch { /* not watching */ }
-    try { core.plugins.stopAll(); } catch (e) { console.error("stopping plugins failed:", e); }
+    try { core.plugins.stopAll(true); } catch (e) { console.error("stopping plugins failed:", e); }
     try { core.launcher.stopAll(); } catch (e) { console.error("stopping launched apps failed:", e); }
     log.removeAllListeners();
     try { log.close(); } catch { /* already closed */ }
