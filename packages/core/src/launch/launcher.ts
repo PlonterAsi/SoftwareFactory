@@ -92,6 +92,8 @@ export function projectEnv(dir: string, nodePath: string, port: number | null): 
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
   env[pathKey] = [join(dir, "node_modules", ".bin"), dirname(nodePath), env[pathKey] ?? ""].filter(Boolean).join(delimiter);
   if (port) env.PORT = String(port);
+  // Apps the factory built reach their agents through this core (kit route /api/_agent).
+  env.SF_CORE_URL = `http://127.0.0.1:${process.env.SF_PORT ?? 4317}`;
   env.BROWSER = "none"; // dev servers must not open a browser of their own; the Bridge shows the page
   env.FORCE_COLOR = "0";
   env.NO_COLOR = "1";

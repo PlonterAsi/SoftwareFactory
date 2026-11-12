@@ -4,6 +4,9 @@
 //   - keeps the app's data in data/db.json (created with the sample records on first start)
 //   - a JSON API for every entity: GET/POST /api/<entity>, GET/PUT/DELETE /api/<entity>/<id>
 //   - when the app needs the disk or the operating system, its own routes live in api.js
+//   - when it needs research or judgment plain code cannot do, it asks one of your agents:
+//     POST /api/_agent { task, input?, agent? } from a view, or ctx.ask(task, input) in api.js
+//     (SoftwareFactory must be open; it runs the agent and logs what it cost)
 import { createServer } from "node:http";
 import { readFile, writeFile, rename, mkdir, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -49,6 +52,20 @@ async function body(req) {
   return s ? JSON.parse(s) : {};
 }
 
+// Your agents live in SoftwareFactory; the Run tab tells the app where (SF_CORE_URL).
+const CORE = process.env.SF_CORE_URL || "http://127.0.0.1:4317";
+async function ask(task, input, opts = {}) {
+  let r;
+  try {
+    r = await fetch(CORE + "/api/apps/agent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task, input, agent: opts.agent, app: (schema.app && schema.app.name) || "an app" }) });
+  } catch {
+    throw Object.assign(new Error("Open SoftwareFactory to use this app's agent."), { status: 503 });
+  }
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(out.error || "The agent could not answer."), { status: r.status });
+  return out;
+}
+
 async function files(dir, out) {
   for (const name of await readdir(dir)) {
     if (name.startsWith(".") || name === "node_modules" || name === "data") continue;
@@ -73,8 +90,12 @@ async function api(req, res, url) {
     if (p.startsWith("..") || !abs.startsWith(root) || /(^|[\\/])(data|\.git|node_modules)([\\/]|$)/.test(p)) return send(res, 403, { error: "not allowed" });
     try { return send(res, 200, await readFile(abs, "utf8"), "text/plain; charset=utf-8"); } catch { return send(res, 404, { error: "no such file" }); }
   }
+  if (name === "_agent" && req.method === "POST") {
+    const b = await body(req);
+    try { return send(res, 200, await ask(b.task, b.input, { agent: b.agent })); } catch (e) { return send(res, e.status || 502, { error: e.message }); }
+  }
   if (ext && typeof ext.handle === "function") {
-    const handled = await ext.handle(req, res, url, { db, schema, save, send, body: () => body(req), root });
+    const handled = await ext.handle(req, res, url, { db, schema, save, send, body: () => body(req), root, ask });
     if (handled) return;
   }
   let entity;
