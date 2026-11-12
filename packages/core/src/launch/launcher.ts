@@ -128,6 +128,13 @@ export class Launcher extends EventEmitter {
     const open = log.db.prepare("SELECT id FROM launch_sessions WHERE ended_at IS NULL").all() as { id: number }[];
     for (const r of open) log.append("launch.exited", { session: Number(r.id), code: null, how: "app-closed", tail: [] });
     process.once("exit", () => this.stopAll());
+    // An archived project (also merged or turned into a ticket) keeps no apps running.
+    log.on("event", (e: { type: string; payload: unknown }) => {
+      if (e.type !== "project.updated") return;
+      const p = e.payload as { projectId?: number; status?: string };
+      if (p.status !== "archived" || p.projectId == null) return;
+      for (const s of [...this.sessions.values()]) if (s.projectId === p.projectId && isLive(s.state)) this.stop(s.id);
+    });
   }
 
   /** Running and recent sessions of a project, newest first. Live ones carry their state; past ones come from the table. */
@@ -165,8 +172,15 @@ export class Launcher extends EventEmitter {
   async start(input: StartInput): Promise<SessionView> {
     const { projectId, dir, profile } = input;
     const mode = input.mode === "window" && profile.kind !== "static" ? "window" : "inline";
-    const busy = [...this.sessions.values()].find((s) => s.projectId === projectId && s.profileId === profile.id && isLive(s.state));
+    const busy = [...this.sessions.values()].find((s) => s.projectId === projectId && s.profileId === profile.id && s.dir === dir && isLive(s.state));
     if (busy) return strip(busy);
+    if (mode === "inline" && profile.kind !== "static") {
+      for (const o of [...this.sessions.values()]) {
+        if (o.projectId !== projectId || o.dir === dir || !isLive(o.state) || o.kind === "static") continue;
+        this.sys(o, "Stopped: a newer build of this project started.");
+        this.stop(o.id);
+      }
+    }
     const argList = profile.args ? (input.argv ? input.argv.map(String).slice(0, 64) : input.args ? splitArgs(input.args) : []) : [];
     const command = [profile.command, ...argList.map(quoteArg)].join(" ");
     const argText = argList.length ? argList.map(quoteArg).join(" ") : null;

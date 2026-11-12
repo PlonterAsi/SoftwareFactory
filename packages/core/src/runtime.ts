@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { killTree } from "./launch/launcher.js";
 
 /**
  * Agent runtime adapter. The factory talks to agents only through this
@@ -121,7 +122,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       child.stdin.end(this.stdinFor(req), "utf8");
       let out = "";
       let err = "";
-      const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error(`Agent timed out after ${this.opts.timeoutMs} ms`)); }, this.opts.timeoutMs);
+      const timer = setTimeout(() => { killTree(child, true); reject(new Error(`Agent timed out after ${this.opts.timeoutMs} ms`)); }, this.opts.timeoutMs);
       child.stdout.on("data", (d) => (out += d));
       child.stderr.on("data", (d) => (err += d));
       child.on("error", (e) => { clearTimeout(timer); reject(e); });

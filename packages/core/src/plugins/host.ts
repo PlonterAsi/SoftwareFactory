@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { killTree } from "../launch/launcher.js";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, normalize, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
@@ -301,7 +302,7 @@ export class PluginHost {
   }
 
   /** Stop a plugin's backend (calls still waiting are refused). Resolves once the process has exited (at most ~3 s). */
-  stop(id: string): Promise<void> {
+  stop(id: string, force = false): Promise<void> {
     const t = this.restartTimers.get(id);
     if (t) { clearTimeout(t); this.restartTimers.delete(id); }
     const r = this.running.get(id);
@@ -314,11 +315,13 @@ export class PluginHost {
     for (const c of r.calls.values()) { clearTimeout(c.timer); c.rej(new Error("The plugin stopped")); }
     r.calls.clear();
     try { this.send(r, { t: "stop" }); } catch { /* gone */ }
-    setTimeout(() => { try { r.child.kill(); } catch { /* gone */ } }, 500).unref();
+    if (force) { try { killTree(r.child, true); } catch { /* gone */ } }
+    else setTimeout(() => { try { killTree(r.child, true); } catch { /* gone */ } }, 500).unref();
     return exited;
   }
 
-  stopAll() { for (const id of [...this.running.keys()]) this.stop(id); }
+  /** `force` kills right away: use it when the core is going down and timers will not fire. */
+  stopAll(force = false) { for (const id of [...this.running.keys()]) this.stop(id, force); }
 
   /** Is the backend up and has it finished loading? */
   isReady(id: string) { return !!this.running.get(id)?.ready; }

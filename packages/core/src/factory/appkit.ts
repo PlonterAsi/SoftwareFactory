@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { killTree } from "../launch/launcher.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -185,7 +186,7 @@ export async function probeStart(dir: string, timeoutMs = 15_000): Promise<strin
   } catch (e) {
     return [`the app does not start with npm start: ${(e as Error).message}`];
   } finally {
-    child.kill();
+    killTree(child, true);
     try { rmSync(data, { recursive: true, force: true }); } catch { /* the OS cleans tmp */ }
   }
 }

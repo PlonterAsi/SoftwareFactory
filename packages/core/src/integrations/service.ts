@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { killTree } from "../launch/launcher.js";
 import { splitArgs } from "../launch/detect.js";
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, normalize, sep } from "node:path";
@@ -196,7 +197,7 @@ export class Integrations {
     return new Promise((resolve) => {
       const child = spawn(process.execPath, [join(i.dir!, i.entry!), ...args], { cwd: i.dir!, env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
       let stdout = "", stderr = "", timedOut = false;
-      const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, opts.timeoutMs ?? 60_000);
+      const timer = setTimeout(() => { timedOut = true; killTree(child, true); }, opts.timeoutMs ?? 60_000);
       child.stdout.on("data", (d) => { if (stdout.length < MAX_OUTPUT) stdout += d; });
       child.stderr.on("data", (d) => { if (stderr.length < MAX_OUTPUT) stderr += d; });
       child.stdin.on("error", () => {});
