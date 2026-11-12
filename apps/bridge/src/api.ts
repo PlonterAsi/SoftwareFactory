@@ -458,7 +458,11 @@ export interface UsageExample { label: string; argv: string[]; stdin?: string; n
 export interface UsageView { summary: string | null; synopsis: string | null; fields: UsageField[]; examples: UsageExample[]; readsStdin: boolean; sources: string[] }
 export interface RunProfileView { id: string; kind: RunKind; label: string; command: string; root?: string; args: boolean; recommended?: boolean; note?: string; utility?: boolean; usage?: UsageView }
 export interface BrowseView { path: string; parent: string | null; home: string; roots: string[]; entries: { name: string; path: string; dir: boolean; size?: number }[]; error: string | null }
-export interface ProjectFolderView { dir: string; source: "folder" | "import" | "run"; label: string; ref?: number; exists: boolean }
+export interface ProjectFolderView {
+  dir: string; source: "folder" | "import" | "run"; label: string; ref?: number; exists: boolean;
+  /** For builds: what was built, the idea it came from, whether it is the project's own build line, and what it is. */
+  name?: string; summary?: string; idea?: string; own?: boolean; app?: "kit" | "page" | "other";
+}
 export type LaunchState = "starting" | "running" | "serving" | "exited" | "stopped" | "failed";
 export interface LaunchSession {
   id: number; projectId: number; profileId: string; kind: RunKind; label: string; command: string; args: string | null; dir: string; root: string | null;

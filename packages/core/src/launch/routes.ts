@@ -11,14 +11,30 @@ import { readUsage } from "./usage.js";
 import { deleteDataFile, listDataFiles, makeSamples, readDataFile, renameDataFile, writeDataFile } from "./files.js";
 import { planQuickRun } from "./quick.js";
 
-/** A folder a project can run from, and where it came from. */
-export interface ProjectFolder { dir: string; source: "folder" | "import" | "run"; label: string; ref?: number; exists: boolean }
+/**
+ * A folder a project can run from, and where it came from. For builds: what was built (`name`, `summary`),
+ * whether it is the project's own build line (`own`: its first build and the builds made in the same folder)
+ * or another idea someone built while in this project, and `app`: "kit" for a full app on the app kit,
+ * "page" for pages from before full apps, "other" for anything else.
+ */
+export interface ProjectFolder {
+  dir: string; source: "folder" | "import" | "run"; label: string; ref?: number; exists: boolean;
+  name?: string; summary?: string; idea?: string; own?: boolean; app?: "kit" | "page" | "other";
+}
 
 const isDir = (p: string) => { try { return statSync(p).isDirectory(); } catch { return false; } };
 
+/** What kind of thing a folder holds, from its files: a full app on the kit, plain pages, or something else. */
+export function appKind(dir: string): "kit" | "page" | "other" {
+  if (existsSync(join(dir, "web", "kit", "shell.js")) && existsSync(join(dir, "src", "schema.js"))) return "kit";
+  if (existsSync(join(dir, "index.html"))) return "page";
+  return "other";
+}
+
 /**
  * Every folder a project lives in, the one to run first: a folder you chose,
- * then its imported repo, then its newest shipped build, then any other build.
+ * then its imported repo, then its own build (newest first), then other ideas built
+ * inside it, then builds that did not ship.
  */
 export function projectFolders(log: EventLog, projectId: number): ProjectFolder[] {
   const out: ProjectFolder[] = [];
@@ -32,9 +48,29 @@ export function projectFolders(log: EventLog, projectId: number): ProjectFolder[
   }
   const runIds = links.filter((l) => l.kind === "factory_run").map((l) => Number(l.ref));
   if (runIds.length) {
-    const rows = log.db.prepare(`SELECT id, dir, outcome, plan_name FROM factory_runs WHERE dir IS NOT NULL AND id IN (${runIds.map(() => "?").join(",")}) ORDER BY id DESC`).all(...runIds) as Record<string, any>[];
-    for (const r of rows.filter((x) => x.outcome === "shipped")) add({ dir: r.dir, source: "run", ref: Number(r.id), label: `Run #${r.id}${r.plan_name ? ` · ${r.plan_name}` : ""} (shipped)` });
-    for (const r of rows.filter((x) => x.outcome !== "shipped")) add({ dir: r.dir, source: "run", ref: Number(r.id), label: `Run #${r.id}${r.plan_name ? ` · ${r.plan_name}` : ""} (${r.outcome ?? "in progress"})` });
+    const rows = log.db.prepare(`SELECT id, dir, outcome, plan_name, idea FROM factory_runs WHERE dir IS NOT NULL AND id IN (${runIds.map(() => "?").join(",")}) ORDER BY id DESC`).all(...runIds) as Record<string, any>[];
+    // The project's own line: the build that started it (its id is the project's) or, for a project you
+    // made, its first build; plus every later build in that same folder (Turn into an app works there).
+    const first = rows.find((r) => Number(r.id) === projectId) ?? rows.at(-1);
+    const ownDir = first?.dir as string | undefined;
+    const summaries = new Map<number, string>();
+    for (const r of rows) {
+      const plan = log.db.prepare("SELECT payload FROM events WHERE type = 'factory.plan' AND json_extract(payload, '$.run') = ? ORDER BY id DESC LIMIT 1").get(Number(r.id)) as { payload: string } | undefined;
+      try { const s = plan ? JSON.parse(plan.payload)?.plan?.summary : null; if (typeof s === "string") summaries.set(Number(r.id), s); } catch { /* an odd payload: no summary */ }
+    }
+    const entry = (r: Record<string, any>, own: boolean): Omit<ProjectFolder, "exists"> => {
+      const name = r.plan_name ? String(r.plan_name) : `Build #${r.id}`;
+      const state = r.outcome === "shipped" ? "" : ` (${r.outcome ?? "in progress"})`;
+      return {
+        dir: r.dir, source: "run", ref: Number(r.id), name, idea: String(r.idea ?? ""), own, summary: summaries.get(Number(r.id)),
+        app: isDir(r.dir) ? appKind(r.dir) : undefined,
+        label: own ? `${name}${state}` : `${name}${state} · another idea built here (run #${r.id})`,
+      };
+    };
+    const shipped = rows.filter((x) => x.outcome === "shipped");
+    for (const r of shipped.filter((x) => x.dir === ownDir)) add(entry(r, true));
+    for (const r of shipped.filter((x) => x.dir !== ownDir)) add(entry(r, false));
+    for (const r of rows.filter((x) => x.outcome !== "shipped")) add(entry(r, r.dir === ownDir));
   }
   // Folders that exist come first, in the order above.
   return [...out.filter((f) => f.exists), ...out.filter((f) => !f.exists)];

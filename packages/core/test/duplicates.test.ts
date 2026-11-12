@@ -49,7 +49,7 @@ describe("duplicate builds", () => {
       r = await post(`/api/projects/${p.id}/runs`, { idea: IDEA });
       expect(r.status).toBe(409);
       expect((await r.json()).duplicateOf).toBe(run);
-      expect(listProjects(log).filter((x) => x.name.startsWith("Redesign")).length).toBe(1);
+      expect(listProjects(log).filter((x) => x.origin === "factory").length).toBe(1);
 
       // Build again anyway is still one tap away.
       r = await post("/api/factory/runs", { idea: IDEA, again: true });
@@ -57,7 +57,7 @@ describe("duplicate builds", () => {
       const second = (await r.json()).run;
       core.factory.wait(second).catch(() => {});
       expect(second).not.toBe(run);
-      expect(listProjects(log).filter((x) => x.name.startsWith("Redesign")).length).toBe(2);
+      expect(listProjects(log).filter((x) => x.origin === "factory").length).toBe(2);
 
       // A different idea is never held back.
       r = await post("/api/factory/runs", { idea: "a todo CLI" });

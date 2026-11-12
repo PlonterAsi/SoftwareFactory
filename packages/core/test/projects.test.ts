@@ -42,7 +42,9 @@ describe("projects", () => {
     const ps = listProjects(log);
     expect(ps.length).toBe(2);
     const run = ps.find((p) => p.origin === "factory")!;
-    expect(run.name).toBe("a CLI that counts words");
+    // A build that is its own project is named after what was planned, not the cut-off idea.
+    expect(run.name).toBe("Word Counter");
+    expect(run.summary).not.toBe("");
     expect(run.rollup.runs).toBe(1);
     expect(run.rollup.shipped).toBe(1);
     expect(run.rollup.agentCalls).toBeGreaterThan(0);
