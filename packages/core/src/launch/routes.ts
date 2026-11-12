@@ -67,10 +67,15 @@ export function projectFolders(log: EventLog, projectId: number): ProjectFolder[
         label: own ? `${name}${state}` : `${name}${state} · another idea built here (run #${r.id})`,
       };
     };
+    // A build is the project's own when it works in the same folder or builds the same app again (same plan
+    // name, like a v2 in a folder of its own). The newest own build comes first, so Use starts what you built
+    // last; builds of other ideas made while inside the project come after it and say so.
+    const ownName = String(first?.plan_name ?? "").trim().toLowerCase();
+    const isOwn = (r: Record<string, any>) => r.dir === ownDir || (!!ownName && String(r.plan_name ?? "").trim().toLowerCase() === ownName);
     const shipped = rows.filter((x) => x.outcome === "shipped");
-    // The newest shipped build comes first, so the Run tab starts what you built last.
-    for (const r of shipped) add(entry(r, r.dir === ownDir));
-    for (const r of rows.filter((x) => x.outcome !== "shipped")) add(entry(r, r.dir === ownDir));
+    for (const r of shipped.filter(isOwn)) add(entry(r, true));
+    for (const r of shipped.filter((x) => !isOwn(x))) add(entry(r, false));
+    for (const r of rows.filter((x) => x.outcome !== "shipped")) add(entry(r, isOwn(r)));
   }
   // Folders that exist come first, in the order above.
   return [...out.filter((f) => f.exists), ...out.filter((f) => !f.exists)];
