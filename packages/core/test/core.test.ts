@@ -43,6 +43,11 @@ describe("agent runtime", () => {
     expect(args).toEqual(["-p", "--output-format", "json", "--model", "haiku", "--max-budget-usd", "0.1", "--plugin-dir", "/p/superpowers", "--strict-mcp-config", "--tools", ""]);
   });
 
+  it("lets the web tools run headless without a permission prompt, and nothing else", () => {
+    const args = new ClaudeCodeRuntime({ profile: "lean" }).buildArgs({ prompt: "hi", tools: ["WebSearch", "WebFetch", "Bash"] });
+    expect(args.join(" ")).toContain("--tools WebSearch,WebFetch,Bash --allowedTools WebSearch,WebFetch");
+  });
+
   it("sends a prompt longer than a Windows command line on stdin", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sf-cli-"));
     const fake = join(dir, "fake-claude.mjs");

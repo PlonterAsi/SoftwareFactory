@@ -60,6 +60,9 @@ export interface ClaudeCodeOptions {
 /** Longest role kept on the command line; longer ones go on stdin (Windows command lines stop near 32,000 characters). */
 const MAX_ARG_ROLE = 8000;
 
+/** Tools an agent may use headless without a prompt: they read the web and change nothing here. */
+export const WEB_TOOLS = ["WebSearch", "WebFetch"];
+
 export class ClaudeCodeRuntime implements AgentRuntime {
   readonly name: string;
   private readonly opts: Required<ClaudeCodeOptions>;
@@ -89,6 +92,9 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     else if (req.tools?.length) args.push("--tools", req.tools.join(","));
     // Headless edits in a working copy: accept file edits there, nothing else is allowed to prompt.
     if (req.cwd && req.tools?.some((t) => t === "Edit" || t === "Write")) args.push("--permission-mode", "acceptEdits");
+    // Read-only web tools change nothing on this machine; headless, an unapproved one is simply refused.
+    const web = (req.tools ?? []).filter((t) => WEB_TOOLS.includes(t));
+    if (web.length) args.push("--allowedTools", web.join(","));
     return args;
   }
 
