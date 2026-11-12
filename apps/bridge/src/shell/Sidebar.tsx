@@ -9,8 +9,9 @@ import { shortName } from "../projects/shortName";
  * The left rail of the Foundry Glass shell: where you are, what needs you, and the projects you
  * were last in. Amber appears here only when something waits for you.
  */
-export function Sidebar({ route, needs, projects, factoryRuns, crewBusy, base, children }: {
-  route: Route; needs: number; projects: ProjectSummary[] | null; factoryRuns: FactoryRunView[]; crewBusy: boolean; base?: string; children?: ReactNode;
+export function Sidebar({ route, needs, projects, factoryRuns, crewBusy, base, conflicts = 0, proposals = 0, tickets = 0, children }: {
+  route: Route; needs: number; projects: ProjectSummary[] | null; factoryRuns: FactoryRunView[]; crewBusy: boolean; base?: string;
+  conflicts?: number; proposals?: number; tickets?: number; children?: ReactNode;
 }) {
   const at = (r: Route["page"], view?: string) => route.page === r && (view == null || (route.page === "factory" && route.view === view));
   const recent = (projects ?? []).filter((p) => p.status !== "archived")
@@ -39,9 +40,12 @@ export function Sidebar({ route, needs, projects, factoryRuns, crewBusy, base, c
       <div className="sb-group">
         <div className="sb-label">Factory</div>
         <Item to={{ page: "factory", view: "bay" }} on={at("factory", "bay")} icon={<StatusGlyph status={crewBusy ? "working" : "agent"} label="" />}>Agents</Item>
-        <Item to={{ page: "factory", view: "tickets" }} on={at("factory", "tickets")} icon={<Ico d="M3 4.5h10v2.2a1.3 1.3 0 0 0 0 2.6v2.2H3V9.3a1.3 1.3 0 0 0 0-2.6zM9.5 4.5v7" />}>Tickets</Item>
+        <Item to={{ page: "factory", view: "tickets" }} on={at("factory", "tickets")} icon={<Ico d="M3 4.5h10v2.2a1.3 1.3 0 0 0 0 2.6v2.2H3V9.3a1.3 1.3 0 0 0 0-2.6zM9.5 4.5v7" />} badge={tickets || undefined}>Tickets</Item>
         {base && <Item to={{ page: "bases" }} on={at("bases")} icon={<Ico d="M2 13h12M3 13V6l5-3 5 3v7M6.5 13V9.5h3V13" />}>Base: {base}</Item>}
-        <Item to={{ page: "factory", view: "factory" }} on={at("factory", "factory") || at("factory", "order") || at("factory", "improve") || at("factory", "data")} icon={<Ico d="M2 13V7l4 2V7l4 2V3h4v10z" />}>Whole factory</Item>
+        <Item to={{ page: "factory", view: "factory" }} on={at("factory", "factory")} icon={<Ico d="M2 13V7l4 2V7l4 2V3h4v10z" />}>All builds</Item>
+        <Item to={{ page: "factory", view: "order" }} on={at("factory", "order")} icon={<Ico d="M8 2.5 13.5 8 8 13.5 2.5 8zM8 5.5v5M5.5 8h5" />} badge={conflicts || undefined} alert={conflicts > 0}>Rules and ideas</Item>
+        <Item to={{ page: "factory", view: "improve" }} on={at("factory", "improve")} icon={<Ico d="M8 13V3M4 7l4-4 4 4" />} badge={proposals || undefined}>Improve</Item>
+        <Item to={{ page: "factory", view: "data" }} on={at("factory", "data")} icon={<Ico d="M3 4c0-1 2.2-1.5 5-1.5s5 .5 5 1.5v8c0 1-2.2 1.5-5 1.5S3 13 3 12zM3 4c0 1 2.2 1.5 5 1.5S13 5 13 4M3 8c0 1 2.2 1.5 5 1.5S13 9 13 8" />}>Data vault</Item>
       </div>
       <div className="sb-group">
         <div className="sb-label">Library</div>

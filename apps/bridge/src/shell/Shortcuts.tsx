@@ -9,7 +9,7 @@ const GO: Record<string, { label: string; to: Route }> = {
   n: { label: "Needs you", to: { page: "needs" } },
   p: { label: "Projects", to: { page: "home" } },
   a: { label: "Agents", to: { page: "factory", view: "bay" } },
-  f: { label: "Whole factory", to: { page: "factory", view: "factory" } },
+  f: { label: "All builds", to: { page: "factory", view: "factory" } },
   l: { label: "Finished apps (Library)", to: { page: "features" } },
   o: { label: "Add-ons", to: { page: "plugins" } },
   b: { label: "Brain", to: { page: "brain" } },

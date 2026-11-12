@@ -54,3 +54,10 @@ Switch it on in **Systems → Layout → Foundry Glass** (kept per computer in `
 - **Short names** (`projects/shortName.ts`): drop the article and the "with…/that…/for…" tail ("A word counter app with history" → "Word counter app"). Used in cards, the sidebar, the helm and the project header; the full name stays as subtitle and tooltip.
 - **Cards**: in Foundry Glass, Projects is a grid of cards: status mark and line, short name, full name or summary, build bar, counts, last active; Use appears on hover for shipped projects.
 - Needs you also counts tickets waiting on you; Tickets has its own sidebar item.
+
+## One shell (phase 6)
+
+- The classic top bar and the Systems → Layout switch are gone; Foundry Glass is the only shell.
+- The Whole factory screen is dissolved. Each part is its own page with a sidebar item: All builds (`#/factory`), Agents (`#/factory/bay`), Tickets (`#/factory/tickets`), Rules and ideas (`#/factory/order`, star map beside project rules, loose ideas and conflicts), Improve (`#/factory/improve`), Data vault (`#/factory/data`). Old links keep working.
+- Sidebar counts are neutral; only "needs you" counts (Needs you, conflicts) are amber.
+- Light theme stays a later step.
