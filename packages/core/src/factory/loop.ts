@@ -18,7 +18,7 @@ import { visualCheck } from "./visualize.js";
 import { checkUi, uiCase } from "./uicheck.js";
 import { appCase, checkAppLive, installKit, isKitFile } from "./appkit.js";
 import { checkScreens, screenCase, type ScreenCheck } from "./screencheck.js";
-import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, answerSummary, changedFiles, hasWorkbench, restoreProtected, testDispute, workbenchContract, writtenOnDisk } from "./workbench.js";
+import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, answerSummary, changedFiles, hasWorkbench, restoreFromHead, restoreProtected, testDispute, workbenchContract, writtenOnDisk } from "./workbench.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
 } from "./workspace.js";
@@ -696,7 +696,7 @@ class Run {
     if (!fixed.length) { this.log.append("factory.tests.disputed", { run: this.id, kept: true, evidence: evidence.slice(0, 1500), said: answerSummary(text) }); return false; }
     const res = writeFiles(this.dir, fixed, { lockTests: false });
     const broken = syntaxErrors(this.dir, res.written.map((w) => w.path).filter((p) => /\.[cm]?js$/.test(p)));
-    if (broken.length) { git(this.dir, "checkout", "-q", "HEAD", "--", "test"); this.log.append("factory.tests.disputed", { run: this.id, kept: true, evidence: evidence.slice(0, 1500), said: `correction did not parse: ${broken[0]}` }); return false; }
+    if (broken.length) { restoreFromHead(this.dir, changedFiles(this.dir).filter(isLockedTest)); this.log.append("factory.tests.disputed", { run: this.id, kept: true, evidence: evidence.slice(0, 1500), said: `correction did not parse: ${broken[0]}` }); return false; }
     const sha = commitAll(this.dir, `Acceptance tests corrected after a dispute\n\n${evidence.slice(0, 1000)}`);
     this.lockedHash = testsHash(this.dir);
     this.lockedSha = git(this.dir, "rev-parse", "HEAD");
@@ -717,7 +717,7 @@ class Run {
         const verify = this.bench ? `\n\n${VERIFY_CONTRACT}\nThe acceptance criteria:\n${this.plan.acceptance.map((a, i) => `${i + 1}. ${a}`).join("\n")}` : "";
         const text = await this.ask(m, `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 48000)}${verify}`, { round });
         // The Reviewer may run things but not change them: whatever it left in the folder goes.
-        if (this.bench) { try { git(this.dir, "checkout", "-q", "--", "."); git(this.dir, "clean", "-fdq"); } catch { /* nothing to put back */ } }
+        if (this.bench) { try { restoreFromHead(this.dir, changedFiles(this.dir)); } catch { /* nothing to put back */ } }
         let res: ReviewResult;
         try { res = parseReview(text); } catch (e) { this.verdict(m, "review", false, round, (e as Error).message); throw e; }
         this.verdict(m, "review", true, round);

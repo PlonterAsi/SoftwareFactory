@@ -1,6 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { AgentRuntime } from "../runtime.js";
 import { git } from "./workspace.js";
 
@@ -68,11 +69,22 @@ export function changedFiles(dir: string): string[] {
  */
 export function restoreProtected(dir: string, isProtected: (p: string) => boolean): string[] {
   const touched = changedFiles(dir).filter(isProtected);
-  for (const p of touched) {
-    try { git(dir, "checkout", "-q", "HEAD", "--", p); } catch { try { git(dir, "rm", "-q", "--cached", "--force", "--", p); } catch { /* not tracked */ } }
-    try { if (existsSync(join(dir, p)) && !git(dir, "ls-files", "--", p)) git(dir, "clean", "-fq", "--", p); } catch { /* gone already */ }
-  }
+  restoreFromHead(dir, touched);
   return touched;
+}
+
+/**
+ * Put files back exactly as the last commit holds them, byte for byte. Not `git checkout`: with
+ * core.autocrlf (Git for Windows' default) that writes CRLF, and the locked tests' fingerprint no longer
+ * matches ("The locked acceptance tests were changed"). Files the commit does not have are removed.
+ */
+export function restoreFromHead(dir: string, paths: string[]): void {
+  for (const p of paths) {
+    const r = spawnSync("git", ["cat-file", "blob", `HEAD:${p}`], { cwd: dir, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    const abs = join(dir, p);
+    if (r.status === 0) { mkdirSync(dirname(abs), { recursive: true }); writeFileSync(abs, r.stdout); }
+    else if (existsSync(abs)) rmSync(abs, { force: true, recursive: true });
+  }
 }
 
 /** What the agent left on disk, in the shape of a writeFiles result (so the heat map draws it). */
