@@ -2,14 +2,13 @@ import { useEffect, useState } from "react";
 import { setupApi, type CrewMode, type SetupView, type ToolCheck } from "./api";
 import { UpdatesSection, type Updates } from "./Updates";
 import { CrewGitHub } from "./CrewGitHub";
-import type { Layout } from "./shell/prefs";
 
 /**
  * Ship's systems: which crew works (free practice crew or real Claude Code
  * agents), what this computer has, and where everything lands on disk.
  * Every check is free; nothing here calls a model.
  */
-export function Setup({ open, onClose, dropsAt, updates, layout, onLayout }: { open: boolean; onClose: () => void; dropsAt: number; updates?: Updates; layout?: Layout; onLayout?: (l: Layout) => void }) {
+export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onClose: () => void; dropsAt: number; updates?: Updates }) {
   const [s, setS] = useState<SetupView | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -66,24 +65,6 @@ export function Setup({ open, onClose, dropsAt, updates, layout, onLayout }: { o
               </button>
             </div>
           </section>
-
-          {onLayout && (
-            <section className="setup-sec">
-              <h3>Layout</h3>
-              <div className="crew-modes">
-                <button className={`mode-card${layout !== "foundry" ? " on" : ""}`} onClick={() => onLayout("classic")} aria-pressed={layout !== "foundry"}>
-                  <span className="mode-name">Classic</span>
-                  <span className="mode-tag">old top bar</span>
-                  <span className="mode-body">Pages along the top, the Assistant always on the right.</span>
-                </button>
-                <button className={`mode-card${layout === "foundry" ? " on" : ""}`} onClick={() => onLayout("foundry")} aria-pressed={layout === "foundry"}>
-                  <span className="mode-name">Foundry Glass</span>
-                  <span className="mode-tag">new · default</span>
-                  <span className="mode-body">A sidebar with Needs you and recent projects, Ctrl K to file, build or go anywhere, Ctrl J to show or hide the Assistant.</span>
-                </button>
-              </div>
-            </section>
-          )}
 
           <section className="setup-sec">
             <h3>This computer <button className="link" disabled={busy} onClick={() => load(true)}>{busy ? "checking…" : "Check again"}</button></h3>

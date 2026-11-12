@@ -21,12 +21,3 @@ export function usePref<T extends string>(key: string, fallback: T): [T, (v: T) 
   }, [key, fallback]);
   return [v, (next: T) => { write(key, next); setV(next); }];
 }
-
-/**
- * "foundry" is the Foundry Glass sidebar shell; "classic" is the old top bar, still one click away in
- * Systems, Layout. Foundry is the default: on a real PC (2026-11-12) the new layout sat behind an opt-in
- * nobody found, so every install kept showing the old top bar. A choice made in Systems is kept.
- */
-export type Layout = "classic" | "foundry";
-export const LAYOUT_KEY = "sf.layout";
-export const DEFAULT_LAYOUT: Layout = "foundry";

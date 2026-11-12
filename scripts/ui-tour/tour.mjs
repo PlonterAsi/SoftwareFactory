@@ -94,10 +94,6 @@ try {
     shots.push(name);
   };
 
-  // First pass in the classic layout (Foundry Glass is the default now; its pass is the fg-* screens).
-  await page.goto(`${BRIDGE}/`);
-  await page.evaluate(() => localStorage.setItem("sf.layout", "classic"));
-  await page.reload();
   await visit("#/", "home");
   const projects = await api("/api/projects");
   for (const p of (Array.isArray(projects) ? projects : projects.projects ?? [])) {
@@ -107,47 +103,41 @@ try {
     const panels = await page.$$eval('a[href^="#/p/"]', (as) => [...new Set(as.map((a) => a.getAttribute("href")))]);
     for (const h of panels.filter((h) => h.split("/").length === 4)) await visit(h, `${tag}-${h.split("/")[3]}`);
   }
-  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/bases", "bases"], ["#/factory", "factory-floor"], ["#/factory/bay", "agent-bay"], ["#/factory/order", "order"], ["#/factory/improve", "improve"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
+  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/bases", "bases"], ["#/factory", "all-builds"], ["#/factory/bay", "agents"], ["#/factory/tickets", "tickets"], ["#/factory/order", "rules-and-ideas"], ["#/factory/improve", "improve"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
   current = "systems";
   await page.goto(`${BRIDGE}/#/`);
   await page.waitForTimeout(800);
   const sys = page.getByRole("button", { name: "Systems" }).first();
   if (await sys.count()) { await sys.click(); await page.waitForTimeout(600); await page.screenshot({ path: join(out, "systems.png") }); shots.push("systems"); }
   else problems.push("systems: no Systems button found");
-  // The Foundry Glass shell (Systems → Layout), same screens plus Needs you and the helm.
-  await page.evaluate(() => localStorage.setItem("sf.layout", "foundry"));
+  // Needs you, the helm and the keys (reload first so the Systems drawer is closed).
   await page.reload();
-  await visit("#/", "fg-home");
-  await visit("#/needs", "fg-needs");
-  await visit("#/bases", "fg-bases");
+  await visit("#/needs", "needs");
   const waitingProject = (await api(`/api/projects/of?kind=factory_run&ref=${waiting}`)).projectId;
-  if (waitingProject != null) await visit(`#/p/${waitingProject}/runs`, "fg-waiting-runs");
-  await visit("#/factory", "fg-factory-floor");
-  await visit("#/plugins", "fg-plugins");
-  current = "fg-helm";
+  if (waitingProject != null) await visit(`#/p/${waitingProject}/runs`, "waiting-runs");
+  current = "helm";
   await page.keyboard.press("Control+k");
   await page.waitForTimeout(400);
   await page.keyboard.type("habit");
   await page.waitForTimeout(300);
-  if (await page.locator(".helm").count()) { await page.screenshot({ path: join(out, "fg-helm.png") }); shots.push("fg-helm"); }
-  else problems.push("fg-helm: Ctrl K did not open the helm");
+  if (await page.locator(".helm").count()) { await page.screenshot({ path: join(out, "helm.png") }); shots.push("helm"); }
+  else problems.push("helm: Ctrl K did not open the helm");
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
-  current = "fg-keys";
+  current = "keys";
   await page.keyboard.press("?");
   await page.waitForTimeout(300);
-  if (await page.locator(".keys").count()) { await page.screenshot({ path: join(out, "fg-keys.png") }); shots.push("fg-keys"); }
-  else problems.push("fg-keys: ? did not open the shortcut list");
+  if (await page.locator(".keys").count()) { await page.screenshot({ path: join(out, "keys.png") }); shots.push("keys"); }
+  else problems.push("keys: ? did not open the shortcut list");
   await page.keyboard.press("Escape");
   await page.keyboard.press("g");
   await page.keyboard.press("n");
   await page.waitForTimeout(300);
-  if (!page.url().endsWith("#/needs")) problems.push(`fg-keys: g n went to ${page.url()}, not Needs you`);
+  if (!page.url().endsWith("#/needs")) problems.push(`keys: g n went to ${page.url()}, not Needs you`);
   await page.keyboard.press("Control+j");
   await page.waitForTimeout(400);
-  if (await page.locator(".s2-assist").count()) problems.push("fg: Ctrl J did not hide the Assistant");
-  await visit("#/needs", "fg-needs-no-assistant");
-  await page.evaluate(() => localStorage.removeItem("sf.layout"));
+  if (await page.locator(".s2-assist").count()) problems.push("Ctrl J did not hide the Assistant");
+  await visit("#/needs", "needs-no-assistant");
   await browser.close();
 
   writeFileSync(join(out, "contact-sheet.html"), `<!doctype html><meta charset="utf-8"><title>UI tour ${outName}</title><style>body{background:#111;color:#ddd;font:14px system-ui;margin:20px}div{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:16px}img{width:100%;border:1px solid #333}</style><h1>UI tour ${outName}</h1><p>${problems.length ? problems.length + " problems, see problems.txt" : "No problems found"}</p><div>${shots.map((s) => `<figure><img src="${s}.png"><figcaption>${s}</figcaption></figure>`).join("")}</div>`);
