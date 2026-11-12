@@ -6,7 +6,7 @@ export const PROJECTS_VIEW = "projects";
 
 /** Event types that can change who owns what. */
 export const touchesProjects = (t: string) =>
-  t.startsWith("project.") || t === "order.node" || t === "order.sweep" || t === "order.sweep.undone" || t === "factory.run.started";
+  t.startsWith("project.") || t === "order.node" || t === "order.sweep" || t === "order.sweep.undone" || t === "factory.run.started" || t === "factory.plan";
 
 /**
  * `projects` and `project_links`, rewritten from the projects fold after any event
@@ -14,7 +14,7 @@ export const touchesProjects = (t: string) =>
  */
 export const projectsProjection: Projection = {
   name: "projects",
-  version: 1,
+  version: 2,
   tables: ["projects", "project_links"],
   describe: "Projects, and which ideas, runs and other things belong to each",
   migrate(db) {

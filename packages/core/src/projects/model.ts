@@ -145,6 +145,18 @@ export function foldProjects(events: SfEvent[], order?: Pick<OrderState, "nodes"
         }
         break;
       }
+      case "factory.plan": {
+        // A build that is its own project takes the name and summary of what was planned, so two builds of
+        // one idea read apart ("Plan Diagram" vs "Plan Diagram View") instead of the same cut-off idea twice.
+        const run = Number(p.run);
+        const x = projects.get(run);
+        const plan = (p.plan ?? {}) as { name?: unknown; summary?: unknown };
+        const idea = runs.find((r) => r.id === run)?.idea;
+        if (!x || x.origin !== "factory" || p.kept != null || idea == null || x.name !== nameFromIdea(idea)) break;
+        if (typeof plan.name === "string" && plan.name.trim()) x.name = plan.name.trim().slice(0, 80);
+        if (!x.summary && typeof plan.summary === "string") x.summary = plan.summary.trim().slice(0, 2000);
+        break;
+      }
       case "order.node": {
         if (p.parentId != null) break;
         const sig = p.signalId != null ? signals.get(Number(p.signalId)) : undefined;

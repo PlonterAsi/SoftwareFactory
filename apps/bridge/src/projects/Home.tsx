@@ -99,7 +99,7 @@ function Row({ p, onOpen, twins }: { p: ProjectSummary; onOpen: (id: number) => 
   const other = Math.max(0, r.runs - r.shipped - r.failed - r.running);
   const linked = Object.entries(r.linked).filter(([k]) => k !== "self"); // "self" only marks SoftwareFactory's own project
   return (
-    <li className={`hull status-${p.status}`}>
+    <li className={`hull hull-row status-${p.status}`}>
       <a href={href({ page: "project", id: p.id })} onClick={(e) => { e.preventDefault(); onOpen(p.id); }} className="hull-link">
         <span className="lamp" aria-label={p.status} title={p.status} />
         <span className="hull-main">
@@ -125,6 +125,9 @@ function Row({ p, onOpen, twins }: { p: ProjectSummary; onOpen: (id: number) => 
         </span>
         <span className="hull-when">{ago(r.lastActive)}</span>
       </a>
+      {r.shipped > 0 && (
+        <a className="button sm hull-use" href={href({ page: "project", id: p.id, panel: "run" })} title="Open the finished app and use it here">▶ Use</a>
+      )}
     </li>
   );
 }
