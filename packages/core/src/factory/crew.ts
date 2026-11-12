@@ -1,3 +1,4 @@
+import { kitFor } from "../bay/kits.js";
 import { isAbsolute, join } from "node:path";
 import type { AgentDef, Slot } from "../bay/agentfile.js";
 import { BUILTIN_AGENTS, DEFAULT_SLOTS, systemPromptFor } from "../bay/builtin.js";
@@ -24,7 +25,10 @@ export interface CrewMember {
   /** The full system prompt: the agent's prompt, then the station contract. */
   role: string;
   pluginDirs: string[];
+  /** Built-in tools, plus Skill when it has skills and mcp__<server> for each of its MCP servers. */
   tools: string[];
+  /** Its own --mcp-config (only its MCP servers), when it has any. */
+  mcpConfig?: string;
 }
 
 /** Where the factory gets its workers. The Agent Bay is one; the built-in crew is the fallback. */
@@ -42,8 +46,14 @@ export function pluginDirsFor(plugins: string[], env = process.env): string[] {
 export function bind(agent: AgentDef, version: number, slot: Slot, principles?: Principle[]): CrewMember {
   return {
     id: agent.id, version, name: agent.name, station: slot, model: agent.model, budgetUsd: agent.budgetUsd,
-    role: systemPromptFor(agent, slot, principles), pluginDirs: pluginDirsFor(agent.plugins), tools: agent.tools,
+    role: systemPromptFor(agent, slot, principles), ...kitOf(agent),
   };
+}
+
+/** What an agent loads on a call: its plugins, its own skills kit and MCP servers (bay/kits.ts). */
+export function kitOf(agent: AgentDef): { pluginDirs: string[]; tools: string[]; mcpConfig?: string } {
+  const k = kitFor({ ...agent, mcp: agent.mcp ?? [] }, pluginDirsFor(agent.plugins));
+  return { pluginDirs: k.pluginDirs, tools: k.tools, ...(k.mcpConfig ? { mcpConfig: k.mcpConfig } : {}) };
 }
 
 /** The built-in crew with no Bay behind it (tests, and a factory made without one). */

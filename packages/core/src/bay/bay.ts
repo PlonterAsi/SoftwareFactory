@@ -2,7 +2,7 @@ import "./tables.js";
 import type { EventLog, SfEvent } from "../events.js";
 import type { AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
-import { bind, type CrewMember, type CrewSource } from "../factory/crew.js";
+import { bind, kitOf, type CrewMember, type CrewSource } from "../factory/crew.js";
 import { parseSeatTake } from "../factory/council.js";
 import { parseFileBlocks, parseJsonBlock, isLockedTest } from "../factory/workspace.js";
 import { validatePlan, parseReview, type Plan } from "../factory/loop.js";
@@ -13,6 +13,7 @@ import { parseLensAnswer } from "../improve/lenses.js";
 import { MODELS, SLOTS, normalizeAgent, parseAgentFile, serializeAgent, slugify, type AgentDef, type HomeStation, type Slot } from "./agentfile.js";
 import { BUILTIN_AGENTS, DEFAULT_SLOTS, SLOT_SEATS, systemPromptFor } from "./builtin.js";
 import { principles } from "../brain/brain.js";
+import { library } from "./kits.js";
 
 /**
  * The Agent Bay: where workers are created, edited, tested and assigned.
@@ -57,6 +58,8 @@ export interface BayState {
   stats: Record<string, AgentStats>;
   visuals: { id: number; ts: string; scope: string; pass: boolean; items: string[]; missing: string[] }[];
   models: readonly string[];
+  /** What an agent's settings can choose from: skills, built-in tools, MCP servers. */
+  library: ReturnType<typeof library>;
 }
 
 const DRAFT_CONTRACT = `Station contract: draft.
@@ -70,6 +73,15 @@ export class AgentBay implements CrewSource {
     // Seed the built-in crew once; after that they are ordinary, editable agents.
     const have = new Set(this.events("bay.agent.saved").map((e) => (e.payload as { id: string }).id));
     for (const a of BUILTIN_AGENTS) if (!have.has(a.id)) this.log.append("bay.agent.saved", { id: a.id, version: 1, def: a, note: "built-in crew", by: "builtin", builtin: true });
+    // A built-in agent nobody has edited follows the shipped one (new skills, a better prompt). One the person edited stays theirs.
+    for (const a of BUILTIN_AGENTS) {
+      const cur = have.has(a.id) ? this.get(a.id) : undefined;
+      if (!cur || cur.versions.at(-1)?.by !== "builtin") continue;
+      let was: AgentDef | null = null;
+      try { was = normalizeAgent({ ...cur.def }); } catch { /* an unusable old copy is simply replaced */ }
+      if (was && JSON.stringify(was) === JSON.stringify(normalizeAgent({ ...a }))) continue;
+      this.log.append("bay.agent.saved", { id: a.id, version: cur.version + 1, def: a, note: `built-in update: ${was ? changeNote(was, a) : "replaced"}`, by: "builtin", builtin: true });
+    }
     // A test cut off by a restart would show as running forever.
     for (const t of this.tests()) if (t.state === "running") this.log.append("bay.test", { id: t.id, agent: t.agent, version: t.version, state: "done", pass: false, error: "The core restarted during this test." });
   }
@@ -133,7 +145,7 @@ export class AgentBay implements CrewSource {
   state(): BayState {
     return {
       agents: this.agents(), slots: this.slots(), seats: SLOT_SEATS, tests: this.tests().slice(-60), stats: this.stats(),
-      visuals: this.events("bay.visual").slice(-40).map((e) => ({ id: e.id, ts: e.ts, ...(e.payload as any) })), models: MODELS,
+      visuals: this.events("bay.visual").slice(-40).map((e) => ({ id: e.id, ts: e.ts, ...(e.payload as any) })), models: MODELS, library: library(),
     };
   }
 
@@ -293,7 +305,7 @@ export class AgentBay implements CrewSource {
     const prompt = samplePrompt(station, sample);
     const r = await runAgent(this.log, this.runtime, id, {
       prompt, model: a.def.model, systemPrompt: systemPromptFor(a.def, station, principles(this.log)), budgetUsd: Math.min(a.def.budgetUsd, 0.25),
-      pluginDirs: bind(a.def, a.version, station === "none" ? "overseer" : station).pluginDirs, tools: a.def.tools,
+      ...kitOf(a.def),
     }, { agentVersion: a.version, station: station === "none" ? undefined : station, bayTest: true });
     const checks: { label: string; pass: boolean }[] = [{ label: "answered within its cap", pass: !r.error }];
     if (r.result) checks.push(...verify(station, r.result.text), { label: "did the task (no \"I could not\")", pass: !COULD_NOT.test(r.result.text) });
