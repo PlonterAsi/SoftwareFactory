@@ -12,31 +12,33 @@ import { fileURLToPath } from "node:url";
  * just those, and turns on the Skill tool: with every tool off (the lean default) Claude Code
  * never loads a plugin's skills at all.
  *
- * MCP servers come from <data>/mcp-servers.json (Claude Code's own `mcpServers` shape). An
+ * MCP servers come from agent-mcp.json (bundled) and <data>/mcp-servers.json (Claude Code's own `mcpServers` shape). An
  * agent's servers go into a per-agent --mcp-config; lean runs stay --strict-mcp-config, so
  * no other server loads, and only that agent's servers' tools are allowed.
  */
 
 const BUNDLED = fileURLToPath(new URL("../../agent-skills/", import.meta.url));
+const BUNDLED_MCP = fileURLToPath(new URL("../../agent-mcp.json", import.meta.url));
 
-let cfg: { dataDir?: string; kitsDir: string; bundledDir: string } = { kitsDir: join(tmpdir(), "sf-agent-kits"), bundledDir: BUNDLED };
+let cfg: { dataDir?: string; kitsDir: string; bundledDir: string; bundledMcp?: string } = { kitsDir: join(tmpdir(), "sf-agent-kits"), bundledDir: BUNDLED, bundledMcp: BUNDLED_MCP };
 
 /** Point the kits at the app's data folder (the person's skills, MCP servers, and where kits are built). */
-export function configureKits(o: { dataDir?: string; kitsDir?: string; bundledDir?: string }) {
+export function configureKits(o: { dataDir?: string; kitsDir?: string; bundledDir?: string; bundledMcp?: string | null }) {
   cfg = {
     dataDir: o.dataDir,
     kitsDir: o.kitsDir ?? (o.dataDir ? join(o.dataDir, "agent-kits") : cfg.kitsDir),
     bundledDir: o.bundledDir ?? BUNDLED,
+    bundledMcp: o.bundledMcp === null ? undefined : o.bundledMcp ?? BUNDLED_MCP,
   };
 }
 
 export interface SkillInfo { name: string; description: string; source: "bundled" | "yours"; dir: string }
-export interface McpInfo { name: string; command: string; config: Record<string, unknown> }
+export interface McpInfo { name: string; command: string; note: string; source: "bundled" | "yours"; config: Record<string, unknown> }
 export interface Kit { pluginDirs: string[]; tools: string[]; mcpConfig?: string }
 
 /** Built-in Claude Code tools an agent can be given, with what each one lets it do. */
 export const TOOL_CHOICES: { name: string; note: string }[] = [
-  { name: "Read", note: "read files" },
+  { name: "Read", note: "read the project's files (only when it works on a project folder)" },
   { name: "Glob", note: "find files by name" },
   { name: "Grep", note: "search inside files" },
   { name: "Edit", note: "change files (only in a working copy)" },
@@ -74,15 +76,23 @@ export function listSkills(): SkillInfo[] {
   return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** The MCP servers set up for agents (<data>/mcp-servers.json). An unreadable file is an empty list. */
-export function listMcp(): McpInfo[] {
-  if (!cfg.dataDir) return [];
-  const file = join(cfg.dataDir, "mcp-servers.json");
-  if (!existsSync(file)) return [];
+function mcpIn(file: string | undefined, source: McpInfo["source"]): McpInfo[] {
+  if (!file || !existsSync(file)) return [];
   try {
     const servers = (JSON.parse(readFileSync(file, "utf8")).mcpServers ?? {}) as Record<string, Record<string, unknown>>;
-    return Object.entries(servers).map(([name, config]) => ({ name, config, command: [config.command ?? config.url ?? "?", ...((config.args as string[]) ?? [])].join(" ") }));
+    return Object.entries(servers).map(([name, raw]) => {
+      // Keys starting with "_" are notes for people; Claude Code gets only the server's own settings.
+      const config = Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith("_")));
+      return { name, source, config, note: String(raw._note ?? ""), command: [config.command ?? config.url ?? "?", ...((config.args as string[]) ?? [])].join(" ") };
+    });
   } catch { return []; }
+}
+
+/** The MCP servers agents can use: the bundled ones (agent-mcp.json), then yours (<data>/mcp-servers.json), yours winning by name. */
+export function listMcp(): McpInfo[] {
+  const by = new Map<string, McpInfo>();
+  for (const m of [...mcpIn(cfg.bundledMcp, "bundled"), ...mcpIn(cfg.dataDir && join(cfg.dataDir, "mcp-servers.json"), "yours")]) by.set(m.name, m);
+  return [...by.values()];
 }
 
 /** What an agent's settings can choose from, for the Agent Bay's pickers. */
@@ -90,7 +100,7 @@ export function library() {
   return {
     skills: listSkills().map(({ name, description, source }) => ({ name, description, source })),
     tools: TOOL_CHOICES,
-    mcp: listMcp().map(({ name, command }) => ({ name, command })),
+    mcp: listMcp().map(({ name, command, note, source }) => ({ name, command, note, source })),
     mcpFile: cfg.dataDir ? join(cfg.dataDir, "mcp-servers.json") : null,
   };
 }

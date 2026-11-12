@@ -1,4 +1,5 @@
 import type { EventLog, EventType } from "../events.js";
+import { kitArgs } from "../factory/crew.js";
 import type { AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import type { CrewSource } from "../factory/crew.js";
@@ -110,7 +111,7 @@ export class OrderEngine {
       const m = this.opts.crew?.crewFor("order")[0];
       const run = await runAgent(this.log, this.runtime, m?.id ?? "archivist", {
         prompt: archivistPrompt(signal.text, st, undefined, signal.home), systemPrompt: m?.role ?? ARCHIVIST_ROLE, model: m?.model ?? this.opts.model,
-        budgetUsd: Math.min(this.opts.perCallUsd, m?.budgetUsd ?? Infinity), pluginDirs: m?.pluginDirs.length ? m.pluginDirs : undefined,
+        budgetUsd: Math.min(this.opts.perCallUsd, m?.budgetUsd ?? Infinity), ...kitArgs(m),
       }, { station: "order", agentVersion: m?.version });
       costUsd = run.result?.costUsd ?? 0;
       try {

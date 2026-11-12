@@ -50,6 +50,12 @@ export function bind(agent: AgentDef, version: number, slot: Slot, principles?: 
   };
 }
 
+/** A crew member's loadout as request fields (empty ones left out), for any agent call. */
+export function kitArgs(m: { pluginDirs: string[]; tools: string[]; mcpConfig?: string } | undefined): { pluginDirs?: string[]; tools?: string[]; mcpConfig?: string } {
+  if (!m) return {};
+  return { ...(m.pluginDirs.length ? { pluginDirs: m.pluginDirs } : {}), ...(m.tools.length ? { tools: m.tools } : {}), ...(m.mcpConfig ? { mcpConfig: m.mcpConfig } : {}) };
+}
+
 /** What an agent loads on a call: its plugins, its own skills kit and MCP servers (bay/kits.ts). */
 export function kitOf(agent: AgentDef): { pluginDirs: string[]; tools: string[]; mcpConfig?: string } {
   const k = kitFor({ ...agent, mcp: agent.mcp ?? [] }, pluginDirsFor(agent.plugins));

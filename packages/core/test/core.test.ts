@@ -40,18 +40,35 @@ describe("event log and signals", () => {
 describe("agent runtime", () => {
   it("lean profile skips MCP and tools, sets model and budget", () => {
     const args = new ClaudeCodeRuntime({ profile: "lean" }).buildArgs({ prompt: "hi", model: "haiku", budgetUsd: 0.1, pluginDirs: ["/p/superpowers"] });
-    expect(args).toEqual(["-p", "--output-format", "json", "--model", "haiku", "--max-budget-usd", "0.1", "--plugin-dir", "/p/superpowers", "--strict-mcp-config", "--tools", ""]);
+    expect(args).toEqual(["-p", "--output-format", "json", "--model", "haiku", "--max-budget-usd", "0.1", "--plugin-dir", "/p/superpowers", "--strict-mcp-config", "--tools", "", "--setting-sources", "project,local"]);
   });
 
   it("runs station agents without the person's own CLAUDE.md and memory; a working copy keeps its own", () => {
     const rt = new ClaudeCodeRuntime({ profile: "lean" });
     expect(rt.envFor({ prompt: "hi" }, { PATH: "x" })).toEqual({ PATH: "x", CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
-    expect(rt.envFor({ prompt: "hi", cwd: "/repo" }, { PATH: "x" })).toEqual({ PATH: "x" });
+    expect(rt.envFor({ prompt: "hi", cwd: "/repo", tools: ["Read", "Edit"] }, { PATH: "x" })).toEqual({ PATH: "x" });
+    // An agent that only reads a project folder is still a station agent.
+    expect(rt.envFor({ prompt: "hi", cwd: "/repo", tools: ["Read"] }, { PATH: "x" })).toMatchObject({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1" });
+  });
+
+  it("gives file tools only to an agent working in a folder, and lets it read there without a prompt", () => {
+    const rt = new ClaudeCodeRuntime({ profile: "lean" });
+    const loose = rt.buildArgs({ prompt: "hi", tools: ["Read", "Grep", "WebSearch"] });
+    expect(loose[loose.indexOf("--tools") + 1]).toBe("WebSearch");
+    expect(loose[loose.indexOf("--allowedTools") + 1]).toBe("WebSearch");
+    const inDir = rt.buildArgs({ prompt: "hi", tools: ["Read", "Grep", "WebSearch"], cwd: "/proj" });
+    expect(inDir[inDir.indexOf("--tools") + 1]).toBe("Read,Grep,WebSearch");
+    expect(inDir[inDir.indexOf("--allowedTools") + 1]).toBe("Read,Grep,WebSearch");
+    expect(inDir).not.toContain("--permission-mode");
+    // A station agent sees only its own kit, not the person's installed plugins and skills; repo work keeps them.
+    expect(inDir[inDir.indexOf("--setting-sources") + 1]).toBe("project,local");
+    expect(rt.buildArgs({ prompt: "hi", tools: ["Read", "Edit"], cwd: "/proj" })).not.toContain("--setting-sources");
   });
 
   it("lets the web tools run headless without a permission prompt, and nothing else", () => {
     const args = new ClaudeCodeRuntime({ profile: "lean" }).buildArgs({ prompt: "hi", tools: ["WebSearch", "WebFetch", "Bash"] });
-    expect(args.join(" ")).toContain("--tools WebSearch,WebFetch,Bash --allowedTools WebSearch,WebFetch");
+    expect(args[args.indexOf("--tools") + 1]).toBe("WebSearch,WebFetch,Bash");
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe("WebSearch,WebFetch");
   });
 
   it("sends a prompt longer than a Windows command line on stdin", async () => {

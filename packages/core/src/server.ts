@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -260,7 +261,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
           model: body.model ? String(body.model) : o.model,
           systemPrompt: o.role,
           budgetUsd: typeof body.budgetUsd === "number" ? body.budgetUsd : Math.min(budgetUsd, o.budgetUsd),
-          pluginDirs: o.pluginDirs.length ? o.pluginDirs : undefined,
+          ...kitArgs(o),
         }, { agentVersion: o.version, station: "overseer", ...(projectId != null ? { projectId } : {}) });
         return json(res, run.error ? 502 : 200, { ...run, suggestion: run.result ? buildSuggestion(run.result.text).build : undefined });
       }

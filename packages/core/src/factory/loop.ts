@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
-import { MockRuntime, type AgentRuntime } from "../runtime.js";
+import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
-import { builtinCrew, type CrewMember, type CrewSource } from "./crew.js";
+import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
@@ -671,7 +671,9 @@ class Run {
     this.calls++;
     const r = await runAgent(this.log, this.runtime, m.id, {
       prompt, model: this.o.models[m.id] ?? this.o.models[m.station] ?? m.model, systemPrompt: m.role, budgetUsd: Number(cap.toFixed(4)),
-      pluginDirs: m.pluginDirs.length ? m.pluginDirs : undefined, tools: m.tools.length ? m.tools : undefined, mcpConfig: m.mcpConfig,
+      ...kitArgs(m),
+      // An agent that reads files reads this project's folder, once there is one.
+      ...(this.dir && existsSync(this.dir) && m.tools.some((t) => READ_TOOLS.includes(t)) ? { cwd: this.dir } : {}),
     }, { factoryRun: this.id, station: m.station, agentVersion: m.version, ...meta });
     this.spent += r.result?.costUsd ?? 0;
     if (r.error || !r.result) throw new Error(`${m.name} failed: ${r.error}`);

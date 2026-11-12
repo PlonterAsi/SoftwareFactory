@@ -1,4 +1,5 @@
 import type { EventLog, SfEvent } from "../events.js";
+import { kitArgs, kitOf } from "../factory/crew.js";
 import { runAgent } from "../agents.js";
 import type { AgentRuntime } from "../runtime.js";
 import type { Factory } from "../factory/loop.js";
@@ -687,6 +688,7 @@ export class Tickets {
         model: a?.def.model ?? "haiku",
         systemPrompt: `${a?.def.prompt ?? "You are a careful engineer."}\n\n${TICKET_CONTRACT}`,
         budgetUsd: cap,
+        ...(a ? kitArgs(kitOf(a.def)) : {}),
       }, { agentVersion: a?.version, station: "ticket" });
       if (run.error || !run.result) {
         this.say(id, `${name} could not answer: ${run.error ?? "no reply"}`, { by: a?.def.id ?? want, kind: "event" });

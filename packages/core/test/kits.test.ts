@@ -7,7 +7,7 @@ import { configureKits, kitFor, library, listSkills } from "../src/bay/kits.js";
 import { bind } from "../src/factory/crew.js";
 
 const data = mkdtempSync(join(tmpdir(), "sf-kits-"));
-configureKits({ dataDir: data });
+configureKits({ dataDir: data, bundledMcp: null });
 afterAll(() => configureKits({}));
 
 describe("per-agent kits: each agent loads only its own skills and MCP servers", () => {
@@ -39,7 +39,7 @@ describe("per-agent kits: each agent loads only its own skills and MCP servers",
 
   it("writes an agent's own MCP servers to its own config and allows only their tools", () => {
     writeFileSync(join(data, "mcp-servers.json"), JSON.stringify({ mcpServers: { docs: { command: "node", args: ["docs.js"] }, other: { command: "x" } } }));
-    expect(library().mcp).toEqual([{ name: "docs", command: "node docs.js" }, { name: "other", command: "x" }]);
+    expect(library().mcp).toEqual([{ name: "docs", command: "node docs.js", note: "", source: "yours" }, { name: "other", command: "x", note: "", source: "yours" }]);
     const k = kitFor({ plugins: [], skills: [], tools: ["WebFetch"], mcp: ["docs"] }, []);
     expect(k.tools).toEqual(["WebFetch", "mcp__docs"]);
     expect(Object.keys(JSON.parse(readFileSync(k.mcpConfig!, "utf8")).mcpServers)).toEqual(["docs"]);
@@ -54,12 +54,26 @@ describe("per-agent kits: each agent loads only its own skills and MCP servers",
   it("a bound crew member carries its kit; the Skill tool is allowed headless", () => {
     const fixer = BUILTIN_AGENTS.find((a) => a.id === "fixer")!;
     const m = bind(fixer, 1, "fix");
-    expect(m.tools).toEqual(["Skill"]);
-    expect(m.pluginDirs).toHaveLength(1);
-    const args = new ClaudeCodeRuntime({ profile: "lean" }).buildArgs({ prompt: "x", tools: m.tools, pluginDirs: m.pluginDirs });
-    expect(args[args.indexOf("--tools") + 1]).toBe("Skill");
-    expect(args[args.indexOf("--allowedTools") + 1]).toBe("Skill");
+    expect(m.tools).toEqual(["Read", "Glob", "Grep", "WebSearch", "Skill"]);
+    expect(readdirSync(join(m.pluginDirs[0], "skills")).sort()).toEqual(["silent-failure-hunting", "systematic-debugging"]);
+    const args = new ClaudeCodeRuntime({ profile: "lean" }).buildArgs({ prompt: "x", tools: m.tools, pluginDirs: m.pluginDirs, cwd: "/proj" });
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read,Glob,Grep,WebSearch,Skill");
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe("Read,Glob,Grep,WebSearch,Skill");
     expect(existsSync(m.pluginDirs[0])).toBe(true);
+  });
+
+  it("ships a bundled MCP catalogue (Playwright) that no agent loads unless it is ticked", () => {
+    configureKits({ dataDir: data });
+    expect(library().mcp.find((m) => m.name === "playwright")).toMatchObject({ source: "bundled", command: expect.stringMatching(/@playwright\/mcp@\d/) });
+    const k = kitFor({ plugins: [], skills: [], tools: [], mcp: ["playwright"] }, []);
+    const cfg = JSON.parse(readFileSync(k.mcpConfig!, "utf8")).mcpServers.playwright;
+    expect(Object.keys(cfg).some((x) => x.startsWith("_"))).toBe(false);
+    configureKits({ dataDir: data, bundledMcp: null });
+  });
+
+  it("every skill a built-in agent lists is in the library", () => {
+    const have = new Set(listSkills().map((s) => s.name));
+    for (const a of BUILTIN_AGENTS) for (const s of a.skills) expect(have.has(s), `${a.id}: ${s}`).toBe(true);
   });
 
   it("an unedited built-in agent follows the shipped one; one the person edited stays theirs", () => {
@@ -69,7 +83,7 @@ describe("per-agent kits: each agent loads only its own skills and MCP servers",
     log.append("bay.agent.saved", { id: "builder", version: 1, def: old("builder"), note: "built-in crew", by: "builtin", builtin: true });
     log.append("bay.agent.saved", { id: "builder", version: 2, def: { ...old("builder"), prompt: "Mine." }, note: "edited", by: "you", builtin: true });
     const bay = new AgentBay(log);
-    expect(bay.get("fixer")).toMatchObject({ version: 2, def: { skills: ["systematic-debugging"] } });
+    expect(bay.get("fixer")).toMatchObject({ version: 2, def: { skills: ["systematic-debugging", "silent-failure-hunting"] } });
     expect(bay.get("fixer")!.versions.at(-1)!.note).toMatch(/^built-in update: changed .*skills/);
     expect(bay.get("builder")).toMatchObject({ version: 2, def: { prompt: "Mine.", skills: [] } });
     // Nothing more on the next start.
