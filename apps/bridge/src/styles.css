@@ -1404,3 +1404,15 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .keys-row dt { display: flex; gap: 4px; }
 .keys-row dd { margin: 0; color: var(--ink-2); }
 @media (prefers-reduced-motion: reduce) { .s2-page { animation: none; } }
+
+/* Use tab: which app, what it is, and where it came from */
+.rn-app-name { margin: 0; font-size: 17px; font-weight: 600; }
+.rn-app-sum { color: var(--muted); }
+.rn-other { color: var(--warn, #e0b25c); }
+.rn-more > summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 4px; }
+.rn-more[open] { display: grid; gap: 6px; }
+.rn-upgrade { border-style: solid; border-color: var(--accent, #4fd1c5); }
+.hull-use { align-self: center; margin: 0 16px 0 8px; white-space: nowrap; background: var(--accent); color: #04211d; border-radius: 6px; padding: 7px 14px; font: 600 14px var(--body); text-decoration: none; }
+.hull-use:hover { filter: brightness(1.1); }
+.hull-row { display: flex; align-items: center; }
+.hull-row > .hull-link { flex: 1; min-width: 0; }

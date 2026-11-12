@@ -3,7 +3,7 @@ import { API, launchApi, type LaunchInfo, type LaunchSession, type OutputLine, t
 import { registerProjectPanel, type PanelContext } from "./panels";
 import { ago } from "./builtin";
 import { ToolForm, type ToolRunRequest } from "./useTool";
-import { AddScreen } from "./addScreen";
+import { AddScreen, UpgradeToApp } from "./addScreen";
 import { DataFiles } from "./dataFiles";
 
 /**
@@ -68,6 +68,21 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
     if (first) setPicked(first.id);
   }, [info, picked]);
 
+  // Opening the tab is asking to use it: an app or pages start on their own, once per visit and folder.
+  // Command-line tools and programs wait for a press (they may do work on files).
+  const autoTried = useRef(new Set<string>());
+  useEffect(() => {
+    if (!info || !info.exists || !info.dir || busy) return;
+    if (autoTried.current.has(info.dir)) return;
+    autoTried.current.add(info.dir);
+    const mainP = info.profiles.filter((p) => !p.utility);
+    const best = mainP.find((p) => p.recommended) ?? mainP[0];
+    if (!best || (best.kind !== "web" && best.kind !== "static")) return;
+    const already = info.running.find((s) => s.dir === info.dir && s.profileId === best.id);
+    if (already) { setPicked(already.id); return; }
+    void go(best);
+  }, [info]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const liveByProfile = new Map((info?.running ?? []).filter((s) => s.dir === dir).map((s) => [s.profileId, s]));
   async function start(p: RunProfileView, mode: "inline" | "window" = "inline", run?: ToolRunRequest) {
     setBusy(p.id); setActErr(null);
@@ -104,23 +119,31 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
     <div className="rn">
       <aside className="rn-pad" aria-label="Ways to run this project">
         <section className="rn-folder">
-          <h3>Folder</h3>
-          {info.folders.length ? (
-            <select value={dir ?? ""} onChange={(e) => { setDir(e.target.value); setPicked(null); }} aria-label="Project folder">
+          <h3>{info.folders.length > 1 ? "Which app" : "App"}</h3>
+          {info.folders.length > 1 ? (
+            <select value={dir ?? ""} onChange={(e) => { setDir(e.target.value); setPicked(null); }} aria-label="Which app to use">
               {info.folders.map((f) => <option key={f.dir} value={f.dir}>{f.label}{f.exists ? "" : " (missing)"}</option>)}
             </select>
-          ) : <p className="muted rn-note">This project has no folder yet. Build an idea in it, import a repo, or point it at a folder of yours.</p>}
-          {dir && <p className="mono rn-path" title={dir}>{dir}</p>}
-          <div className="rn-row">
-            {folder?.exists && <button className="ghost sm" onClick={() => launchApi.terminal(pid, dir).catch((x) => setActErr((x as Error).message))} title="Open a terminal window in this folder">Terminal here</button>}
-            <button className="ghost sm" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}>{addOpen ? "Cancel" : "Use another folder"}</button>
-          </div>
-          {addOpen && (
-            <form className="rn-add" onSubmit={addFolder}>
-              <input value={newDir} onChange={(e) => setNewDir(e.target.value)} placeholder="C:\Dev\my-app" aria-label="Full folder path" autoFocus />
-              <button className="sm" type="submit" disabled={!newDir.trim()}>Add</button>
-            </form>
+          ) : folder ? <p className="rn-app-name">{folder.name ?? folder.label}{folder.exists ? "" : " (missing)"}</p>
+            : <p className="muted rn-note">This project has no folder yet. Build an idea in it, import a repo, or point it at a folder of yours.</p>}
+          {folder?.summary && <p className="rn-note rn-app-sum">{folder.summary}</p>}
+          {folder?.source === "run" && folder.own === false && folder.idea && (
+            <p className="rn-note rn-other">Built here from another idea: “{folder.idea.length > 140 ? folder.idea.slice(0, 140) + "…" : folder.idea}”</p>
           )}
+          <details className="rn-more">
+            <summary>Folder and terminal</summary>
+            {dir && <p className="mono rn-path" title={dir}>{dir}</p>}
+            <div className="rn-row">
+              {folder?.exists && <button className="ghost sm" onClick={() => launchApi.terminal(pid, dir).catch((x) => setActErr((x as Error).message))} title="Open a terminal window in this folder">Terminal here</button>}
+              <button className="ghost sm" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}>{addOpen ? "Cancel" : "Use another folder"}</button>
+            </div>
+            {addOpen && (
+              <form className="rn-add" onSubmit={addFolder}>
+                <input value={newDir} onChange={(e) => setNewDir(e.target.value)} placeholder="C:\Dev\my-app" aria-label="Full folder path" autoFocus />
+                <button className="sm" type="submit" disabled={!newDir.trim()}>Add</button>
+              </form>
+            )}
+          </details>
         </section>
 
         {folder && !info.exists && <p className="error rn-note">The folder is not on disk any more.</p>}
@@ -148,6 +171,8 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
             </section>
           );
         })()}
+        {info.exists && folder?.source === "run" && folder.ref != null && main.length > 0 && !main.some((p) => p.kind === "web" || p.kind === "static") && <AddScreen ctx={ctx} baseRun={folder.ref} />}
+        {info.exists && folder?.source === "run" && folder.ref != null && folder.app === "page" && main.some((p) => p.kind === "static") && <UpgradeToApp ctx={ctx} baseRun={folder.ref} name={folder.name} />}
         {main.length > 0 && <h3>{main.length > 1 ? "All the ways to run it" : "Details"}</h3>}
         <ul className="rn-profiles">
           {main.map((p) => <ProfileCard key={p.id} p={p} s={liveByProfile.get(p.id)} args={args[p.id] ?? ""} setArgs={(v) => setArgs((a) => ({ ...a, [p.id]: v }))}
@@ -163,7 +188,6 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
         )}
         {actErr && <p className="error rn-note" role="alert">{actErr}</p>}
         {info.exists && dir && <DataFiles pid={pid} dir={dir} version={dataVersion} onChanged={reload} />}
-        {info.exists && folder?.source === "run" && folder.ref != null && main.length > 0 && !main.some((p) => p.kind === "web" || p.kind === "static") && <AddScreen ctx={ctx} baseRun={folder.ref} />}
 
         {info.sessions.length > 0 && (
           <section className="rn-history">
@@ -309,7 +333,7 @@ function clock(ms: number) {
 
 registerProjectPanel({
   id: "run",
-  title: "Run",
+  title: "Use",
   order: 5,
   badge: (ctx) => {
     const f = ctx.project.facets?.launch as { running?: number } | undefined;
