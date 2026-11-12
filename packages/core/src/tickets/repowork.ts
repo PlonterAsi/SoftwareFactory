@@ -7,6 +7,7 @@ import type { AgentBay } from "../bay/bay.js";
 import { commitAll, git, parseFileBlocks, writeFiles } from "../factory/workspace.js";
 import { importOf, moduleNotes } from "../imports/explorer.js";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
+import { fastGates } from "../safety/gates.js";
 import { parseGitHubRepo, type GitHubRepo } from "./github.js";
 
 /**
@@ -135,6 +136,10 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
   const touched = git(dir, "status", "--porcelain", "--untracked-files=all").split("\n").map((l) => l.slice(3).trim().replace(/^"|"$/g, "")).filter(Boolean);
   const hits = scanFiles(Object.fromEntries(touched.filter((f) => existsSync(join(dir, f))).map((f) => [f, readFileSync(join(dir, f), "utf8")])));
   if (hits.length) return { ok: false, dir, branch, base, sha: null, files: touched, costUsd: run.result.costUsd, summary: "", error: `Not committed: the change holds what looks like a real secret.\n${describeSecrets(hits)}` };
+  // Fast gates (SF-26): syntax, tsc and lint on the change, free, before it is committed.
+  const gates = fastGates(dir, touched);
+  for (const g of gates.results) log.append("factory.fastgate", { ticket: o.key, gate: g.gate, state: g.state, note: g.note, messages: g.messages.slice(0, 20) });
+  if (!gates.ok) return { ok: false, dir, branch, base, sha: null, files: touched, costUsd: run.result.costUsd, summary: "", error: `Not committed: ${gates.messages}` };
   const sha = commitAll(dir, `${o.key}: ${o.title}\n\nWorked by SoftwareFactory's crew on branch ${branch}.`);
   const files = sha ? git(dir, "diff", "--name-only", `${base}..HEAD`).split("\n").filter(Boolean) : [];
   const summary = run.result.text.replace(/<<<\s*FILE[\s\S]*?(?:FILE\s*>>>|$)/g, "").trim().split("\n").filter(Boolean).slice(-6).join("\n");

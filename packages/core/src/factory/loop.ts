@@ -2,6 +2,7 @@ import { failureLines } from "./trim.js";
 import { recallBlock } from "../brain/recall.js";
 import { existsSync } from "node:fs";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
+import { fastGates } from "../safety/gates.js";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
@@ -611,6 +612,17 @@ class Run {
 
   private async runSuite(round: number): Promise<TestRun> {
     if (testsHash(this.dir) !== this.lockedHash) throw new Error("The locked acceptance tests were changed. Refusing to run.");
+    // Fast gates (SF-26): free checks on what the last commit changed, before the slower suite. A failure goes straight to the fixer.
+    let changed: string[] = [];
+    try { changed = git(this.dir, "diff", "--name-only", "HEAD~1", "HEAD").split("\n").filter(Boolean); } catch { changed = Object.keys(readTree(this.dir)); }
+    const gates = fastGates(this.dir, changed.filter((f) => !isKitFile(f)));
+    for (const g of gates.results) this.log.append("factory.fastgate", { run: this.id, round, gate: g.gate, state: g.state, note: g.note, messages: g.messages.slice(0, 20) });
+    if (!gates.ok) {
+      const bad = gates.results.find((g) => g.state === "fail")!;
+      const failed: TestRun = { cases: [{ name: `fast check: ${bad.gate}`, file: changed[0] ?? "", pass: false, error: gates.messages, durationMs: 0 }], passed: 0, failed: 1, exitCode: 1, timedOut: false, output: gates.messages };
+      this.log.append("factory.tests", { run: this.id, round, cases: failed.cases, passed: 0, failed: 1, timedOut: false });
+      return failed;
+    }
     const r = await runTests(this.dir);
     // Every project is a real program: the app check (or, for plans from before apps, the page check)
     // is one more cell in the grid, fixed like a failing test.
