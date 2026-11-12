@@ -19,8 +19,12 @@ const run = (cmd: string, args: string[], cwd: string) =>
 
 /** The local binary of a tool (node_modules/.bin), or null. */
 const localBin = (dir: string, name: string) => {
-  const p = join(dir, "node_modules", ".bin", process.platform === "win32" ? `${name}.cmd` : name);
-  return existsSync(p) ? p : null;
+  // A workspace package finds its tools in the root's node_modules, up to two folders up.
+  for (const d of [dir, join(dir, ".."), join(dir, "..", "..")]) {
+    const p = join(d, "node_modules", ".bin", process.platform === "win32" ? `${name}.cmd` : name);
+    if (existsSync(p)) return p;
+  }
+  return null;
 };
 
 function readJson(file: string): any { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; } }

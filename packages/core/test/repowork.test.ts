@@ -88,3 +88,35 @@ describe("workInRepo loop", () => {
     expect(rt.calls.length).toBe(3); // build, review, one fix
   });
 });
+
+describe("harnessChecks (SF-23 wiring)", () => {
+  it("runs the fast gates per changed package, the integrity guard and the stop rules", async () => {
+    const { harnessChecks } = await import("../src/tickets/repowork.js");
+    const { mkdirSync, rmSync } = await import("node:fs");
+    const dir = mkdtempSync(join(tmpdir(), "sf-hc-"));
+    git(dir, "init", "-q", "-b", "main");
+    mkdirSync(join(dir, "packages/a/test"), { recursive: true });
+    writeFileSync(join(dir, "packages/a/test/x.test.js"), "test('x', () => {});\n");
+    writeFileSync(join(dir, "packages/a/ok.js"), "export const a = 1;\n");
+    git(dir, "add", "-A"); git(dir, "commit", "-q", "-m", "base");
+    const base = git(dir, "rev-parse", "HEAD");
+    let t = 0;
+    const c = harnessChecks({ maxMinutes: 30, now: () => t });
+
+    writeFileSync(join(dir, "packages/a/bad.js"), "export const = ;\n");
+    const g = await c.gates!(dir, ["packages/a/bad.js"]);
+    expect(g.ok).toBe(false);
+    expect(g.output).toMatch(/In packages\/a:[\s\S]*bad\.js/);
+    expect((await c.gates!(dir, ["packages/a/ok.js"])).ok).toBe(true);
+
+    rmSync(join(dir, "packages/a/test/x.test.js"));
+    const i = await c.integrity!(dir, base);
+    expect(i.ok).toBe(false);
+    expect(i.output).toMatch(/x\.test\.js: test file deleted/);
+
+    expect(c.stopRule!({ round: 1, failures: ["tests: 1 failing"], costUsd: 0, maxUsd: 0.6 })).toBeNull();
+    expect(c.stopRule!({ round: 2, failures: ["tests: 1 failing", "tests: 1 failing"], costUsd: 0, maxUsd: 0.6 })).toMatch(/same tests/i);
+    t = 31 * 60_000;
+    expect(c.stopRule!({ round: 1, failures: ["a"], costUsd: 0, maxUsd: 0.6 })).toMatch(/30 minutes/);
+  });
+});

@@ -8,6 +8,9 @@ import type { AgentBay } from "../bay/bay.js";
 import { commitAll, git, parseFileBlocks, writeFiles } from "../factory/workspace.js";
 import { importOf, moduleNotes } from "../imports/explorer.js";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
+import { fastGates } from "../safety/gates.js";
+import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
+import { stopReason } from "../factory/stoprules.js";
 import { parseGitHubRepo, type GitHubRepo } from "./github.js";
 
 /**
@@ -136,6 +139,52 @@ const trim = (s: string, n = 3000) => (s.length > n ? `…${s.slice(-n)}` : s);
 
 const sh = (cmd: string, args: string[], cwd: string, timeout = 300_000) => spawnSync(cmd, args, { cwd, encoding: "utf8", shell: true, windowsHide: true, timeout });
 
+/** Install a fresh clone's dependencies once (npm ci --ignore-scripts). Returns why it could not, or null. */
+export function ensureDeps(dir: string): string | null {
+  if (existsSync(join(dir, "node_modules"))) return null;
+  if (!existsSync(join(dir, "package-lock.json"))) return "dependencies are not installed and there is no package-lock.json";
+  const i = sh("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], dir, 600_000);
+  return i.status === 0 ? null : `npm ci failed: ${trim(`${i.stdout ?? ""}\n${i.stderr ?? ""}`, 800)}`;
+}
+
+/** The changed files grouped by top-level package (packages/x, apps/x, else "."), paths relative to it. */
+function byPackage(files: string[]): Map<string, string[]> {
+  const roots = new Map<string, string[]>();
+  for (const f of files) {
+    const m = f.match(/^((?:packages|apps)\/[^/]+)\//);
+    const r = m ? m[1] : ".";
+    roots.set(r, [...(roots.get(r) ?? []), m ? f.slice(r.length + 1) : f]);
+  }
+  return roots;
+}
+
+/**
+ * The real checks of the ticket loop (SF-23): the fast gates (SF-26) per changed package, so a
+ * monorepo's tsconfig is found; the test integrity guard (SF-24); the stop rules (SF-25) over the
+ * failures so far and the run's wall clock.
+ */
+export function harnessChecks(o: { maxMinutes?: number; now?: () => number } = {}): LoopChecks {
+  const now = o.now ?? Date.now;
+  const startedAt = now();
+  return {
+    gates: (dir, files) => {
+      ensureDeps(dir);
+      const out: string[] = [];
+      for (const [root, rel] of byPackage(files.filter((f) => existsSync(join(dir, f))))) {
+        const g = fastGates(join(dir, root), rel);
+        if (!g.ok) out.push(root === "." ? g.messages : `In ${root}:\n${g.messages}`);
+      }
+      return { ok: !out.length, output: out.join("\n\n") };
+    },
+    integrity: (dir, base) => {
+      const f = testIntegrity(dir, base);
+      return { ok: !f.length, output: f.length ? `${describeIntegrity(f)}\nFix the code, not the tests.` : "" };
+    },
+    // The same failure twice means the fix changed nothing that matters; past the wall clock, stop too.
+    stopRule: (s) => stopReason({ rounds: s.failures.map((f) => ({ failing: 1, names: f })), startedAt, now: now(), maxMinutes: o.maxMinutes }),
+  };
+}
+
 /**
  * Default test run: for each top-level package (packages/x, apps/x, else the root) holding a changed
  * file and having a `test` script, the tests that touch the changed files (`vitest related` when the
@@ -143,21 +192,13 @@ const sh = (cmd: string, args: string[], cwd: string, timeout = 300_000) => spaw
  * once (`npm ci --ignore-scripts`); when that is not possible the check is skipped, never passed.
  */
 export function defaultRunTests(dir: string, files: string[]): CheckResult {
-  const roots = new Map<string, string[]>();
-  for (const f of files) {
-    const m = f.match(/^((?:packages|apps)\/[^/]+)\//);
-    const r = m ? m[1] : ".";
-    roots.set(r, [...(roots.get(r) ?? []), m ? f.slice(r.length + 1) : f]);
-  }
+  const roots = byPackage(files);
   const withTests = [...roots].filter(([r]) => {
     try { return !!JSON.parse(readFileSync(join(dir, r, "package.json"), "utf8")).scripts?.test; } catch { return false; }
   });
   if (!withTests.length) return { ok: true, output: "no package with a test script holds a changed file", skipped: true };
-  if (!existsSync(join(dir, "node_modules"))) {
-    if (!existsSync(join(dir, "package-lock.json"))) return { ok: true, output: "dependencies are not installed and there is no package-lock.json", skipped: true };
-    const i = sh("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], dir, 600_000);
-    if (i.status !== 0) return { ok: true, output: `npm ci failed, so the tests could not run:\n${trim(`${i.stdout ?? ""}\n${i.stderr ?? ""}`, 800)}`, skipped: true };
-  }
+  const deps = ensureDeps(dir);
+  if (deps) return { ok: true, output: `${deps}, so the tests could not run`, skipped: true };
   let out = "";
   for (const [r, changed] of withTests) {
     const cwd = join(dir, r);
