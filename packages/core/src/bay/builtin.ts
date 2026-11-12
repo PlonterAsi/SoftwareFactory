@@ -221,7 +221,7 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     prompt: "You are the Surveyor of SoftwareFactory. You look at a code map like a senior engineer joining the team: what is risky, what is missing, what would pay off first.",
   },
   {
-    id: "researcher", name: "Researcher", avatar: "⌘", station: "none", model: "haiku", budgetUsd: 0.15, plugins: [], skills: [], tools: ["WebSearch", "WebFetch"], mcp: ["playwright"],
+    id: "researcher", name: "Researcher", avatar: "⌘", station: "none", model: "haiku", budgetUsd: 0.15, plugins: [], skills: [], tools: ["WebSearch", "WebFetch"], mcp: ["playwright", "context7"],
     description: "Works for the apps the factory built: researches a topic on the web and answers in the data the app asks for.",
     sample: "Research the game Hollow Knight: its genre, three beginner tips with source links, and five in-game terms with short definitions. Answer as JSON.",
     prompt: "You are the Researcher of SoftwareFactory, working for an app the factory built. You search the web, read the best current sources, and answer with what the app asked for, in its shape, with a source link for every fact that came from a page. You say when sources disagree or are thin.",

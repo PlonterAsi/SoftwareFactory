@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { secretHookFile, secretHookSettings } from "./safety/secrets.js";
 import { killTree } from "./launch/launcher.js";
 
 /**
@@ -34,6 +37,9 @@ export interface AgentResult {
   runtime: string;
   /** Prompt-context tokens written to or read from cache: the fixed cost of loading context. */
   contextTokens: number;
+  /** Of those, read from the prompt cache (cheap) and written to it (SF-18). */
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 }
 
 export interface AgentRuntime {
@@ -107,7 +113,11 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     else if (builtin.length) args.push("--tools", builtin.join(","));
     if (req.mcpConfig) args.push("--mcp-config", req.mcpConfig);
     // Headless edits in a working copy: accept file edits there, nothing else is allowed to prompt.
-    if (req.cwd && req.tools?.some((t) => t === "Edit" || t === "Write")) args.push("--permission-mode", "acceptEdits");
+    if (req.cwd && req.tools?.some((t) => t === "Edit" || t === "Write")) {
+      args.push("--permission-mode", "acceptEdits");
+      // The secret gate runs after every edit, so a leaked key reaches the agent as an error to fix (SF-17).
+      args.push("--settings", secretHookSettings(secretHookFile(join(tmpdir(), "sf-hooks"))));
+    }
     // Allowed without a prompt: read-only web tools, the Skill tool (it reads the agent's own skills), and the
     // agent's own MCP servers. Headless, anything unapproved is simply refused.
     const allowed = (req.tools ?? []).filter((t) => WEB_TOOLS.includes(t) || t === "Skill" || (req.cwd && READ_TOOLS.includes(t)) || (req.mcpConfig && t.startsWith("mcp__")));
@@ -167,6 +177,8 @@ export function parseClaudeJson(raw: string, runtime: string, wallMs: number): A
     models: Object.keys(j.modelUsage ?? {}),
     runtime,
     contextTokens: Number(u.cache_creation_input_tokens ?? 0) + Number(u.cache_read_input_tokens ?? 0) + Number(u.input_tokens ?? 0),
+    cacheReadTokens: Number(u.cache_read_input_tokens ?? 0),
+    cacheWriteTokens: Number(u.cache_creation_input_tokens ?? 0),
   };
 }
 

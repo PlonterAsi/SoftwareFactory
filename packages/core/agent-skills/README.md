@@ -29,4 +29,4 @@ Left out on purpose: superpowers' brainstorming, writing-plans and verification-
 person questions, write plan files or run commands, which a one-shot station agent cannot do), and Express- or
 Jest-based skills (SoftwareFactory builds use plain Node with no packages).
 
-MCP servers offered out of the box are in `../agent-mcp.json` (Playwright, given to the Researcher).
+MCP servers offered out of the box are in `../agent-mcp.json` (Playwright and Context7, given to the Researcher). The rule for adding one: [docs/mcp-safety.md](../../../docs/mcp-safety.md).

@@ -1,4 +1,7 @@
+import { failureLines } from "./trim.js";
+import { recallBlock } from "../brain/recall.js";
 import { existsSync } from "node:fs";
+import { describeSecrets, scanFiles } from "../safety/secrets.js";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
@@ -385,7 +388,7 @@ class Run {
       const prev = seats.filter((x) => x.round === round - 1);
       brief = await this.station("council", async () => {
         const results = await Promise.all(crew.map(async (m, seat) => {
-          const prompt = `Idea: ${this.idea}${round > 1 ? `\n\nRound ${round}. The other seats said:\n${othersText(prev, m.id)}\nAnswer again: keep what still holds, change what they convinced you of.` : ""}`;
+          const prompt = `Idea: ${this.idea}${round === 1 && this.recalled() ? `\n\n${this.recalled()}` : ""}${round > 1 ? `\n\nRound ${round}. The other seats said:\n${othersText(prev, m.id)}\nAnswer again: keep what still holds, change what they convinced you of.` : ""}`;
           const res: SeatResult = { agent: m.id, name: m.name, version: m.version, round, costUsd: 0 };
           try {
             const text = await this.ask(m, prompt, { seat, round });
@@ -421,7 +424,7 @@ class Run {
         const onTop = this.basePlan
           ? `This app already shipped. Its approved plan:\n${JSON.stringify(this.basePlan, null, 2)}\n\nThe person now asks to add: ${this.idea}\n\nWrite the plan for its next version in the same JSON shape: keep the same name and slug, and every existing entity, field, view, flow and exported function (they still work and their tests stay locked); add what the ask needs. New fields on existing entities are optional, so records already saved still load. In "acceptance", list ONLY the new criteria: the old ones stay as they are.`
           : `Idea: ${this.idea}`;
-        const text = await this.ask(this.one("plan"), `${onTop}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
+        const text = await this.ask(this.one("plan"), `${onTop}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
         const plan = validatePlan(parseJsonBlock<Plan>(text));
         if (this.basePlan) { plan.slug = this.basePlan.slug; plan.app = true; }
         this.plan = plan;
@@ -537,11 +540,12 @@ class Run {
   }
 
   private async fix(run: TestRun, round: number, note: string): Promise<CrewMember> {
-    const failures = run.cases.filter((c) => !c.pass).map((c) => `- ${c.name} (${c.file}): ${c.error ?? "failed"}`).join("\n");
+    const failures = run.cases.filter((c) => !c.pass).map((c) => `- ${c.name} (${c.file}): ${(c.error ?? "failed").slice(0, 600)}`).join("\n");
     const src = this.codeText();
     const prompt = [
       `Spec:\n${JSON.stringify(this.plan, null, 2)}`,
-      failures ? `Failing tests:\n${failures}\n\nTest output (tail):\n${run.output.slice(-1500)}` : "All tests pass.",
+      // Only the lines that say what failed and where (SF-16), at most 100.
+      failures ? `Failing tests:\n${failures}\n\nTest output (failure lines):\n${failureLines(run.output, 100, 2500)}` : "All tests pass.",
       note ? `The reviewer of the build asked for: ${note}` : "",
       `Locked tests (read only):\n${this.testsText()}`,
       `Current code:\n${src}`,
@@ -625,6 +629,11 @@ class Run {
       if (!ui.pass) { r.failed++; r.output = `Page check:\n${ui.problems.join("\n")}\n\n${r.output}`.slice(0, 4000); }
       else r.passed++;
     }
+    // The secret gate (SF-17): a key in the code is one more failing cell, fixed like a test.
+    const secrets = scanFiles(readTree(this.dir));
+    r.cases.push({ name: "no secrets in the code (API keys, tokens, private keys)", file: secrets[0]?.file ?? "", pass: !secrets.length, error: secrets.length ? describeSecrets(secrets) : undefined } as (typeof r.cases)[number]);
+    if (secrets.length) { r.failed++; r.output = `Secret check:\n${describeSecrets(secrets)}\nRead keys from an environment variable instead.\n\n${r.output}`.slice(0, 4000); }
+    else r.passed++;
     this.log.append("factory.tests", { run: this.id, round, cases: r.cases, passed: r.passed, failed: r.failed, timedOut: r.timedOut });
     return r;
   }
@@ -638,6 +647,16 @@ class Run {
 
   private testsText() {
     return Object.entries(readTree(this.dir)).filter(([p]) => isLockedTest(p)).map(([p, c]) => `<<<FILE ${p}\n${c}FILE>>>`).join("\n");
+  }
+
+  private recallText: string | null = null;
+  /** The person's past notes and decisions closest to this idea (SF-22), worked out once per run and logged. */
+  private recalled(): string {
+    if (this.recallText === null) {
+      this.recallText = recallBlock(this.log, this.idea, 5);
+      this.log.append("factory.recall", { run: this.id, count: this.recallText ? this.recallText.split("\n").length - 1 : 0 });
+    }
+    return this.recallText;
   }
 
   /** The one agent working a single-seat station right now. */

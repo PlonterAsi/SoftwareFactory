@@ -298,6 +298,7 @@ export interface AgentStats {
   calls: number; failed: number; costUsd: number; avgUsd: number; verdicts: { pass: number; total: number }; passRate: number | null;
   runs: number; avgRounds: number | null; lastAt: string | null; state: "idle" | "thinking" | "blocked"; current?: string;
   byVersion: Record<number, { calls: number; costUsd: number; pass: number; total: number }>;
+  cache?: { read: number; write: number; input: number; hitRate: number | null };
 }
 export interface BayState {
   agents: AgentView[]; slots: Record<Slot, string[]>; seats: Record<Slot, number>; tests: BayTest[]; stats: Record<string, AgentStats>;

@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { runAgent } from "../agents.js";
 import type { AgentRuntime } from "../runtime.js";
 import type { AgentBay } from "../bay/bay.js";
 import { commitAll, git, parseFileBlocks, writeFiles } from "../factory/workspace.js";
-import { importOf } from "../imports/explorer.js";
+import { importOf, moduleNotes } from "../imports/explorer.js";
+import { describeSecrets, scanFiles } from "../safety/secrets.js";
 import { parseGitHubRepo, type GitHubRepo } from "./github.js";
 
 /**
@@ -93,15 +94,31 @@ export function prepareClone(repo: RepoRef, workRoot: string, id: number, branch
 
 export interface RepoWorkResult { ok: boolean; dir: string; branch: string; base: string; sha: string | null; files: string[]; costUsd: number; summary: string; error?: string }
 
+/**
+ * The codebase overview the Cartographer and Surveyor already wrote (SF-20): each module's purpose,
+ * role and risks, about 1,000 tokens. The Builder starts from it instead of re-exploring the repo.
+ */
+export function overviewBlock(log: EventLog, projectId: number | null | undefined, maxChars = 4000): string {
+  if (projectId == null) return "";
+  let notes: ReturnType<typeof moduleNotes>;
+  try { notes = moduleNotes(log, projectId); } catch { return ""; }
+  if (!notes.size) return "";
+  const rank = (r: string) => (r === "core" ? 0 : r === "entry" ? 1 : r === "ui" ? 2 : r === "test" ? 5 : 3);
+  const lines = [...notes].sort((a, b) => rank(a[1].role) - rank(b[1].role)).map(([m, x]) => `- ${m} [${x.role}]: ${x.purpose}${x.risks.length ? ` (risks: ${x.risks.slice(0, 2).join("; ")})` : ""}`);
+  let out = "";
+  for (const l of lines) { if (out.length + l.length > maxChars) break; out += `\n${l}`; }
+  return `\n\nCodebase overview (from the Cartographer's map of this repo; start here, then read only what you need):${out}`;
+}
+
 /** One Builder pass on the ticket in the clone, then a commit on the branch. Never pushes. */
 export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: AgentBay | undefined, o: {
-  id: number; key: string; title: string; document: string; repo: RepoRef; workRoot: string; maxUsd: number; git?: (dir: string, ...args: string[]) => string;
+  id: number; key: string; title: string; document: string; repo: RepoRef; workRoot: string; maxUsd: number; git?: (dir: string, ...args: string[]) => string; projectId?: number | null;
 }): Promise<RepoWorkResult> {
   const branch = branchFor(o.key, o.title);
   const { dir, base } = prepareClone(o.repo, o.workRoot, o.id, branch, o.git);
   const b = bay?.crewFor("build")[0];
   const run = await runAgent(log, runtime, b?.id ?? "builder", {
-    prompt: `${o.document}\n\nYou are on branch ${branch} of a clone of ${o.repo.source}.`,
+    prompt: `${o.document}\n\nYou are on branch ${branch} of a clone of ${o.repo.source}.${overviewBlock(log, o.projectId)}`,
     model: b?.model ?? "sonnet",
     systemPrompt: `${b?.role.split("Station contract:")[0].trim() ?? "You are the Builder: you write working code."}\n\n${REPO_CONTRACT}`,
     budgetUsd: Math.min(o.maxUsd, b?.budgetUsd ?? o.maxUsd),
@@ -114,6 +131,10 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
   if (run.error || !run.result) return { ok: false, dir, branch, base, sha: null, files: [], costUsd: 0, summary: "", error: run.error ?? "no reply" };
   const blocks = parseFileBlocks(run.result.text);
   if (blocks.length) writeFiles(dir, blocks, { lockTests: false });
+  // The secret gate (SF-17): nothing that looks like a real key is committed, whatever wrote it.
+  const touched = git(dir, "status", "--porcelain", "--untracked-files=all").split("\n").map((l) => l.slice(3).trim().replace(/^"|"$/g, "")).filter(Boolean);
+  const hits = scanFiles(Object.fromEntries(touched.filter((f) => existsSync(join(dir, f))).map((f) => [f, readFileSync(join(dir, f), "utf8")])));
+  if (hits.length) return { ok: false, dir, branch, base, sha: null, files: touched, costUsd: run.result.costUsd, summary: "", error: `Not committed: the change holds what looks like a real secret.\n${describeSecrets(hits)}` };
   const sha = commitAll(dir, `${o.key}: ${o.title}\n\nWorked by SoftwareFactory's crew on branch ${branch}.`);
   const files = sha ? git(dir, "diff", "--name-only", `${base}..HEAD`).split("\n").filter(Boolean) : [];
   const summary = run.result.text.replace(/<<<\s*FILE[\s\S]*?(?:FILE\s*>>>|$)/g, "").trim().split("\n").filter(Boolean).slice(-6).join("\n");

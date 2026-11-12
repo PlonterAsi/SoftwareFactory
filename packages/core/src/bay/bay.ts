@@ -49,6 +49,8 @@ export interface AgentStats {
   state: "idle" | "thinking" | "blocked";
   current?: string;
   byVersion: Record<number, { calls: number; costUsd: number; pass: number; total: number }>;
+  /** Prompt-cache use (SF-18): input tokens read from cache, written to it, and all input tokens. hitRate = read / input. */
+  cache: { read: number; write: number; input: number; hitRate: number | null };
 }
 export interface BayState {
   agents: AgentView[];
@@ -152,7 +154,7 @@ export class AgentBay implements CrewSource {
   /** Per-agent numbers, all derived from the event log: calls, cost, verifier pass rate, rounds, live state. */
   stats(): Record<string, AgentStats> {
     const out: Record<string, AgentStats> = {};
-    const s = (id: string) => (out[id] ??= { calls: 0, failed: 0, costUsd: 0, avgUsd: 0, verdicts: { pass: 0, total: 0 }, passRate: null, runs: 0, avgRounds: null, lastAt: null, state: "idle", byVersion: {} });
+    const s = (id: string) => (out[id] ??= { calls: 0, failed: 0, costUsd: 0, avgUsd: 0, verdicts: { pass: 0, total: 0 }, passRate: null, runs: 0, avgRounds: null, lastAt: null, state: "idle", byVersion: {}, cache: { read: 0, write: 0, input: 0, hitRate: null } });
     const ver = (st: AgentStats, v: number) => (st.byVersion[v] ??= { calls: 0, costUsd: 0, pass: 0, total: 0 });
     for (const a of this.agents()) s(a.def.id);
     const started = new Map<number, { agent: string; version: number; station?: string; ts: string; factoryRun?: number; test?: boolean }>();
@@ -174,6 +176,11 @@ export class AgentBay implements CrewSource {
         st.costUsd += cost;
         const bv = ver(st, st0.version);
         bv.calls++; bv.costUsd += cost;
+        if (e.type === "agent.run.completed") {
+          st.cache.read += Number(p.cacheReadTokens ?? 0);
+          st.cache.write += Number(p.cacheWriteTokens ?? 0);
+          st.cache.input += Number(p.contextTokens ?? 0);
+        }
         if (e.type === "agent.run.failed") st.failed++;
         lastOutcome.set(st0.agent, e.type === "agent.run.failed" ? "failed" : "ok");
         if (st0.factoryRun != null) {
@@ -192,6 +199,7 @@ export class AgentBay implements CrewSource {
     for (const [id, st] of Object.entries(out)) {
       st.costUsd = Number(st.costUsd.toFixed(6));
       st.avgUsd = st.calls ? Number((st.costUsd / st.calls).toFixed(6)) : 0;
+      st.cache.hitRate = st.cache.input ? Number((st.cache.read / st.cache.input).toFixed(3)) : null;
       st.passRate = st.verdicts.total ? st.verdicts.pass / st.verdicts.total : null;
       st.runs = runsOf.get(id)?.size ?? 0;
       st.avgRounds = st.runs ? Number(((callsInRuns.get(id) ?? 0) / st.runs).toFixed(2)) : null;
