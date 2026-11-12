@@ -1627,3 +1627,47 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .fpage .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
 .fpage .tabs > * { white-space: nowrap; flex: none; }
 .fpage-rules { grid-template-columns: minmax(240px, 0.65fr) minmax(0, 1.5fr); }
+
+/* Factory Bridge (bridge/): the dashboard. Modes share the head and the status strip. */
+.fbridge { overflow-y: auto; }
+.fb-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+.fb-modes { display: flex; gap: 4px; background: var(--shell); border: 1px solid var(--line); border-radius: 10px; padding: 4px; }
+.fb-modes a { color: var(--ink-2); text-decoration: none; padding: 7px 13px; border-radius: 7px; font-size: 14px; transition: background 160ms var(--ease), color 160ms var(--ease); }
+.fb-modes a:hover { background: var(--hover); color: var(--ink); }
+.fb-modes a[aria-current] { background: var(--panel-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2); }
+.fb-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; margin: 8px 28px 14px; padding: 10px 14px; background: var(--shell); border: 1px solid var(--line); border-radius: 12px; }
+.fb-pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 5px 12px; font-size: 14px; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink-2); text-decoration: none; }
+.fb-pill.needs { border-color: var(--gate); color: var(--gate); background: var(--gate-dim); transition: background 160ms var(--ease); }
+.fb-pill.needs:hover { background: rgba(245, 177, 76, 0.2); }
+.fb-dia { width: 9px; height: 9px; transform: rotate(45deg); background: currentColor; display: inline-block; }
+.fb-stat { font-size: 14px; color: var(--muted); display: inline-flex; gap: 6px; align-items: baseline; }
+.fb-stat b { color: var(--ink); font-weight: 500; }
+.loom { display: grid; gap: 14px; padding: 0 28px 28px; }
+.loom-scroll { overflow-x: auto; min-width: 0; }
+.loom-svg { display: block; }
+.loom-lamp { transition: fill 180ms var(--ease), stroke 180ms var(--ease), opacity 180ms var(--ease); }
+.loom-token { transition: transform 240ms var(--ease); }
+.loom-lane { cursor: pointer; outline: none; }
+.loom-lane-bg { fill: transparent; transition: fill 140ms var(--ease); }
+.loom-lane:hover .loom-lane-bg, .loom-lane:focus-visible .loom-lane-bg { fill: var(--panel-2); }
+.loom-lane.wait .loom-lane-bg { fill: var(--gate-dim); }
+.loom-lane:focus-visible .loom-lane-bg { stroke: var(--accent); stroke-width: 2; }
+.loom-gate { border: 1px solid var(--gate); border-radius: 12px; background: var(--panel-2); padding: 12px 14px; display: grid; gap: 10px; }
+.loom-gate-head { display: flex; align-items: center; gap: 10px; }
+.loom-gate-head button { margin-left: auto; }
+.loom-board { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 14px; }
+.loom-board th { color: var(--muted); font-weight: 400; text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line-2); font-size: 13px; }
+.loom-board td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.loom-board tbody tr { cursor: pointer; }
+.loom-board tbody tr:hover td { background: var(--panel-2); }
+.loom-board tr.wait td { background: var(--gate-dim); }
+.loom-board tr.wait td:first-child { box-shadow: inset 3px 0 0 var(--gate); }
+.loom-st { display: inline-flex; align-items: center; gap: 7px; }
+.loom-st i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.loom-st.g i { background: var(--good); } .loom-st.b i { background: var(--bad); }
+.loom-st.n i { background: var(--gate); border-radius: 1px; transform: rotate(45deg); }
+.loom-glyphs { color: var(--agent); letter-spacing: 2px; }
+.loom-waited { color: var(--gate); }
+.loom-fuel { display: inline-block; width: 70px; height: 5px; background: var(--panel-2); border-radius: 3px; vertical-align: middle; margin-right: 8px; overflow: hidden; }
+.loom-fuel i { display: block; height: 100%; background: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .loom-lamp, .loom-token, .loom-lane-bg { transition: none; } }

@@ -61,3 +61,11 @@ Switch it on in **Systems → Layout → Foundry Glass** (kept per computer in `
 - The Whole factory screen is dissolved. Each part is its own page with a sidebar item: All builds (`#/factory`), Agents (`#/factory/bay`), Tickets (`#/factory/tickets`), Rules and ideas (`#/factory/order`, star map beside project rules, loose ideas and conflicts), Improve (`#/factory/improve`), Data vault (`#/factory/data`). Old links keep working.
 - Sidebar counts are neutral; only "needs you" counts (Needs you, conflicts) are amber.
 - Light theme stays a later step.
+
+## Factory Bridge (dashboard)
+
+Assaf asked for a next-generation dashboard (2026-11-12). A council produced three concepts (prototype: https://claude.ai/artifact/NsFb5giEUuWyYwCAKaa4U5); he chose all three as modes of one page, Signal Loom first. Code in `apps/bridge/src/bridge/`, route `#/bridge[/mode]`, sidebar item **Factory Bridge**, key `G` then `D`.
+
+- **Status strip** on every mode: what waits for you (amber, links to Needs you), agents working, builds running, spent today.
+- **Signal Loom** (`loom`): the factory floor for every build at once. One lane per build (all unfinished, then the latest finished, up to 8) through the eleven stations; station lamps light where an agent works with its glyph; a knot per fix round; the two Your OK signals and the lane turn amber while a build waits, and tapping the lane opens the shared approval bar in place. A departure board below sorts waiting builds first; any other row opens the run in its project. Drawn at the pane's real width (scrolls below 720px), redrawn only on events; elapsed times tick every 5 s.
+- Next: **Partitura** (`score`, one staff per agent, one note per call, Timetable toggle) and **Lantern Quarter** (`quarter`, projects as districts, agents as moons).

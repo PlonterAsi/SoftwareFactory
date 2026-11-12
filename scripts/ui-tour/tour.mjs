@@ -103,7 +103,14 @@ try {
     const panels = await page.$$eval('a[href^="#/p/"]', (as) => [...new Set(as.map((a) => a.getAttribute("href")))]);
     for (const h of panels.filter((h) => h.split("/").length === 4)) await visit(h, `${tag}-${h.split("/")[3]}`);
   }
-  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/bases", "bases"], ["#/factory", "all-builds"], ["#/factory/bay", "agents"], ["#/factory/tickets", "tickets"], ["#/factory/order", "rules-and-ideas"], ["#/factory/improve", "improve"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
+  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/bases", "bases"], ["#/bridge", "factory-bridge"], ["#/factory", "all-builds"], ["#/factory/bay", "agents"], ["#/factory/tickets", "tickets"], ["#/factory/order", "rules-and-ideas"], ["#/factory/improve", "improve"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
+  // The Factory Bridge's Signal Loom: tapping the waiting lane opens its approval bar.
+  current = "factory-bridge-gate";
+  await page.goto(`${BRIDGE}/#/bridge`);
+  await page.waitForTimeout(1000);
+  const lane = page.locator(".loom-lane.wait").first();
+  if (await lane.count()) { await lane.click(); await page.waitForTimeout(400); if (await page.locator(".loom-gate").count()) { await page.screenshot({ path: join(out, "factory-bridge-gate.png") }); shots.push("factory-bridge-gate"); } else problems.push("factory-bridge: tapping the waiting lane did not open its approval bar"); }
+  else problems.push("factory-bridge: no waiting lane on the Signal Loom");
   current = "systems";
   await page.goto(`${BRIDGE}/#/`);
   await page.waitForTimeout(800);

@@ -32,6 +32,7 @@ import { Helm, HelmButton } from "./shell/Helm";
 import { NeedsYou } from "./shell/NeedsYou";
 import { ShortcutSheet, useShortcuts } from "./shell/Shortcuts";
 import { BasesPage, useBases } from "./Bases";
+import { FactoryBridge } from "./bridge/FactoryBridge";
 
 export function App() {
   const f = useFactory();
@@ -142,7 +143,9 @@ export function App() {
         ) : <div className="fpage"><DataDeck store={store} /></div>}
     </ErrorBoundary>
   );
-  const pageInner = route.page === "needs"
+  const pageInner = route.page === "bridge"
+    ? <FactoryBridge mode={route.mode} factoryRuns={f.factoryRuns} runs={f.runs} crew={crew} projects={projects.list} projectOfRun={chatRoutes.factoryRuns} onShowRun={showRun} />
+    : route.page === "needs"
     ? <NeedsYou factoryRuns={f.factoryRuns} featuresWaiting={featuresWaiting} conflicts={open} ticketsForYou={ticketCounts?.you ?? 0} onShowRun={showRun} />
     : route.page === "bases"
     ? <BasesPage bases={bases.data} refresh={bases.refresh} />

@@ -10,11 +10,14 @@ import { useEffect, useState } from "react";
  *   #/brain                the Brain: the principles every loop follows
  *   #/bases                the factories this app hosts (open, create, rename, archive)
  *   #/factory[/view]       the whole factory (floor, bay, order, tickets, improve, data), as before projects
+ *   #/bridge[/mode]        the Factory Bridge dashboard (loom, score, quarter)
  *   #/needs                everything waiting on you (the new shell's first item)
  *   #/_kit                 the shared component kit (not linked; the UI tour shoots it)
  * The old #order, #bay and #data still open the factory views.
  */
 export type FactoryView = "factory" | "order" | "bay" | "data" | "tickets" | "improve";
+export type BridgeMode = "loom" | "score" | "quarter";
+const MODES: BridgeMode[] = ["loom", "score", "quarter"];
 export type Route =
   | { page: "home" }
   | { page: "project"; id: number; panel?: string; run?: number }
@@ -24,7 +27,8 @@ export type Route =
   | { page: "brain" }
   | { page: "bases" }
   | { page: "kit" }
-  | { page: "needs" };
+  | { page: "needs" }
+  | { page: "bridge"; mode: BridgeMode };
 
 const VIEWS: FactoryView[] = ["factory", "order", "bay", "data", "tickets", "improve"];
 
@@ -41,6 +45,7 @@ export function parse(hash: string): Route {
   if (parts[0] === "bases") return { page: "bases" };
   if (parts[0] === "_kit") return { page: "kit" };
   if (parts[0] === "needs") return { page: "needs" };
+  if (parts[0] === "bridge") return { page: "bridge", mode: MODES.includes(parts[1] as BridgeMode) ? (parts[1] as BridgeMode) : "loom" };
   if (parts[0] === "factory") return { page: "factory", view: VIEWS.includes(parts[1] as FactoryView) ? (parts[1] as FactoryView) : "factory" };
   return { page: "home" };
 }
@@ -53,6 +58,7 @@ export function href(r: Route): string {
   if (r.page === "bases") return "#/bases";
   if (r.page === "kit") return "#/_kit";
   if (r.page === "needs") return "#/needs";
+  if (r.page === "bridge") return r.mode === "loom" ? "#/bridge" : `#/bridge/${r.mode}`;
   if (r.page === "factory") return r.view === "factory" ? "#/factory" : `#/factory/${r.view}`;
   return "#/";
 }
