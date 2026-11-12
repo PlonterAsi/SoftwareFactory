@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { killTree } from "../launch/launcher.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -176,7 +177,7 @@ export function runTests(root: string, timeoutMs = 60_000): Promise<TestRun> {
     let out = "";
     let err = "";
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
+    const timer = setTimeout(() => { timedOut = true; killTree(child, true); }, timeoutMs);
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (err += d));
     child.on("close", (code) => {

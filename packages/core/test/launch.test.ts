@@ -8,6 +8,7 @@ import {
   EventLog, MockRuntime, Factory, createCore, createProject, detectProfiles, splitArgs, quoteArg, resolveInside, findLocalUrl, projectEnv, projectFolders,
   readUsage, parseSynopsis, browse,
 } from "../src/index.js";
+import { Launcher } from "../src/launch/launcher.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-launch-"));
 function folder(files: Record<string, string>) {
@@ -114,6 +115,33 @@ describe("launch: finding how to run a project", () => {
     expect(env.GITHUB_TOKEN_TEST).toBeUndefined();
     expect(env.PORT).toBe("4000");
     expect(env.PATH!.split(process.platform === "win32" ? ";" : ":").slice(0, 2)).toEqual([join("/p", "node_modules", ".bin"), "/opt/node/bin"]);
+  });
+});
+
+describe("launch: stopping what SF started", () => {
+  const web = () => folder({ "package.json": JSON.stringify({ type: "module", scripts: { start: "node server.js" } }), "server.js": WEB_SERVER });
+  const profileOf = (dir: string) => detectProfiles(dir).profiles[0];
+
+  it("stops the old build when a newer build of the same project starts", async () => {
+    const log = new EventLog(":memory:");
+    const l = new Launcher(log);
+    const a = web(), b = web();
+    const sa = await l.start({ projectId: 1, dir: a, profile: profileOf(a) });
+    const sb = await l.start({ projectId: 1, dir: b, profile: profileOf(b) });
+    expect(sb.id).not.toBe(sa.id);
+    await until(async () => l.view(sa.id)?.state === "stopped");
+    expect(l.running(1).map((s) => s.id)).toEqual([sb.id]);
+    l.stopAll();
+  });
+
+  it("stops a project's apps when it is archived", async () => {
+    const log = new EventLog(":memory:");
+    const l = new Launcher(log);
+    const a = web();
+    const s = await l.start({ projectId: 1, dir: a, profile: profileOf(a) });
+    log.append("project.updated", { projectId: 1, status: "archived" });
+    await until(async () => l.view(s.id)?.state === "stopped");
+    expect(l.running(1)).toEqual([]);
   });
 });
 
