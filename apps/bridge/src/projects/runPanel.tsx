@@ -253,14 +253,15 @@ function Stage({ id, onStop, recommended, onStart }: { id: number | null; onStop
   const [, tick] = useState(0);
   const [frameKey, setFrameKey] = useState(0);
   const [wide, setWide] = useState(false);
-  const [showConsole, setShowConsole] = useState(true);
+  // An app or pages fill the stage; the console is one press away (and shows by itself for tools).
+  const [consolePick, setShowConsole] = useState<boolean | null>(null);
   const [input, setInput] = useState("");
   const [inErr, setInErr] = useState<string | null>(null);
   const consoleRef = useRef<HTMLOListElement>(null);
   const stick = useRef(true);
   useEffect(() => { if (!s || !live(s)) return; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, [s]);
   useEffect(() => { const el = consoleRef.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [lines]);
-  useEffect(() => { setWide(false); setShowConsole(true); setInErr(null); }, [id]);
+  useEffect(() => { setWide(false); setShowConsole(null); setInErr(null); }, [id]);
 
   if (id == null || !s) {
     return (
@@ -276,6 +277,7 @@ function Stage({ id, onStop, recommended, onStart }: { id: number | null; onStop
     );
   }
   const url = s.url ? fullUrl(s.url) : null;
+  const showConsole = consolePick ?? !(url && live(s));
   const up = s.endedAt ? Date.parse(s.endedAt) - Date.parse(s.startedAt) : Date.now() - Date.parse(s.startedAt);
   async function send(e: FormEvent) {
     e.preventDefault();
@@ -297,7 +299,7 @@ function Stage({ id, onStop, recommended, onStart }: { id: number | null; onStop
             <button className="ghost tiny" onClick={() => setFrameKey((k) => k + 1)} title="Reload the page">↻</button>
             <span className="mono rn-url" title={url}>{url}</span>
             <button className="ghost tiny" onClick={() => launchApi.open(url).catch(() => window.open(url, "_blank"))} title="Open in your browser">Browser</button>
-            <button className="ghost tiny" onClick={() => setShowConsole((v) => !v)}>{showConsole ? "Hide console" : "Console"}</button>
+            <button className="ghost tiny" onClick={() => setShowConsole(!showConsole)}>{showConsole ? "Hide console" : "Console"}</button>
             <button className="ghost tiny" onClick={() => setWide((v) => !v)} aria-pressed={wide}>{wide ? "Shrink" : "Expand"}</button>
           </div>
           {live(s) ? <iframe key={`${s.id}-${frameKey}`} src={url} title={`${s.label} preview`} className="rn-frame" /> : <p className="empty">The app has stopped, so its page is gone. Start it again to see it.</p>}
