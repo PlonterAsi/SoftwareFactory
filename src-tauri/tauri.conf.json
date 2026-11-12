@@ -37,6 +37,11 @@
       "../packages/core/dist/": "core/",
       "../packages/core/package.json": "core/package.json",
       "../packages/core/plugin-examples/": "plugin-examples/"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
     }
   },
   "plugins": {

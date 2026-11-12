@@ -494,6 +494,13 @@ async function updatePhase() {
     const sig = await api("/api/signals", { method: "POST", body: JSON.stringify({ text: marker, source: "bridge" }) });
     check("a note is saved on the old version", sig.status === 201, JSON.stringify(sig.body).slice(0, 200));
     screenshot("5-old-version");
+    // A Node process left running from the app's own node.exe (an orphaned plugin or app
+    // server) locks the file. The installer must stop it rather than fail with
+    // "Error opening file for writing: ...\\node\\node.exe".
+    const stray = spawn(join(installDir, "node", "node.exe"), ["-e", "setInterval(() => {}, 1e9)"], { detached: true, stdio: "ignore", windowsHide: true });
+    stray.unref();
+    await sleep(1_000);
+    check("a stray process holds the bundled node.exe before the update", alive(stray.pid), `pid ${stray.pid}`);
 
     // The Bridge checks 5 s after opening, finds NEW, counts down 15 s (factory idle), then installs.
     const found = await until("the old version to ask for updates", async () => hits.some((u) => u.startsWith("/latest.json")), 90_000, 500);
@@ -514,6 +521,7 @@ async function updatePhase() {
     if (!back) { launch(findExe(installDir), "after-update"); await until("the updated core", health, 120_000, 1000); }
     const after = await health();
     check(`the installed app is now v${NEW}`, after?.appVersion === NEW, `appVersion ${after?.appVersion}`);
+    check("the installer stopped the stray node.exe instead of failing on the locked file", !alive(stray.pid), `pid ${stray.pid}; installer hook log: ${readTail(join(process.env.TEMP ?? "", "SoftwareFactory-installer.log")).trim().replace(/\r?\n/g, " | ")}`);
     await waitBridge(60_000);
     screenshot("8-updated");
     const notes = (await api("/api/signals")).body;

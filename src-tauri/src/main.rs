@@ -136,6 +136,21 @@ fn stop_core(app: &tauri::AppHandle) {
     let state = app.state::<Core>();
     let mut st = state.0.lock().unwrap();
     if let Some(mut old) = st.child.take() {
+        // The core starts its own Node processes (plugins, finished apps' servers, Claude Code).
+        // They run the same bundled node.exe, and an update cannot replace it while they live,
+        // so on Windows stop the whole tree, not only the core.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let _ = Command::new("taskkill")
+                .args(["/PID", &old.id().to_string(), "/T", "/F"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+        }
         let _ = old.kill();
         let _ = old.wait();
     }
@@ -276,9 +291,7 @@ fn main() {
         .expect("error while building SoftwareFactory")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                if let Some(mut child) = app.state::<Core>().0.lock().unwrap().child.take() {
-                    let _ = child.kill();
-                }
+                stop_core(app);
             }
         });
 }
