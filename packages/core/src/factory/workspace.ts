@@ -124,7 +124,12 @@ export function git(root: string, ...args: string[]): string {
 
 export function initRepo(root: string) {
   mkdirSync(root, { recursive: true });
-  if (!existsSync(join(root, ".git"))) git(root, "init", "-q", "-b", "main");
+  if (!existsSync(join(root, ".git"))) {
+    git(root, "init", "-q", "-b", "main");
+    // Files stay byte for byte as the agents wrote them: Git for Windows' default autocrlf would rewrite
+    // line endings on checkout and break the locked tests' fingerprint.
+    git(root, "config", "core.autocrlf", "false");
+  }
 }
 
 /** Commit everything; returns the short sha, or null when nothing changed. */

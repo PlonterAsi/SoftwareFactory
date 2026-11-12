@@ -90,7 +90,9 @@ export async function checkScreens(baseUrl: string, o: { browser?: string | null
   const browser = o.browser === undefined ? findBrowser() : o.browser;
   if (!browser) return { pass: true, skipped: "no browser on this computer (Edge, Chrome or Chromium)", screens: [] };
   const home = await dumpScreen(browser, `${baseUrl}/#/home`);
-  if (home.timedOut && !home.dom) return { pass: true, skipped: "the browser did not answer", browser, screens: [] };
+  // No output at all (timed out, or a browser that exits at once, as Edge does when started from Git Bash):
+  // a broken environment must not fail a good app.
+  if (!home.dom.trim()) return { pass: true, skipped: home.timedOut ? "the browser did not answer" : "the browser gave no output", browser, screens: [] };
   const screens: ScreenResult[] = [];
   const homeProblem = screenProblem(home.dom, home.errors);
   screens.push({ route: "home", ok: !homeProblem, ...(homeProblem ? { problem: homeProblem } : {}) });
@@ -100,7 +102,7 @@ export async function checkScreens(baseUrl: string, o: { browser?: string | null
     const forms = routes.filter((r) => /^e\/[^/]+$/.test(r)).map((r) => `${r}/new`);
     for (const route of [...routes, ...forms].slice(0, (o.max ?? 14) - 1)) {
       const s = await dumpScreen(browser, `${baseUrl}/#/${route}`);
-      if (s.timedOut && !s.dom) { screens.push({ route, ok: true, problem: "skipped: the browser did not answer" }); continue; }
+      if (!s.dom.trim()) { screens.push({ route, ok: true, problem: "skipped: the browser did not answer" }); continue; }
       const p = screenProblem(s.dom, s.errors);
       screens.push({ route, ok: !p, ...(p ? { problem: p } : {}) });
     }
