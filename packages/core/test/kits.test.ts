@@ -2,6 +2,7 @@ import { describe, it, expect, afterAll } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { AgentBay, BUILTIN_AGENTS, ClaudeCodeRuntime, EventLog } from "../src/index.js";
 import { configureKits, kitFor, library, listSkills } from "../src/bay/kits.js";
 import { bind } from "../src/factory/crew.js";
@@ -90,5 +91,18 @@ describe("per-agent kits: each agent loads only its own skills and MCP servers",
     new AgentBay(log);
     expect(bay.get("fixer")!.version).toBe(2);
     expect(bay.state().library.skills.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the bundled library is found where the installer puts it", () => {
+  it("looks next to the code first (installed: core/bay/kits.js and core/agent-skills), then two levels up (repo)", async () => {
+    const { bundledPath } = await import("../src/bay/kits.js");
+    const root = mkdtempSync(join(tmpdir(), "sf-install-"));
+    mkdirSync(join(root, "core", "bay"), { recursive: true });
+    mkdirSync(join(root, "core", "agent-skills"), { recursive: true });
+    const from = pathToFileURL(join(root, "core", "bay", "kits.js")).href;
+    expect(bundledPath("agent-skills", from).replace(/[\/]+$/, "")).toBe(join(root, "core", "agent-skills"));
+    // A repo layout (src/bay/kits.ts with packages/core/agent-skills) falls back to two levels up.
+    expect(bundledPath("agent-mcp.json", from)).toBe(join(root, "agent-mcp.json"));
   });
 });
