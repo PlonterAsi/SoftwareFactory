@@ -38,6 +38,27 @@ if (args[0] === "--stdin") { const t = readFileSync(0, "utf8"); console.log("wor
 else console.log("args:" + JSON.stringify(args));
 `;
 
+describe("launch: which build a project opens", () => {
+  it("opens the newest build of the project's own app first, and other ideas built inside it after", () => {
+    const log = new EventLog(":memory:");
+    const pid = createProject(log, { name: "Games", kind: "app" });
+    const build = (idea: string, name: string) => {
+      const run = log.append("factory.run.started", { idea, projectId: pid }).id;
+      const dir = folder({ "index.html": "<p>hi</p>" });
+      log.append("factory.plan", { run, plan: { name, summary: `${name} summary` }, dir });
+      log.append("factory.run.finished", { run, outcome: "shipped", dir, plan: name });
+      return run;
+    };
+    const v1 = build("a game guide app", "Game Mastery");
+    const other = build("a plan diagram for SF", "Plan Step Map");
+    const v2 = build("add Street Fighter 6 to the game guide", "Game Mastery");
+    const f = projectFolders(log, pid);
+    expect(f.map((x) => x.ref)).toEqual([v2, v1, other]);
+    expect(f.map((x) => x.own)).toEqual([true, true, false]);
+    expect(f[2].label).toMatch(/another idea built here/);
+  });
+});
+
 describe("launch: finding how to run a project", () => {
   it("finds the factory's bin/ tools, a web server script, and plain pages", () => {
     const cli = folder({ "package.json": JSON.stringify({ name: "wc", type: "module", scripts: { test: "node --test" } }), "bin/wc.js": ECHO_CLI, "src/count.js": "export const x = 1;\n" });
@@ -228,13 +249,10 @@ describe("launch: running a project from the Bridge", () => {
       const info = (await call(`/api/launch/projects/${pid}`)).body;
       expect(info.folders[0]).toMatchObject({ source: "run", ref: run, exists: true });
       expect(projectFolders(log, pid)[0]).toMatchObject({ label: "Word Counter", name: "Word Counter", own: true, app: "kit" });
-      // Another idea built while inside this project comes after the project's own build, and says so.
-      const other = f.start("a habit tracker with streaks", { autoApprove: true, projectId: pid });
-      await f.wait(other);
-      const two = projectFolders(log, pid);
-      expect(two.map((x) => x.ref)).toEqual([run, other]);
-      expect(two[1]).toMatchObject({ own: false });
-      expect(two[1].label).toMatch(/another idea built here/);
+      // A second build in this project (the mock planner names every plan the same) is the same app: the newest comes first.
+      const v2 = f.start("a CLI that counts words, version two", { autoApprove: true, projectId: pid });
+      await f.wait(v2);
+      expect(projectFolders(log, pid).map((x) => x.ref)).toEqual([v2, run]);
       // A factory build is an app: it starts with one press as a web app, no arguments.
       const app = info.profiles.find((p: any) => p.kind === "web");
       expect(app).toMatchObject({ id: "script:start", recommended: true });
