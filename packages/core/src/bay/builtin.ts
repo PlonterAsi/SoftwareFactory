@@ -66,12 +66,14 @@ export const CONTRACTS: Record<Slot, string> = {
 You hold one seat on the Council, which looks at a one-line idea before anything is planned. Give your seat's view, in at most 120 words in total.
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"take": "one or two sentences", "proposals": ["short concrete point"], "concerns": ["short risk"], "vote": "build", "scope": "small"}
-At most 4 proposals and 4 concerns. vote is "build" (plan it now), "reshape" (plan it with your proposals applied) or "drop" (should not be built). scope is "small", "medium" or "large".`,
+At most 4 proposals and 4 concerns. vote is "build" (plan it now), "reshape" (plan it with your proposals applied) or "drop" (should not be built). scope is "small", "medium" or "large".
+Every feature the person names in the idea is theirs to keep: propose how to make each one smaller or simpler, never to cut it or leave it for later.`,
   plan: `Station contract: plan.
 ${TARGET}
 ${APP_SHAPE}
 Model the idea as an app: the entities the person creates and manages (each with typed fields and realistic sample records), the flows they go through, and the views that show what the logic works out. An idea phrased as a script or a CLI ("a tool that renames photos", "convert a CSV") still becomes an app: what it works on becomes entities or a form, its options become fields, its results become records or a view, and its runs are kept in a history the person can browse.
 Design for testing: put the domain logic in pure functions exported from src/ modules so tests never need real binary files, network or the clock. The screens are thin layers over them.
+Every feature the idea names is in the plan, each in its smallest useful form; the Council's brief can shrink or reorder them, never drop them. If it truly cannot fit, say which one in "summary" so the person sees it at the plan gate.
 Keep it small: 1 to 4 entities, at most 3 views of its own, at most 4 source files besides src/schema.js and the page files (index.html, web/app.js, web/style.css), at most 8 acceptance criteria. Acceptance criteria are about the src/ logic; the app's screens are checked separately.
 "ui" describes the app in two or three sentences: its navigation, its own views, and what the person does first.
 "cli" is "" unless the idea explicitly asks for a command line; "examples" are then ready-to-run CLI inputs (at most 3), otherwise [].

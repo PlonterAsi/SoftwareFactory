@@ -84,6 +84,7 @@ export function briefText(b: CouncilBrief): string {
     sec("Agreed by two or more seats", b.agreed),
     sec("Proposals", b.proposals),
     sec("Concerns to design around", b.concerns),
+    "The features the person named in the idea stay in the plan: use the brief to make them smaller, not to drop them.",
   ].filter(Boolean).join("\n");
 }
 
