@@ -24,6 +24,10 @@ export function parseFileBlocks(text: string): FileBlock[] {
   let cur: { path: string; lines: string[] } | null = null;
   const flush = () => {
     if (!cur) return;
+    // A stray last line that is only the block's own path (or a half-written FILE marker) is not code:
+    // run 2366 locked a test file ending in "test/game-mastery.test.js", which throws on load.
+    const own = cur.path.replace(/^`|`$/g, "").trim();
+    while (cur.lines.length && (!cur.lines.at(-1)!.trim() || cur.lines.at(-1)!.trim().replace(/^`|`$/g, "") === own || /^(?:<<<|>>>)?\s*\/?FILE\b.*$/.test(cur.lines.at(-1)!.trim()))) cur.lines.pop();
     let content = cur.lines.join("\n");
     // Agents sometimes wrap the content in a code fence; drop it.
     const fenced = content.match(/^```[\w-]*\n([\s\S]*?)\n```\s*$/);
@@ -120,7 +124,12 @@ export function git(root: string, ...args: string[]): string {
 
 export function initRepo(root: string) {
   mkdirSync(root, { recursive: true });
-  if (!existsSync(join(root, ".git"))) git(root, "init", "-q", "-b", "main");
+  if (!existsSync(join(root, ".git"))) {
+    git(root, "init", "-q", "-b", "main");
+    // Files stay byte for byte as the agents wrote them: Git for Windows' default autocrlf would rewrite
+    // line endings on checkout and break the locked tests' fingerprint.
+    git(root, "config", "core.autocrlf", "false");
+  }
 }
 
 /** Commit everything; returns the short sha, or null when nothing changed. */
@@ -153,6 +162,9 @@ export default async function* reporter(source) {
       }) + "\\n";
     } else if (event.type === "test:stderr" || event.type === "test:stdout") {
       yield JSON.stringify({ kind: event.type.slice(5), message: String(d.message).slice(0, 1500) }) + "\\n";
+    } else if (event.type === "test:diagnostic") {
+      // Node's own notes: the counts at the end, but also errors no test owns (a throw after a test ended, a stray promise).
+      yield JSON.stringify({ kind: "diag", file: d.file, message: String(d.message).slice(0, 1500) }) + "\\n";
     }
   }
 }
@@ -165,6 +177,11 @@ function reporter(): string {
   }
   return reporterPath;
 }
+
+/** Node's closing counts ("tests 10", "pass 9"): not news to anyone. */
+const DIAG_COUNT = /^(tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) [\d.]+$/;
+/** What node --test says for a file that failed as a whole, with no detail of its own. */
+const GENERIC_FAIL = /^(test failed|failed)$/i;
 
 /** Run `node --test` in the project with a JSON-lines reporter, so each test is a cell in the grid. */
 export function runTests(root: string, timeoutMs = 60_000): Promise<TestRun> {
@@ -184,18 +201,24 @@ export function runTests(root: string, timeoutMs = 60_000): Promise<TestRun> {
       clearTimeout(timer);
       const cases: TestCase[] = [];
       const notes: string[] = [];
+      const diags: string[] = [];
       for (const line of out.split("\n")) {
         if (!line.startsWith("{")) continue;
         try {
           const j = JSON.parse(line);
           if (j.kind === "case") cases.push({ name: j.name, file: j.file ? posixRel(root, j.file.startsWith("file:") ? fileURLToPath(j.file) : j.file) : "", pass: j.pass, error: j.error, durationMs: j.durationMs ?? 0 });
           else if (j.kind === "stderr" || j.kind === "stdout") notes.push(j.message);
+          else if (j.kind === "diag" && !DIAG_COUNT.test(j.message)) diags.push(j.message);
         } catch { /* not ours */ }
       }
+      // A whole file that failed says only "test failed": what actually broke is in Node's diagnostics (an error
+      // thrown after the tests ended, an unhandled rejection) or on stderr. Without it the Fixer is blind (run 2366).
+      const why = [...diags, err.trim()].filter(Boolean).join("\n").slice(0, 1500);
+      for (const c of cases) if (!c.pass && why && (!c.error || GENERIC_FAIL.test(c.error))) c.error = `${c.error ?? "failed"}: ${why}`;
       const failed = cases.filter((c) => !c.pass).length;
       // A crash before any test ran (syntax error, missing module) still counts as a failure.
       if (!cases.length && code !== 0) cases.push({ name: "test suite loads", file: "", pass: false, error: (err + notes.join("\n")).slice(0, 2000) || `exit ${code}`, durationMs: 0 });
-      resolve({ cases, passed: cases.filter((c) => c.pass).length, failed: cases.filter((c) => !c.pass).length || failed, exitCode: code, timedOut, output: (notes.join("\n") + "\n" + err).trim().slice(0, 4000) });
+      resolve({ cases, passed: cases.filter((c) => c.pass).length, failed: cases.filter((c) => !c.pass).length || failed, exitCode: code, timedOut, output: [...diags, ...notes, err].join("\n").trim().slice(0, 4000) });
     });
   });
 }

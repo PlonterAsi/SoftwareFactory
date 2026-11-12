@@ -157,7 +157,7 @@ function appEnv(dir: string, extra: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * Start the app the way the Run tab's Start does (node server.js, no arguments), on a free port
  * and a scratch data folder, and ask it for its page and its data. Problems, as sentences.
  */
-export async function probeStart(dir: string, timeoutMs = 15_000): Promise<string[]> {
+export async function probeStart(dir: string, timeoutMs = 15_000, during?: (baseUrl: string) => Promise<string[]>): Promise<string[]> {
   if (!existsSync(join(dir, "server.js"))) return ["server.js is missing"];
   const data = mkdtempSync(join(tmpdir(), "sf-appcheck-"));
   const child = spawn(process.execPath, ["server.js"], { cwd: dir, env: appEnv(dir, { PORT: "0", APP_DATA_DIR: data }), stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -182,6 +182,8 @@ export async function probeStart(dir: string, timeoutMs = 15_000): Promise<strin
       const j = JSON.parse(db.text) as { data?: Record<string, unknown[]> };
       if (!j.data || !Object.values(j.data).some((l) => Array.isArray(l) && l.length)) problems.push("the started app has no sample data");
     }
+    // More checks against the running app (the screens in a real browser), while it is up.
+    if (during && !problems.length) problems.push(...await during(`http://127.0.0.1:${port}`));
     return problems;
   } catch (e) {
     return [`the app does not start with npm start: ${(e as Error).message}`];
@@ -192,11 +194,11 @@ export async function probeStart(dir: string, timeoutMs = 15_000): Promise<strin
 }
 
 /** The whole app check: what checkApp reads, then the app actually started once. */
-export async function checkAppLive(dir: string): Promise<AppCheck> {
+export async function checkAppLive(dir: string, during?: (baseUrl: string) => Promise<string[]>): Promise<AppCheck> {
   const a = checkApp(dir);
   // Starting it only makes sense when the files it needs are there.
   if (!a.problems.some((p) => /server\.js|src\/schema\.js|kit file/.test(p))) {
-    const started = await probeStart(dir);
+    const started = await probeStart(dir, 15_000, during);
     a.problems.push(...started);
     a.pass = a.problems.length === 0;
   }

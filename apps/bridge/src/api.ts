@@ -73,7 +73,7 @@ export type StationState = "idle" | "active" | "pass" | "fail" | "incomplete" | 
 export type Vote = "build" | "reshape" | "drop";
 export interface SeatView { agent: string; name: string; version: number; round: number; take?: { take: string; proposals: string[]; concerns: string[]; vote: Vote; scope: string }; error?: string }
 export interface CouncilBriefView { rounds: number; votes: Record<string, Vote>; outcome: Vote; agreed: string[]; proposals: string[]; concerns: string[] }
-export interface ReviewView { round: number; agent: string; verdict: "pass" | "fix"; findings: { severity: "high" | "low"; text: string }[] }
+export interface ReviewView { round: number; agent: string; verdict: "pass" | "fix"; findings: { severity: "high" | "low"; text: string }[]; /** Each acceptance criterion, checked by running the product (H8). */ criteria?: { text: string; pass: boolean; evidence: string }[] }
 export interface TestCaseView { name: string; file: string; pass: boolean; error?: string }
 /** A gate a run waits at. For a failed step: which one, how many tries, and whether the last try failed the same way. */
 export interface GateWaitView { gate: string; question: string; at: string; action?: string; kind?: "retry" | "council" | "rounds" | "budget"; station?: string; attempt?: number; error?: string; same?: boolean }
@@ -97,10 +97,18 @@ export interface FactoryRunView {
   fixRounds: number;
   council: { round: number; seats: SeatView[]; brief: CouncilBriefView }[];
   reviews: ReviewView[];
+  /** The engine's loop (H5, H6): every fix attempt, what it changed and what came of it, and each step up the ladder. */
+  loop: LoopEventView[];
   finished?: { outcome: "shipped" | "stopped" | "failed"; reason: string; totalUsd: number | null; agentCalls?: number; sha?: string; resumable?: boolean };
   /** Picked up again after the app closed: from which station, how many times, and whether on its own. */
   resumed?: { from: string; auto: boolean; count: number; at: string };
 }
+
+export type LoopEventView =
+  | { kind: "attempt"; at: string; round: number; agent: string; model: string; before: number; after: number; files: string[]; said: string; dispute?: string; ladder: string }
+  | { kind: "ladder"; at: string; from: string; to: string; reason: string; round: number }
+  | { kind: "relocked"; at: string; files: string[]; reason: string }
+  | { kind: "kept"; at: string; evidence: string; said: string };
 
 /** Fold factory events into one view per run. */
 export function foldRuns(events: SfEvent[]): FactoryRunView[] {
@@ -108,7 +116,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
   for (const e of events) {
     const p = e.payload ?? {};
     if (e.type === "factory.run.started") {
-      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], reviews: [] });
+      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], reviews: [], loop: [] });
       continue;
     }
     const r = runs.get(p.run ?? p.factoryRun);
@@ -123,7 +131,11 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         break;
       case "factory.plan": r.plan = p.plan; r.dir = p.dir; break;
       case "factory.council": r.council.push({ round: p.round, seats: p.seats, brief: p.brief }); break;
-      case "factory.review": r.reviews.push({ round: p.round, agent: p.agent, verdict: p.verdict, findings: p.findings }); break;
+      case "factory.review": r.reviews.push({ round: p.round, agent: p.agent, verdict: p.verdict, findings: p.findings, criteria: p.criteria }); break;
+      case "factory.attempt": r.loop.push({ kind: "attempt", at: e.ts, round: p.round, agent: p.agent, model: p.model, before: p.before, after: p.after, files: p.files ?? [], said: p.said ?? "", dispute: p.dispute, ladder: p.ladder }); break;
+      case "factory.ladder": r.loop.push({ kind: "ladder", at: e.ts, from: p.from, to: p.to, reason: p.reason, round: p.round }); break;
+      case "factory.tests.locked": if (p.relocked) r.loop.push({ kind: "relocked", at: e.ts, files: p.files ?? [], reason: p.reason ?? "" }); break;
+      case "factory.tests.disputed": r.loop.push({ kind: "kept", at: e.ts, evidence: p.evidence ?? "", said: p.said ?? "" }); break;
       case "factory.tests": r.tests.push({ round: p.round, passed: p.passed, failed: p.failed, cases: p.cases }); break;
       case "factory.files":
         for (const w of p.written ?? []) {

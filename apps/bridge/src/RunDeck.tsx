@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { FactoryRunView, SeatView, Vote } from "./api";
+import type { FactoryRunView, LoopEventView, SeatView, Vote } from "./api";
 
-type Tab = "council" | "plan" | "tests" | "files" | "review" | "visuals";
+type Tab = "council" | "plan" | "tests" | "loop" | "files" | "review" | "visuals";
 
 /** What the selected run produced, drawn instead of listed: task graph, test grid, file heat map, visual checks. */
 export function RunDeck({ run }: { run?: FactoryRunView }) {
@@ -15,6 +15,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
     ["council", `Council${lastCouncil ? ` · ${lastCouncil.brief.outcome}` : run?.stations.council?.state === "skipped" ? " · skipped" : ""}`],
     ["plan", `Plan${run?.plan ? ` · ${run.plan.tasks.length}` : ""}`],
     ["tests", `Tests${last ? ` · ${last.passed}/${last.passed + last.failed}` : ""}`],
+    ["loop", `Loop${run?.loop.length ? ` · ${run.loop.filter((l) => l.kind === "attempt").length}` : ""}`],
     ["files", `Files${fileCount ? ` · ${fileCount}` : ""}`],
     ["review", `Review${lastReview ? ` · ${lastReview.findings.length}` : ""}`],
     ["visuals", `Visuals${run?.visuals.length ? (vFail ? ` · ${vFail} missing` : " · all") : ""}`],
@@ -31,6 +32,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
         {!run && <div className="empty">Start a run to see its plan as a task graph, its tests as a grid and its files as a heat map.</div>}
         {run && tab === "plan" && <TaskGraph run={run} />}
         {run && tab === "tests" && <TestGrid run={run} />}
+        {run && tab === "loop" && <LoopView run={run} />}
         {run && tab === "files" && <HeatMap run={run} />}
         {run && tab === "visuals" && <Visuals run={run} />}
         {run && tab === "council" && <CouncilView run={run} />}
@@ -207,9 +209,39 @@ function ReviewView({ run }: { run: FactoryRunView }) {
       {run.reviews.map((r) => (
         <div key={r.round} className={`review-card ${r.verdict}`}>
           <div className="take-head"><strong>Round {r.round}</strong> <span className="mono muted">{r.agent}</span> <span className="vote">{r.verdict === "fix" ? "sent to the Fixer" : "pass"}</span></div>
+          {r.criteria?.length ? (
+            <ul className="criteria">{r.criteria.map((c, i) => <li key={i} className={c.pass ? "crit-pass" : "crit-fail"}><span className="kind">{c.pass ? "seen working" : "not met"}</span> {c.text}{c.evidence && <div className="muted small">{c.evidence}</div>}</li>)}</ul>
+          ) : null}
           {r.findings.length ? <ul>{r.findings.map((f, i) => <li key={i} className={`sev-${f.severity}`}><span className="kind">{f.severity}</span> {f.text}</li>)}</ul> : <div className="muted">No findings.</div>}
         </div>
       ))}
     </div>
+  );
+}
+
+const RUNG: Record<string, string> = { deeper: "Deeper fix on a stronger model", dispute: "Questioning a locked test", person: "Asking you", normal: "Back to normal fixes" };
+
+/** The engine's loop, drawn: each fix attempt (what it changed, failing before → after), each step up the ladder. */
+function LoopView({ run }: { run: FactoryRunView }) {
+  if (!run.loop.length) return <div className="empty">{run.fixRounds ? "Loading the loop…" : "When a test fails, every fix attempt shows here: what it changed, what the agent said, and whether the failures went down. A stall climbs a ladder (a deeper fix on a stronger model, then questioning a locked test) before you are asked."}</div>;
+  return (
+    <ol className="loop-list">
+      {run.loop.map((l: LoopEventView, i) => {
+        if (l.kind === "attempt") {
+          const trend = l.after < l.before ? "down" : l.after > l.before ? "up" : "flat";
+          return (
+            <li key={i} className={`loop-item attempt ${l.after === 0 ? "green" : trend}`}>
+              <div className="loop-head"><b>Round {l.round}</b> <span className="muted">{l.agent} · {l.model}</span> <span className={`loop-trend ${trend}`}>failing {l.before} → {l.after}</span></div>
+              <div className="loop-files">{l.files.length ? l.files.slice(0, 8).join(", ") : "changed nothing"}</div>
+              {l.said && <p className="loop-said">{l.said}</p>}
+              {l.dispute && <p className="loop-dispute">Disputed a test: {l.dispute}</p>}
+            </li>
+          );
+        }
+        if (l.kind === "ladder") return <li key={i} className="loop-item ladder"><b>{RUNG[l.to] ?? l.to}</b> <span className="muted">{l.reason}</span></li>;
+        if (l.kind === "relocked") return <li key={i} className="loop-item relocked"><b>Locked tests corrected and locked again</b> <span className="muted">{l.files.join(", ")}</span><p className="loop-said">{l.reason}</p></li>;
+        return <li key={i} className="loop-item kept"><b>The locked tests stand</b><p className="loop-said">{l.said || l.evidence}</p></li>;
+      })}
+    </ol>
   );
 }

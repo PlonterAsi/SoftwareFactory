@@ -40,7 +40,8 @@ export function visualCheck(log: EventLog, run: number, station: StationId, roun
   }
   if (station === "tests" || station === "build" || station === "fix") {
     const files = of("factory.files", (p) => p.station === station && sameRound(p)).at(-1)?.payload as any;
-    need(`${station}: files on the heat map (${files?.written?.length ?? 0})`, !!files?.written?.length);
+    // A fix round that changed nothing is drawn too: its reason is on the record and goes to the next round.
+    need(`${station}: files on the heat map (${files?.written?.length ?? 0})`, !!files?.written?.length || (station === "fix" && !!files?.noChange));
   }
   if (station === "test" || station === "fix") {
     const t = of("factory.tests", (p) => p.round === (round ?? 0)).at(-1)?.payload as any;

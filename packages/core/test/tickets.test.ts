@@ -283,7 +283,9 @@ describe("tickets: working inside an imported repo", () => {
     expect(builder.cwd).toBe(clone);
     // The Builder's own skill (frontend-design) comes along: its kit folder and the Skill tool.
     expect(builder.pluginDirs?.some((d) => /skills-[0-9a-f]{12}$/.test(d))).toBe(true);
-    expect(builder.tools).toEqual(["Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "Skill"]);
+    expect(builder.tools).toEqual(["Read", "Edit", "Write", "Glob", "Grep", "Bash", "WebFetch", "Skill"]);
+    // The workbench: a shell limited to the commands it needs to run the tests itself.
+    expect(builder.commands).toContain("npm test");
     expect(t.notes(a.id).at(-1)!.text).toMatch(/git fetch ".*" sf\/LA-1/);
     // A bug worked in a repo never closes by rule: no locked tests ran.
     expect(t.notes(a.id).some((n) => n.by === "qa-rule")).toBe(false);

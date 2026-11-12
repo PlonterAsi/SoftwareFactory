@@ -383,6 +383,23 @@ button.tiny { padding: 2px 8px; font-size: 13px; }
 .take-head { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; margin-bottom: 3px; }
 .vote { font: 600 12.5px var(--mono); }
 .reviews { display: flex; flex-direction: column; gap: 6px; }
+/* The engine's loop: fix attempts and the escalation ladder */
+.loop-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.loop-item { border: 1px solid var(--line-2); border-left: 3px solid var(--line-3); border-radius: 6px; padding: 8px 10px; font-size: 13.5px; }
+.loop-item.attempt.down, .loop-item.attempt.green { border-left-color: var(--good); }
+.loop-item.attempt.flat, .loop-item.attempt.up { border-left-color: var(--gate); }
+.loop-item.ladder { border-left-color: var(--bad); background: rgba(255, 107, 94, 0.06); }
+.loop-item.relocked, .loop-item.kept { border-left-color: var(--gate); }
+.loop-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.loop-trend { margin-left: auto; font: 600 12.5px var(--mono); }
+.loop-trend.down { color: var(--good); }
+.loop-trend.flat, .loop-trend.up { color: var(--gate); }
+.loop-files { font: 12.5px var(--mono); color: var(--muted); margin-top: 3px; word-break: break-all; }
+.loop-said { margin: 4px 0 0; white-space: pre-wrap; }
+.loop-dispute { margin: 4px 0 0; color: var(--gate); }
+.criteria { margin: 2px 0 6px; padding-left: 16px; }
+.crit-pass .kind { color: var(--good); }
+.crit-fail .kind { color: var(--bad); }
 .review-card ul { margin: 2px 0 0; padding-left: 16px; }
 .sev-high .kind { color: var(--bad); }
 .station.s-skipped { opacity: 0.7; border-style: dashed; }
