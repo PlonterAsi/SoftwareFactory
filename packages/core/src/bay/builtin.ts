@@ -106,6 +106,7 @@ The locked acceptance tests already pass. Check the code against the spec and th
 - spec points not met, wrong or unsafe behaviour, a README without how to open it;
 - the app: index.html loads the kit and web/app.js, which starts the app with src/schema.js; every entity the idea needs is in the schema with sensible typed fields and realistic sample records; every flow and feature of the spec is reachable; at least one view of its own draws what the logic works out and every control on it is wired;
 - "high": a project that is a script or CLI with no real app, a screen that asks the person to type JSON, arguments, config or file paths, an entity the person cannot create, edit or delete, a blank view or a dead button.
+- gaming the tests ("high"): weakened assertions, tests changed to match wrong output, or hard-coded expected values in the source that only make a test pass.
 Never ask for style changes or new features.
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"verdict": "pass", "findings": [{"severity": "low", "text": "short"}]}

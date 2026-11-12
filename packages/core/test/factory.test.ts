@@ -75,10 +75,11 @@ describe("factory loop", () => {
     expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Fix round 1", "Build: Word Counter", "App kit", "Acceptance tests (locked)", "Spec and plan: Word Counter"]);
 
     const tests = events(log, "factory.tests");
-    // Four locked tests, the app check and the secret gate (SF-17), one cell each.
-    expect(tests.map((t) => [t.round, t.passed, t.failed])).toEqual([[0, 5, 1], [1, 6, 0]]);
-    expect(tests[0].cases.at(-2)).toMatchObject({ name: expect.stringContaining("the app works"), pass: true });
-    expect(tests[0].cases.at(-1)).toMatchObject({ name: expect.stringContaining("no secrets"), pass: true });
+    // Four locked tests, the app check, the secret gate (SF-17) and the test integrity guard (SF-24), one cell each.
+    expect(tests.map((t) => [t.round, t.passed, t.failed])).toEqual([[0, 6, 1], [1, 7, 0]]);
+    expect(tests[0].cases.at(-3)).toMatchObject({ name: expect.stringContaining("the app works"), pass: true });
+    expect(tests[0].cases.at(-2)).toMatchObject({ name: expect.stringContaining("no secrets"), pass: true });
+    expect(tests[0].cases.at(-1)).toMatchObject({ name: expect.stringContaining("tests left intact"), pass: true });
     // What it makes is a real program: an app on the kit that starts with one press, full CRUD, no arguments to guess.
     expect(existsSync(join(fin.dir, "index.html"))).toBe(true);
     expect(existsSync(join(fin.dir, "server.js"))).toBe(true);

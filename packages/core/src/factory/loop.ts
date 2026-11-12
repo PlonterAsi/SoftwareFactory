@@ -3,6 +3,7 @@ import { recallBlock } from "../brain/recall.js";
 import { existsSync } from "node:fs";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
 import { fastGates } from "../safety/gates.js";
+import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
@@ -319,6 +320,9 @@ class Run {
   private dir = "";
   private plan!: Plan;
   private lockedHash = "";
+  /** The commit the tests were locked in, and how many cases the suite showed first (SF-24). Not kept across a resume. */
+  private lockedSha = "";
+  private lockedCases: number | undefined;
   private fixRounds = 0;
   private brief: CouncilBrief | null = null;
   /** A feature run: the plan that shipped, which the next version builds on. */
@@ -472,6 +476,7 @@ class Run {
     this.log.append("factory.files", { run: this.id, station: "tests", round: 1, ...res });
     const sha = commitAll(this.dir, "Acceptance tests (locked)");
     this.lockedHash = testsHash(this.dir);
+    this.lockedSha = git(this.dir, "rev-parse", "HEAD");
     this.log.append("factory.tests.locked", { run: this.id, hash: this.lockedHash, files: res.written.map((w) => w.path), sha });
   }
 
@@ -646,6 +651,14 @@ class Run {
     r.cases.push({ name: "no secrets in the code (API keys, tokens, private keys)", file: secrets[0]?.file ?? "", pass: !secrets.length, error: secrets.length ? describeSecrets(secrets) : undefined } as (typeof r.cases)[number]);
     if (secrets.length) { r.failed++; r.output = `Secret check:\n${describeSecrets(secrets)}\nRead keys from an environment variable instead.\n\n${r.output}`.slice(0, 4000); }
     else r.passed++;
+    // The test integrity guard (SF-24): deleted, moved or skipped tests fail the step like a failing test.
+    if (this.lockedSha) {
+      const gamed = testIntegrity(this.dir, this.lockedSha, { locked: this.lockedCases, ran: this.lockedCases === undefined ? undefined : r.cases.filter((c) => isLockedTest(c.file)).length });
+      r.cases.push({ name: "tests left intact (none deleted, moved or skipped)", file: "", pass: !gamed.length, error: gamed.length ? describeIntegrity(gamed) : undefined } as (typeof r.cases)[number]);
+      if (gamed.length) { r.failed++; r.output = `Test integrity:\n${describeIntegrity(gamed)}\nFix the code, not the tests.\n\n${r.output}`.slice(0, 4000); }
+      else r.passed++;
+      if (this.lockedCases === undefined) this.lockedCases = r.cases.filter((c) => isLockedTest(c.file)).length;
+    }
     this.log.append("factory.tests", { run: this.id, round, cases: r.cases, passed: r.passed, failed: r.failed, timedOut: r.timedOut });
     return r;
   }
