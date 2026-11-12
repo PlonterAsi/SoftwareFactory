@@ -1712,3 +1712,8 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .lq-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
 .lq-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 @media (prefers-reduced-motion: reduce) { .lq-lot, .lq-d, .fb-seg button { transition: none; } }
+.loom-st.s i { background: var(--muted); border-radius: 1px; }
+.lq-lot.stop { background: var(--muted); height: 100%; opacity: 0.6; }
+.fb-seg button:disabled { cursor: default; color: var(--muted); }
+.fb-seg button:disabled:hover { background: transparent; }
+.fb-seg button[aria-pressed="true"]:disabled { color: var(--ink); }

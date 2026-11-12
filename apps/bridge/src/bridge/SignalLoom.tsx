@@ -66,7 +66,7 @@ export function SignalLoom({ factoryRuns, runs, crew, projectOf, onShowRun, now 
   const cx = (i: number) => L + CW * i + CW / 2;
   const glyph = (id: string) => crew[id]?.avatar ?? "◆";
 
-  const stationBusy = (id: string) => [...new Set(runs.filter((a) => a.state === "running" && a.factoryRun != null && a.station === id).map((a) => a.agent))];
+  const stationBusy = (id: string): string[] => [...new Set(runs.filter((a) => a.state === "running" && a.factoryRun != null && a.station === id).map((a) => a.agent))];
   const anyWait = (id: string) => lanes.some((r) => isWaiting(r) && currentStation(r) === id);
 
   const dotFill = (s: StationState | undefined, wait: boolean) =>
@@ -99,8 +99,8 @@ export function SignalLoom({ factoryRuns, runs, crew, projectOf, onShowRun, now 
           {lanes.length === 0 && <text x={W / 2} y={HEAD + 36} textAnchor="middle" fontSize={14} fill="var(--muted)">No builds yet. Type an idea in the Helm (Ctrl K) and press Ctrl Enter to build it.</text>}
           {lanes.map((r, li) => {
             const y = HEAD + li * LANE + LANE / 2, at = currentStation(r), idx = IDX[at] ?? 0, wait = isWaiting(r);
-            const done = r.finished?.outcome === "shipped", failed = r.finished && !done;
-            const tone = wait ? "var(--gate)" : done ? "var(--good)" : failed ? "var(--bad)" : "var(--accent)";
+            const done = r.finished?.outcome === "shipped", failed = r.finished?.outcome === "failed", stopped = r.finished?.outcome === "stopped";
+            const tone = wait ? "var(--gate)" : done ? "var(--good)" : failed ? "var(--bad)" : stopped ? "var(--muted)" : "var(--accent)";
             const ag = working(r.run);
             const spentPct = Math.min(1, r.spentUsd / (r.maxUsd || 1));
             return (
@@ -116,7 +116,8 @@ export function SignalLoom({ factoryRuns, runs, crew, projectOf, onShowRun, now 
                 <line x1={cx(0)} y1={y} x2={cx(10)} y2={y} stroke="var(--line-2)" strokeWidth={2} />
                 <line x1={cx(0)} y1={y} x2={cx(idx)} y2={y} stroke={tone} strokeWidth={2.5} opacity={0.75} />
                 {LOOM_STATIONS.map(([id], i) => {
-                  const s = r.stations[id]?.state ?? (i < idx && id !== "council" && id !== "fix" ? "pass" : undefined);
+                  const raw = r.stations[id]?.state ?? (i < idx && id !== "council" && id !== "fix" ? "pass" : undefined);
+                  const s = r.finished && raw === "active" ? (failed ? "fail" : "idle") : raw;
                   const f = dotFill(s, wait && id === at);
                   return id.startsWith("gate")
                     ? <rect key={id} x={cx(i) - 5} y={y - 5} width={10} height={10} transform={`rotate(45 ${cx(i)} ${y})`} fill={f} />
@@ -130,7 +131,7 @@ export function SignalLoom({ factoryRuns, runs, crew, projectOf, onShowRun, now 
                 <g className="loom-token" style={{ transform: `translate(${cx(idx)}px, ${y}px)` }}>
                   <circle r={13} fill="var(--bg)" stroke={tone} strokeWidth={2} />
                   {ag.length > 0 && <text y={-20} textAnchor="middle" fontSize={14} fill="var(--agent)">{ag.map((a) => glyph(a.agent)).join("")}</text>}
-                  <text y={4.5} textAnchor="middle" fontSize={12} fill={tone} fontWeight={600}>{wait ? "!" : done ? "✓" : failed ? "×" : "▸"}</text>
+                  <text y={4.5} textAnchor="middle" fontSize={12} fill={tone} fontWeight={600}>{wait ? "!" : done ? "✓" : failed ? "×" : stopped ? "■" : "▸"}</text>
                   {wait && <text y={31} textAnchor="middle" fontSize={12.5} fill="var(--gate)">Tap to answer</text>}
                 </g>
               </g>
@@ -156,7 +157,7 @@ export function SignalLoom({ factoryRuns, runs, crew, projectOf, onShowRun, now 
                 <tr key={r.run} className={wait ? "wait" : ""} onClick={() => (wait ? setOpen(r.run) : onShowRun(r.run))}>
                   <td className="mono">#{r.run}</td>
                   <td>{projectOf(r.run) ?? runName(r)}</td>
-                  <td><span className={`loom-st ${wait ? "n" : r.finished ? (r.finished.outcome === "shipped" ? "g" : "b") : "w"}`}><i />{wait ? "Waiting for your OK" : r.finished ? (r.finished.outcome === "shipped" ? "Shipped" : r.finished.outcome === "stopped" ? "Stopped" : "Failed") : LABEL[at] ?? at}</span></td>
+                  <td><span className={`loom-st ${wait ? "n" : r.finished ? (r.finished.outcome === "shipped" ? "g" : r.finished.outcome === "stopped" ? "s" : "b") : "w"}`}><i />{wait ? "Waiting for your OK" : r.finished ? (r.finished.outcome === "shipped" ? "Shipped" : r.finished.outcome === "stopped" ? "Stopped" : "Failed") : LABEL[at] ?? at}</span></td>
                   <td>{ag.length ? <><span className="loom-glyphs">{ag.map((a) => glyph(a.agent)).join("")}</span> {ag.map((a) => crew[a.agent]?.name ?? a.agent).join(", ")}</> : <span className="muted">none</span>}</td>
                   <td className="mono">{end ? fmtDur(end - started) : "done"}{wait && waitedMs > 0 && <span className="loom-waited"> · waiting {fmtDur(waitedMs)}</span>}</td>
                   <td className="mono">{r.fixRounds}/{r.maxFixRounds}</td>

@@ -52,7 +52,7 @@ export function LanternQuarter({ projects, factoryRuns, runs, agents, stats, pro
               <div className="lq-street" aria-label={latest ? `Latest build at ${at}` : "No builds yet"}>
                 {LOOM_STATIONS.map(([id, label], i) => {
                   const s = latest?.stations[id]?.state;
-                  const c = !latest ? "" : wait && i === atIdx ? "ask" : s === "active" ? "on" : s === "fail" ? "bad" : s === "pass" || (latest.finished?.outcome === "shipped" && s !== "skipped" && s !== "idle" && s != null) || (i < atIdx && s !== "skipped" && id !== "fix" && id !== "council") ? "done" : "";
+                  const c = !latest ? "" : wait && i === atIdx ? "ask" : s === "active" ? (latest.finished ? (latest.finished.outcome === "failed" ? "bad" : "stop") : "on") : s === "fail" ? "bad" : s === "pass" || (latest.finished?.outcome === "shipped" && s !== "skipped" && s !== "idle" && s != null) || (i < atIdx && s !== "skipped" && id !== "fix" && id !== "council") ? "done" : "";
                   return <i key={id} className={`lq-lot ${c}${id.startsWith("gate") ? " gate" : ""}`} title={label} />;
                 })}
               </div>
@@ -87,7 +87,7 @@ export function LanternQuarter({ projects, factoryRuns, runs, agents, stats, pro
           );
         })}
       </div>
-      <div className="lq-legend"><span><i style={{ background: "var(--accent)" }} />working now</span><span><i style={{ background: "rgba(143,212,122,.5)" }} />station done</span><span><i style={{ background: "var(--gate)" }} />waiting for your OK</span><span><i style={{ background: "var(--bad)" }} />bug ticket</span><span><i style={{ background: "var(--agent)" }} />agent spend</span></div>
+      <div className="lq-legend"><span><i style={{ background: "var(--accent)" }} />working now</span><span><i style={{ background: "rgba(143,212,122,.5)" }} />station done</span><span><i style={{ background: "var(--gate)" }} />waiting for your OK</span><span><i style={{ background: "var(--muted)" }} />stopped there</span><span><i style={{ background: "var(--bad)" }} />failed or bug ticket</span><span><i style={{ background: "var(--agent)" }} />agent spend</span></div>
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { LOOM_STATIONS } from "./SignalLoom";
  * build down the stations, so a fix loop shows as a sawtooth.
  */
 type Win = "fit" | "1h" | "24h" | "all";
-const WINS: [Win, string][] = [["fit", "Latest work"], ["1h", "Last hour"], ["24h", "24 hours"], ["all", "All"]];
+const WINS: [Win, string][] = [["fit", "Work sessions"], ["1h", "Last hour"], ["24h", "24 hours"], ["all", "All"]];
 const ROWS = LOOM_STATIONS.filter(([id]) => ["council", "plan", "tests", "build", "review", "fix"].includes(id));
 const TINTS = ["var(--accent)", "var(--ink-2)", "var(--good)", "var(--agent)", "#7fb4ff"];
 
@@ -31,14 +31,31 @@ export function Partitura({ runs, agents, factoryRuns, now, onShowRun }: {
     const a = Date.parse(r.startedAt);
     return { ...r, a, b: r.state === "running" ? now : a + Math.max(r.durationMs ?? 0, 3000) };
   }), [runs, now]);
-  // Latest work: the window that holds the last 40 calls, so recent work fills the score.
+  // Work sessions: calls with less than 20 minutes between them belong together. The default
+  // window is the latest session, so a burst of work fills the score instead of shrinking to dots.
   const [win, setWin] = useState<Win>("fit");
-  const recent = [...calls].sort((p, q) => q.a - p.a).slice(0, 40);
+  const sessions = useMemo(() => {
+    const out: { from: number; to: number; count: number }[] = [];
+    for (const c of [...calls].sort((p, q) => p.a - q.a)) {
+      const s = out[out.length - 1];
+      if (s && c.a - s.to < 20 * 60e3) { s.to = Math.max(s.to, c.b); s.count++; } else out.push({ from: c.a, to: c.b, count: 1 });
+    }
+    return out;
+  }, [calls]);
+  const [pick, setPick] = useState<number | null>(null);
+  const si = pick == null || pick >= sessions.length ? sessions.length - 1 : pick;
+  const sess = sessions[si];
   const firstAt = calls.length ? Math.min(...calls.map((c) => c.a)) : now - 3600e3;
   const lastAt = calls.length ? Math.max(...calls.map((c) => c.b)) : now;
-  const fitFrom = recent.length ? Math.min(...recent.map((c) => c.a)) : now - 3600e3;
-  const to = win === "fit" ? Math.max(lastAt, Math.min(now, lastAt + 0.1 * Math.max(60e3, lastAt - fitFrom))) : Math.max(now, lastAt);
-  const from = win === "1h" ? now - 3600e3 : win === "24h" ? now - 86400e3 : win === "fit" ? fitFrom - 0.04 * Math.max(60e3, to - fitFrom) : firstAt - 60e3;
+  let from: number, to: number;
+  if (win === "fit" && sess) {
+    const pad = Math.max(10e3, (sess.to - sess.from) * 0.04);
+    from = sess.from - pad;
+    to = si === sessions.length - 1 && now - sess.to < 20 * 60e3 ? Math.max(now, sess.to) + pad : sess.to + pad;
+  } else {
+    to = Math.max(now, lastAt);
+    from = win === "1h" ? now - 3600e3 : win === "24h" ? now - 86400e3 : firstAt - 60e3;
+  }
   const span = Math.max(60e3, to - from);
   const shown = calls.filter((c) => c.b >= from && c.a <= to);
 
@@ -128,6 +145,13 @@ export function Partitura({ runs, agents, factoryRuns, now, onShowRun }: {
         <span className="fb-seg" role="group" aria-label="Time window">
           {WINS.map(([w, label]) => <button key={w} aria-pressed={win === w} onClick={() => setWin(w)}>{label}</button>)}
         </span>
+        {win === "fit" && sessions.length > 1 && (
+          <span className="fb-seg" role="group" aria-label="Session">
+            <button disabled={si <= 0} onClick={() => setPick(si - 1)} aria-label="Earlier session">‹ Earlier</button>
+            <button disabled aria-pressed="true">{si + 1} of {sessions.length}</button>
+            <button disabled={si >= sessions.length - 1} onClick={() => setPick(si + 1)} aria-label="Later session">Later ›</button>
+          </span>
+        )}
         <span className="muted">{shown.length} agent call{shown.length === 1 ? "" : "s"} · <span className="mono">${shown.reduce((s, c) => s + (c.costUsd ?? 0), 0).toFixed(3)}</span></span>
       </div>
       <div className="loom-scroll" ref={box}>
