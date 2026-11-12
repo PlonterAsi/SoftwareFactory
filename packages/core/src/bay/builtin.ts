@@ -28,7 +28,8 @@ export const KIT_OWNED = ["server.js", "web/kit/db.js", "web/kit/store.js", "web
 export const APP_SHAPE = `Every project is an application on the SoftwareFactory app kit. The core writes the kit into the project and rewrites it before every test run: ${KIT_OWNED.join(", ")}. It gives, with no code from the crew:
 - a server the person starts with one press (npm start, no arguments) that serves the screens and keeps all data in data/db.json, with a JSON API for every entity;
 - a left navigation; for every entity a searchable, sortable list, a create and edit form with validation, and delete with confirmation (full CRUD);
-- an Overview, and a System view that shows every entity and field, every flow, every feature, the activity history of changes, backup and restore, and the source files.
+- an Overview, and a System view that shows every entity and field, every flow, every feature, the activity history of changes, backup and restore, and the source files;
+- agents: when the idea needs research, facts from the web or judgment plain code cannot do (look a topic up, summarize, sort by meaning), the app asks one of the person's agents through its own server. From a view: fetch("api/_agent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: "words", input: data }) }) answers { text, json (when the agent answered with a json block), costUsd } or an { error } to show. In api.js: await ctx.ask(task, input). The agent (the Researcher by default) searches the web; SoftwareFactory must be open. Call it only when the person presses a button, show that it is working, then save what came back as records the person can edit. Build the task text and turn the answer into records in pure src/ functions, so tests never need the network.
 The crew writes the app's model (src/schema.js: entities with typed fields and sample records, flows, features), its domain logic (pure functions in src/), and its own views (a dashboard, board, calendar or chart that shows what the logic works out).`;
 
 /** The full build target: what the Builder and Fixer write, file by file. */
@@ -53,7 +54,7 @@ Never write or change the kit files. You write:
 - index.html: <link rel="stylesheet" href="web/kit/kit.css"> then <link rel="stylesheet" href="web/style.css">, a <div id="app"></div>, and <script type="module" src="web/app.js"></script>. Plain HTML, CSS and JavaScript: no frameworks, no CDN, nothing from the internet, no build step.
 - web/style.css: the app's own look on top of the kit (may be short).
 - package.json: { "name": "<slug>", "type": "module", "scripts": { "start": "node server.js", "test": "node --test" } }.
-- api.js only when the idea truly needs the local disk or the operating system: export async function handle(req, res, url, ctx), returning true when it answered (ctx = { db, schema, save, send, body, root }); its routes live under /api/ and the views call them with fetch. Folders and files are chosen in the view, never typed by the person as arguments.
+- api.js only when the idea truly needs the local disk or the operating system: export async function handle(req, res, url, ctx), returning true when it answered (ctx = { db, schema, save, send, body, root, ask }); its routes live under /api/ and the views call them with fetch. Folders and files are chosen in the view, never typed by the person as arguments.
 - A command-line tool (bin/<name>.js) only when the idea explicitly asks for scripting, and then next to the app, never instead of it.
 Never make the person type JSON, arguments or file paths: no text box whose content is parsed as JSON, no screen that asks for a config file.`;
 
@@ -216,6 +217,12 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     description: "Reads the code map of an imported repo and suggests the fixes and improvements that matter most.",
     sample: "Repo: 40 files, 3 modules (src/api 900 lines, src/db 400 lines, web 1200 lines). Health: no tests, no CI, .env committed.",
     prompt: "You are the Surveyor of SoftwareFactory. You look at a code map like a senior engineer joining the team: what is risky, what is missing, what would pay off first.",
+  },
+  {
+    id: "researcher", name: "Researcher", avatar: "⌘", station: "none", model: "haiku", budgetUsd: 0.15, plugins: [], skills: [], tools: ["WebSearch", "WebFetch"],
+    description: "Works for the apps the factory built: researches a topic on the web and answers in the data the app asks for.",
+    sample: "Research the game Hollow Knight: its genre, three beginner tips with source links, and five in-game terms with short definitions. Answer as JSON.",
+    prompt: "You are the Researcher of SoftwareFactory, working for an app the factory built. You search the web, read the best current sources, and answer with what the app asked for, in its shape, with a source link for every fact that came from a page. You say when sources disagree or are thin.",
   },
 ];
 

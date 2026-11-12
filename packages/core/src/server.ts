@@ -28,6 +28,7 @@ import { PluginHost } from "./plugins/host.js";
 import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
 import { brainRoute } from "./brain/routes.js";
 import { DropFolder } from "./bridge/drop.js";
+import { askForApp } from "./factory/appagent.js";
 import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
 import { GitHub, parseGitHubRepo } from "./tickets/github.js";
 import { linkToProject } from "./projects/service.js";
@@ -259,6 +260,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
           pluginDirs: o.pluginDirs.length ? o.pluginDirs : undefined,
         }, { agentVersion: o.version, station: "overseer", ...(projectId != null ? { projectId } : {}) });
         return json(res, run.error ? 502 : 200, { ...run, suggestion: run.result ? buildSuggestion(run.result.text).build : undefined });
+      }
+      if (req.method === "POST" && url.pathname === "/api/apps/agent") {
+        // An app the factory built asks one of your agents (the Researcher by default) for work plain code cannot do.
+        // Only app servers on this machine (no browser origin) or SoftwareFactory's own pages may spend on it.
+        if (origin && !/^https?:\/\/(tauri\.localhost|localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return json(res, 403, { error: "App agents answer apps on this computer only" });
+        const r = await askForApp(log, runtime, bay, await readJson(req));
+        return json(res, r.status, r.body);
       }
       if (req.method === "POST" && url.pathname === "/api/factory/runs") {
         const body = await readJson(req);
