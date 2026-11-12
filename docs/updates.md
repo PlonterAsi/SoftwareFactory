@@ -59,3 +59,16 @@ A private repo also means GitHub Actions minutes count: 2,000 a month free, and 
 - The public key is committed in `src-tauri/tauri.conf.json`.
 - The private key is the `TAURI_SIGNING_PRIVATE_KEY` repository secret. It has no password, so `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` stays unset. Keep an offline copy: if the key is lost, installed apps can no longer verify updates, and everyone needs one manual install of a build with a new public key.
 - To rotate the key: generate a new pair with `npx tauri signer generate --ci -p "" -w softwarefactory-updater.key`, put the new public key in `tauri.conf.json`, and set the secret. Apps installed before the rotation need one manual install.
+
+## Locked node.exe
+
+The installer replaces the bundled `node\node.exe`. Windows will not let it while any process
+runs that file (the core, a plugin, a finished app's server, Claude Code started through
+`cli.js`). Two guards keep updates from stopping with "Error opening file for writing":
+
+- The shell stops the core's whole process tree (`taskkill /T`) before it hands over to the
+  installer, and when the app closes.
+- The NSIS installer runs `src-tauri/windows/hooks.nsh` before it copies files (and before an
+  uninstall): it stops every process whose executable is this install's `node\node.exe`, and
+  nothing else. The smoke test's update step leaves such a process running on purpose and
+  checks the update still goes through.
