@@ -11,6 +11,9 @@
  *   station: plan
  *   budget-usd: 0.2
  *   plugins: []
+ *   skills: []
+ *   tools: []
+ *   mcp: []
  *   ---
  *   You are the Planner of SoftwareFactory. ...
  */
@@ -33,10 +36,12 @@ export interface AgentDef {
   budgetUsd: number;
   /** Claude Code plugin folders this agent loads. Empty = lean: nothing extra is loaded. */
   plugins: string[];
-  /** Skill packs (SKILL.md names) the agent relies on; loaded through its plugins. */
+  /** Skills (names in the skills library, bay/kits.ts) the agent loads: only these, through its own small plugin folder. */
   skills: string[];
   /** Tools the agent may use. Empty = answers in text only (the cheapest and safest). */
   tools: string[];
+  /** MCP servers (names in <data>/mcp-servers.json) this agent loads. Empty = none. */
+  mcp: string[];
   /** A sample task for test runs in the Bay. */
   sample: string;
   /** The agent's own instructions: who it is and how it works. The station contract is added by the core. */
@@ -51,9 +56,9 @@ export function slugify(s: string): string {
 
 const FIELDS: [keyof AgentDef, string][] = [
   ["name", "name"], ["id", "id"], ["avatar", "avatar"], ["description", "description"], ["station", "station"], ["model", "model"],
-  ["budgetUsd", "budget-usd"], ["plugins", "plugins"], ["skills", "skills"], ["tools", "tools"], ["sample", "sample"],
+  ["budgetUsd", "budget-usd"], ["plugins", "plugins"], ["skills", "skills"], ["tools", "tools"], ["mcp", "mcp"], ["sample", "sample"],
 ];
-const LISTS = new Set<keyof AgentDef>(["plugins", "skills", "tools"]);
+const LISTS = new Set<keyof AgentDef>(["plugins", "skills", "tools", "mcp"]);
 
 /** Check and clean an agent definition. Throws with a plain message on anything unusable. */
 export function normalizeAgent(raw: Partial<AgentDef> & Record<string, unknown>): AgentDef {
@@ -78,6 +83,7 @@ export function normalizeAgent(raw: Partial<AgentDef> & Record<string, unknown>)
     plugins: list(raw.plugins),
     skills: list(raw.skills),
     tools: list(raw.tools),
+    mcp: list(raw.mcp),
     sample: String(raw.sample ?? "").trim().slice(0, 500),
     prompt,
   };
@@ -127,7 +133,7 @@ export function parseAgentFile(text: string): AgentDef {
     name: display, id: scalar(head.id) ?? name, avatar: scalar(head.avatar), description: scalar(head.description),
     station: (scalar(head.station) ?? "none") as HomeStation, model: scalar(head.model),
     budgetUsd: head["budget-usd"] !== undefined ? Number(scalar(head["budget-usd"])) : undefined,
-    plugins: list(head.plugins), skills: list(head.skills), tools: list(head.tools), sample: scalar(head.sample), prompt: m[2],
+    plugins: list(head.plugins), skills: list(head.skills), tools: list(head.tools), mcp: list(head.mcp), sample: scalar(head.sample), prompt: m[2],
   });
 }
 

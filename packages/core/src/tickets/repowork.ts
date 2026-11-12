@@ -106,7 +106,9 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     systemPrompt: `${b?.role.split("Station contract:")[0].trim() ?? "You are the Builder: you write working code."}\n\n${REPO_CONTRACT}`,
     budgetUsd: Math.min(o.maxUsd, b?.budgetUsd ?? o.maxUsd),
     pluginDirs: b?.pluginDirs.length ? b.pluginDirs : undefined,
-    tools: TOOLS,
+    // The working-copy tools, plus the Builder's own skills and MCP servers.
+    tools: [...new Set([...TOOLS, ...(b?.tools ?? [])])],
+    mcpConfig: b?.mcpConfig,
     cwd: dir,
   }, { agentVersion: b?.version, station: "repo" });
   if (run.error || !run.result) return { ok: false, dir, branch, base, sha: null, files: [], costUsd: 0, summary: "", error: run.error ?? "no reply" };

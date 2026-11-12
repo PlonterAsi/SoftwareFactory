@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SLOTS, SLOT_LABEL, bayApi, type AgentDef, type AgentStats, type AgentView, type BayState, type BayTest, type Slot } from "./api";
+import { SLOTS, SLOT_LABEL, bayApi, type AgentDef, type AgentStats, type AgentView, type BayLibrary, type BayState, type BayTest, type Slot } from "./api";
 
 /**
  * The Agent Bay: every worker is a crew card (avatar, state, current task, cost).
@@ -161,7 +161,7 @@ function AgentPanel({ a, bay, onSelect, onError, onAssign }: { a: AgentView; bay
         <div className="ap-title">
           <div className="ap-name">{a.def.name} <span className="mono muted">v{a.version}{a.builtin ? " · built-in" : ""}{a.retired ? " · retired" : ""}</span></div>
           <div className="muted ap-desc">{a.def.description || "No description yet."}</div>
-          <div className="mono ap-meta"><span className={`model m-${a.def.model}`}>{a.def.model}</span> cap ${a.def.budgetUsd.toFixed(2)}/call · {a.def.plugins.length ? `${a.def.plugins.length} plugin${a.def.plugins.length > 1 ? "s" : ""}` : "lean (no plugins)"} · {working.length ? `on ${working.map((s) => SLOT_LABEL[s]).join(", ")}` : "on the bench"}</div>
+          <div className="mono ap-meta"><span className={`model m-${a.def.model}`}>{a.def.model}</span> cap ${a.def.budgetUsd.toFixed(2)}/call · {loadout(a.def)} · {working.length ? `on ${working.map((s) => SLOT_LABEL[s]).join(", ")}` : "on the bench"}</div>
           {home && (homeIds.length < homeSeats
             ? <button className="sm" onClick={() => onAssign(home, [...homeIds, a.def.id])}>Seat it on {SLOT_LABEL[home]}</button>
             : <span className="muted">{SLOT_LABEL[home]} is full ({homeSeats} seat{homeSeats > 1 ? "s" : ""}): pick a seat on the station board to swap it in.</span>)}
@@ -172,7 +172,7 @@ function AgentPanel({ a, bay, onSelect, onError, onAssign }: { a: AgentView; bay
           <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "tab on" : "tab"} onClick={() => setTab(id)}>{label}</button>)}
       </div>
       <div className="ap-body">
-        {tab === "edit" && <Editor a={a} models={bay.models} onSelect={onSelect} onError={onError} />}
+        {tab === "edit" && <Editor a={a} models={bay.models} lib={bay.library} onSelect={onSelect} onError={onError} />}
         {tab === "versions" && <Versions a={a} onError={onError} />}
         {tab === "tests" && <Tests a={a} tests={tests} onError={onError} />}
         {tab === "stats" && <Stats a={a} st={st} />}
@@ -183,11 +183,35 @@ function AgentPanel({ a, bay, onSelect, onError, onAssign }: { a: AgentView; bay
 
 const list = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
 
-function Editor({ a, models, onSelect, onError }: { a: AgentView; models: string[]; onSelect: (id: string) => void; onError: (e: string) => void }) {
-  const [d, setD] = useState<AgentDef>(a.def);
+/** What an agent loads, in one line: lean, or its skills, tools, MCP servers and plugins. */
+function loadout(d: AgentDef): string {
+  const n = (k: number, one: string) => `${k} ${one}${k > 1 ? "s" : ""}`;
+  const parts = [d.skills.length && n(d.skills.length, "skill"), d.tools.length && n(d.tools.length, "tool"), d.mcp?.length && n(d.mcp.length, "MCP server"), d.plugins.length && n(d.plugins.length, "plugin")].filter(Boolean);
+  return parts.length ? `loads ${parts.join(", ")}` : "lean (loads nothing extra)";
+}
+
+/** Tick boxes for one list of an agent's loadout; names it has that the library lacks stay visible, marked missing. */
+function Picks({ label, hint, chosen, options, onChange }: { label: string; hint: string; chosen: string[]; options: { name: string; note: string }[]; onChange: (v: string[]) => void }) {
+  const all = [...options, ...chosen.filter((c) => !options.some((o) => o.name === c)).map((name) => ({ name, note: "not found: it will be left out" }))];
+  return (
+    <fieldset className="picks">
+      <legend>{label} <span className="muted">{hint}</span></legend>
+      {all.length === 0 && <span className="muted">none available</span>}
+      {all.map((o) => (
+        <label key={o.name} title={o.note} className={chosen.includes(o.name) ? "on" : ""}>
+          <input type="checkbox" checked={chosen.includes(o.name)} onChange={(e) => onChange(e.target.checked ? [...chosen, o.name] : chosen.filter((x) => x !== o.name))} />
+          <span className="mono">{o.name}</span> <span className="muted">{o.note}</span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+function Editor({ a, models, lib, onSelect, onError }: { a: AgentView; models: string[]; lib?: BayLibrary; onSelect: (id: string) => void; onError: (e: string) => void }) {
+  const [d, setD] = useState<AgentDef>({ ...a.def, mcp: a.def.mcp ?? [] });
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const dirty = JSON.stringify(d) !== JSON.stringify(a.def);
+  const dirty = JSON.stringify(d) !== JSON.stringify({ ...a.def, mcp: a.def.mcp ?? [] });
   const set = <K extends keyof AgentDef>(k: K, v: AgentDef[K]) => setD((x) => ({ ...x, [k]: v }));
   const act = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn(); } catch (e) { onError((e as Error).message); } finally { setBusy(false); } };
   return (
@@ -203,10 +227,12 @@ function Editor({ a, models, onSelect, onError }: { a: AgentView; models: string
       <label>Prompt <span className="muted">(who it is and how it works; the station's output contract is added by the core)</span>
         <textarea rows={6} value={d.prompt} onChange={(e) => set("prompt", e.target.value)} />
       </label>
-      <div className="ed-row">
-        <label>Plugins<input value={d.plugins.join(", ")} placeholder="none (lean): loads only what you list" onChange={(e) => set("plugins", list(e.target.value))} /></label>
-        <label>Skills<input value={d.skills.join(", ")} placeholder="none" onChange={(e) => set("skills", list(e.target.value))} /></label>
-        <label>Tools<input value={d.tools.join(", ")} placeholder="none: answers in text" onChange={(e) => set("tools", list(e.target.value))} /></label>
+      <div className="loadout">
+        <div className="muted">What it loads on every call: only what is ticked. Each one adds cost, so leave it lean unless it helps. <b className="mono">{loadout(d)}</b></div>
+        <Picks label="Skills" hint="(it reads one when the task calls for it)" chosen={d.skills} options={(lib?.skills ?? []).map((s) => ({ name: s.name, note: `${s.source === "yours" ? "yours · " : ""}${s.description}` }))} onChange={(v) => set("skills", v)} />
+        <Picks label="Tools" hint="(none: it answers in text, the cheapest and safest)" chosen={d.tools} options={lib?.tools ?? []} onChange={(v) => set("tools", v)} />
+        <Picks label="MCP servers" hint={lib?.mcpFile ? `(set them up in ${lib.mcpFile})` : ""} chosen={d.mcp ?? []} options={(lib?.mcp ?? []).map((m) => ({ name: m.name, note: m.command }))} onChange={(v) => set("mcp", v)} />
+        <label>Plugins <span className="muted">(Claude Code plugin folders, loaded whole: prefer single skills)</span><input value={d.plugins.join(", ")} placeholder="none" onChange={(e) => set("plugins", list(e.target.value))} /></label>
       </div>
       <label>Sample task <span className="muted">(used by Test)</span><input value={d.sample} onChange={(e) => set("sample", e.target.value)} /></label>
       <div className="ed-actions">

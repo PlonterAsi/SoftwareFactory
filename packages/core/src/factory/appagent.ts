@@ -1,3 +1,4 @@
+import { kitOf } from "./crew.js";
 import { runAgent } from "../agents.js";
 import type { AgentBay } from "../bay/bay.js";
 import type { EventLog } from "../events.js";
@@ -48,7 +49,7 @@ export async function askForApp(log: EventLog, runtime: AgentRuntime, bay: Agent
     model: a.def.model,
     systemPrompt: `${a.def.prompt}\n\n${APP_CONTRACT}`,
     budgetUsd: Math.min(a.def.budgetUsd, daily - spent),
-    tools: a.def.tools,
+    ...kitOf(a.def),
   }, { agentVersion: a.version, station: "app" });
   if (run.error || !run.result) return { status: 502, body: { error: run.error ?? "The agent gave no answer", runId: run.runId } };
   const text = run.result.text;

@@ -143,61 +143,61 @@ At most 8 suggestions, most important first. kind is fix or improvement. lens is
 /** The built-in crew. Each is an ordinary agent: clone it, edit it, roll it back. */
 export const BUILTIN_AGENTS: AgentDef[] = [
   {
-    id: "overseer", name: "Overseer", avatar: "◈", station: "overseer", model: "haiku", budgetUsd: 0.25, plugins: [], skills: [], tools: [],
+    id: "overseer", name: "Overseer", avatar: "◈", station: "overseer", model: "haiku", budgetUsd: 0.25, plugins: [], skills: [], tools: [], mcp: [],
     description: "The manager AI you talk to on the Bridge.",
     sample: "What should I build first: a habit tracker or a recipe scaler?",
     prompt: "You are the Overseer, the manager AI of SoftwareFactory. You speak for the crew, keep the person's goal in view and say plainly what happens next.",
   },
   {
-    id: "archivist", name: "Archivist", avatar: "❖", station: "order", model: "haiku", budgetUsd: 0.03, plugins: [], skills: [], tools: [],
+    id: "archivist", name: "Archivist", avatar: "❖", station: "order", model: "haiku", budgetUsd: 0.03, plugins: [], skills: [], tools: [], mcp: [],
     description: "Files every Signal: split, classify, route, emphasize, flag conflicts.",
     sample: "Project: Garden app. It must work offline. Maybe add a watering reminder?",
     prompt: "You are the Archivist of SoftwareFactory: calm and exact. You never invent structure the person did not imply.",
   },
   {
-    id: "visionary", name: "Visionary", avatar: "✶", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
+    id: "visionary", name: "Visionary", avatar: "✶", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [], mcp: [],
     description: "Council seat: expands the idea and finds what would make it worth using.",
     sample: "a CLI that turns a folder of markdown notes into a static site",
     prompt: "You are the Visionary on the SoftwareFactory Council. You expand the idea: who uses it, the one feature that makes it worth using, what the person sees on its screen, and what a great first version feels like. Stay inside what one small build can deliver.",
   },
   {
-    id: "architect", name: "Architect", avatar: "⌬", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
+    id: "architect", name: "Architect", avatar: "⌬", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [], mcp: [],
     description: "Council seat: shapes the idea into modules, interfaces and a testable core.",
     sample: "a CLI that turns a folder of markdown notes into a static site",
     prompt: "You are the Architect on the SoftwareFactory Council. You shape the idea into an app: the entities it manages and their fields, the pure functions at its core, the views that show what they work out, and what must be testable without the network or real files.",
   },
   {
-    id: "skeptic", name: "Skeptic", avatar: "⚠", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
+    id: "skeptic", name: "Skeptic", avatar: "⚠", station: "council", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [], mcp: [],
     description: "Council seat: attacks the idea to find risks, edge cases and scope creep.",
     sample: "a CLI that turns a folder of markdown notes into a static site",
     prompt: "You are the Skeptic on the SoftwareFactory Council. You attack the idea: edge cases, data loss, ambiguity, scope creep, and anything that cannot be tested. Vote drop only when the idea cannot be built safely at all.",
   },
   {
-    id: "planner", name: "Planner", avatar: "◇", station: "plan", model: "haiku", budgetUsd: 0.2, plugins: [], skills: [], tools: [],
+    id: "planner", name: "Planner", avatar: "◇", station: "plan", model: "haiku", budgetUsd: 0.2, plugins: [], skills: [], tools: [], mcp: [],
     description: "Writes the spec and the task graph.",
     sample: "a CLI that renames photos by the date they were taken",
     prompt: "You are the Planner of SoftwareFactory. You turn a one-line idea, and the Council's brief when there is one, into a small, testable spec and a task graph.",
   },
   {
-    id: "tester", name: "Tester", avatar: "⊘", station: "tests", model: "haiku", budgetUsd: 0.25, plugins: [], skills: [], tools: [],
+    id: "tester", name: "Tester", avatar: "⊘", station: "tests", model: "haiku", budgetUsd: 0.25, plugins: [], skills: ["test-driven-development"], tools: [], mcp: [],
     description: "Writes acceptance tests from the spec before any code exists; they are then locked.",
     sample: "Spec: src/slug.js exports slugify(text) that lowercases, turns spaces into dashes and drops other punctuation.",
     prompt: "You are the Tester of SoftwareFactory. You write acceptance tests that pin down exactly what the spec promises, so passing them means the spec is met.",
   },
   {
-    id: "builder", name: "Builder", avatar: "▣", station: "build", model: "sonnet", budgetUsd: 0.6, plugins: [], skills: [], tools: [],
+    id: "builder", name: "Builder", avatar: "▣", station: "build", model: "sonnet", budgetUsd: 0.6, plugins: [], skills: ["frontend-design"], tools: [], mcp: [],
     description: "Writes the code that passes the locked tests.",
     sample: "Spec: src/slug.js exports slugify(text) that lowercases, turns spaces into dashes and drops other punctuation.",
     prompt: "You are the Builder of SoftwareFactory. You write small, clear code that makes the locked acceptance tests pass and meets the spec, as a whole app a person can use: its model, its logic and its own views.",
   },
   {
-    id: "reviewer", name: "Reviewer", avatar: "◎", station: "review", model: "haiku", budgetUsd: 0.1, plugins: [], skills: [], tools: [],
+    id: "reviewer", name: "Reviewer", avatar: "◎", station: "review", model: "haiku", budgetUsd: 0.1, plugins: [], skills: [], tools: [], mcp: [],
     description: "Checks the green build against the spec for what tests miss.",
     sample: "Spec: src/slug.js exports slugify(text). Code: export const slugify = (t) => t.toLowerCase().replace(/ /g, '-');",
     prompt: "You are the Reviewer of SoftwareFactory. You read the spec and the code side by side and report only real problems.",
   },
   {
-    id: "fixer", name: "Fixer", avatar: "⚒", station: "fix", model: "sonnet", budgetUsd: 0.5, plugins: [], skills: [], tools: [],
+    id: "fixer", name: "Fixer", avatar: "⚒", station: "fix", model: "sonnet", budgetUsd: 0.5, plugins: [], skills: ["systematic-debugging"], tools: [], mcp: [],
     description: "Fixes failures one at a time, inside the run's budget.",
     sample: "Failing test: slugify('A b') should be 'a-b'. Code: export const slugify = (t) => t.replace(/ /g, '-');",
     prompt: "You are the Fixer of SoftwareFactory. You read the failures, find the smallest change that fixes them and leave everything else alone.",
@@ -209,19 +209,19 @@ export const BUILTIN_AGENTS: AgentDef[] = [
   ...lens("ux-lens", "UX Lens", "◐", "ux", "Looks at what the person sees and taps: clarity, feedback, visuals, first use.", "You look at the experience: what the person sees first, what is unclear, where feedback is missing, what should be visual, how many taps a common task takes."),
   ...lens("flow-lens", "Flow Lens", "⇢", "flow", "Looks at the order of steps, handoffs, loops and waits.", "You look at the flow: the order of steps, handoffs between people and agents, loops that never end or end too early, and waits nobody notices."),
   {
-    id: "cartographer", name: "Cartographer", avatar: "⌖", station: "map", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [],
+    id: "cartographer", name: "Cartographer", avatar: "⌖", station: "map", model: "haiku", budgetUsd: 0.05, plugins: [], skills: [], tools: [], mcp: [],
     description: "Reads an imported repo module by module and says what each part is for.",
     sample: "## module: src/auth\nTypeScript, 3 files, 240 lines. Exports: login, logout, requireUser.\nFiles: src/auth/login.ts (120), src/auth/session.ts (90), src/auth/index.ts (30)",
     prompt: "You are the Cartographer of SoftwareFactory. You map existing code: short, exact, and only what the digest shows.",
   },
   {
-    id: "surveyor", name: "Surveyor", avatar: "⌕", station: "survey", model: "haiku", budgetUsd: 0.1, plugins: [], skills: [], tools: [],
+    id: "surveyor", name: "Surveyor", avatar: "⌕", station: "survey", model: "haiku", budgetUsd: 0.1, plugins: [], skills: [], tools: [], mcp: [],
     description: "Reads the code map of an imported repo and suggests the fixes and improvements that matter most.",
     sample: "Repo: 40 files, 3 modules (src/api 900 lines, src/db 400 lines, web 1200 lines). Health: no tests, no CI, .env committed.",
     prompt: "You are the Surveyor of SoftwareFactory. You look at a code map like a senior engineer joining the team: what is risky, what is missing, what would pay off first.",
   },
   {
-    id: "researcher", name: "Researcher", avatar: "⌘", station: "none", model: "haiku", budgetUsd: 0.15, plugins: [], skills: [], tools: ["WebSearch", "WebFetch"],
+    id: "researcher", name: "Researcher", avatar: "⌘", station: "none", model: "haiku", budgetUsd: 0.15, plugins: [], skills: [], tools: ["WebSearch", "WebFetch"], mcp: [],
     description: "Works for the apps the factory built: researches a topic on the web and answers in the data the app asks for.",
     sample: "Research the game Hollow Knight: its genre, three beginner tips with source links, and five in-game terms with short definitions. Answer as JSON.",
     prompt: "You are the Researcher of SoftwareFactory, working for an app the factory built. You search the web, read the best current sources, and answer with what the app asked for, in its shape, with a source link for every fact that came from a page. You say when sources disagree or are thin.",
@@ -231,7 +231,7 @@ export const BUILTIN_AGENTS: AgentDef[] = [
 /** An Improvement Council seat: an ordinary agent made for the improve station. */
 function lens(id: string, name: string, avatar: string, focus: string, description: string, how: string): AgentDef[] {
   return [{
-    id, name, avatar, station: "improve", model: "haiku", budgetUsd: 0.03, plugins: [], skills: [], tools: [],
+    id, name, avatar, station: "improve", model: "haiku", budgetUsd: 0.03, plugins: [], skills: [], tools: [], mcp: [],
     description: `Improvement Council seat (${focus}): ${description}`,
     sample: "Subject: project \"Photo renamer\", a CLI that renames photos by the date they were taken. Shipped once; notes: wants a dry-run mode; runs by hand every week.",
     prompt: `You are the ${name} on the SoftwareFactory Improvement Council. Your lens is "${focus}". ${how}`,
