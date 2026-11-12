@@ -210,7 +210,7 @@ export class PluginHost {
     this.stop(id);
     this.syncAgents(v, false);
     const dir = resolve(v.dir);
-    if (dir.startsWith(resolve(this.root) + sep)) rmSync(dir, { recursive: true, force: true });
+    if (dir.startsWith(resolve(this.root) + sep)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); // Windows holds a just-stopped backend's files for a moment (EBUSY)
     this.log.append("plugin.removed", { id, by: opts.by ?? "you" });
     return { id, removed: true };
   }
