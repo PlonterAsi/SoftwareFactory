@@ -393,7 +393,8 @@ export const projectsApi = {
   update: (id: number, patch: Partial<Pick<ProjectSummary, "name" | "kind" | "summary" | "status">>) => post(`/api/projects/${id}`, patch) as Promise<ProjectDetail>,
   link: (id: number, kind: string, ref: string | number) => post(`/api/projects/${id}/links`, { kind, ref: String(ref) }) as Promise<ProjectDetail>,
   unlink: (id: number, kind: string, ref: string | number) => post(`/api/projects/${id}/unlink`, { kind, ref: String(ref) }) as Promise<ProjectDetail>,
-  build: (id: number, idea: string, maxUsd?: number, again?: boolean) => post(`/api/projects/${id}/runs`, { idea, maxUsd, ...(again ? { again } : {}) }) as Promise<{ run: number; projectId: number }>,
+  /** onTop: add the idea to the app this project already shipped (next version, same folder and data) instead of a new app. */
+  build: (id: number, idea: string, maxUsd?: number, again?: boolean, onTop?: boolean) => post(`/api/projects/${id}/runs`, { idea, maxUsd, ...(again ? { again } : {}), ...(onTop ? { onTop } : {}) }) as Promise<{ run: number; projectId: number }>,
   /** Move everything of this project into another; this one goes away (archived if you made it). */
   merge: (id: number, into: number) => post(`/api/projects/${id}/merge`, { into }) as Promise<ProjectDetail>,
 };

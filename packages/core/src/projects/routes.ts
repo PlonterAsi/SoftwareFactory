@@ -63,9 +63,17 @@ export async function projectsRoute(
     if (!projectDetail(log, id)) return [404, { error: `No project #${id}` }];
     const blocked = ctx.canBuild?.();
     if (blocked) return [409, { error: blocked }];
+    const maxUsd = typeof body.maxUsd === "number" ? body.maxUsd : undefined;
+    // On top of the app this project already shipped (its newest shipped build), unless asked for a new app.
+    if (body.onTop) {
+      const base = newestShipped(log, id, body.baseRun);
+      if (!base) return [409, { error: "This project has no shipped app to add to yet. Build it as a new app first." }];
+      try { return [202, { run: ctx.factory.addFeature(base, String(body.idea ?? ""), { projectId: id, maxUsd }), projectId: id, baseRun: base }]; }
+      catch (e) { return [409, { error: (e as Error).message }]; }
+    }
     const dup = duplicateReply(ctx.factory, String(body.idea ?? ""), body.again);
     if (dup) return dup;
-    const run = ctx.factory.start(String(body.idea ?? ""), { projectId: id, maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined });
+    const run = ctx.factory.start(String(body.idea ?? ""), { projectId: id, maxUsd });
     return [202, { run, projectId: id }];
   }
   if (m[2] === "merge") {
@@ -76,15 +84,21 @@ export async function projectsRoute(
     const blocked = ctx.canBuild?.();
     if (blocked) return [409, { error: blocked }];
     // The newest build of this project that shipped.
-    const base = log.list({ type: "factory.run.finished", limit: 1e6 }).map((e) => e.payload as { run: number; outcome: string })
-      .filter((p) => p.outcome === "shipped" && projectOf(log, { kind: "factory_run", ref: String(p.run) }) === id && (body.baseRun == null || p.run === Number(body.baseRun))).at(-1);
-    if (!base) return [409, { error: "This project has no finished factory build to add a screen to. Imported projects can get one through an improvement or a ticket." }];
+    const base = newestShipped(log, id, body.baseRun);
+    if (base == null) return [409, { error: "This project has no finished factory build to add a screen to. Imported projects can get one through an improvement or a ticket." }];
     try {
-      const run = ctx.factory.addScreen(base.run, { projectId: id, maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined });
-      return [202, { run, projectId: id, baseRun: base.run }];
+      const run = ctx.factory.addScreen(base, { projectId: id, maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined });
+      return [202, { run, projectId: id, baseRun: base }];
     } catch (e) {
       return [409, { error: (e as Error).message }];
     }
   }
   return null;
+}
+
+/** The newest factory build of this project that shipped (or the one asked for), or null. */
+function newestShipped(log: EventLog, id: number, baseRun?: unknown): number | null {
+  const base = log.list({ type: "factory.run.finished", limit: 1e6 }).map((e) => e.payload as { run: number; outcome: string })
+    .filter((p) => p.outcome === "shipped" && projectOf(log, { kind: "factory_run", ref: String(p.run) }) === id && (baseRun == null || p.run === Number(baseRun))).at(-1);
+  return base?.run ?? null;
 }
