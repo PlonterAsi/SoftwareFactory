@@ -103,10 +103,19 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     return req.systemPrompt && req.systemPrompt.length > MAX_ARG_ROLE ? `<your-role>\n${req.systemPrompt}\n</your-role>\n\n${req.prompt}` : req.prompt;
   }
 
+  /**
+   * A station agent answers in its own contract's format, so it runs without the person's own
+   * CLAUDE.md files and memory (a "Now: ..." line from a personal rule broke answers). An agent
+   * working in a folder (a ticket's working copy) still reads that folder's CLAUDE.md.
+   */
+  envFor(req: AgentRequest, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+    return req.cwd ? base : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
+  }
+
   run(req: AgentRequest): Promise<AgentResult> {
     const started = Date.now();
     return new Promise((resolve, reject) => {
-      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...this.buildArgs(req)], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, ...(req.cwd ? { cwd: req.cwd } : {}) });
+      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...this.buildArgs(req)], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: this.envFor(req), ...(req.cwd ? { cwd: req.cwd } : {}) });
       // A CLI that dies before reading stdin closes the pipe; the exit code says what happened.
       child.stdin.on("error", () => {});
       child.stdin.end(this.stdinFor(req), "utf8");
