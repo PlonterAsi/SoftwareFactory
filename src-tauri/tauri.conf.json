@@ -37,7 +37,8 @@
       "../packages/core/dist/": "core/",
       "../packages/core/package.json": "core/package.json",
       "../packages/core/plugin-examples/": "plugin-examples/",
-      "../packages/core/agent-skills/": "core/agent-skills/"
+      "../packages/core/agent-skills/": "core/agent-skills/",
+      "../packages/core/agent-mcp.json": "core/agent-mcp.json"
     },
     "windows": {
       "nsis": {

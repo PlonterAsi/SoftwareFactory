@@ -1,0 +1,10 @@
+{
+  "_about": "MCP servers SoftwareFactory offers to agents out of the box. Nothing here runs unless an agent ticks it. Yours go in <data>/mcp-servers.json and win over these by name.",
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.84", "--headless", "--isolated"],
+      "_note": "Microsoft Playwright MCP, Apache-2.0: open a page, click, read and screenshot it. Local, free; the first use downloads the package."
+    }
+  }
+}

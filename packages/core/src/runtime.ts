@@ -59,12 +59,19 @@ export interface ClaudeCodeOptions {
   timeoutMs?: number;
 }
 
+/** An agent that edits files in a working copy (a ticket's repo work) rather than answering in its contract. */
+const edits = (req: AgentRequest) => !!req.cwd && !!req.tools?.some((t) => t === "Edit" || t === "Write");
+
 /** Option A of the spike: drive Claude Code headless (`claude -p`). */
 /** Longest role kept on the command line; longer ones go on stdin (Windows command lines stop near 32,000 characters). */
 const MAX_ARG_ROLE = 8000;
 
 /** Tools an agent may use headless without a prompt: they read the web and change nothing here. */
 export const WEB_TOOLS = ["WebSearch", "WebFetch"];
+/** Tools that read files. They only make sense in a folder: without one an agent would read the core's own data folder, so they are dropped. */
+export const READ_TOOLS = ["Read", "Glob", "Grep"];
+/** Tools that touch files: only with a folder, and only in it. */
+const FILE_TOOLS = [...READ_TOOLS, "Edit", "Write", "NotebookEdit"];
 
 export class ClaudeCodeRuntime implements AgentRuntime {
   readonly name: string;
@@ -92,15 +99,18 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     if (req.systemPrompt && req.systemPrompt.length <= MAX_ARG_ROLE) args.push("--append-system-prompt", req.systemPrompt);
     for (const dir of req.pluginDirs ?? []) args.push("--plugin-dir", dir);
     // --tools takes built-in tools only; an MCP server's tools come from --mcp-config and are allowed by name.
-    const builtin = (req.tools ?? []).filter((t) => !t.startsWith("mcp__"));
+    const builtin = (req.tools ?? []).filter((t) => !t.startsWith("mcp__") && (req.cwd || !FILE_TOOLS.includes(t)));
     if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", builtin.join(","));
+    // Without this a station agent with the Skill tool sees every skill and plugin the person installed
+    // (130+ on Assaf's PC), not just its own kit. An agent that edits a working copy keeps the person's settings.
+    if (this.opts.profile === "lean" && !edits(req)) args.push("--setting-sources", "project,local");
     else if (builtin.length) args.push("--tools", builtin.join(","));
     if (req.mcpConfig) args.push("--mcp-config", req.mcpConfig);
     // Headless edits in a working copy: accept file edits there, nothing else is allowed to prompt.
     if (req.cwd && req.tools?.some((t) => t === "Edit" || t === "Write")) args.push("--permission-mode", "acceptEdits");
     // Allowed without a prompt: read-only web tools, the Skill tool (it reads the agent's own skills), and the
     // agent's own MCP servers. Headless, anything unapproved is simply refused.
-    const allowed = (req.tools ?? []).filter((t) => WEB_TOOLS.includes(t) || t === "Skill" || (req.mcpConfig && t.startsWith("mcp__")));
+    const allowed = (req.tools ?? []).filter((t) => WEB_TOOLS.includes(t) || t === "Skill" || (req.cwd && READ_TOOLS.includes(t)) || (req.mcpConfig && t.startsWith("mcp__")));
     if (allowed.length) args.push("--allowedTools", allowed.join(","));
     return args;
   }
@@ -116,7 +126,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
    * working in a folder (a ticket's working copy) still reads that folder's CLAUDE.md.
    */
   envFor(req: AgentRequest, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-    return req.cwd ? base : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
+    // An agent that only reads a project's files is still a station agent: its contract, not the person's memory.
+    return edits(req) ? base : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
   }
 
   run(req: AgentRequest): Promise<AgentResult> {

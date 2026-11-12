@@ -1,0 +1,2 @@
+Adapted from anthropics/claude-plugins-official, plugin pr-review-toolkit, agent code-simplifier (Apache-2.0, see LICENSE).
+Change: the subagent prompt is used as a skill; its frontmatter was replaced. The text is unchanged.

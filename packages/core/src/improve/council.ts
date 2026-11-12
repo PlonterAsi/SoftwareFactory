@@ -3,7 +3,7 @@ import type { EventLog, SfEvent } from "../events.js";
 import type { AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
-import type { CrewSource } from "../factory/crew.js";
+import { kitArgs, type CrewSource } from "../factory/crew.js";
 import { canonFor, type OrderState } from "../order/model.js";
 import { listProjects, projectDetail, registerProjectFacet } from "../projects/service.js";
 import { mergeLenses, memoryText, parseLensAnswer, type Draft, type Effort, type Impact, type LensProposal, type ProposalStatus, type Remembered, type Target } from "./lenses.js";
@@ -260,7 +260,7 @@ export class ImproveCouncil {
         }
         inflight += cap;
         const r = await runAgent(this.log, this.runtime, m.id, {
-          prompt, model: m.model, systemPrompt: m.role, budgetUsd: cap, pluginDirs: m.pluginDirs.length ? m.pluginDirs : undefined, tools: m.tools, mcpConfig: m.mcpConfig,
+          prompt, model: m.model, systemPrompt: m.role, budgetUsd: cap, ...kitArgs(m),
         }, { station: "improve", agentVersion: m.version, seat }).finally(() => { inflight -= cap; });
         const c = r.result?.costUsd ?? 0;
         cost += c;

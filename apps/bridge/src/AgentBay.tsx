@@ -231,7 +231,7 @@ function Editor({ a, models, lib, onSelect, onError }: { a: AgentView; models: s
         <div className="muted">What it loads on every call: only what is ticked. Each one adds cost, so leave it lean unless it helps. <b className="mono">{loadout(d)}</b></div>
         <Picks label="Skills" hint="(it reads one when the task calls for it)" chosen={d.skills} options={(lib?.skills ?? []).map((s) => ({ name: s.name, note: `${s.source === "yours" ? "yours · " : ""}${s.description}` }))} onChange={(v) => set("skills", v)} />
         <Picks label="Tools" hint="(none: it answers in text, the cheapest and safest)" chosen={d.tools} options={lib?.tools ?? []} onChange={(v) => set("tools", v)} />
-        <Picks label="MCP servers" hint={lib?.mcpFile ? `(set them up in ${lib.mcpFile})` : ""} chosen={d.mcp ?? []} options={(lib?.mcp ?? []).map((m) => ({ name: m.name, note: m.command }))} onChange={(v) => set("mcp", v)} />
+        <Picks label="MCP servers" hint={lib?.mcpFile ? `(set them up in ${lib.mcpFile})` : ""} chosen={d.mcp ?? []} options={(lib?.mcp ?? []).map((m) => ({ name: m.name, note: m.note || m.command }))} onChange={(v) => set("mcp", v)} />
         <label>Plugins <span className="muted">(Claude Code plugin folders, loaded whole: prefer single skills)</span><input value={d.plugins.join(", ")} placeholder="none" onChange={(e) => set("plugins", list(e.target.value))} /></label>
       </div>
       <label>Sample task <span className="muted">(used by Test)</span><input value={d.sample} onChange={(e) => set("sample", e.target.value)} /></label>

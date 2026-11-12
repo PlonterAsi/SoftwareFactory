@@ -1,4 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
+import { kitArgs } from "../factory/crew.js";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
@@ -271,7 +272,7 @@ export class RepoExplorer {
         if (spent >= cap) break;
         const r = await runAgent(this.log, this.runtime, cart?.id ?? "cartographer", {
           prompt: mapPrompt(repoName, b), model: cart?.model ?? "haiku", systemPrompt: cart?.role,
-          budgetUsd: Number(Math.max(0.01, Math.min(cart?.budgetUsd ?? 0.05, cap - spent)).toFixed(4)), pluginDirs: cart?.pluginDirs.length ? cart.pluginDirs : undefined,
+          budgetUsd: Number(Math.max(0.01, Math.min(cart?.budgetUsd ?? 0.05, cap - spent)).toFixed(4)), ...kitArgs(cart), cwd: imp.dir,
         }, { station: "map", agentVersion: cart?.version });
         spent += r.result?.costUsd ?? 0;
         for (const n of (r.result && parseModuleNotes(r.result.text)) || []) { note(n, cart?.id ?? "cartographer"); mapped++; }
@@ -290,7 +291,7 @@ export class RepoExplorer {
       const sv = this.crew?.crewFor("survey")[0];
       const r = await runAgent(this.log, this.runtime, sv?.id ?? "surveyor", {
         prompt: surveyPrompt(repoName, mapText(map, notes)), model: sv?.model ?? "haiku", systemPrompt: sv?.role,
-        budgetUsd: Number(Math.max(0.01, Math.min(sv?.budgetUsd ?? 0.1, cap - spent)).toFixed(4)), pluginDirs: sv?.pluginDirs.length ? sv.pluginDirs : undefined,
+        budgetUsd: Number(Math.max(0.01, Math.min(sv?.budgetUsd ?? 0.1, cap - spent)).toFixed(4)), ...kitArgs(sv), cwd: imp.dir,
       }, { station: "survey", agentVersion: sv?.version });
       spent += r.result?.costUsd ?? 0;
       suggestions = r.result ? parseSuggestions(r.result.text) : null;
