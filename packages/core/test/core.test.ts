@@ -43,6 +43,12 @@ describe("agent runtime", () => {
     expect(args).toEqual(["-p", "--output-format", "json", "--model", "haiku", "--max-budget-usd", "0.1", "--plugin-dir", "/p/superpowers", "--strict-mcp-config", "--tools", ""]);
   });
 
+  it("runs station agents without the person's own CLAUDE.md and memory; a working copy keeps its own", () => {
+    const rt = new ClaudeCodeRuntime({ profile: "lean" });
+    expect(rt.envFor({ prompt: "hi" }, { PATH: "x" })).toEqual({ PATH: "x", CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
+    expect(rt.envFor({ prompt: "hi", cwd: "/repo" }, { PATH: "x" })).toEqual({ PATH: "x" });
+  });
+
   it("lets the web tools run headless without a permission prompt, and nothing else", () => {
     const args = new ClaudeCodeRuntime({ profile: "lean" }).buildArgs({ prompt: "hi", tools: ["WebSearch", "WebFetch", "Bash"] });
     expect(args.join(" ")).toContain("--tools WebSearch,WebFetch,Bash --allowedTools WebSearch,WebFetch");
