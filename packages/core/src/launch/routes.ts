@@ -68,8 +68,8 @@ export function projectFolders(log: EventLog, projectId: number): ProjectFolder[
       };
     };
     const shipped = rows.filter((x) => x.outcome === "shipped");
-    for (const r of shipped.filter((x) => x.dir === ownDir)) add(entry(r, true));
-    for (const r of shipped.filter((x) => x.dir !== ownDir)) add(entry(r, false));
+    // The newest shipped build comes first, so the Run tab starts what you built last.
+    for (const r of shipped) add(entry(r, r.dir === ownDir));
     for (const r of rows.filter((x) => x.outcome !== "shipped")) add(entry(r, r.dir === ownDir));
   }
   // Folders that exist come first, in the order above.

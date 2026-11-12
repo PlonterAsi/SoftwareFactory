@@ -228,13 +228,13 @@ describe("launch: running a project from the Bridge", () => {
       const info = (await call(`/api/launch/projects/${pid}`)).body;
       expect(info.folders[0]).toMatchObject({ source: "run", ref: run, exists: true });
       expect(projectFolders(log, pid)[0]).toMatchObject({ label: "Word Counter", name: "Word Counter", own: true, app: "kit" });
-      // Another idea built while inside this project comes after the project's own build, and says so.
+      // Another idea built while inside this project comes first (the newest build), and says it is another idea.
       const other = f.start("a habit tracker with streaks", { autoApprove: true, projectId: pid });
       await f.wait(other);
       const two = projectFolders(log, pid);
-      expect(two.map((x) => x.ref)).toEqual([run, other]);
-      expect(two[1]).toMatchObject({ own: false });
-      expect(two[1].label).toMatch(/another idea built here/);
+      expect(two.map((x) => x.ref)).toEqual([other, run]);
+      expect(two[0]).toMatchObject({ own: false });
+      expect(two[0].label).toMatch(/another idea built here/);
       // A factory build is an app: it starts with one press as a web app, no arguments.
       const app = info.profiles.find((p: any) => p.kind === "web");
       expect(app).toMatchObject({ id: "script:start", recommended: true });
