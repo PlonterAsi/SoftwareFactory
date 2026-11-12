@@ -37,6 +37,19 @@ const run = (rt: Fake, s: ReturnType<typeof setup>, checks: LoopChecks, id = 1) 
 const ok = { ok: true, output: "" };
 
 describe("workInRepo loop", () => {
+  it("a check that could not run is not listed as passed", async () => {
+    const s = setup(); const rt = new Fake();
+    const r = await run(rt, s, { runTests: () => ({ ok: true, output: "no deps", skipped: true }) });
+    expect(r.ok).toBe(true);
+    expect(r.checks).toEqual(["gates", "test integrity", "review"]);
+  });
+
+  it("the Reviewer is told to look for gamed tests", async () => {
+    const s = setup(); const rt = new Fake();
+    await run(rt, s, { runTests: () => ok });
+    expect(rt.calls.find((c) => /Station contract: review/.test(c.systemPrompt ?? ""))!.systemPrompt).toMatch(/gaming the tests/);
+  });
+
   it("a clean pass commits, reads the repo's rules and logs each step", async () => {
     const s = setup(); const rt = new Fake();
     const r = await run(rt, s, { runTests: () => ok });

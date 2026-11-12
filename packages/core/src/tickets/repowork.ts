@@ -111,8 +111,8 @@ export function overviewBlock(log: EventLog, projectId: number | null | undefine
   return `\n\nCodebase overview (from the Cartographer's map of this repo; start here, then read only what you need):${out}`;
 }
 
-/** One check's verdict: `output` is what failed (trimmed before it goes back to the Builder). */
-export interface CheckResult { ok: boolean; output: string }
+/** One check's verdict: `output` is what failed (trimmed before it goes back to the Builder). `skipped`: it could not run, so it is not listed as passed. */
+export interface CheckResult { ok: boolean; output: string; skipped?: boolean }
 
 /**
  * The checks of the ticket loop, passed in so they can be swapped (and faked in tests).
@@ -134,17 +134,39 @@ const PASS: CheckResult = { ok: true, output: "" };
 const MAX_FIX_ROUNDS = 2;
 const trim = (s: string, n = 3000) => (s.length > n ? `…${s.slice(-n)}` : s);
 
-/** Default test run: the `test` script of each top-level package (packages/x, apps/x) holding a changed file, else the root's. */
+const sh = (cmd: string, args: string[], cwd: string, timeout = 300_000) => spawnSync(cmd, args, { cwd, encoding: "utf8", shell: true, windowsHide: true, timeout });
+
+/**
+ * Default test run: for each top-level package (packages/x, apps/x, else the root) holding a changed
+ * file and having a `test` script, the tests that touch the changed files (`vitest related` when the
+ * package uses vitest, else its `test` script). A fresh clone has no dependencies: they are installed
+ * once (`npm ci --ignore-scripts`); when that is not possible the check is skipped, never passed.
+ */
 export function defaultRunTests(dir: string, files: string[]): CheckResult {
-  const roots = new Set<string>();
-  for (const f of files) { const m = f.match(/^((?:packages|apps)\/[^/]+)\//); roots.add(m ? m[1] : "."); }
+  const roots = new Map<string, string[]>();
+  for (const f of files) {
+    const m = f.match(/^((?:packages|apps)\/[^/]+)\//);
+    const r = m ? m[1] : ".";
+    roots.set(r, [...(roots.get(r) ?? []), m ? f.slice(r.length + 1) : f]);
+  }
+  const withTests = [...roots].filter(([r]) => {
+    try { return !!JSON.parse(readFileSync(join(dir, r, "package.json"), "utf8")).scripts?.test; } catch { return false; }
+  });
+  if (!withTests.length) return { ok: true, output: "no package with a test script holds a changed file", skipped: true };
+  if (!existsSync(join(dir, "node_modules"))) {
+    if (!existsSync(join(dir, "package-lock.json"))) return { ok: true, output: "dependencies are not installed and there is no package-lock.json", skipped: true };
+    const i = sh("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], dir, 600_000);
+    if (i.status !== 0) return { ok: true, output: `npm ci failed, so the tests could not run:\n${trim(`${i.stdout ?? ""}\n${i.stderr ?? ""}`, 800)}`, skipped: true };
+  }
   let out = "";
-  for (const r of roots) {
-    const pj = join(dir, r, "package.json");
-    if (!existsSync(pj)) continue;
-    try { if (!JSON.parse(readFileSync(pj, "utf8")).scripts?.test) continue; } catch { continue; }
-    const p = spawnSync("npm", ["test", "--silent"], { cwd: join(dir, r), encoding: "utf8", shell: true, windowsHide: true, timeout: 300_000 });
-    if (p.status !== 0) out += `npm test in ${r} failed:\n${trim(`${p.stdout ?? ""}\n${p.stderr ?? ""}`)}\n`;
+  for (const [r, changed] of withTests) {
+    const cwd = join(dir, r);
+    let usesVitest = false;
+    try { const pj = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")); usesVitest = /vitest/.test(String(pj.scripts?.test)) || !!pj.devDependencies?.vitest; } catch { /* plain npm test */ }
+    const p = usesVitest
+      ? sh("npx", ["vitest", "related", "--run", "--passWithNoTests", ...changed.map((f) => JSON.stringify(f))], cwd)
+      : sh("npm", ["test", "--silent"], cwd);
+    if (p.status !== 0) out += `${usesVitest ? "vitest related" : "npm test"} in ${r} failed:\n${trim(`${p.stdout ?? ""}\n${p.stderr ?? ""}`)}\n`;
   }
   return { ok: !out, output: out };
 }
@@ -189,7 +211,11 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
   const rv = bay?.crewFor("review")[0];
   let spent = 0;
   const left = () => Math.max(0, o.maxUsd - spent);
-  const step = (name: string, state: "running" | "passed" | "failed" | "skipped", note = "") => { log.append("ticket.step", { id: o.id, key: o.key, step: name, state, note: note.slice(0, 500) }); };
+  const step = (name: string, state: "running" | "passed" | "failed" | "skipped", note = "") => {
+    log.append("ticket.step", { id: o.id, key: o.key, step: name, state, note: note.slice(0, 500) });
+    // The ticket's own timeline on the Bridge shows what did not pass.
+    if (state === "failed" || state === "skipped") log.append("ticket.noted", { id: o.id, by: "factory", kind: "event", text: `${name}: ${state}${note ? `. ${note.split("\n").slice(0, 3).join(" ").slice(0, 300)}` : ""}` });
+  };
   const fail = (error: string, files: string[] = []): RepoWorkResult => ({ ok: false, dir, branch, base, sha: null, files, costUsd: spent, summary: "", error, checks: passed });
   const passed: string[] = [];
   // One Builder call (the first build, or a fix). `share` is the largest part of the budget it may use.
@@ -234,6 +260,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
       step(name, "running");
       const r = await fn();
       if (!r.ok) { step(name, "failed", r.output); return { name, output: r.output }; }
+      if (r.skipped) { step(name, "skipped", r.output); continue; }
       step(name, "passed");
       if (!passed.includes(name)) passed.push(name);
     }
@@ -253,7 +280,6 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     bad = await check();
   }
   if (bad) return fail(`Not committed: ${bad.name} still failing after ${failures.length} round(s).\n${trim(bad.output, 1500)}`, changedFiles(dir));
-  passed.splice(0, passed.length, ...["gates", "test integrity", "tests"]);
 
   // A Reviewer reads the diff; a high finding gets one fix round, then the checks again.
   if (left() > 0) {
@@ -263,7 +289,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     const rr = await runAgent(log, runtime, rv?.id ?? "reviewer", {
       prompt: `Ticket: ${o.title}\n\nThe diff:\n${diff}`,
       model: rv?.model ?? "sonnet",
-      systemPrompt: `You are the Reviewer. Read the diff for bugs, missed requirements and risks.\n\nStation contract: review. Answer only with JSON: { "verdict": "pass"|"fail", "findings": [{ "severity": "high"|"medium"|"low", "text": "..." }] }. High means it must be fixed before merge.`,
+      systemPrompt: `You are the Reviewer. Read the diff for bugs, missed requirements and risks, and for gaming the tests: deleted, skipped or weakened tests, tests changed to match wrong output, or expected values hard-coded in the source (each of these is high).\n\nStation contract: review. Answer only with JSON: { "verdict": "pass"|"fail", "findings": [{ "severity": "high"|"medium"|"low", "text": "..." }] }. High means it must be fixed before merge.`,
       budgetUsd: Math.min(left(), o.maxUsd * 0.2, rv?.budgetUsd ?? o.maxUsd),
     }, { agentVersion: rv?.version, station: "review" });
     spent += rr.result?.costUsd ?? 0;
