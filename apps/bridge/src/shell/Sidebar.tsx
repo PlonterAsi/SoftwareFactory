@@ -39,6 +39,7 @@ export function Sidebar({ route, needs, projects, factoryRuns, crewBusy, base, c
       )}
       <div className="sb-group">
         <div className="sb-label">Factory</div>
+        <Item to={{ page: "bridge", mode: "loom" }} on={at("bridge")} icon={<Ico d="M2 5h12M2 11h12M4.5 3v4M8 9v4M11.5 3v4" />}>Factory Bridge</Item>
         <Item to={{ page: "factory", view: "bay" }} on={at("factory", "bay")} icon={<StatusGlyph status={crewBusy ? "working" : "agent"} label="" />}>Agents</Item>
         <Item to={{ page: "factory", view: "tickets" }} on={at("factory", "tickets")} icon={<Ico d="M3 4.5h10v2.2a1.3 1.3 0 0 0 0 2.6v2.2H3V9.3a1.3 1.3 0 0 0 0-2.6zM9.5 4.5v7" />} badge={tickets || undefined}>Tickets</Item>
         {base && <Item to={{ page: "bases" }} on={at("bases")} icon={<Ico d="M2 13h12M3 13V6l5-3 5 3v7M6.5 13V9.5h3V13" />}>Base: {base}</Item>}

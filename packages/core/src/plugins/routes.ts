@@ -64,7 +64,7 @@ export async function pluginsRoute(
     const body = await ctx.readJson(req);
     if (op === "enable") return [200, plugins.enable(id)];
     if (op === "disable") return [200, plugins.disable(id)];
-    if (op === "remove") return [200, plugins.remove(id)];
+    if (op === "remove") return [200, await plugins.remove(id)];
     if (op === "call") return [200, { value: await plugins.call(id, String(body.method ?? ""), body.args ?? {}) }];
     return null;
   } catch (e) {

@@ -175,11 +175,11 @@ export class Integrations {
   }
 
   /** Take an installed feature out of SoftwareFactory and delete its copy. The project itself is untouched. */
-  remove(id: number, opts: { by?: string } = {}): Integration {
+  async remove(id: number, opts: { by?: string } = {}): Promise<Integration> {
     const i = getIntegration(this.log, id);
     if (!i) throw new Error(`No integration #${id}`);
     if (i.status === "removed") return i;
-    if (i.form === "plugin" && i.status === "installed" && i.entry && this.plugins?.get(i.entry)) this.plugins.remove(i.entry);
+    if (i.form === "plugin" && i.status === "installed" && i.entry && this.plugins?.get(i.entry)) await this.plugins.remove(i.entry);
     else if (i.dir && i.dir.startsWith(this.extDir)) rmSync(i.dir, { recursive: true, force: true });
     this.log.append("integration.removed", { id, by: opts.by ?? "you" });
     return getIntegration(this.log, id)!;

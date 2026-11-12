@@ -80,7 +80,7 @@ describe("plugin manifests", () => {
 });
 
 describe("the plugin host", () => {
-  it("installs a copy that starts off, and the one approval turns it on", () => {
+  it("installs a copy that starts off, and the one approval turns it on", async () => {
     const { h } = host();
     const src = plugin({ "ui/index.html": "<h1>x</h1>" }, { id: "tabby", panels: [{ id: "t", entry: "ui/index.html" }] });
     const v = h.install(src);
@@ -93,7 +93,7 @@ describe("the plugin host", () => {
     expect(h.file("tabby", "../../etc/passwd")).toBeNull();
     expect(h.file("tabby", "%2e%2e/%2e%2e/x")).toBeNull();
     expect(h.disable("tabby").status).toBe("disabled");
-    h.remove("tabby");
+    await h.remove("tabby");
     expect(h.get("tabby")).toBeNull();
     expect(existsSync(v.dir)).toBe(false);
   });
@@ -271,7 +271,7 @@ describe("plugins through the core", () => {
     expect(req.status).toBe("awaiting");
     expect(ig.decide(req.id, true).status).toBe("installed");
     expect(h.get("from-project")).toMatchObject({ status: "enabled" });
-    ig.remove(req.id);
+    await ig.remove(req.id);
     expect(h.get("from-project")).toBeNull();
   });
 });

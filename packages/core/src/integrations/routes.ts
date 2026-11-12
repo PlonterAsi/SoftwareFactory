@@ -46,7 +46,7 @@ export async function integrationsRoute(
   const body = await ctx.readJson(req);
   try {
     if (m[2] === "decide") return [200, integrations.decide(id, body.approve === true, { note: body.note ? String(body.note) : undefined })];
-    if (m[2] === "remove") return [200, integrations.remove(id)];
+    if (m[2] === "remove") return [200, await integrations.remove(id)];
     return [200, await integrations.runTool(id, String(body.args ?? ""), { stdin: body.stdin != null ? String(body.stdin) : undefined })];
   } catch (e) {
     return [409, { error: (e as Error).message }];
