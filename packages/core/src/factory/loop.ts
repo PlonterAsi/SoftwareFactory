@@ -75,8 +75,11 @@ export interface RunOptions {
   projectId?: number;
 }
 
-/** A run that adds a screen to a project the factory already shipped: same folder, same locked tests. */
-export interface ScreenRun { kind: "screen"; baseRun: number; baseSha: string; tag: string }
+/**
+ * A run on top of a project the factory already shipped: same folder, same data, same locked tests.
+ * "screen" turns a script into an app; "feature" adds what the person asks to the shipped app.
+ */
+export interface ScreenRun { kind: "screen" | "feature"; baseRun: number; baseSha: string; tag: string }
 
 export interface ReviewResult { verdict: "pass" | "fix"; findings: { severity: "high" | "low"; text: string }[] }
 
@@ -247,6 +250,40 @@ export class Factory {
     return id;
   }
 
+  /**
+   * Add a feature to a shipped app. The run works in the app's own folder on top of what
+   * shipped: the Council and the Planner see the shipped plan and write the next version's
+   * plan (you approve it), the Tester adds tests for the new parts only (the old locked tests
+   * stay and must still pass), the Builder changes only what the feature needs, the Reviewer
+   * looks, you accept, and it ships as the next version. Your data in the folder stays. A run
+   * that does not ship puts the folder back the way it was.
+   */
+  addFeature(baseRun: number, ask: string, opts: Pick<RunOptions, "maxUsd" | "autoApprove" | "autoRetries" | "models" | "projectId" | "council"> = {}): number {
+    const text = ask.trim();
+    if (!text) throw new Error("Say what to add.");
+    const screen = this.onTopOf(baseRun, "feature", "add a feature to");
+    const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: true };
+    const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
+    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}) });
+    const done = new Run(this, this.log, runtime, ev.id, text, o, screen).go().finally(() => this.active.delete(ev.id));
+    this.active.set(ev.id, done);
+    return ev.id;
+  }
+
+  /** The next version of a shipped run: refuses a folder that is gone, busy or has your own changes. */
+  private onTopOf(baseRun: number, kind: ScreenRun["kind"], what: string): ScreenRun {
+    const fin = this.log.list({ type: "factory.run.finished", sinceId: baseRun - 1, limit: 1e6 }).map((e) => e.payload as { run: number; outcome: string }).filter((p) => p.run === baseRun).at(-1);
+    if (fin?.outcome !== "shipped") throw new Error(`Run #${baseRun} has not shipped, so there is nothing to ${what} yet.`);
+    const base = restoreState(this.log, baseRun);
+    if (!base.plan || !base.dir || !existsSync(join(base.dir, ".git"))) throw new Error(`The folder of run #${baseRun} is gone${base.dir ? ` (${base.dir})` : ""}.`);
+    const dir = base.dir;
+    for (const id of this.active.keys()) if (restoreState(this.log, id).dir === dir) throw new Error(`Run #${id} is already working in that folder.`);
+    if (git(dir, "status", "--porcelain")) throw new Error(`The folder has changes that are not committed (${dir}). Commit or undo them first, so nothing of yours is lost.`);
+    const tags = git(dir, "tag", "--list", "v*").split("\n").map((t) => t.match(/^v(\d+)\.(\d+)\.(\d+)$/)).filter(Boolean) as RegExpMatchArray[];
+    const minor = Math.max(0, ...tags.map((m) => Number(m[1]) * 1000 + Number(m[2]))) + 1;
+    return { kind, baseRun, baseSha: git(dir, "rev-parse", "HEAD"), tag: `v${Math.floor(minor / 1000)}.${minor % 1000}.0` };
+  }
+
   /** Wait for a run to finish (tests and the CLI). */
   /** A run working right now in this core. */
   isActive(run: number): boolean { return this.active.has(run); }
@@ -280,6 +317,8 @@ class Run {
   private lockedHash = "";
   private fixRounds = 0;
   private brief: CouncilBrief | null = null;
+  /** A feature run: the plan that shipped, which the next version builds on. */
+  private basePlan: Plan | null = null;
 
   constructor(
     private f: Factory, private log: EventLog, private runtime: AgentRuntime,
@@ -291,6 +330,11 @@ class Run {
   async go(from?: RestoredState) {
     try {
       if (from) this.restore(from);
+      if (this.screen?.kind === "feature") {
+        const base = restoreState(this.log, this.screen.baseRun);
+        this.basePlan = base.plan ?? null;
+        if (!this.dir) this.dir = base.dir ?? "";
+      }
       const done = from?.done ?? new Set<string>();
       if (!done.has("intake")) await this.station("intake", async () => { captureSignal(this.log, this.idea, "factory"); });
       if (!done.has("council")) await this.councilLoop();
@@ -374,11 +418,17 @@ class Run {
       // Resumed at the plan gate: the plan is already written, ask again.
       if (written) written = false;
       else await this.station("plan", async () => {
-        const text = await this.ask(this.one("plan"), `Idea: ${this.idea}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
+        const onTop = this.basePlan
+          ? `This app already shipped. Its approved plan:\n${JSON.stringify(this.basePlan, null, 2)}\n\nThe person now asks to add: ${this.idea}\n\nWrite the plan for its next version in the same JSON shape: keep the same name and slug, and every existing entity, field, view, flow and exported function (they still work and their tests stay locked); add what the ask needs. New fields on existing entities are optional, so records already saved still load. In "acceptance", list ONLY the new criteria: the old ones stay as they are.`
+          : `Idea: ${this.idea}`;
+        const text = await this.ask(this.one("plan"), `${onTop}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
         const plan = validatePlan(parseJsonBlock<Plan>(text));
+        if (this.basePlan) { plan.slug = this.basePlan.slug; plan.app = true; }
         this.plan = plan;
-        this.dir = resolve(join(this.f.projectsDir, `${plan.slug}-${this.id}`));
-        initRepo(this.dir);
+        if (!this.basePlan) {
+          this.dir = resolve(join(this.f.projectsDir, `${plan.slug}-${this.id}`));
+          initRepo(this.dir);
+        }
         const spec = writeFiles(this.dir, [{ path: "SPEC.md", content: specMarkdown(this.idea, plan) }], { lockTests: true });
         const sha = commitAll(this.dir, `Spec and plan: ${plan.name}`);
         this.log.append("factory.plan", { run: this.id, plan, dir: this.dir, sha, written: spec.written });
@@ -398,10 +448,13 @@ class Run {
     let tests: typeof files = [];
     let res!: ReturnType<typeof writeFiles>;
     for (let attempt = 1; ; attempt++) {
-      const text = await this.ask(this.one("tests"), `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${feedback}`);
+      const kept = this.basePlan ? this.testsText() : "";
+      const text = await this.ask(this.one("tests"), `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${kept ? `\n\nThis is the next version of a shipped app. Its locked tests stay as they are (read only):\n${kept}\n\nWrite NEW test files, with new names under test/, for the acceptance criteria above only.` : ""}${feedback}`);
       files = parseFileBlocks(text);
       // Fixtures (test/fixtures/*.csv and the like) belong to the locked suite too.
-      tests = files.filter((f) => isLockedTest(f.path));
+      // A feature run never rewrites a locked test: a new file with an old name gets the version in its name.
+      if (this.basePlan) files = files.map((f) => (isLockedTest(f.path) && existsSync(join(this.dir, f.path)) ? { ...f, path: f.path.replace(/(\.test)?(\.[cm]?js|\.[a-z]+)$/i, `-${this.screen!.tag}$1$2`) } : f));
+      tests = files.filter((f) => isLockedTest(f.path) && !(this.basePlan && existsSync(join(this.dir, f.path))));
       if (!tests.some((f) => f.path.endsWith(".js"))) throw new Error("The Tester returned no test/*.js files");
       res = writeFiles(this.dir, tests, { lockTests: false });
       const broken = syntaxErrors(this.dir, res.written.map((w) => w.path).filter((p) => /\.[cm]?js$/.test(p)));
@@ -422,7 +475,15 @@ class Run {
     // The app kit goes in first, so the Builder writes the model and views on top of it.
     if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
     this.builder = this.one("build");
-    const text = await this.ask(this.builder, this.screen
+    const text = await this.ask(this.builder, this.screen?.kind === "feature"
+      ? [
+        `This app already shipped and its locked acceptance tests pass. Build its next version on top of the existing code: add what the spec adds (new entities, fields, views and logic) and keep everything that works.`,
+        `Keep every existing export, entity, view and file working; records the person already saved must still load, so new fields are optional. All locked tests, old and new, must pass. Return only the files you add or change, each in full.`,
+        `Spec of the next version:\n${JSON.stringify(this.plan, null, 2)}`,
+        `Locked acceptance tests (read only):\n${this.testsText()}`,
+        `Current code:\n${this.codeText()}`,
+      ].join("\n\n")
+      : this.screen
       ? [
         `This project already shipped and its locked acceptance tests pass, but it is a script, not a program. Turn it into a real app on the app kit (already in the folder), on top of the existing code: write src/schema.js (the entities it works on and keeps, such as its inputs, settings and a history of its results, each with sample records), web/app.js with views that run its logic through forms and draw the results, index.html and web/style.css.`,
         `Keep every existing export, file and command working (the CLI too, if there is one). If the logic the app needs lives in a module that imports node: modules, move the pure part into a browser-safe module under src/ and have the old module import it from there; work that truly needs the disk goes in api.js. The locked tests must still pass. Return only the files you add or change, each in full, and update README.md to say the app opens from the Run tab's Start.`,
@@ -537,7 +598,7 @@ class Run {
       const runJson = { summary: this.plan.summary, examples: examples.map((x) => ({ label: String(x.label || x.args), profile: "cli", args: String(x.args), ...(x.input ? { input: String(x.input) } : {}) })) };
       writeFiles(this.dir, [{ path: "run.json", content: JSON.stringify(runJson, null, 2) + "\n" }], { lockTests: true });
     }
-    commitAll(this.dir, this.screen ? `Ship: ${this.plan.name} as an app` : "Ship");
+    commitAll(this.dir, this.screen?.kind === "feature" ? `Ship: ${this.plan.name} ${this.screen.tag}` : this.screen ? `Ship: ${this.plan.name} as an app` : "Ship");
     git(this.dir, "tag", "-f", this.screen?.tag ?? "v0.1.0");
     return git(this.dir, "rev-parse", "--short", "HEAD");
   }
