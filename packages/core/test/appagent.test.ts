@@ -24,7 +24,7 @@ describe("app agents", () => {
     const r = await askForApp(log, rt, bay, { task: "Research Hollow Knight", input: { name: "Hollow Knight" }, app: "Game Mastery" });
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ agent: "researcher", json: { genre: "metroidvania", terms: ["Geo"] }, costUsd: 0.03 });
-    expect(seen[0].tools).toEqual(["WebSearch", "WebFetch", "mcp__playwright"]);
+    expect(seen[0].tools).toEqual(["WebSearch", "WebFetch", "mcp__playwright", "mcp__context7"]);
     expect(seen[0].mcpConfig).toMatch(/mcp-[0-9a-f]{12}\.json$/);
     expect(seen[0].prompt).toContain("App: Game Mastery");
     expect(seen[0].prompt).toContain("\"name\":\"Hollow Knight\"");

@@ -3,8 +3,21 @@
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@0.0.84", "--headless", "--isolated"],
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.84",
+        "--headless",
+        "--isolated"
+      ],
       "_note": "Microsoft Playwright MCP, Apache-2.0: open a page, click, read and screenshot it. Local, free; the first use downloads the package."
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@4.4.4"
+      ],
+      "_note": "Upstash Context7 (MIT client): current docs and examples for a library. Free tier only (no API key); see docs/mcp-safety.md."
     }
   }
 }

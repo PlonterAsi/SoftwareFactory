@@ -361,6 +361,7 @@ function Stats({ a, st }: { a: AgentView; st?: AgentStats }) {
   const maxCost = Math.max(1e-6, ...vs.map((v) => v.costUsd));
   const tiles: [string, string][] = [
     ["calls", String(st.calls)], ["failed calls", String(st.failed)], ["pass rate", st.passRate != null ? `${Math.round(st.passRate * 100)}%` : "–"],
+    ["prompt cache hits", st.cache?.hitRate != null ? `${Math.round(st.cache.hitRate * 100)}% of ${st.cache.input.toLocaleString("en-US")} input tokens` : "–"],
     ["verdicts", `${st.verdicts.pass}/${st.verdicts.total}`], ["factory runs", String(st.runs)], ["rounds per run", st.avgRounds != null ? String(st.avgRounds) : "–"],
     ["cost", `$${st.costUsd.toFixed(4)}`], ["per call", `$${st.avgUsd.toFixed(4)}`],
   ];

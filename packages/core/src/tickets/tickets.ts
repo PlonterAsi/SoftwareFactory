@@ -643,7 +643,7 @@ export class Tickets {
     const gh = this.opts.github;
     // A GitHub repo is cloned from where this core's GitHub access points (github.com; a local stand-in in tests).
     if (repo.github && gh) repo = { ...repo, dir: gh.remote(repo.github) };
-    const job = workInRepo(this.log, runtime, bay, { id: t.id, key: t.key, title: t.title, document: doc, repo, workRoot, maxUsd: Math.min(maxUsd ?? 0.6, 1.5), git: gh ? (d, ...a) => gh.git(d, ...a) : undefined })
+    const job = workInRepo(this.log, runtime, bay, { id: t.id, key: t.key, title: t.title, document: doc, repo, workRoot, maxUsd: Math.min(maxUsd ?? 0.6, 1.5), git: gh ? (d, ...a) => gh.git(d, ...a) : undefined, projectId: t.project })
       .then(async (r) => {
         if (!r.ok) {
           this.log.append("ticket.noted", { id: t.id, by, status: "open", text: `The Builder could not work it: ${r.error}` });
