@@ -356,7 +356,9 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
             github.setToken(typeof b.token === "string" && b.token.trim() ? b.token : null);
           }
           const check = self && github.hasToken() ? await github.check(self) : null;
-          return json(res, 200, { hasToken: github.hasToken(), repo: self ? `${self.owner}/${self.name}` : null, canPush: check?.ok ?? false, why: check?.why ?? null });
+          const source = github.tokenSource();
+          const login = source && check?.ok ? await github.login() : null;
+          return json(res, 200, { hasToken: github.hasToken(), source, login, repo: self ? `${self.owner}/${self.name}` : null, canPush: check?.ok ?? false, why: check?.why ?? null });
         }
         if (url.pathname === "/api/tickets/auto") {
           // The auto-work rule: GET reads it, POST changes any of on, maxUsd, dailyUsd, wip.
