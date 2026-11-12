@@ -1717,3 +1717,13 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .fb-seg button:disabled { cursor: default; color: var(--muted); }
 .fb-seg button:disabled:hover { background: transparent; }
 .fb-seg button[aria-pressed="true"]:disabled { color: var(--ink); }
+
+/* Agent settings: what an agent loads (skills, tools, MCP servers), as tick boxes. */
+.loadout { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.loadout > .muted { font-size: 13px; }
+.picks { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.picks legend { font-size: 13px; color: var(--muted); padding: 0; margin-bottom: 3px; }
+.editor .picks label { flex-direction: row; align-items: center; gap: 5px; flex: 0 1 auto; max-width: 100%; font-size: 13px; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer; }
+.editor .picks label.on { border-color: var(--accent); }
+.picks label > .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34ch; }
+.editor .picks input[type="checkbox"] { flex: 0 0 auto; margin: 0; }

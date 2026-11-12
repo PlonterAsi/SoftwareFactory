@@ -36,7 +36,8 @@
     "resources": {
       "../packages/core/dist/": "core/",
       "../packages/core/package.json": "core/package.json",
-      "../packages/core/plugin-examples/": "plugin-examples/"
+      "../packages/core/plugin-examples/": "plugin-examples/",
+      "../packages/core/agent-skills/": "core/agent-skills/"
     },
     "windows": {
       "nsis": {

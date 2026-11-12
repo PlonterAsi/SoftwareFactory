@@ -100,7 +100,7 @@ idea → Planner (spec + task graph) → [you approve plan] → Tester (acceptan
 - **Bridge UI** (`apps/bridge`): React + TypeScript. Star map (every Signal is a star in the Unsorted belt), factory floor (the 9 stations, React Flow), computation timeline (every agent call with model, time, tokens and cost), Overseer channel.
 - **Core** (`packages/core`): TypeScript. Append-only SQLite event log with full-text search, Signals, the `AgentRuntime` adapter with per-call budget caps, a small JSON API and a live event stream.
 - **Shell** (`src-tauri`): Tauri 2. Opens the Bridge and runs the core as a child process.
-- **Skill** (`skills/visualize-everything`): the visualizeEverything station step.
+- **Skill** (`packages/core/agent-skills/visualize-everything`, in the agents' skills library): the visualizeEverything station step.
 - **Spike**: [docs/spike-runtime.md](docs/spike-runtime.md). Headless Claude Code in a lean profile costs about $0.0014 per short call on Haiku, versus about $0.99 with every plugin loaded on the default model.
 
 ## Run it

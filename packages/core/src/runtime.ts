@@ -15,8 +15,10 @@ export interface AgentRequest {
   budgetUsd?: number;
   /** Plugin folders to load (your installed Claude Code plugins). */
   pluginDirs?: string[];
-  /** Tools the agent may use. Empty or absent in the lean profile: none (the agent answers in text). */
+  /** Tools the agent may use. Empty or absent in the lean profile: none (the agent answers in text). `mcp__<server>` names allow that MCP server's tools. */
   tools?: string[];
+  /** An --mcp-config file with only this agent's MCP servers (see bay/kits.ts). */
+  mcpConfig?: string;
   /**
    * Run inside this folder (a working copy the agent may edit with its tools).
    * File edits there are accepted without a prompt; nothing outside it is.
@@ -89,13 +91,17 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     if (req.budgetUsd !== undefined) args.push("--max-budget-usd", String(req.budgetUsd));
     if (req.systemPrompt && req.systemPrompt.length <= MAX_ARG_ROLE) args.push("--append-system-prompt", req.systemPrompt);
     for (const dir of req.pluginDirs ?? []) args.push("--plugin-dir", dir);
-    if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", (req.tools ?? []).join(","));
-    else if (req.tools?.length) args.push("--tools", req.tools.join(","));
+    // --tools takes built-in tools only; an MCP server's tools come from --mcp-config and are allowed by name.
+    const builtin = (req.tools ?? []).filter((t) => !t.startsWith("mcp__"));
+    if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", builtin.join(","));
+    else if (builtin.length) args.push("--tools", builtin.join(","));
+    if (req.mcpConfig) args.push("--mcp-config", req.mcpConfig);
     // Headless edits in a working copy: accept file edits there, nothing else is allowed to prompt.
     if (req.cwd && req.tools?.some((t) => t === "Edit" || t === "Write")) args.push("--permission-mode", "acceptEdits");
-    // Read-only web tools change nothing on this machine; headless, an unapproved one is simply refused.
-    const web = (req.tools ?? []).filter((t) => WEB_TOOLS.includes(t));
-    if (web.length) args.push("--allowedTools", web.join(","));
+    // Allowed without a prompt: read-only web tools, the Skill tool (it reads the agent's own skills), and the
+    // agent's own MCP servers. Headless, anything unapproved is simply refused.
+    const allowed = (req.tools ?? []).filter((t) => WEB_TOOLS.includes(t) || t === "Skill" || (req.mcpConfig && t.startsWith("mcp__")));
+    if (allowed.length) args.push("--allowedTools", allowed.join(","));
     return args;
   }
 

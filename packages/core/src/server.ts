@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { configureKits } from "./bay/kits.js";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -69,6 +70,8 @@ export interface CoreOptions {
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
 export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion, github: githubIn }: CoreOptions) {
   // GitHub write access for the crew's PRs; the token lives in the data folder, never in the log.
+  // Each agent's own skills and MCP servers: the person's library and the built kits live in the data folder.
+  if (dataDir) configureKits({ dataDir });
   const github = githubIn ?? (dataDir ? new GitHub({ dataDir }) : undefined);
   const crewMode = () => (runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime));
   const bay = new AgentBay(log, runtime);

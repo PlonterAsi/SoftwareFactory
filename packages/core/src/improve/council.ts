@@ -260,7 +260,7 @@ export class ImproveCouncil {
         }
         inflight += cap;
         const r = await runAgent(this.log, this.runtime, m.id, {
-          prompt, model: m.model, systemPrompt: m.role, budgetUsd: cap, pluginDirs: m.pluginDirs.length ? m.pluginDirs : undefined, tools: m.tools,
+          prompt, model: m.model, systemPrompt: m.role, budgetUsd: cap, pluginDirs: m.pluginDirs.length ? m.pluginDirs : undefined, tools: m.tools, mcpConfig: m.mcpConfig,
         }, { station: "improve", agentVersion: m.version, seat }).finally(() => { inflight -= cap; });
         const c = r.result?.costUsd ?? 0;
         cost += c;

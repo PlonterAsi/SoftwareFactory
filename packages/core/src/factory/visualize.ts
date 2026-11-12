@@ -6,7 +6,7 @@ export interface VisualResult { pass: boolean; items: string[]; missing: string[
 /**
  * visualizeEverything, as code. Before a station may pass, every kind of thing
  * it produced must have the event its Bridge view is drawn from
- * (skills/visualize-everything/SKILL.md has the table).
+ * (packages/core/agent-skills/visualize-everything/SKILL.md has the table).
  */
 export function visualCheck(log: EventLog, run: number, station: StationId, round?: number): VisualResult {
   const evs = log.list({ sinceId: run - 1, limit: 1e6 }).filter((e) => (e.payload as { run?: number; factoryRun?: number })?.run === run || (e.payload as { factoryRun?: number })?.factoryRun === run || e.id === run);

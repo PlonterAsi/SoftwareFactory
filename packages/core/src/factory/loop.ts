@@ -671,7 +671,7 @@ class Run {
     this.calls++;
     const r = await runAgent(this.log, this.runtime, m.id, {
       prompt, model: this.o.models[m.id] ?? this.o.models[m.station] ?? m.model, systemPrompt: m.role, budgetUsd: Number(cap.toFixed(4)),
-      pluginDirs: m.pluginDirs.length ? m.pluginDirs : undefined, tools: m.tools.length ? m.tools : undefined,
+      pluginDirs: m.pluginDirs.length ? m.pluginDirs : undefined, tools: m.tools.length ? m.tools : undefined, mcpConfig: m.mcpConfig,
     }, { factoryRun: this.id, station: m.station, agentVersion: m.version, ...meta });
     this.spent += r.result?.costUsd ?? 0;
     if (r.error || !r.result) throw new Error(`${m.name} failed: ${r.error}`);
