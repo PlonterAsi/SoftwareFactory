@@ -107,6 +107,13 @@ describe("Agent Bay", () => {
       const t = await bay.test(id);
       expect([id, t.pass]).toEqual([id, true]);
     }
+    // An agent that says it could not do the task fails, however well its answer is shaped.
+    const blocked = new AgentBay(new EventLog(), scripted(() => "I couldn't run the research. Both web tools are blocked by a permission prompt.\n```json\n{\"verified\": false}\n```"));
+    const r = await blocked.test("researcher");
+    expect(r.pass).toBe(false);
+    expect(r.checks!.find((c) => !c.pass)!.label).toMatch(/did the task/);
+    const { COULD_NOT } = await import("../src/bay/bay.js");
+    expect(COULD_NOT.test("Players cannot use the map until level 3.")).toBe(false);
     // A planner whose answers break the contract fails its test.
     const bad = new AgentBay(log, scripted((req) => (req.systemPrompt?.includes("Station contract: plan") ? "I would rather chat." : undefined)));
     const t = await bad.test("planner");

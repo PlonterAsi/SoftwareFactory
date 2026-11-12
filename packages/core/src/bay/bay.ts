@@ -296,7 +296,7 @@ export class AgentBay implements CrewSource {
       pluginDirs: bind(a.def, a.version, station === "none" ? "overseer" : station).pluginDirs, tools: a.def.tools,
     }, { agentVersion: a.version, station: station === "none" ? undefined : station, bayTest: true });
     const checks: { label: string; pass: boolean }[] = [{ label: "answered within its cap", pass: !r.error }];
-    if (r.result) checks.push(...verify(station, r.result.text));
+    if (r.result) checks.push(...verify(station, r.result.text), { label: "did the task (no \"I could not\")", pass: !COULD_NOT.test(r.result.text) });
     const pass = checks.every((c) => c.pass);
     this.log.append("bay.test", { id: start.id, agent: id, version: a.version, state: "done", pass, checks, output: (r.result?.text ?? "").slice(0, 4000), error: r.error, costUsd: r.result?.costUsd ?? 0, runId: r.runId });
     this.visual(`test of ${id}`);
@@ -352,6 +352,9 @@ export function verify(station: HomeStation, text: string): { label: string; pas
     default: return [check("a non-empty answer", () => text.trim().length > 0)];
   }
 }
+
+/** An answer that says the agent could not do the task (a tool refused, no access) fails its test, however well it is shaped. */
+export const COULD_NOT = /\bI (?:could ?n[o']t|can ?n[o']t|cannot|was unable to|am unable to)\b[^.\n]{0,60}\b(?:run|use|access|reach|complete|perform|do|search|fetch|research)\b|\bblocked by a permission|\bpermission (?:prompt|was denied|denied)/i;
 
 /** A free first draft from the words of the description. */
 export function heuristicDraft(text: string): AgentDef {
