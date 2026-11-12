@@ -36,6 +36,7 @@ export type EventType =
   | "factory.tests.locked"
   | "factory.gate"
   | "factory.visual"
+  | "factory.fastgate"
   | "factory.budget"
   | "order.node"
   | "order.fragment"
