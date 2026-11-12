@@ -17,8 +17,16 @@ import { fileURLToPath } from "node:url";
  * no other server loads, and only that agent's servers' tools are allowed.
  */
 
-const BUNDLED = fileURLToPath(new URL("../../agent-skills/", import.meta.url));
-const BUNDLED_MCP = fileURLToPath(new URL("../../agent-mcp.json", import.meta.url));
+/**
+ * Where the bundled library sits next to the code. In the repo (src/ or dist/) it is two levels up;
+ * the installer copies dist/ straight into core/, so there it is one level up (core/agent-skills).
+ */
+export function bundledPath(name: string, from = import.meta.url): string {
+  const near = fileURLToPath(new URL(`../${name}`, from));
+  return existsSync(near) ? near : fileURLToPath(new URL(`../../${name}`, from));
+}
+const BUNDLED = bundledPath("agent-skills");
+const BUNDLED_MCP = bundledPath("agent-mcp.json");
 
 let cfg: { dataDir?: string; kitsDir: string; bundledDir: string; bundledMcp?: string } = { kitsDir: join(tmpdir(), "sf-agent-kits"), bundledDir: BUNDLED, bundledMcp: BUNDLED_MCP };
 

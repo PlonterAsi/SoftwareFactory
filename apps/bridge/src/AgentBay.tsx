@@ -65,12 +65,12 @@ function CrewCard({ a, st, on, slots, onClick }: { a: AgentView; st?: AgentStats
   return (
     <button className={`crew-card${on ? " on" : ""}${a.retired ? " retired" : ""}`} draggable={!a.retired} onClick={onClick}
       onDragStart={(e) => { e.dataTransfer.setData("text/agent", a.def.id); e.dataTransfer.effectAllowed = "copy"; }}
-      title={`${a.def.name} v${a.version}: ${a.def.description}`} aria-pressed={on}>
+      title={`${a.def.name} v${a.version}: ${a.def.description}\n${loadoutNames(a.def)}`} aria-pressed={on}>
       <Avatar a={a.def} st={st} />
       <span className="cc-main">
         <span className="cc-name">{a.def.name} <span className="mono muted">v{a.version}</span></span>
         <span className="cc-sub mono"><span className={`model m-${a.def.model}`}>{a.def.model}</span> {working.length ? working.map((s) => SLOT_LABEL[s]).join(", ") : <span className="muted">bench</span>}</span>
-        <span className={`cc-state st-${state}`}>{state === "thinking" ? `thinking · ${st?.current ?? ""}` : state === "blocked" ? "blocked · last call failed" : a.retired ? "retired" : "idle"}</span>
+        <span className={`cc-state st-${state}`}>{state === "thinking" ? `thinking · ${st?.current ?? ""}` : state === "blocked" ? "blocked · last call failed" : a.retired ? "retired" : "idle"}<span className="cc-kit muted"> · {kitShort(a.def)}</span></span>
       </span>
       <span className="cc-cost mono">${(st?.costUsd ?? 0).toFixed(4)}<br /><span className="muted">{st?.passRate != null ? `${Math.round(st.passRate * 100)}% pass` : "no runs"}</span></span>
     </button>
@@ -190,19 +190,48 @@ function loadout(d: AgentDef): string {
   return parts.length ? `loads ${parts.join(", ")}` : "lean (loads nothing extra)";
 }
 
-/** Tick boxes for one list of an agent's loadout; names it has that the library lacks stay visible, marked missing. */
+/** "3 skills · 4 tools · 1 MCP", or "lean": what this agent loads, for its card. */
+function kitShort(d: AgentDef): string {
+  const parts = [d.skills.length && `${d.skills.length} skill${d.skills.length > 1 ? "s" : ""}`, d.tools.length && `${d.tools.length} tool${d.tools.length > 1 ? "s" : ""}`, d.mcp?.length && `${d.mcp.length} MCP`, d.plugins.length && `${d.plugins.length} plugin${d.plugins.length > 1 ? "s" : ""}`].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "lean";
+}
+
+/** The names, for a tooltip. */
+function loadoutNames(d: AgentDef): string {
+  const line = (label: string, xs: string[] | undefined) => (xs?.length ? `${label}: ${xs.join(", ")}` : "");
+  return [line("Skills", d.skills), line("Tools", d.tools), line("MCP", d.mcp), line("Plugins", d.plugins)].filter(Boolean).join("\n") || "Lean: loads nothing extra";
+}
+
+/**
+ * One list of an agent's loadout: what THIS agent loads, as chips you can remove, then the rest of the
+ * library behind "Add". The library is shared; what each agent ticks is its own.
+ */
 function Picks({ label, hint, chosen, options, onChange }: { label: string; hint: string; chosen: string[]; options: { name: string; note: string }[]; onChange: (v: string[]) => void }) {
-  const all = [...options, ...chosen.filter((c) => !options.some((o) => o.name === c)).map((name) => ({ name, note: "not found: it will be left out" }))];
+  const [open, setOpen] = useState(false);
+  const noteOf = (n: string) => options.find((o) => o.name === n)?.note ?? "not in the library: it will be left out";
+  const rest = options.filter((o) => !chosen.includes(o.name));
   return (
     <fieldset className="picks">
       <legend>{label} <span className="muted">{hint}</span></legend>
-      {all.length === 0 && <span className="muted">none available</span>}
-      {all.map((o) => (
-        <label key={o.name} title={o.note} className={chosen.includes(o.name) ? "on" : ""}>
-          <input type="checkbox" checked={chosen.includes(o.name)} onChange={(e) => onChange(e.target.checked ? [...chosen, o.name] : chosen.filter((x) => x !== o.name))} />
-          <span className="mono">{o.name}</span> <span className="muted">{o.note}</span>
-        </label>
-      ))}
+      <div className="pick-row">
+        {chosen.length === 0 && <span className="muted">none</span>}
+        {chosen.map((n) => (
+          <span key={n} className={`pick-chip${options.some((o) => o.name === n) ? "" : " missing"}`} title={noteOf(n)}>
+            <span className="mono">{n}</span>
+            <button type="button" className="ghost" aria-label={`Remove ${n}`} onClick={() => onChange(chosen.filter((x) => x !== n))}>×</button>
+          </span>
+        ))}
+        {rest.length > 0 && <button type="button" className="ghost pick-add" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "Done" : `+ Add (${rest.length} more in the library)`}</button>}
+      </div>
+      {open && (
+        <div className="pick-row pick-lib">
+          {rest.map((o) => (
+            <button type="button" key={o.name} className="pick-opt" title={o.note} onClick={() => onChange([...chosen, o.name])}>
+              <span className="mono">+ {o.name}</span> <span className="muted">{o.note}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </fieldset>
   );
 }
@@ -228,7 +257,7 @@ function Editor({ a, models, lib, onSelect, onError }: { a: AgentView; models: s
         <textarea rows={6} value={d.prompt} onChange={(e) => set("prompt", e.target.value)} />
       </label>
       <div className="loadout">
-        <div className="muted">What it loads on every call: only what is ticked. Each one adds cost, so leave it lean unless it helps. <b className="mono">{loadout(d)}</b></div>
+        <div className="muted">What <b>this agent</b> loads on every call. The library under "Add" is shared by all agents; each one picks its own. More adds cost, so add what its job needs. <b className="mono">{loadout(d)}</b></div>
         <Picks label="Skills" hint="(it reads one when the task calls for it)" chosen={d.skills} options={(lib?.skills ?? []).map((s) => ({ name: s.name, note: `${s.source === "yours" ? "yours · " : ""}${s.description}` }))} onChange={(v) => set("skills", v)} />
         <Picks label="Tools" hint="(none: it answers in text, the cheapest and safest)" chosen={d.tools} options={lib?.tools ?? []} onChange={(v) => set("tools", v)} />
         <Picks label="MCP servers" hint={lib?.mcpFile ? `(set them up in ${lib.mcpFile})` : ""} chosen={d.mcp ?? []} options={(lib?.mcp ?? []).map((m) => ({ name: m.name, note: m.note || m.command }))} onChange={(v) => set("mcp", v)} />

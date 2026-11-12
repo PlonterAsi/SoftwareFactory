@@ -1718,12 +1718,18 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .fb-seg button:disabled:hover { background: transparent; }
 .fb-seg button[aria-pressed="true"]:disabled { color: var(--ink); }
 
-/* Agent settings: what an agent loads (skills, tools, MCP servers), as tick boxes. */
+/* Agent settings: what this agent loads (chips), and the shared library behind "Add". */
 .loadout { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 .loadout > .muted { font-size: 13px; }
-.picks { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.picks { border: 0; margin: 0; padding: 0; min-width: 0; }
 .picks legend { font-size: 13px; color: var(--muted); padding: 0; margin-bottom: 3px; }
-.editor .picks label { flex-direction: row; align-items: center; gap: 5px; flex: 0 1 auto; max-width: 100%; font-size: 13px; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer; }
-.editor .picks label.on { border-color: var(--accent); }
-.picks label > .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34ch; }
-.editor .picks input[type="checkbox"] { flex: 0 0 auto; margin: 0; }
+.pick-row { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-width: 0; }
+.pick-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--ink); border: 1px solid var(--accent); border-radius: 6px; padding: 1px 2px 1px 7px; }
+.pick-chip.missing { border-style: dashed; color: var(--muted); }
+.pick-chip button { padding: 0 6px; min-height: 0; line-height: 1.4; }
+.pick-add { font-size: 12.5px; padding: 2px 8px; }
+.pick-lib { margin-top: 6px; padding: 6px; border: 1px dashed var(--line); border-radius: 6px; }
+.pick-opt { display: inline-flex; gap: 5px; align-items: baseline; max-width: 100%; font-size: 12.5px; background: none; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; cursor: pointer; text-align: left; }
+.pick-opt:hover { border-color: var(--accent); }
+.pick-opt > .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
+.cc-kit { font-size: 11.5px; }
