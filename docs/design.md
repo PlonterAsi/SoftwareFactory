@@ -47,3 +47,10 @@ Switch it on in **Systems → Layout → Foundry Glass** (kept per computer in `
 - **ApprovalCard** (`shell/ApprovalCard.tsx`, used by Needs you): what you approve laid out beside the question. Plan OK shows the summary, tasks, "done means" checks and budget. Build OK shows the last test round, the review and the files. The GateBar is sticky at the card's foot.
 - **Motion**: pages in the new shell fade up 4px over 180ms; helm and Assistant slide in; all off under reduced motion.
 - **Keys** (`shell/Shortcuts.tsx`, new shell only, never while typing): `?` lists them; `G` then N/P/A/F/L/O/B goes to Needs you, Projects, Agents, Whole factory, Finished apps, Add-ons, Brain.
+
+## Cards, short names, five sections (phase 4)
+
+- **Sections**: `registerProjectPanel` takes an optional `section` (`brief | build | ship | improve | know`, default `know`). The project rail groups tabs under Brief (Overview, Ideas), Build (Builds, Tickets, Agents), Ship (Use, Integrate), Improve (Improvements), Know (Code map, History, Settings, add-on tabs). Panel ids and links are unchanged.
+- **Short names** (`projects/shortName.ts`): drop the article and the "with…/that…/for…" tail ("A word counter app with history" → "Word counter app"). Used in cards, the sidebar, the helm and the project header; the full name stays as subtitle and tooltip.
+- **Cards**: in Foundry Glass, Projects is a grid of cards: status mark and line, short name, full name or summary, build bar, counts, last active; Use appears on hover for shipped projects.
+- Needs you also counts tickets waiting on you; Tickets has its own sidebar item.

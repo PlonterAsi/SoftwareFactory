@@ -94,6 +94,10 @@ try {
     shots.push(name);
   };
 
+  // First pass in the classic layout (Foundry Glass is the default now; its pass is the fg-* screens).
+  await page.goto(`${BRIDGE}/`);
+  await page.evaluate(() => localStorage.setItem("sf.layout", "classic"));
+  await page.reload();
   await visit("#/", "home");
   const projects = await api("/api/projects");
   for (const p of (Array.isArray(projects) ? projects : projects.projects ?? [])) {

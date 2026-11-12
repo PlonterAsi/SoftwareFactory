@@ -9,7 +9,7 @@ function ImprovePanel({ ctx }: { ctx: PanelContext }) {
 }
 
 registerProjectPanel({
-  id: "improve",
+  id: "improve", section: "improve",
   title: "Improvements",
   order: 50,
   badge: (ctx) => {

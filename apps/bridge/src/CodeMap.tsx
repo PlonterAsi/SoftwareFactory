@@ -280,7 +280,7 @@ function HealthRing({ score }: { score: number | null }) {
 const queuePanel = (p: Parameters<typeof panelsFor>[0]) => panelsFor(p).find((x) => /improve|council|proposal/i.test(x.id))?.id;
 
 registerProjectPanel({
-  id: "code", title: "Code map", order: 15,
+  id: "code", section: "know", title: "Code map", order: 15,
   appliesTo: (p) => (p.rollup.linked.repo ?? 0) > 0,
   badge: (c) => { const f = (c.project.facets as Record<string, any>).code; return f ? (f.status === "exploring" || f.status === "importing" ? "exploring" : f.openSuggestions || null) : null; },
   alert: (c) => (c.project.facets as Record<string, any>).code?.status === "failed",

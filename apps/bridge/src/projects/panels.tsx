@@ -30,9 +30,21 @@ export interface PanelContext {
   pickedRun: number | null;
 }
 
+/**
+ * The five parts of a project, in the order work flows: what it is, making it, using it, making it
+ * better, and what is known about it. A panel names its section; one without lands in "Know".
+ */
+export type Section = "brief" | "build" | "ship" | "improve" | "know";
+export const SECTIONS: { id: Section; title: string }[] = [
+  { id: "brief", title: "Brief" }, { id: "build", title: "Build" }, { id: "ship", title: "Ship" },
+  { id: "improve", title: "Improve" }, { id: "know", title: "Know" },
+];
+
 export interface ProjectPanel {
   id: string;
   title: string;
+  /** Which part of the project this tab belongs to. Optional; defaults to "know". */
+  section?: Section;
   /** Lower comes first. Built-ins use 0 (Overview), 10 (Ideas), 20 (Runs), 60 (Agents), 90 (History). */
   order: number;
   appliesTo?: (p: ProjectSummary) => boolean;
@@ -48,6 +60,12 @@ const registry = new Map<string, ProjectPanel>();
 export function registerProjectPanel(p: ProjectPanel) { registry.set(p.id, p); }
 export function unregisterProjectPanel(id: string) { registry.delete(id); }
 export function registeredPanelIds(): string[] { return [...registry.keys()]; }
+
+/** This project's panels grouped by section, sections in order, empty ones left out. */
+export function sectionsFor(p: ProjectSummary): { id: Section; title: string; panels: ProjectPanel[] }[] {
+  const all = panelsFor(p);
+  return SECTIONS.map((s) => ({ ...s, panels: all.filter((x) => (x.section ?? "know") === s.id) })).filter((s) => s.panels.length);
+}
 
 export function panelsFor(p: ProjectSummary): ProjectPanel[] {
   return [...registry.values()].filter((x) => !x.appliesTo || x.appliesTo(p)).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
