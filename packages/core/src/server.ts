@@ -85,6 +85,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     return gitOk.ok;
   };
   const factory = new Factory(log, runtime, projectsDir, bay);
+  factory.maxRunMinutes = settings.maxRunMinutes;
   recordAppVersion(log, appVersion);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
   // The crew picks up ready bugs and tasks on its own, within your caps (docs/tickets.md, "The ready queue").
@@ -480,6 +481,7 @@ function selfGitHub(log: EventLog) {
 export function readSettings(log: EventLog): {
   crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean;
   ticketsAutoWork?: boolean; ticketsAutoMaxUsd?: number; ticketsAutoDailyUsd?: number; ticketsWip?: number;
+  maxRunMinutes?: number;
 } {
   const rows = log.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]));
