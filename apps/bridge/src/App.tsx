@@ -23,7 +23,7 @@ import "./projects/runPanel";
 import "./CodeMap";
 import { FeaturesPage, useIntegrations } from "./Features";
 import { PluginsPage, syncPluginPanels, usePlugins } from "./Plugins";
-import { LAYOUT_KEY, usePref, type Layout } from "./shell/prefs";
+import { DEFAULT_LAYOUT, LAYOUT_KEY, usePref, type Layout } from "./shell/prefs";
 import { Sidebar } from "./shell/Sidebar";
 import { Helm, HelmButton } from "./shell/Helm";
 import { NeedsYou } from "./shell/NeedsYou";
@@ -100,7 +100,7 @@ export function App() {
       mode={f.mode} since={since} onDismissSince={() => setSince(null)} onSetup={() => setSetupOpen(true)} onShowRun={showRun}
       projectId={projectId} projectName={projectName} projects={projects.list} routes={chatRoutes} />
   );
-  const [layout, setLayout] = usePref<Layout>(LAYOUT_KEY, "classic");
+  const [layout, setLayout] = usePref<Layout>(LAYOUT_KEY, DEFAULT_LAYOUT);
   const [assist, setAssist] = usePref<"open" | "closed">("sf.assistant", "open");
   const [helmOpen, setHelmOpen] = useState(false);
   const foundry = layout === "foundry";

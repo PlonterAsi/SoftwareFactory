@@ -72,12 +72,12 @@ export function Setup({ open, onClose, dropsAt, updates, layout, onLayout }: { o
               <div className="crew-modes">
                 <button className={`mode-card${layout !== "foundry" ? " on" : ""}`} onClick={() => onLayout("classic")} aria-pressed={layout !== "foundry"}>
                   <span className="mode-name">Classic</span>
-                  <span className="mode-tag">top bar</span>
+                  <span className="mode-tag">old top bar</span>
                   <span className="mode-body">Pages along the top, the Assistant always on the right.</span>
                 </button>
                 <button className={`mode-card${layout === "foundry" ? " on" : ""}`} onClick={() => onLayout("foundry")} aria-pressed={layout === "foundry"}>
                   <span className="mode-name">Foundry Glass</span>
-                  <span className="mode-tag">preview</span>
+                  <span className="mode-tag">new · default</span>
                   <span className="mode-body">A sidebar with Needs you and recent projects, Ctrl K to file, build or go anywhere, Ctrl J to show or hide the Assistant.</span>
                 </button>
               </div>
