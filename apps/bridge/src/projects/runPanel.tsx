@@ -60,7 +60,10 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
   const [newDir, setNewDir] = useState("");
   const [why, setWhy] = useState<string | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
+  // While an app or its pages show, the controls fold away so the app gets the room; one press brings them back.
+  const [padPick, setPadPick] = useState<boolean | null>(null);
 
+  useEffect(() => { setPadPick(null); }, [picked]);
   // Show the newest live session on arrival, else the newest one.
   useEffect(() => {
     if (picked != null || !info) return;
@@ -115,9 +118,12 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
   const main = info.profiles.filter((p) => !p.utility);
   const util = info.profiles.filter((p) => p.utility);
 
+  const showingApp = !!info.running.find((s) => s.id === picked && s.url);
+  // An early demo page keeps the controls open: its Upgrade card is the next step.
+  const padOpen = padPick ?? !(showingApp && folder?.app !== "page");
   return (
-    <div className="rn">
-      <aside className="rn-pad" aria-label="Ways to run this project">
+    <div className={`rn${padOpen ? "" : " using"}`}>
+      <aside className="rn-pad" hidden={!padOpen} aria-label="Ways to run this project">
         <section className="rn-folder">
           <h3>{info.folders.length > 1 ? "Which app" : "App"}</h3>
           {info.folders.length > 1 ? (
@@ -206,7 +212,7 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
           </section>
         )}
       </aside>
-      <Stage id={picked} onStop={stop} recommended={main.find((p) => p.recommended) ?? main[0] ?? null} onStart={(p) => go(p)} />
+      <Stage id={picked} padOpen={padOpen} onTogglePad={() => setPadPick(!padOpen)} onStop={stop} recommended={main.find((p) => p.recommended) ?? main[0] ?? null} onStart={(p) => go(p)} />
     </div>
   );
 }
@@ -248,7 +254,7 @@ function ProfileCard({ p, s, args, setArgs, busy, onStart, onStop, onShow, picke
   );
 }
 
-function Stage({ id, onStop, recommended, onStart }: { id: number | null; onStop: (id: number) => void; recommended: RunProfileView | null; onStart: (p: RunProfileView) => void }) {
+function Stage({ id, padOpen, onTogglePad, onStop, recommended, onStart }: { id: number | null; padOpen: boolean; onTogglePad: () => void; onStop: (id: number) => void; recommended: RunProfileView | null; onStart: (p: RunProfileView) => void }) {
   const { session: s, lines } = useSession(id);
   const [, tick] = useState(0);
   const [frameKey, setFrameKey] = useState(0);
@@ -286,6 +292,7 @@ function Stage({ id, onStop, recommended, onStart }: { id: number | null; onStop
   return (
     <section className={`rn-stage${wide ? " wide" : ""}`} aria-label={`${s.label} output`}>
       <header className="rn-stage-head">
+        <button className="ghost tiny" onClick={onTogglePad} aria-expanded={padOpen} title={padOpen ? "Fold the controls away, so the app gets the room" : "Show the controls: other apps, ways to run it, data files"}>{padOpen ? "◂ Hide controls" : "▸ Controls"}</button>
         <span className={`rn-light st-${s.state}${s.exitCode ? " bad" : ""}`} aria-hidden />
         <strong>{s.label}</strong>
         <span className={`rn-pill st-${s.state}`}>{s.mode === "window" ? "in its own window" : s.state}{s.exitCode != null ? ` · exit ${s.exitCode}` : ""}</span>

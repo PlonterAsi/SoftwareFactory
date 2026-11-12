@@ -1416,3 +1416,6 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .hull-use:hover { filter: brightness(1.1); }
 .hull-row { display: flex; align-items: center; }
 .hull-row > .hull-link { flex: 1; min-width: 0; }
+.rn.using { grid-template-columns: 1fr; }
+.rn.using .rn-pad { display: none; }
+.rn-stage-head strong { white-space: nowrap; }
