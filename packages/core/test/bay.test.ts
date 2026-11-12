@@ -152,6 +152,14 @@ describe("Council", () => {
     expect(majority(["build", "reshape", "drop"])).toBe(null);
   });
 
+  it("keeps the features the person named: the brief and the plan contract say so, the Council may only shrink them", async () => {
+    const { briefText } = await import("../src/factory/council.js");
+    const { CONTRACTS } = await import("../src/bay/builtin.js");
+    expect(briefText({ rounds: 1, votes: {}, outcome: "reshape", agreed: ["too much for one build"], proposals: [], concerns: [] })).toMatch(/features the person named in the idea stay in the plan/);
+    expect(CONTRACTS.plan).toMatch(/Every feature the idea names is in the plan/);
+    expect(CONTRACTS.council).toMatch(/never to cut it/);
+  });
+
   it("merges three takes into one brief: what two seats agree on, proposals and concerns", () => {
     const seat = (agent: string, t: object): SeatResult => ({ agent, name: agent, version: 1, round: 1, costUsd: 0, take: { take: "x", proposals: [], concerns: [], vote: "build", scope: "small", ...t } as any });
     const b = synthesize([

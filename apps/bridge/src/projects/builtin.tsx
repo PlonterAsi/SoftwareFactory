@@ -32,12 +32,16 @@ function Overview({ project: p, events, go, showRun }: PanelContext) {
   const sets = useMemo(() => projectSets(p), [p]);
   const recent = useMemo(() => events.filter((e) => inProject(e, p, sets) && describe(e)).slice(-8).reverse(), [events, p, sets]);
   const [dup, setDup] = useState<DuplicateRun | null>(null);
+  // A project with a shipped app grows it: the idea becomes its next version, unless you ask for a new app.
+  const hasApp = r.shipped > 0;
+  const [asNew, setAsNew] = useState(false);
+  const onTop = hasApp && !asNew;
   async function build(e?: FormEvent, again = false) {
     e?.preventDefault();
     if (!idea.trim() || busy) return;
     setBusy(true);
     setDup(null);
-    try { const { run } = await projectsApi.build(p.id, idea.trim(), undefined, again); setIdea(""); setErr(null); showRun(run); }
+    try { const { run } = await projectsApi.build(p.id, idea.trim(), undefined, again, onTop); setIdea(""); setErr(null); showRun(run); }
     catch (x) { const d = duplicateOf(x); if (d) setDup(d); else setErr((x as Error).message); }
     finally { setBusy(false); }
   }
@@ -58,9 +62,14 @@ function Overview({ project: p, events, go, showRun }: PanelContext) {
             onKeyDown={(e) => { if (e.key === "Escape") setSummary(null); if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) saveSummary(); }} aria-label="Project description" />
         )}
         <form className="pj-build" onSubmit={build}>
-          <input value={idea} onChange={(e) => setIdea(e.target.value)} placeholder={`Build something in ${p.name}…`} aria-label="Idea to build in this project" />
-          <button type="submit" disabled={!idea.trim() || busy}>{busy ? "Starting…" : "Build it"}</button>
+          <input value={idea} onChange={(e) => setIdea(e.target.value)} placeholder={onTop ? `Add something to ${p.name}…` : `Build something in ${p.name}…`} aria-label="Idea to build in this project" />
+          <button type="submit" disabled={!idea.trim() || busy}>{busy ? "Starting…" : onTop ? "Add it" : "Build it"}</button>
         </form>
+        {hasApp && (
+          <label className="pj-build-mode muted">
+            <input type="checkbox" checked={asNew} onChange={(e) => setAsNew(e.target.checked)} /> Build it as a new app instead of the next version of {p.name}
+          </label>
+        )}
         {err && <p className="error" role="alert">{err}</p>}
         {dup && <DuplicateNotice dup={dup} busy={busy} onShow={showRun} onDismiss={() => setDup(null)} onAgain={() => build(undefined, true)} />}
       </section>
