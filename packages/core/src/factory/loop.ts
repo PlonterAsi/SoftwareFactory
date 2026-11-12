@@ -1,6 +1,8 @@
 import { failureLines } from "./trim.js";
+import { SAME_TESTS_REASON, stopReason, type RoundRecord } from "./stoprules.js";
 import { recallBlock } from "../brain/recall.js";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
 import { fastGates } from "../safety/gates.js";
 import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
@@ -111,6 +113,9 @@ export class Factory {
 
   /** Runs this core found in flight when it started (closed as stopped, resumable). */
   readonly interrupted: number[] = [];
+
+  /** Wall-clock limit per run in minutes (the `maxRunMinutes` setting). */
+  maxRunMinutes: number | undefined;
 
   constructor(private log: EventLog, private runtime: AgentRuntime, readonly projectsDir: string, readonly crew: CrewSource = builtinCrew) {
     // Agent calls cut off by the restart would otherwise pulse as "running" forever.
@@ -509,26 +514,35 @@ class Run {
   }
 
   private builder: CrewMember | null = null;
+  private startedAt = Date.now();
+  private lastFixFiles: Record<string, string> = {};
+  private lastFixBefore: Record<string, string> = {};
 
   private async testFixLoop(extraFeedback = "", rerun = false) {
     let run = await this.station("test", () => this.runSuite(0));
     if (!rerun && this.builder) this.verdict(this.builder, "build", run.failed === 0, 0, run.failed ? `${run.failed} failing` : undefined);
-    let lastFailing = "";
+    let history: RoundRecord[] = [];
+    let files: Record<string, string> = {};
+    let before: Record<string, string> = {};
     let budget = this.o.maxFixRounds;
     let feedback = extraFeedback;
     while (run.failed > 0 || feedback) {
       const failing = run.cases.filter((c) => !c.pass).map((c) => c.name).sort().join("\n");
-      let reason = "";
-      if (budget <= 0) reason = `Tests still fail after ${this.o.maxFixRounds} fix rounds.`;
-      else if (failing && failing === lastFailing) reason = "The same tests failed twice in a row after a fix.";
+      history.push({ failing: run.failed, names: failing, files, before });
+      const stop = stopReason({ rounds: history, startedAt: this.startedAt, now: Date.now(), maxMinutes: this.f.maxRunMinutes });
+      // Only "the same tests failed twice" may be waved on by a person; the other rules end the run.
+      if (stop && stop !== SAME_TESTS_REASON) {
+        this.mark("fix", "fail", this.fixRounds || undefined, `Stopped: ${stop}`);
+        throw new StopRun(stop);
+      }
+      const reason = budget <= 0 ? `Tests still fail after ${this.o.maxFixRounds} fix rounds.` : stop ?? "";
       if (reason) {
         const d = await this.gate("escalation", `${reason} Grant 2 more fix rounds?`, { action: "2 more fix rounds", kind: "rounds" });
         if (!d.approve) throw new StopRun(reason);
         budget = 2;
-        lastFailing = "";
+        history = [history[history.length - 1]];
         feedback = d.note ?? feedback;
       }
-      lastFailing = failing;
       budget--;
       this.fixRounds++;
       const round = this.fixRounds;
@@ -539,6 +553,8 @@ class Run {
         fixer = await this.fix(run, round, note);
         return this.runSuite(round);
       }, round);
+      files = this.lastFixFiles;
+      before = this.lastFixBefore;
       this.verdict(fixer, "fix", run.failed === 0, round, run.failed ? `${run.failed} failing` : undefined);
       // The Test station shows the latest verdict, not only the first run's.
       if (run.failed === 0) this.mark("test", "pass", round, `green after fix round ${round}`);
@@ -558,12 +574,16 @@ class Run {
     ].filter(Boolean).join("\n\n");
     const fixer = this.one("fix");
     const files = parseFileBlocks(await this.ask(fixer, prompt, { round }));
+    // What each file held before this round, so the stop rules (SF-25) see a revert to the build's version.
+    const norm = (p: string) => p.replace(/\\/g, "/").replace(/^\.\//, "");
+    this.lastFixBefore = Object.fromEntries(files.map((f) => norm(f.path)).filter((p) => existsSync(join(this.dir, p))).map((p) => [p, createHash("sha256").update(readFileSync(join(this.dir, p), "utf8")).digest("hex")]));
     const res = writeFiles(this.dir, files, { lockTests: true });
     if (!res.written.length) {
       this.log.append("factory.files", { run: this.id, station: "fix", round, ...res });
       throw new Error(res.refused.length ? "The Fixer only tried to change the locked tests." : "The Fixer changed nothing.");
     }
     this.log.append("factory.files", { run: this.id, station: "fix", round, ...res });
+    this.lastFixFiles = Object.fromEntries(res.written.map((w) => [w.path, w.sha256]));
     commitAll(this.dir, `Fix round ${round}`);
     return fixer;
   }
