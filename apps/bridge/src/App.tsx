@@ -144,7 +144,7 @@ export function App() {
     </ErrorBoundary>
   );
   const pageInner = route.page === "bridge"
-    ? <FactoryBridge mode={route.mode} factoryRuns={f.factoryRuns} runs={f.runs} crew={crew} projects={projects.list} projectOfRun={chatRoutes.factoryRuns} onShowRun={showRun} />
+    ? <FactoryBridge mode={route.mode} factoryRuns={f.factoryRuns} runs={f.runs} crew={crew} agents={bay.agents} stats={bay.stats} projects={projects.list} projectOfRun={chatRoutes.factoryRuns} events={f.events} onShowRun={showRun} />
     : route.page === "needs"
     ? <NeedsYou factoryRuns={f.factoryRuns} featuresWaiting={featuresWaiting} conflicts={open} ticketsForYou={ticketCounts?.you ?? 0} onShowRun={showRun} />
     : route.page === "bases"

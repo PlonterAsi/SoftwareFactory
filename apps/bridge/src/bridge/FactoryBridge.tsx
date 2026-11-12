@@ -1,21 +1,25 @@
 import { useEffect, useState } from "react";
-import type { AgentRunView, FactoryRunView, ProjectSummary } from "../api";
+import type { AgentRunView, AgentStats, AgentView, FactoryRunView, ProjectSummary, SfEvent } from "../api";
 import type { CrewIndex } from "../FactoryFloor";
 import { href, type BridgeMode } from "../projects/router";
 import { SignalLoom } from "./SignalLoom";
+import { Partitura } from "./Partitura";
+import { LanternQuarter } from "./LanternQuarter";
 
 /** The modes of the Factory Bridge. Each answers one question about the factory. */
 export const BRIDGE_MODES: { id: BridgeMode; name: string; asks: string }[] = [
   { id: "loom", name: "Signal Loom", asks: "Where is every build, and which one waits for me?" },
+  { id: "score", name: "Partitura", asks: "Which agent worked when, on which build, and what did it cost?" },
+  { id: "quarter", name: "Lantern Quarter", asks: "How is every project doing, and which one needs me?" },
 ];
 
 /**
  * Factory Bridge: the dashboard over the whole factory. A status strip on top (what needs you,
  * who works, what runs, what it cost today), then one mode at a time.
  */
-export function FactoryBridge({ mode, factoryRuns, runs, crew, projects, projectOfRun, onShowRun }: {
-  mode: BridgeMode; factoryRuns: FactoryRunView[]; runs: AgentRunView[]; crew: CrewIndex; projects: ProjectSummary[] | null;
-  projectOfRun: Record<number, number>; onShowRun: (run: number) => void;
+export function FactoryBridge({ mode, factoryRuns, runs, crew, agents, stats, projects, projectOfRun, events, onShowRun }: {
+  mode: BridgeMode; factoryRuns: FactoryRunView[]; runs: AgentRunView[]; crew: CrewIndex; agents: AgentView[]; stats: Record<string, AgentStats>;
+  projects: ProjectSummary[] | null; projectOfRun: Record<number, number>; events: SfEvent[]; onShowRun: (run: number) => void;
 }) {
   // Elapsed times tick every few seconds; nothing else animates while the factory is idle.
   const [now, setNow] = useState(Date.now());
@@ -46,6 +50,8 @@ export function FactoryBridge({ mode, factoryRuns, runs, crew, projects, project
         <span className="fb-stat">Spent today <b className="mono">${spentToday.toFixed(2)}</b></span>
       </div>
       {current.id === "loom" && <SignalLoom factoryRuns={factoryRuns} runs={runs} crew={crew} projectOf={name} onShowRun={onShowRun} now={now} />}
+      {current.id === "score" && <Partitura runs={runs} agents={agents} factoryRuns={factoryRuns} now={now} onShowRun={onShowRun} />}
+      {current.id === "quarter" && <LanternQuarter projects={projects} factoryRuns={factoryRuns} runs={runs} agents={agents} stats={stats} projectOfRun={projectOfRun} events={events} />}
     </section>
   );
 }

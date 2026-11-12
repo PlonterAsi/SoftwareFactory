@@ -1671,3 +1671,44 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .loom-fuel { display: inline-block; width: 70px; height: 5px; background: var(--panel-2); border-radius: 3px; vertical-align: middle; margin-right: 8px; overflow: hidden; }
 .loom-fuel i { display: block; height: 100%; background: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .loom-lamp, .loom-token, .loom-lane-bg { transition: none; } }
+.fb-seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; }
+.fb-seg button { background: transparent; border: 0; padding: 6px 12px; font-size: 13.5px; color: var(--ink-2); cursor: pointer; transition: background 140ms var(--ease); }
+.fb-seg button:hover { background: var(--hover); }
+.fb-seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--ink); }
+.pt { display: grid; gap: 12px; padding: 0 28px 28px; }
+.pt-bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.pt-note { cursor: pointer; }
+.pt-run { cursor: pointer; }
+.pt-empty { padding: 28px 0; }
+.pt-tip { position: fixed; pointer-events: none; background: var(--panel-2); border: 1px solid var(--line-3); border-radius: 8px; padding: 8px 10px; font-size: 13px; z-index: 50; max-width: 280px; box-shadow: var(--shadow); }
+.lq { display: grid; gap: 12px; padding: 0 28px 28px; }
+.lq-districts { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.lq-d { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 13px; display: grid; gap: 9px; min-width: 0; color: inherit; text-decoration: none; transition: border-color 160ms var(--ease), background 160ms var(--ease); }
+.lq-d:hover { border-color: var(--line-3); background: var(--hover); }
+.lq-d.live { border-color: rgba(79, 209, 193, 0.45); }
+.lq-d.wait { border-color: var(--gate); }
+.lq-d h4 { margin: 0; font-size: 15px; font-weight: 500; display: flex; gap: 8px; align-items: center; min-width: 0; }
+.lq-d h4 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lq-porch { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); opacity: 0.4; flex: none; }
+.lq-porch.on { background: var(--accent); opacity: 1; }
+.lq-porch.ask { background: var(--gate); opacity: 1; box-shadow: 0 0 10px var(--gate); }
+.lq-street { display: grid; grid-template-columns: repeat(11, 1fr); gap: 3px; align-items: end; height: 30px; }
+.lq-lot { background: var(--hover); border-radius: 2px 2px 0 0; height: 60%; transition: background 160ms var(--ease), height 160ms var(--ease); }
+.lq-lot.gate { width: 60%; justify-self: center; }
+.lq-lot.done { background: rgba(143, 212, 122, 0.38); }
+.lq-lot.on { background: var(--accent); height: 100%; }
+.lq-lot.ask { background: var(--gate); height: 100%; }
+.lq-lot.bad { background: var(--bad); height: 100%; }
+.lq-houses { display: flex; gap: 4px; align-items: end; height: 22px; font-size: 13px; }
+.lq-house { width: 12px; background: var(--ink-2); opacity: 0.55; clip-path: polygon(50% 0, 100% 30%, 100% 100%, 0 100%, 0 30%); }
+.lq-house.bug { background: var(--bad); opacity: 0.85; }
+.lq-sub { font-size: 13px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+.lq-ask { color: var(--gate); }
+.lq-h { margin: 10px 0 0; font-size: 15px; font-weight: 500; }
+.lq-moons { display: flex; flex-wrap: wrap; gap: 10px 14px; }
+.lq-moon { display: grid; justify-items: center; gap: 4px; width: 68px; font-size: 12.5px; color: var(--muted); text-align: center; text-decoration: none; border-radius: 8px; padding: 4px 0; transition: background 140ms var(--ease); }
+.lq-moon:hover { background: var(--panel-2); }
+.lq-moon.busy span { color: var(--agent); }
+.lq-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.lq-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+@media (prefers-reduced-motion: reduce) { .lq-lot, .lq-d, .fb-seg button { transition: none; } }
