@@ -58,6 +58,25 @@ describe("launch: which build a project opens", () => {
     expect(f.map((x) => x.own)).toEqual([true, true, false]);
     expect(f[2].label).toMatch(/another idea built here/);
   });
+
+  it("opens an app you grew with Add it first, even when its name differs from the first build's", () => {
+    const log = new EventLog(":memory:");
+    const pid = createProject(log, { name: "Game Mastery", kind: "app" });
+    const ship = (idea: string, name: string, dir: string, screen?: object) => {
+      const run = log.append("factory.run.started", { idea, projectId: pid, ...(screen ? { screen } : {}) }).id;
+      log.append("factory.plan", { run, plan: { name, summary: name }, dir });
+      log.append("factory.run.finished", { run, outcome: "shipped", dir, plan: name });
+      return run;
+    };
+    const v1 = ship("a game guide", "Game Mastery", folder({ "index.html": "v1" }));
+    const v2dir = folder({ "index.html": "v2" });
+    const v2 = ship("agentic game guide", "Game Mastery v2", v2dir);
+    expect(projectFolders(log, pid)[0].ref).toBe(v1);
+    const v3 = ship("every genre", "Game Mastery v2", v2dir, { kind: "feature", baseRun: v2, baseSha: "abc", tag: "v0.2.0" });
+    const f = projectFolders(log, pid);
+    expect(f[0]).toMatchObject({ ref: v3, own: true });
+    expect(f.map((x) => x.dir)).toEqual([v2dir, f[1].dir]);
+  });
 });
 
 describe("launch: finding how to run a project", () => {
