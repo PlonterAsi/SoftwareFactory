@@ -34,7 +34,7 @@ export function AgentBay({ bay }: { bay: BayState }) {
           </div>
         </div>
         <div className="bay-right">
-          {selected ? <AgentPanel key={selected.def.id + ":" + selected.version} a={selected} bay={bay} onSelect={setSel} onError={setErr} /> : <div className="empty">Loading the crew…</div>}
+          {selected ? <AgentPanel key={selected.def.id + ":" + selected.version} a={selected} bay={bay} onSelect={setSel} onError={setErr} onAssign={(slot, ids) => run(() => bayApi.assign(slot, ids))} /> : <div className="empty">Loading the crew…</div>}
         </div>
       </div>
     </section>
@@ -145,11 +145,15 @@ function NewAgent({ onMade, onError }: { onMade: (a: AgentView) => void; onError
 
 type Tab = "edit" | "versions" | "tests" | "stats";
 
-function AgentPanel({ a, bay, onSelect, onError }: { a: AgentView; bay: BayState; onSelect: (id: string) => void; onError: (e: string) => void }) {
+function AgentPanel({ a, bay, onSelect, onError, onAssign }: { a: AgentView; bay: BayState; onSelect: (id: string) => void; onError: (e: string) => void; onAssign: (slot: Slot, ids: string[]) => void }) {
   const [tab, setTab] = useState<Tab>("edit");
   const st = bay.stats[a.def.id];
   const tests = bay.tests.filter((t) => t.agent === a.def.id);
   const working = stationsOf(a.def.id, bay.slots);
+  // Made for a station but not working one: one press seats it (a free seat, or the station's only seat).
+  const home = a.def.station !== "none" && !a.retired && !working.includes(a.def.station as Slot) ? (a.def.station as Slot) : null;
+  const homeIds = home ? bay.slots[home] ?? [] : [];
+  const homeSeats = home ? bay.seats[home] ?? 1 : 0;
   return (
     <div className="agent-panel">
       <div className="ap-head">
@@ -158,6 +162,9 @@ function AgentPanel({ a, bay, onSelect, onError }: { a: AgentView; bay: BayState
           <div className="ap-name">{a.def.name} <span className="mono muted">v{a.version}{a.builtin ? " · built-in" : ""}{a.retired ? " · retired" : ""}</span></div>
           <div className="muted ap-desc">{a.def.description || "No description yet."}</div>
           <div className="mono ap-meta"><span className={`model m-${a.def.model}`}>{a.def.model}</span> cap ${a.def.budgetUsd.toFixed(2)}/call · {a.def.plugins.length ? `${a.def.plugins.length} plugin${a.def.plugins.length > 1 ? "s" : ""}` : "lean (no plugins)"} · {working.length ? `on ${working.map((s) => SLOT_LABEL[s]).join(", ")}` : "on the bench"}</div>
+          {home && (homeIds.length < homeSeats
+            ? <button className="sm" onClick={() => onAssign(home, [...homeIds, a.def.id])}>Seat it on {SLOT_LABEL[home]}</button>
+            : <span className="muted">{SLOT_LABEL[home]} is full ({homeSeats} seat{homeSeats > 1 ? "s" : ""}): pick a seat on the station board to swap it in.</span>)}
         </div>
       </div>
       <div className="tabs ap-tabs" role="tablist">
