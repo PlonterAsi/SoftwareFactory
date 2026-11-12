@@ -3,6 +3,7 @@ import { KitPage } from "./Kit";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API, setupApi, useBay, useChatRoutes, useFactory, useOrder, useProjects, type SinceView } from "./api";
 import { Setup } from "./Setup";
+import { BugReport, ErrorBoundary } from "./BugReport";
 import { CoreDown } from "./CoreDown";
 import { AgentBay } from "./AgentBay";
 import { RunDeck } from "./RunDeck";
@@ -17,6 +18,8 @@ import { Home } from "./projects/Home";
 import { Workspace } from "./projects/Workspace";
 import { href, useRoute, type FactoryView } from "./projects/router";
 import "./projects/builtin";
+import { Tickets, useTicketCounts } from "./Tickets";
+import "./TicketsPanel";
 import { ImproveDeck, useImprove } from "./ImproveDeck";
 import "./projects/improvePanel";
 import "./projects/runPanel";
@@ -51,6 +54,7 @@ export function App() {
   const view: FactoryView = route.page === "factory" ? route.view : "factory";
   const setView = (v: FactoryView) => go({ page: "factory", view: v });
   const store = useStore(f.events, route.page === "factory" && view === "data");
+  const ticketCounts = useTicketCounts(f.events);
   // Follow the newest run unless one was picked.
   const selected = f.factoryRuns.find((r) => r.run === picked) ?? f.factoryRuns.at(-1);
   const crew = useMemo(() => Object.fromEntries(bay.agents.map((a) => [a.def.id, { name: a.def.name, avatar: a.def.avatar }])), [bay.agents]);
@@ -71,6 +75,7 @@ export function App() {
     go({ page: "factory", view: "factory" });
   };
   const [setupOpen, setSetupOpen] = useState(false);
+  const [bugOpen, setBugOpen] = useState(false);
   const updates = useUpdates(f.online);
   const lastEvent = f.events.at(-1)?.id ?? 0;
 
@@ -127,19 +132,24 @@ export function App() {
           <button role="tab" aria-selected={view === "factory"} className={view === "factory" ? "tab on" : "tab"} onClick={() => setView("factory")}>Factory floor</button>
           <button role="tab" aria-selected={view === "bay"} className={view === "bay" ? "tab on" : "tab"} onClick={() => setView("bay")}>Agents{Object.values(bay.stats).some((s) => s.state === "thinking") ? " · working" : ""}</button>
           <button role="tab" aria-selected={view === "order"} className={(view === "order" ? "tab on" : "tab") + (open ? " alert" : "")} onClick={() => setView("order")}>Order deck{open ? ` · ${open}` : ""}</button>
+          <button role="tab" aria-selected={view === "tickets"} className={(view === "tickets" ? "tab on" : "tab") + (ticketCounts?.you ? " look" : "")} onClick={() => setView("tickets")}>Tickets{ticketCounts?.you ? ` · ${ticketCounts.you} for you` : ticketCounts?.open ? ` · ${ticketCounts.open}` : ""}</button>
           <button role="tab" aria-selected={view === "improve"} className={view === "improve" ? "tab on" : "tab"} onClick={() => setView("improve")}>Improve{improve.busy ? " · looking" : waiting ? ` · ${waiting}` : ""}</button>
           <button role="tab" aria-selected={view === "data"} className={view === "data" ? "tab on" : "tab"} onClick={() => setView("data")}>Data vault</button>
         </nav>
+        <ErrorBoundary key={view} where={`bridge #/factory/${view}`}>
         {view === "factory" ? <>
           <FactoryFloor runs={f.runs} factoryRuns={f.factoryRuns} selected={selected} onSelect={setPicked} crew={crew} mode={f.mode} />
           <RunDeck run={selected} />
-        </> : view === "bay" ? <AgentBay bay={bay} /> : view === "improve" ? <ImproveDeck improve={improve} crew={bay.agents} onRunStarted={showRun} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
+        </> : view === "bay" ? <AgentBay bay={bay} /> : view === "tickets" ? <Tickets events={f.events} onShowRun={showRun}
+            crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))} />
+          : view === "improve" ? <ImproveDeck improve={improve} crew={bay.agents} onRunStarted={showRun} /> : view === "order" ? <OrderDeck order={order} selected={node} onSelect={pickNode} /> : <DataDeck store={store} />}
+        </ErrorBoundary>
         <Timeline runs={f.runs} totalUsd={f.totalUsd} />
       </div>
       {withOverseer && overseer}
     </main>
   );
-  const page = route.page === "needs"
+  const pageInner = route.page === "needs"
     ? <NeedsYou factoryRuns={f.factoryRuns} featuresWaiting={featuresWaiting} conflicts={open} onShowRun={showRun} />
     : route.page === "bases"
     ? <BasesPage bases={bases.data} refresh={bases.refresh} />
@@ -153,10 +163,15 @@ export function App() {
     ? <FeaturesPage events={f.events} id={route.id} onOpenProject={(id) => go({ page: "project", id, panel: "integrate" })} />
     : route.page === "project"
     ? <Workspace id={route.id} panel={route.panel} run={route.run} factory={f} order={order} bay={bay} go={go} />
-    : <Home list={projects.list} err={projects.err} onOpen={(id) => go({ page: "project", id })} />;
+    : <Home list={projects.list} err={projects.err} events={f.events} onOpen={(id) => go({ page: "project", id })} />;
+  const page = <ErrorBoundary key={route.page === "project" ? `p${route.id}` : route.page} where={`bridge ${href(route)}`}>{pageInner}</ErrorBoundary>;
+  const bugButton = <button className="ghost sm bug-btn" onClick={() => setBugOpen(true)} aria-label="Report a bug" title="Report a bug: what went wrong, with the screen attached">Bug</button>;
   const crewChip = <button className={`crew-chip ${f.mode ?? ""}`} onClick={() => setSetupOpen(true)} title={`Runtime: ${f.runtime}. Click for crew, checks and folders.`}>{f.mode === "real" ? "Real crew" : f.mode === "practice" ? "Practice crew · free" : "Crew …"}</button>;
-  const setup = <Setup open={setupOpen} onClose={() => setSetupOpen(false)} updates={updates} layout={layout} onLayout={setLayout}
-    dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />;
+  const setup = <>
+    <Setup open={setupOpen} onClose={() => setSetupOpen(false)} updates={updates} layout={layout} onLayout={setLayout}
+    dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />
+    <BugReport open={bugOpen} onClose={() => setBugOpen(false)} />
+  </>;
 
   if (foundry) {
     const assistOpen = assist === "open";
@@ -177,6 +192,7 @@ export function App() {
             <HelmButton onOpen={() => setHelmOpen(true)} projectName={projectName} />
             <div className="s2-top-right">
               {open > 0 && <a className="alert-text" href={href({ page: "factory", view: "order" })}>{open} conflict{open > 1 ? "s" : ""}</a>}
+              {bugButton}
               <button className={`ghost sm s2-assist-toggle${assistOpen ? " on" : ""}`} onClick={() => setAssist(assistOpen ? "closed" : "open")} aria-pressed={assistOpen} aria-keyshortcuts="Control+J" title="Show or hide the Assistant (Ctrl J)">Assistant <kbd>Ctrl J</kbd></button>
             </div>
           </header>
@@ -227,6 +243,7 @@ export function App() {
           <span className="num">${f.totalUsd.toFixed(4)}</span>
           <VersionChip u={updates} onOpen={() => setSetupOpen(true)} />
           <button className="ghost sm systems" onClick={() => setSetupOpen(true)} aria-label="Systems: crew, checks and folders">Systems</button>
+          {bugButton}
         </div>
       </header>
       <UpdateBanner u={updates} />

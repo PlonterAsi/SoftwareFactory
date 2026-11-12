@@ -4,6 +4,10 @@ import { projectsApi, PROJECT_KINDS, type ProjectSummary } from "../api";
 import { ago } from "./builtin";
 import { href } from "./router";
 import { ImportRepo } from "../CodeMap";
+import { AskNotProject, checkIntake, type IntakeVerdict } from "../Intake";
+import { showTicket } from "../BugReport";
+import { Waiting } from "../Tickets";
+import type { SfEvent } from "../api";
 
 type Filter = "live" | "archived" | "all";
 
@@ -11,13 +15,14 @@ type Filter = "live" | "archived" | "all";
  * The fleet: every project, most recently active first. Each row's hull bar shows
  * its runs (shipped, failed, running) at a glance; the numbers say the rest.
  */
-export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err: string | null; onOpen: (id: number) => void }) {
+export function Home({ list, err, onOpen, events }: { list: ProjectSummary[] | null; err: string | null; onOpen: (id: number) => void; events: SfEvent[] }) {
   const [filter, setFilter] = useState<Filter>("live");
   const [q, setQ] = useState("");
   const [name, setName] = useState("");
   const [kind, setKind] = useState("app");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [ask, setAsk] = useState<IntakeVerdict | null>(null);
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
     return (list ?? []).filter((p) => (filter === "all" ? true : filter === "archived" ? p.status === "archived" : p.status !== "archived"))
@@ -35,6 +40,14 @@ export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err
   async function create(e: FormEvent) {
     e.preventDefault();
     if (!name.trim() || busy) return;
+    setBusy(true);
+    // An ask about a project you have is a ticket there, not a project: offer that first.
+    const v = await checkIntake(name.trim());
+    setBusy(false);
+    if (v) setAsk(v); else await make();
+  }
+  async function make() {
+    setAsk(null);
     setBusy(true);
     try { const p = await projectsApi.create(name.trim(), kind); setName(""); setMsg(null); onOpen(p.id); }
     catch (x) { setMsg((x as Error).message); }
@@ -54,6 +67,11 @@ export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err
           <button type="submit" disabled={!name.trim() || busy}>Create project</button>
         </form>
       </header>
+      {ask && <AskNotProject text={name.trim()} verdict={ask} onProject={make} onCancel={() => setAsk(null)} onFiled={(id, project) => { setAsk(null); setName(""); showTicket(id, project); }} />}
+      <section className="waiting-home" aria-label="Waiting on you">
+        <h2>Waiting on you</h2>
+        <Waiting events={events} onSelect={(id, project) => showTicket(id, project)} limit={6} />
+      </section>
       <ImportRepo />
       <div className="fleet-tools">
         <div className="seg" role="tablist" aria-label="Which projects">
@@ -79,7 +97,7 @@ export function Home({ list, err, onOpen }: { list: ProjectSummary[] | null; err
 function Row({ p, onOpen, twins }: { p: ProjectSummary; onOpen: (id: number) => void; twins: number }) {
   const r = p.rollup;
   const other = Math.max(0, r.runs - r.shipped - r.failed - r.running);
-  const linked = Object.entries(r.linked);
+  const linked = Object.entries(r.linked).filter(([k]) => k !== "self"); // "self" only marks SoftwareFactory's own project
   return (
     <li className={`hull hull-row status-${p.status}`}>
       <a href={href({ page: "project", id: p.id })} onClick={(e) => { e.preventDefault(); onOpen(p.id); }} className="hull-link">

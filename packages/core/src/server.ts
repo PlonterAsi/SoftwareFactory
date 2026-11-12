@@ -28,6 +28,12 @@ import { PluginHost } from "./plugins/host.js";
 import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
 import { brainRoute } from "./brain/routes.js";
 import { DropFolder } from "./bridge/drop.js";
+import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
+import { GitHub, parseGitHubRepo } from "./tickets/github.js";
+import { linkToProject } from "./projects/service.js";
+import { ErrorCapture, isFault } from "./tickets/capture.js";
+import { classifyIntake, ensureSelfProject, filedAlready, projectToTicket } from "./tickets/intake.js";
+import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { ImproveCouncil, type Target } from "./improve/council.js";
 import { BaseHost, type BootedBase } from "./bases/host.js";
@@ -53,12 +59,17 @@ export interface CoreOptions {
   dataDir?: string;
   /** Improvement Council caps: daily USD and hours between automatic sessions. */
   improve?: { maxUsd?: number; everyHours?: number };
+  /** GitHub write access for the crew's PRs (tests pass one pointed at a fake GitHub). */
+  github?: GitHub;
   /** The installed app's version, from the shell (SF_APP_VERSION). A new one is recorded as `app.updated`. */
   appVersion?: string;
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion, github: githubIn }: CoreOptions) {
+  // GitHub write access for the crew's PRs; the token lives in the data folder, never in the log.
+  const github = githubIn ?? (dataDir ? new GitHub({ dataDir }) : undefined);
+  const crewMode = () => (runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime));
   const bay = new AgentBay(log, runtime);
   const settings = readSettings(log);
   const drop = new DropFolder(log, settings.dropDir ?? dropDir ?? join(homedir(), "SoftwareFactory", "Drop"));
@@ -71,6 +82,29 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const factory = new Factory(log, runtime, projectsDir, bay);
   recordAppVersion(log, appVersion);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
+  // The crew picks up ready bugs and tasks on its own, within your caps (docs/tickets.md, "The ready queue").
+  const autoWork = (): AutoWork => {
+    const st = readSettings(log);
+    return {
+      on: st.ticketsAutoWork ?? AUTO_WORK_DEFAULT.on,
+      maxUsd: st.ticketsAutoMaxUsd ?? AUTO_WORK_DEFAULT.maxUsd,
+      dailyUsd: st.ticketsAutoDailyUsd ?? AUTO_WORK_DEFAULT.dailyUsd,
+      wip: st.ticketsWip ?? AUTO_WORK_DEFAULT.wip,
+    };
+  };
+  const tickets = new Tickets(log, {
+    runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1), workRoot: join(dirname(projectsDir), "ticket-work"),
+    autoWork, canWork: () => (gitReady() ? null : "Git is not installed"),
+    github, canShip: () => (crewMode() === "real" ? null : "the practice crew never opens a PR; switch to the real crew in Systems for that"),
+  });
+  // Every fault becomes a bug ticket by itself (docs/tickets.md, "Errors become bugs").
+  // SoftwareFactory's own project: the home of asks about the app and of the errors it catches. Made when first needed.
+  const ensureSelf = () => ensureSelfProject(log, (name) => order.createNode("project", name));
+  const errors = new ErrorCapture(log, tickets, { project: ensureSelf });
+  const fault = (where: string, e: unknown, context?: Record<string, unknown>) => {
+    const err = e instanceof Error ? e : new Error(String(e));
+    return errors.capture({ message: `${err.name !== "Error" ? `${err.name}: ` : ""}${err.message}`, stack: err.stack, where, from: "core", context });
+  };
   // Imported repos are cloned next to the factory's own projects, in imports/.
   const explorer = new RepoExplorer(log, runtime, join(dirname(projectsDir), "imports"), bay, { createNode: (title) => order.createNode("project", title) });
   // Finished projects added into SoftwareFactory: their frozen copies live in extensions/, next to projects/.
@@ -91,7 +125,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     const p = e.payload as { text: string; source: string; projectId?: number };
     // Said in a project's chat: the Order Engine files it under that project unless the words point elsewhere.
     const home = p.projectId != null ? projectHome(log, order.state(), Number(p.projectId)) : null;
-    order.ingest({ id: e.id, text: p.text, source: p.source, home }).catch((err) => console.error("order ingest failed:", err));
+    order.ingest({ id: e.id, text: p.text, source: p.source, home }).catch((err) => { console.error("order ingest failed:", err); fault("order engine, filing a Signal", err, { signal: e.id }); });
   });
   // Who is talking to the core: the desktop window sends its page origin (http://tauri.localhost
   // on Windows). Kept in memory only; /api/health shows it, so a smoke test can prove the window
@@ -279,6 +313,55 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await projectsRoute({ log, order, factory, readJson, canBuild }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (req.method === "POST" && url.pathname === "/api/tickets/capture") {
+        // An error the Bridge caught: filed like the core's own.
+        const b = await readJson(req);
+        const r = errors.capture({ message: String(b.message ?? ""), stack: b.stack ? String(b.stack) : undefined, where: String(b.where ?? "the Bridge"), from: b.from === "shell" ? "shell" : "bridge", context: (b.context && typeof b.context === "object" ? b.context : undefined) as Record<string, unknown> | undefined, project: typeof b.project === "number" ? b.project : null });
+        return json(res, 200, r ?? { ticket: null });
+      }
+      if (req.method === "POST" && url.pathname === "/api/tickets/intake") {
+        // Before an idea becomes a project: is it an ask about one you have?
+        const b = await readJson(req);
+        const v = classifyIntake(log, String(b.text ?? ""), typeof b.exclude === "number" ? b.exclude : undefined);
+        if (v.verdict === "ask" && v.projectId == null) v.projectId = ensureSelf();
+        if (v.verdict === "ask" && v.projectId != null) { const x = filedAlready(log, v.projectId, String(b.text ?? "")); if (x) v.existing = x; }
+        return json(res, 200, v);
+      }
+      if (req.method === "GET" && url.pathname === "/api/tickets/self") return json(res, 200, { projectId: ensureSelf() });
+      const turn = url.pathname.match(/^\/api\/tickets\/from-project\/(\d+)$/);
+      if (req.method === "POST" && turn) {
+        const b = await readJson(req);
+        const to = typeof b.to === "number" ? b.to : ensureSelf();
+        return json(res, 201, projectToTicket(log, tickets, order.state(), Number(turn[1]), { to, kind: b.kind ? String(b.kind) as TicketKind : undefined }));
+      }
+      if (url.pathname === "/api/tickets" || url.pathname.startsWith("/api/tickets/")) {
+        if (url.pathname === "/api/tickets/github") {
+          // GitHub write access for the crew's PRs. The token is written to the data folder and never sent back.
+          if (!github) return json(res, 501, { error: "GitHub access needs a data folder." });
+          const self = selfGitHub(log);
+          if (req.method === "POST") {
+            const b = await readJson(req);
+            github.setToken(typeof b.token === "string" && b.token.trim() ? b.token : null);
+          }
+          const check = self && github.hasToken() ? await github.check(self) : null;
+          return json(res, 200, { hasToken: github.hasToken(), repo: self ? `${self.owner}/${self.name}` : null, canPush: check?.ok ?? false, why: check?.why ?? null });
+        }
+        if (url.pathname === "/api/tickets/auto") {
+          // The auto-work rule: GET reads it, POST changes any of on, maxUsd, dailyUsd, wip.
+          if (req.method === "POST") {
+            const b = await readJson(req);
+            const set = (key: string, v: unknown, ok: boolean) => { if (ok) log.append("settings.changed", { key, value: v }); };
+            set("ticketsAutoWork", b.on, typeof b.on === "boolean");
+            set("ticketsAutoMaxUsd", b.maxUsd, typeof b.maxUsd === "number" && b.maxUsd > 0 && b.maxUsd <= 5);
+            set("ticketsAutoDailyUsd", b.dailyUsd, typeof b.dailyUsd === "number" && b.dailyUsd >= 0 && b.dailyUsd <= 50);
+            set("ticketsWip", b.wip, Number.isInteger(b.wip) && Number(b.wip) >= 1 && Number(b.wip) <= 6);
+            tickets.dispatch();
+          }
+          return json(res, 200, tickets.autoWork());
+        }
+        const r = await ticketRoute(tickets, req, url, gitReady);
+        if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
+      }
       if (url.pathname === "/api/imports" || url.pathname.startsWith("/api/imports/")) {
         const canImport = () => gitReady() ? null : "Git is not installed, so a repo cannot be imported. Install Git for Windows (git-scm.com/download/win), then import again.";
         const r = await importsRoute({ log, explorer, readJson, canImport }, req, url);
@@ -331,10 +414,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       return json(res, 404, { error: "not found" });
     } catch (e) {
-      return json(res, 400, { error: (e as Error).message });
+      // A sentence for the person ("A ticket needs a title") is a 400; a fault in the code is a 500 and a bug ticket.
+      if (!isFault(e)) return json(res, 400, { error: (e as Error).message });
+      const r = fault(`${req.method} ${url.pathname}`, e, { query: Object.fromEntries(url.searchParams) });
+      return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { factory, order, bay, drop, improve, explorer, launcher, integrations, plugins });
+  return Object.assign(handler, { github, factory, order, bay, drop, tickets, improve, explorer, launcher, integrations, plugins, errors, fault, ensureSelf });
 }
 
 /**
@@ -364,8 +450,25 @@ export function updatesReport(log: EventLog, appVersion: string | undefined, act
   return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns, history };
 }
 
+/** Link SoftwareFactory's own project to its GitHub repo once, so its tickets are worked there. */
+export function linkSelfRepo(log: EventLog, project: number, repo: string) {
+  const g = parseGitHubRepo(repo);
+  if (!g) return;
+  const has = log.db.prepare("SELECT 1 FROM project_links WHERE project_id = ? AND kind = 'github'").get(project);
+  if (!has) linkToProject(log, project, "github", `${g.owner}/${g.name}`);
+}
+
+/** The GitHub repo of SoftwareFactory's own project, if linked. */
+function selfGitHub(log: EventLog) {
+  const row = log.db.prepare("SELECT l.ref FROM project_links l JOIN project_links s ON s.project_id = l.project_id AND s.kind = 'self' WHERE l.kind = 'github' LIMIT 1").get() as { ref: string } | undefined;
+  return row ? parseGitHubRepo(row.ref) : null;
+}
+
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
-export function readSettings(log: EventLog): { crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean } {
+export function readSettings(log: EventLog): {
+  crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean;
+  ticketsAutoWork?: boolean; ticketsAutoMaxUsd?: number; ticketsAutoDailyUsd?: number; ticketsWip?: number;
+} {
   const rows = log.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]));
 }
@@ -404,6 +507,75 @@ async function bayRoute(bay: AgentBay, req: IncomingMessage, url: URL): Promise<
   }
   m = path.match(/^\/api\/bay\/slots\/([a-z]+)$/);
   if (m && SLOTS.includes(m[1] as Slot)) return [200, bay.assign(m[1] as Slot, (Array.isArray(body.agents) ? body.agents : []).map(String))];
+  return null;
+}
+
+/** The tickets' API. Every write is an event, so the Bridge sees it on the stream. Status -1 = the work document as Markdown. */
+async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, gitReady: () => boolean): Promise<[number, unknown] | null> {
+  const path = url.pathname;
+  const q = url.searchParams;
+  const proj = q.get("project");
+  if (req.method === "GET" && path === "/api/tickets/meta") {
+    return [200, { kinds: KINDS.map((k) => ({ code: k, label: KIND_LABEL[k], questions: FORMS[k] })), statuses: STATUS_WORDS, priorities: PRIORITIES.map((p) => ({ code: p, label: PRIORITY_LABEL[p] })), severities: TICKET_SEVERITIES, relations: RELATIONS }];
+  }
+  if (req.method === "GET" && path === "/api/tickets/queue") {
+    const project = proj == null || proj === "" ? null : Number(proj);
+    return [200, { rule: tickets.autoWork(), queue: tickets.queue(project).map((q) => ({ id: q.ticket.id, key: q.ticket.key, title: q.ticket.title, kind: q.ticket.kind, size: q.ticket.size, position: q.position, why: q.why })) }];
+  }
+  if (req.method === "GET" && path === "/api/tickets/waiting") {
+    const project = proj == null || proj === "" ? null : Number(proj);
+    return [200, { items: tickets.waiting(project) }];
+  }
+  const byKey = path.match(/^\/api\/tickets\/key\/([^/]+)$/);
+  if (req.method === "GET" && byKey) {
+    const t = tickets.byKey(decodeURIComponent(byKey[1]));
+    return t ? [200, tickets.detail(t.id)] : [404, { error: `No ticket ${decodeURIComponent(byKey[1])}` }];
+  }
+  if (req.method === "GET" && path === "/api/tickets") {
+    const project = proj == null || proj === "" ? null : Number(proj);
+    const view = (q.get("view") ?? "open") as "open";
+    const parent = q.get("parent");
+    return [200, {
+      tickets: tickets.list({ project, view, parent: parent ? Number(parent) : undefined, kind: (q.get("kind") ?? undefined) as TicketKind | undefined, status: (q.get("status") ?? undefined) as TicketStatus | undefined, q: q.get("q") ?? undefined }),
+      counts: tickets.counts(project),
+    }];
+  }
+  let m = path.match(/^\/api\/tickets\/(\d+)(?:\/([a-z]+))?$/);
+  if (req.method === "GET" && m) {
+    const id = Number(m[1]);
+    if (m[2] === "document") return [-1, tickets.document(id)];
+    if (m[2]) return null;
+    const d = tickets.detail(id);
+    return d ? [200, d] : [404, { error: `No ticket #${id}` }];
+  }
+  if (req.method !== "POST") return null;
+  const body = await readJson(req);
+  if (path === "/api/tickets") return [201, tickets.open({ ...(body as object), by: "you", source: typeof body.source === "string" ? body.source : "you" } as any)];
+  m = path.match(/^\/api\/tickets\/(\d+)\/([a-z]+)$/);
+  if (!m) return null;
+  const id = Number(m[1]);
+  switch (m[2]) {
+    case "edit": return [200, tickets.edit(id, String(body.field), body.value, "you", body.key ? String(body.key) : undefined)];
+    case "say": return [200, tickets.say(id, String(body.text ?? ""), { status: body.status ? String(body.status) as TicketStatus : undefined })];
+    case "link": {
+      // "SF-4", "#4" or 4: people say a ticket by its key.
+      const to = typeof body.to === "number" ? body.to : tickets.byKey(String(body.to ?? ""))?.id;
+      if (to == null) return [400, { error: `No ticket ${String(body.to ?? "")} to link to.` }];
+      return [200, tickets.link(id, to, String(body.relation ?? "related") as Relation, "you", body.removed === true)];
+    }
+    case "line": return [200, tickets.moveLine(id, body.dir === "up" ? "up" : "down")];
+    case "spawn": return [201, tickets.spawn(id, { ...(body as object), by: "you" } as any)];
+    case "work":
+      if (!gitReady()) return [409, { error: "Git is not installed, so the crew has nowhere to keep what it builds. Install Git for Windows (git-scm.com/download/win), then press Work it again." }];
+      try {
+        return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true, again: body.again === true, where: body.where === "repo" || body.where === "new" ? body.where : "auto" })];
+      } catch (e) {
+        const dup = (e as { duplicate?: Record<string, unknown> }).duplicate;
+        if (dup) return [409, { error: (e as Error).message, ...dup }];
+        throw e;
+      }
+    case "ask": return [200, await tickets.ask(id, body.agent ? String(body.agent) : undefined)];
+  }
   return null;
 }
 
@@ -521,6 +693,15 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
   const core = createCore({ log, runtime, projectsDir, dataDir, dropDir, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
   core.drop.start();
   const timers: NodeJS.Timeout[] = [];
+  faultCore = core; // the open base hears what the process throws
+  core.ensureSelf(); // SoftwareFactory has a project of its own from the first start
+  core.tickets.backfillKeys(); // projects whose tickets came before keys get theirs (SF for SoftwareFactory)
+  // SoftwareFactory's own tickets are worked in its own repo, as PRs (Assaf, 11 Nov 2026: the crew may open PRs, never push to main).
+  linkSelfRepo(log, core.ensureSelf(), process.env.SF_SELF_REPO ?? "PlonterAsi/SoftwareFactory");
+  // Follow the crew's open PRs: a merge moves the ticket on. At start, then every 5 minutes.
+  const follow = () => core.tickets.followPrs().catch((e) => console.error("following PRs failed:", e));
+  follow();
+  timers.push(setInterval(follow, 5 * 60_000).unref());
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.
   const { order } = core;
   const sweepIfDue = () => {
@@ -532,7 +713,7 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
   sweepIfDue();
   timers.push(setInterval(sweepIfDue, 3_600_000).unref());
   // The Improvement Council looks again on its own (real crew only, within its caps): first a few minutes after start, then every 15 minutes it checks if a look is due.
-  const improveTick = () => { core.improve.tick().catch((e) => console.error("improve tick failed:", e)); };
+  const improveTick = () => { core.improve.tick().catch((e) => { console.error("improve tick failed:", e); core.fault("improvement council tick", e); }); };
   timers.push(setTimeout(improveTick, 3 * 60_000).unref());
   timers.push(setInterval(improveTick, 15 * 60_000).unref());
   // Plugins you turned on start with the core and stop with it.
@@ -556,6 +737,9 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
   return { handler: core, activeRuns: () => core.factory.activeCount(), dispose, core, log };
 }
 
+/** The core of the base opened last: errors the process throws are filed there. */
+let faultCore: { fault: (where: string, e: unknown) => void } | null = null;
+
 // Started directly (dev, or as the Tauri sidecar): listen on localhost only.
 const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
@@ -571,6 +755,13 @@ if (isMain) {
   const single = host ? null : bootBase(dbPath);
   const server = createServer(host ? host.handle : single!.handler);
   process.on("exit", () => { if (host) host.dispose(); else single!.dispose(); });
+  // Nothing thrown is lost: it is a bug ticket on the open base before anything else happens.
+  process.on("unhandledRejection", (e) => { console.error("unhandled rejection:", e); faultCore?.fault("the core (unhandled promise rejection)", e); });
+  process.on("uncaughtException", (e) => {
+    console.error("uncaught exception:", e);
+    faultCore?.fault("the core (uncaught exception, the core stopped)", e);
+    process.exit(1); // the exit handler closes the open base's database
+  });
   const runtime = { name: process.env.SF_RUNTIME ?? "auto" };
   // Started by the desktop shell: leave with it. Polling is cheap and works on every OS,
   // including when the shell is killed outright and cannot stop its child.

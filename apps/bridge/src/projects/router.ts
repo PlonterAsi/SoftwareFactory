@@ -9,12 +9,12 @@ import { useEffect, useState } from "react";
  *   #/plugins[/id[/panel]] plugins (one plugin, one of its pages)
  *   #/brain                the Brain: the principles every loop follows
  *   #/bases                the factories this app hosts (open, create, rename, archive)
- *   #/factory[/view]       the whole factory (floor, bay, order, data), as before projects
+ *   #/factory[/view]       the whole factory (floor, bay, order, tickets, improve, data), as before projects
  *   #/needs                everything waiting on you (the new shell's first item)
  *   #/_kit                 the shared component kit (not linked; the UI tour shoots it)
  * The old #order, #bay and #data still open the factory views.
  */
-export type FactoryView = "factory" | "order" | "bay" | "data" | "improve";
+export type FactoryView = "factory" | "order" | "bay" | "data" | "tickets" | "improve";
 export type Route =
   | { page: "home" }
   | { page: "project"; id: number; panel?: string; run?: number }
@@ -26,7 +26,7 @@ export type Route =
   | { page: "kit" }
   | { page: "needs" };
 
-const VIEWS: FactoryView[] = ["factory", "order", "bay", "data", "improve"];
+const VIEWS: FactoryView[] = ["factory", "order", "bay", "data", "tickets", "improve"];
 
 export function parse(hash: string): Route {
   const h = hash.replace(/^#/, "");

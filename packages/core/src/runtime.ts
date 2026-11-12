@@ -16,6 +16,11 @@ export interface AgentRequest {
   pluginDirs?: string[];
   /** Tools the agent may use. Empty or absent in the lean profile: none (the agent answers in text). */
   tools?: string[];
+  /**
+   * Run inside this folder (a working copy the agent may edit with its tools).
+   * File edits there are accepted without a prompt; nothing outside it is.
+   */
+  cwd?: string;
 }
 
 export interface AgentResult {
@@ -82,6 +87,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     for (const dir of req.pluginDirs ?? []) args.push("--plugin-dir", dir);
     if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", (req.tools ?? []).join(","));
     else if (req.tools?.length) args.push("--tools", req.tools.join(","));
+    // Headless edits in a working copy: accept file edits there, nothing else is allowed to prompt.
+    if (req.cwd && req.tools?.some((t) => t === "Edit" || t === "Write")) args.push("--permission-mode", "acceptEdits");
     return args;
   }
 
@@ -93,7 +100,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
   run(req: AgentRequest): Promise<AgentResult> {
     const started = Date.now();
     return new Promise((resolve, reject) => {
-      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...this.buildArgs(req)], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...this.buildArgs(req)], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, ...(req.cwd ? { cwd: req.cwd } : {}) });
       // A CLI that dies before reading stdin closes the pipe; the exit code says what happened.
       child.stdin.on("error", () => {});
       child.stdin.end(this.stdinFor(req), "utf8");
@@ -157,6 +164,8 @@ export class MockRuntime implements AgentRuntime {
     else if (station === "review") text = MOCK.review;
     else if (station === "order") text = MOCK.order(req.prompt);
     else if (station === "overseer") text = MOCK.overseer(req.prompt);
+    else if (station === "ticket") text = MOCK.ticket(req.prompt);
+    else if (station === "repo") text = MOCK.repo(req.prompt);
     else if (station === "map") text = MOCK.map(req.prompt);
     else if (station === "survey") text = MOCK.survey(req.prompt);
     else if (station === "improve") text = MOCK.improve(role, req.prompt);
@@ -165,6 +174,23 @@ export class MockRuntime implements AgentRuntime {
 }
 
 const MOCK = {
+  // The practice crew cannot read a codebase; it leaves a note file on the branch so the whole path can be tried for free.
+  repo: (prompt: string) => {
+    // The work document starts "# SF-4 Title" (a project's key and number) or "# #4 Title".
+    const head = prompt.match(/^# (?:#|[A-Z][A-Z0-9]*-)(\d+) (.*)$/m);
+    const id = head?.[1] ?? "0";
+    const title = head?.[2] ?? "the ticket";
+    return [
+      `<<<FILE docs/softwarefactory/ticket-${id}.md`,
+      `# Ticket #${id}: ${title}`, "", "Practice crew: this note stands in for the change. Switch to the real crew in Systems to have the Builder edit the code.", "FILE>>>",
+      "Practice crew: left a note file for the ticket on the branch.",
+    ].join("\n");
+  },
+  // The practice crew reads a ticket back and names the next step; it cannot judge, so it never says "ready".
+  ticket: (prompt: string) => {
+    const head = prompt.split("\n")[0].replace(/^#\s*/, "");
+    return [`Practice crew: I read ${head}.`, "Smallest next step: press Work it with the crew, or switch to the real crew in Systems for a real reading.", "STATUS: open"].join("\n");
+  },
   // The practice Cartographer echoes each module it was given with a canned purpose.
   map: (prompt: string) => "```json\n" + JSON.stringify({ modules: [...prompt.matchAll(/^## module: (.+)$/gm)].map((m) => ({ id: m[1].trim(), purpose: `Mock purpose of ${m[1].trim()}.`, role: /test/.test(m[1]) ? "test" : "core", risks: [] })) }) + "\n```",
   survey: (prompt: string) => {

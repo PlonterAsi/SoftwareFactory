@@ -248,6 +248,9 @@ export class Factory {
   }
 
   /** Wait for a run to finish (tests and the CLI). */
+  /** A run working right now in this core. */
+  isActive(run: number): boolean { return this.active.has(run); }
+
   /** How many runs are working right now (an update waits for this to reach 0). */
   activeCount(): number { return this.active.size; }
   wait(run: number): Promise<void> { return this.active.get(run) ?? Promise.resolve(); }
@@ -674,9 +677,10 @@ class Run {
     const station: StationId = gate === "escalation" ? "fix" : gate;
     if (gate !== "escalation") this.mark(station, "waiting");
     const { neverAuto: _n, ...info } = opts;
-    this.log.append("factory.gate", { run: this.id, gate, state: "waiting", question, ...info });
     let auto = this.o.autoApprove && gate !== "escalation";
     if (this.o.autoApprove && gate === "escalation" && !opts.neverAuto && this.autoRetriesUsed < this.o.autoRetries) { this.autoRetriesUsed++; auto = true; }
+    // `auto`: nobody is asked, the run approves itself (screens and tickets then say nothing waits for you).
+    this.log.append("factory.gate", { run: this.id, gate, state: "waiting", question, ...info, ...(auto ? { auto: true } : {}) });
     // An unattended run never hangs: an escalation it may not retry stops the run.
     const d: GateDecision = auto ? { approve: true, by: "auto" }
       : this.o.autoApprove ? { approve: false, by: "auto" }

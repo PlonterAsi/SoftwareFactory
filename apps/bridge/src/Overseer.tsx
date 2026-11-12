@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { GateActions, STEP } from "./GateActions";
+import { AskNotProject, checkIntake, type IntakeVerdict } from "./Intake";
+import { showTicket } from "./BugReport";
 import { DuplicateNotice } from "./DuplicateNotice";
 import { askOverseer, captureSignal, duplicateOf, normIdea, setupApi, splitBuild, startFactoryRun, type AgentRunView, type DuplicateRun, type ChatRoutes, type CrewMode, type FactoryRunView, type OrderState, type ProjectSummary, type Signal, type SinceView } from "./api";
 
@@ -16,15 +18,24 @@ type Item = {
 export type Channel = "general" | number;
 
 /** Everything said and done, each placed in the chat it belongs to. */
+/** "Working SF-4: Dark and light theme" for a run started from a ticket, else null. */
+function ticketLine(idea: string): string | null {
+  const m = idea.split("\n")[0].match(/^(.*?)\s*\(ticket ((?:[A-Z][A-Z0-9]*-|#)\d+)\)\s*$/);
+  return m ? `Working ticket ${m[2]}: ${m[1].replace(/:\s.*$/, "")}` : null;
+}
+
 function chatItems({ signals, runs, factoryRuns, briefings, ingests, routes }: {
   signals: Signal[]; runs: AgentRunView[]; factoryRuns: FactoryRunView[]; briefings: OrderState["briefings"]; ingests: OrderState["ingests"]; routes: ChatRoutes;
 }): Item[] {
   const runHome = (run: number) => routes.factoryRuns[run] ?? null;
+  // A factory run's own idea is shown as the run, not as a Signal, so its filing receipt is not shown either.
+  const factorySignals = new Set(signals.filter((s) => s.source === "factory").map((s) => s.id));
   const sigHome = new Map(signals.map((s) => [s.id, { home: s.projectId ?? null, also: (routes.filed[s.id] ?? []).filter((p) => p !== (s.projectId ?? null)) }]));
   return [
     ...signals.filter((s) => s.source !== "factory").map((s) => ({ key: "s" + s.id, ts: s.ts, kind: "signal" as const, text: s.text, meta: s.source === "drop" ? "from the drop folder" : undefined, ...sigHome.get(s.id)! })),
     // A build started from General made a project of its own (same id as the run): say so in both chats.
-    ...factoryRuns.map((r) => ({ key: "f" + r.run, ts: r.startedAt, kind: "signal" as const, text: r.idea, meta: `factory run #${r.run}`, home: runHome(r.run), headline: runHome(r.run) === r.run || runHome(r.run) == null })),
+    // A run from a ticket says which ticket in one line; the ticket holds the rest of its work document.
+    ...factoryRuns.map((r) => ({ key: "f" + r.run, ts: r.startedAt, kind: "signal" as const, text: ticketLine(r.idea) ?? r.idea, meta: `factory run #${r.run}`, home: runHome(r.run), headline: runHome(r.run) === r.run || runHome(r.run) == null })),
     ...factoryRuns.filter((r) => r.finished).map((r) => ({
       key: "fd" + r.run, ts: r.startedAt + "~", kind: (r.finished!.outcome === "shipped" ? "factory" : "error") as Item["kind"],
       text: r.finished!.reason, meta: r.finished!.totalUsd != null ? `run #${r.run} · $${r.finished!.totalUsd.toFixed(4)} · ${r.finished!.agentCalls ?? 0} agent calls · ${r.fixRounds} fix rounds` : undefined,
@@ -37,7 +48,7 @@ function chatItems({ signals, runs, factoryRuns, briefings, ingests, routes }: {
     // The Order Engine's daily briefing: everything non-urgent, batched into one message. It spans projects, so it lives in General.
     ...briefings.map((b) => ({ key: "b" + b.id, ts: b.ts, kind: "briefing" as const, text: b.lines.map((l) => "• " + l.text).join("\n"), meta: "Order Engine briefing", home: null })),
     // A quiet receipt under each Signal: how it was filed. It follows its Signal.
-    ...ingests.filter((r) => r.state === "done" && sigHome.has(r.signalId)).map((r) => ({ key: "i" + r.signalId, ts: (signals.find((s) => s.id === r.signalId)?.ts ?? r.ts) + "~", kind: "filed" as const,
+    ...ingests.filter((r) => r.state === "done" && sigHome.has(r.signalId) && !factorySignals.has(r.signalId)).map((r) => ({ key: "i" + r.signalId, ts: (signals.find((s) => s.id === r.signalId)?.ts ?? r.ts) + "~", kind: "filed" as const,
       text: `${r.fragments.length} fragment${r.fragments.length === 1 ? "" : "s"} filed by the ${r.mode === "agent" ? "Archivist" : "heuristics"}${r.costUsd ? ` · $${r.costUsd.toFixed(4)}` : ""}${r.note ? ` · ${r.note}` : ""}`, ...sigHome.get(r.signalId)! })),
     ...runs.filter((r) => r.state !== "running" && !r.factoryRun && !r.bayTest && (r.station === "overseer" || (!r.station && r.agent === "overseer"))).map((r) => ({
       key: "r" + r.runId,
@@ -71,6 +82,7 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
   const [model, setModel] = useState("haiku");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [ask, setAsk] = useState<{ text: string; v: IntakeVerdict } | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   // The chat follows the page you are on (a project's page opens its chat); you can switch by hand.
   const [picked, setPicked] = useState<Channel | null>(null);
@@ -117,11 +129,17 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
    * Start a run. A suggestion builds in the chat it was given in (home), not whichever chat is open now;
    * typed ideas build in the open chat. The core refuses a repeat of a running or just-shipped idea.
    */
-  async function build(e: MouseEvent, idea?: string, home?: number | null, again = false) {
+  async function build(e: MouseEvent, idea?: string, home?: number | null, again = false, askChecked = false) {
     e.preventDefault();
     const t = (idea ?? text).trim();
     if (!t || busy) return;
     const project = home !== undefined ? home ?? undefined : chatProject;
+    // A build with no project is a new project: when it reads like an ask about one you have (SoftwareFactory included), offer a ticket there first.
+    if (project == null && !again && !askChecked) {
+      const v = await checkIntake(t);
+      if (v) { setAsk({ text: t, v }); return; }
+    }
+    setAsk(null);
     setBusy(true);
     setErr(null);
     setDup(null);
@@ -238,6 +256,9 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
         </div>
         {mode === "practice" && <div className="composer-note">Practice crew: Build it makes a sample word counter, free. <button type="button" className="link" onClick={onSetup}>Use real agents</button></div>}
         {err && <div className="err">{err}</div>}
+        {ask && <AskNotProject text={ask.text} verdict={ask.v} onCancel={() => setAsk(null)}
+          onProject={() => { const t = ask.text; setAsk(null); void build({ preventDefault() {} } as MouseEvent, t, undefined, false, true).then(() => setText("")); }}
+          onFiled={(id, project) => { setAsk(null); setText(""); showTicket(id, project); }} />}
         {dup && <DuplicateNotice dup={dup.d} busy={busy} onShow={onShowRun} onDismiss={() => setDup(null)}
           onAgain={() => build({ preventDefault() {} } as MouseEvent, dup.fromBox ? undefined : dup.idea, dup.project ?? null, true)} />}
       </form>
