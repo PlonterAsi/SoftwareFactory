@@ -243,7 +243,19 @@ function MergeInto({ project: p }: { project: ProjectDetail }) {
   const same = others.filter((x) => x.name === p.name);
   const rest = others.filter((x) => x.name !== p.name).sort((a, b) => a.name.localeCompare(b.name));
   if (!others.length) return null;
-  const label = (x: ProjectSummary) => `${x.name} · #${x.id} · ${x.rollup.runs} run${x.rollup.runs === 1 ? "" : "s"}`;
+  // Copies share a name, so the label carries what tells them apart: how much work each holds and when.
+  const label = (x: ProjectSummary) => `${x.name} · #${x.id} · ${x.rollup.runs} run${x.rollup.runs === 1 ? "" : "s"}, ${x.rollup.agentCalls} agent calls, $${x.rollup.spendUsd.toFixed(2)} · ${ago(x.rollup.lastActive ?? x.updatedAt)}`;
+  async function gather() {
+    if (busy || !same.length) return;
+    if (!confirm(`Move the ${same.length} other ${same.length === 1 ? "copy" : "copies"} of "${p.name}" (${same.map((x) => "#" + x.id).join(", ")}) into this one (#${p.id})? Every run and folder is kept; only the duplicate entries go.`)) return;
+    setBusy(true);
+    try {
+      for (const x of same) await projectsApi.merge(x.id, p.id);
+      setMsg(`Merged ${same.length} ${same.length === 1 ? "copy" : "copies"} into this project.`);
+      setAll(await projectsApi.list());
+    } catch (x) { setMsg((x as Error).message); }
+    finally { setBusy(false); }
+  }
   async function merge() {
     const target = others.find((x) => String(x.id) === into);
     if (!target || busy) return;
@@ -256,7 +268,10 @@ function MergeInto({ project: p }: { project: ProjectDetail }) {
   return (
     <fieldset className="pj-merge">
       <legend>Merge into another project</legend>
-      {same.length > 0 && <p className="muted small">{same.length === 1 ? "Another project has" : `${same.length} other projects have`} this same name, so this is likely a copy. Merging keeps every run and its folder; only the duplicate entry goes.</p>}
+      {same.length > 0 && <>
+        <p className="muted small">{same.length === 1 ? "Another project has" : `${same.length} other projects have`} this same name, so this is likely a copy. Merging keeps every run and its folder; only the duplicate entry goes.</p>
+        <div className="row"><button type="button" disabled={busy} onClick={gather}>{busy ? "Merging…" : `Keep this one: bring the ${same.length === 1 ? "copy" : `${same.length} copies`} here`}</button></div>
+      </>}
       <div className="row">
         <select value={into} onChange={(e) => setInto(e.target.value)} aria-label="Project to merge into">
           <option value="">Choose a project…</option>
