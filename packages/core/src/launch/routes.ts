@@ -71,7 +71,12 @@ export function projectFolders(log: EventLog, projectId: number): ProjectFolder[
     // name, like a v2 in a folder of its own). The newest own build comes first, so Use starts what you built
     // last; builds of other ideas made while inside the project come after it and say so.
     const ownName = String(first?.plan_name ?? "").trim().toLowerCase();
-    const isOwn = (r: Record<string, any>) => r.dir === ownDir || (!!ownName && String(r.plan_name ?? "").trim().toLowerCase() === ownName);
+    // A folder you grew with "Add it" (a feature run in this project) is the project's app too, whatever its name.
+    const grown = new Set(rows.filter((r) => {
+      const st = log.db.prepare("SELECT payload FROM events WHERE id = ?").get(Number(r.id)) as { payload: string } | undefined;
+      try { return st ? JSON.parse(st.payload)?.screen?.kind === "feature" : false; } catch { return false; }
+    }).map((r) => r.dir as string));
+    const isOwn = (r: Record<string, any>) => r.dir === ownDir || grown.has(r.dir) || (!!ownName && String(r.plan_name ?? "").trim().toLowerCase() === ownName);
     const shipped = rows.filter((x) => x.outcome === "shipped");
     for (const r of shipped.filter(isOwn)) add(entry(r, true));
     for (const r of shipped.filter((x) => !isOwn(x))) add(entry(r, false));
