@@ -81,7 +81,7 @@ describe("Agent Bay", () => {
     expect(bay.slots().build).toEqual(["builder"]); // never left without a worker
     expect(() => bay.retire("builder")).toThrow(/Built-in/);
     expect(() => bay.assign("build", ["builder", "planner"])).toThrow(/at most 1/);
-    expect(() => bay.assign("council", ["planner", "tester", "builder", "fixer"])).toThrow(/at most 3/);
+    expect(() => bay.assign("council", ["planner", "tester", "builder", "fixer", "reviewer", "visionary", "architect"])).toThrow(/at most 6/);
     expect(() => bay.assign("plan", ["nobody"])).toThrow(/No active agent/);
     expect(() => bay.assign("plan", [c1.def.id])).toThrow(/No active agent/);
     expect(bay.state().visuals.every((v) => v.pass)).toBe(true);

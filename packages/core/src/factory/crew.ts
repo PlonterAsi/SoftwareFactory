@@ -29,7 +29,7 @@ export interface CrewMember {
 
 /** Where the factory gets its workers. The Agent Bay is one; the built-in crew is the fallback. */
 export interface CrewSource {
-  /** The agents working a station, in seat order (the Council has three). */
+  /** The agents working a station, in seat order (the Council has up to six). */
   crewFor(slot: Slot): CrewMember[];
 }
 

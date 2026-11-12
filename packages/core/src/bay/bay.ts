@@ -243,7 +243,7 @@ export class AgentBay implements CrewSource {
     this.visual(`agent ${id}`);
   }
 
-  /** Put agents on a station. The Council takes up to three seats; every other station takes one. */
+  /** Put agents on a station. The Council takes up to six seats; every other station takes one. */
   assign(slot: Slot, ids: string[], by = "you"): Record<Slot, string[]> {
     if (!SLOTS.includes(slot)) throw new Error(`Unknown station "${slot}"`);
     const live = new Set(this.agents().filter((a) => !a.retired).map((a) => a.def.id));

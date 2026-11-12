@@ -2,7 +2,7 @@ import { similarity } from "../order/text.js";
 import { parseJsonBlock } from "./workspace.js";
 
 /**
- * The Council: three seats look at an idea before anything is planned.
+ * The Council: three to six seats look at an idea before anything is planned.
  * Each seat answers alone in round 1. If no majority votes "build", every seat
  * sees the others' takes and answers again (round 2). Plain code then merges
  * the takes into one brief for the Planner: what two or more seats agree on,
@@ -80,7 +80,7 @@ export function synthesize(seats: SeatResult[], rounds: number): CouncilBrief {
 export function briefText(b: CouncilBrief): string {
   const sec = (title: string, items: string[]) => (items.length ? `${title}:\n${items.map((x) => `- ${x}`).join("\n")}` : "");
   return [
-    `Council brief (three agents reviewed the idea first; majority: ${b.outcome}):`,
+    `Council brief (${Object.keys(b.votes).length} agents reviewed the idea first; majority: ${b.outcome}):`,
     sec("Agreed by two or more seats", b.agreed),
     sec("Proposals", b.proposals),
     sec("Concerns to design around", b.concerns),

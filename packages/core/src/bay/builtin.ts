@@ -62,7 +62,7 @@ export const UI_TARGET = APP_TARGET;
 
 export const CONTRACTS: Record<Slot, string> = {
   council: `Station contract: council.
-You hold one of three seats on the Council, which looks at a one-line idea before anything is planned. Give your seat's view, in at most 120 words in total.
+You hold one seat on the Council, which looks at a one-line idea before anything is planned. Give your seat's view, in at most 120 words in total.
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"take": "one or two sentences", "proposals": ["short concrete point"], "concerns": ["short risk"], "vote": "build", "scope": "small"}
 At most 4 proposals and 4 concerns. vote is "build" (plan it now), "reshape" (plan it with your proposals applied) or "drop" (should not be built). scope is "small", "medium" or "large".`,
@@ -229,14 +229,14 @@ function lens(id: string, name: string, avatar: string, focus: string, descripti
   }];
 }
 
-/** Who works each station when nobody has been assigned. The Council takes three seats. */
+/** Who works each station when nobody has been assigned. The Council seats three by default and takes up to six. */
 export const DEFAULT_SLOTS: Record<Slot, string[]> = {
   council: ["visionary", "architect", "skeptic"],
   plan: ["planner"], tests: ["tester"], build: ["builder"], review: ["reviewer"], fix: ["fixer"], order: ["archivist"], overseer: ["overseer"],
   improve: ["integrator", "automator", "simplifier", "enricher", "ux-lens", "flow-lens"], map: ["cartographer"], survey: ["surveyor"],
 };
 
-export const SLOT_SEATS: Record<Slot, number> = { council: 3, plan: 1, tests: 1, build: 1, review: 1, fix: 1, order: 1, overseer: 1, improve: 6, map: 1, survey: 1 };
+export const SLOT_SEATS: Record<Slot, number> = { council: 6, plan: 1, tests: 1, build: 1, review: 1, fix: 1, order: 1, overseer: 1, improve: 6, map: 1, survey: 1 };
 
 /**
  * The system prompt an agent runs with on a station: its own prompt, then the Brain's principles

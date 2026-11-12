@@ -17,7 +17,7 @@ import {
 /**
  * The factory loop: one idea becomes a tested git repo.
  *
- *   intake → council (3 seats, skipped for small jobs) → plan → [gate A: approve plan]
+ *   intake → council (3 to 6 seats, skipped for small jobs) → plan → [gate A: approve plan]
  *     → tests (locked) → build → test ⇄ fix → review (⇄ fix once) → [gate B: accept build] → ship
  *
  * Workers come from a CrewSource (the Agent Bay), asked at the moment each
@@ -327,7 +327,7 @@ class Run {
 
   // ---------- stations ----------
 
-  /** Three seats look at the idea; a second round only when no majority wants to build. */
+  /** The seats look at the idea; a second round only when no majority wants to build. */
   private async councilLoop() {
     const size = isSmallJob(this.idea);
     if (this.o.council === "never" || (this.o.council === "auto" && size.small)) {
