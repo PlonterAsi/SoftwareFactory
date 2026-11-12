@@ -8,7 +8,7 @@ const tmp = () => mkdtempSync(join(tmpdir(), "sf-gh-"));
 const TOKEN = "github_pat_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6";
 
 /** A stand-in for github.com: a bare repo for git, and a fake REST API that records what it was asked. */
-function fakeGitHub() {
+function fakeGitHub(cli?: () => string | null) {
   const src = tmp();
   git(src, "init", "-q", "-b", "main");
   writeFileSync(join(src, "README.md"), "# App\n");
@@ -27,7 +27,7 @@ function fakeGitHub() {
     if (path === "/repos/acme/app/pulls/7") return ok({ number: 7, html_url: "https://github.com/acme/app/pull/7", state: state.merged || state.closed ? "closed" : "open", merged: state.merged, merge_commit_sha: state.merged ? "abc123" : null });
     return new Response("{}", { status: 404 });
   }) as unknown as typeof fetch;
-  const gh = new GitHub({ dataDir: tmp(), fetch: fake, gitUrl: () => bare });
+  const gh = new GitHub({ dataDir: tmp(), fetch: fake, gitUrl: () => bare, cli });
   return { gh, bare, calls, state };
 }
 
@@ -94,5 +94,37 @@ describe("tickets: the crew opens a PR", () => {
     expect(parseGitHubRepo("https://github.com/PlonterAsi/SoftwareFactory.git")).toEqual({ owner: "PlonterAsi", name: "SoftwareFactory" });
     expect(parseGitHubRepo("PlonterAsi/SoftwareFactory")).toEqual({ owner: "PlonterAsi", name: "SoftwareFactory" });
     expect(await gh.check({ owner: "acme", name: "app" })).toEqual({ ok: true });
+  });
+});
+
+describe("tickets: the crew uses this PC's GitHub CLI login", () => {
+  const CLI = "gho_" + "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4";
+
+  it("opens the PR with the GitHub CLI login when no token is pasted, and writes it nowhere", async () => {
+    const f = fakeGitHub(() => CLI + "\n");
+    expect(f.gh.hasToken()).toBe(true);
+    expect(f.gh.tokenSource()).toBe("gh");
+    const log = new EventLog();
+    const proj = createProject(log, { name: "Acme app" });
+    log.append("project.linked", { projectId: proj, kind: "github", ref: "acme/app" });
+    const t = new Tickets(log, { runtime: new MockRuntime({ delayMs: 0 }), workRoot: tmp(), github: f.gh, canShip: () => null });
+    const a = t.open({ kind: "task", title: "Say hello louder", project: proj });
+    t.work(a.id);
+    await t.waitRepo(a.id);
+    expect(t.get(a.id)!.pr?.number).toBe(7);
+    expect(f.calls.find((c) => c.method === "POST")!.auth).toBe(`Bearer ${CLI}`);
+    expect(JSON.stringify(log.db.prepare("SELECT * FROM events").all())).not.toContain(CLI);
+  });
+
+  it("prefers a pasted token over the GitHub CLI login", () => {
+    const { gh } = fakeGitHub(() => CLI);
+    gh.setToken(TOKEN);
+    expect(gh.tokenSource()).toBe("pasted");
+  });
+
+  it("has no access when the GitHub CLI gives nothing usable", () => {
+    expect(fakeGitHub(() => "not a token").gh.hasToken()).toBe(false);
+    expect(fakeGitHub(() => { throw new Error("gh is not installed"); }).gh.tokenSource()).toBe(null);
+    expect(fakeGitHub().gh.hasToken()).toBe(false);
   });
 });
