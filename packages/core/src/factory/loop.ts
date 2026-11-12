@@ -1,7 +1,8 @@
 import { failureLines } from "./trim.js";
 import { SAME_TESTS_REASON, stopReason, type RoundRecord } from "./stoprules.js";
 import { recallBlock } from "../brain/recall.js";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
@@ -509,21 +510,23 @@ class Run {
   private builder: CrewMember | null = null;
   private startedAt = Date.now();
   private lastFixFiles: Record<string, string> = {};
+  private lastFixBefore: Record<string, string> = {};
 
   private async testFixLoop(extraFeedback = "", rerun = false) {
     let run = await this.station("test", () => this.runSuite(0));
     if (!rerun && this.builder) this.verdict(this.builder, "build", run.failed === 0, 0, run.failed ? `${run.failed} failing` : undefined);
     let history: RoundRecord[] = [];
     let files: Record<string, string> = {};
+    let before: Record<string, string> = {};
     let budget = this.o.maxFixRounds;
     let feedback = extraFeedback;
     while (run.failed > 0 || feedback) {
       const failing = run.cases.filter((c) => !c.pass).map((c) => c.name).sort().join("\n");
-      history.push({ failing: run.failed, names: failing, files });
+      history.push({ failing: run.failed, names: failing, files, before });
       const stop = stopReason({ rounds: history, startedAt: this.startedAt, now: Date.now(), maxMinutes: this.f.maxRunMinutes });
       // Only "the same tests failed twice" may be waved on by a person; the other rules end the run.
       if (stop && stop !== SAME_TESTS_REASON) {
-        this.mark("fix", "stopped", this.fixRounds || undefined, stop);
+        this.mark("fix", "fail", this.fixRounds || undefined, `Stopped: ${stop}`);
         throw new StopRun(stop);
       }
       const reason = budget <= 0 ? `Tests still fail after ${this.o.maxFixRounds} fix rounds.` : stop ?? "";
@@ -545,6 +548,7 @@ class Run {
         return this.runSuite(round);
       }, round);
       files = this.lastFixFiles;
+      before = this.lastFixBefore;
       this.verdict(fixer, "fix", run.failed === 0, round, run.failed ? `${run.failed} failing` : undefined);
       // The Test station shows the latest verdict, not only the first run's.
       if (run.failed === 0) this.mark("test", "pass", round, `green after fix round ${round}`);
@@ -564,6 +568,9 @@ class Run {
     ].filter(Boolean).join("\n\n");
     const fixer = this.one("fix");
     const files = parseFileBlocks(await this.ask(fixer, prompt, { round }));
+    // What each file held before this round, so the stop rules (SF-25) see a revert to the build's version.
+    const norm = (p: string) => p.replace(/\\/g, "/").replace(/^\.\//, "");
+    this.lastFixBefore = Object.fromEntries(files.map((f) => norm(f.path)).filter((p) => existsSync(join(this.dir, p))).map((p) => [p, createHash("sha256").update(readFileSync(join(this.dir, p), "utf8")).digest("hex")]));
     const res = writeFiles(this.dir, files, { lockTests: true });
     if (!res.written.length) {
       this.log.append("factory.files", { run: this.id, station: "fix", round, ...res });
@@ -748,7 +755,7 @@ class Run {
     }
   }
 
-  private mark(station: StationId, state: "active" | "pass" | "fail" | "incomplete" | "waiting" | "skipped" | "stopped", round?: number, note?: string) {
+  private mark(station: StationId, state: "active" | "pass" | "fail" | "incomplete" | "waiting" | "skipped", round?: number, note?: string) {
     this.log.append("factory.station", { run: this.id, station, state, round, note, spentUsd: Number(this.spent.toFixed(6)), maxUsd: this.o.maxUsd });
   }
 

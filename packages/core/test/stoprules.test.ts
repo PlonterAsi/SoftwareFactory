@@ -27,6 +27,15 @@ describe("stop rules", () => {
     expect(reason).toMatch(/src\/x\.ts went back/);
   });
 
+  it("does not stop after only one round without a fall", () => {
+    expect(stopReason({ ...base, rounds: [r(5, "a\nb\nc\nd\ne"), r(3, "a\nb\nc"), r(3, "a\nb\nd")] })).toBeNull();
+  });
+
+  it("stops when a fix puts a file back to what the build wrote", () => {
+    const rounds: RoundRecord[] = [r(3, "a"), { failing: 2, names: "b", files: { "src/x.ts": "h2" }, before: { "src/x.ts": "h1" } }, { failing: 1, names: "c", files: { "src/x.ts": "h1" }, before: { "src/x.ts": "h2" } }];
+    expect(stopReason({ ...base, rounds })).toMatch(/src\/x\.ts went back/);
+  });
+
   it("stops past the wall-clock limit, default 30 minutes", () => {
     const rounds = [r(2, "a")];
     expect(stopReason({ rounds, startedAt: 0, now: 29 * 60_000 })).toBeNull();

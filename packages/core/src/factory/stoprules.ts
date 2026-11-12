@@ -7,6 +7,8 @@ export interface RoundRecord {
   names?: string;
   /** Content hash of each file changed in this round, by path. */
   files?: Record<string, string>;
+  /** Content hash of those files just before this round wrote them, so a revert to the build's version counts too. */
+  before?: Record<string, string>;
 }
 
 export const DEFAULT_MAX_RUN_MINUTES = 30;
@@ -19,10 +21,10 @@ export function stopReason(h: { rounds: RoundRecord[]; startedAt: number; now: n
   const last = r.at(-1);
   if (!last) return null;
   for (const [path, hash] of Object.entries(last.files ?? {})) {
-    if (r.slice(0, -1).some((e) => e.files?.[path] === hash)) return `${path} went back to what it was in an earlier round; the fixes are going in circles.`;
+    if (r.slice(0, -1).some((e) => e.files?.[path] === hash || e.before?.[path] === hash)) return `${path} went back to what it was in an earlier round; the fixes are going in circles.`;
   }
   if (last.failing > 0 && last.names && r.length >= 2 && r[r.length - 2].names === last.names) return SAME_TESTS_REASON;
-  if (last.failing > 0 && r.length >= 3 && r[r.length - 2].failing <= r[r.length - 3].failing && last.failing >= r[r.length - 2].failing) {
+  if (last.failing > 0 && r.length >= 3 && r[r.length - 2].failing >= r[r.length - 3].failing && last.failing >= r[r.length - 2].failing) {
     return "The number of failing tests did not fall for 2 rounds in a row.";
   }
   return null;
