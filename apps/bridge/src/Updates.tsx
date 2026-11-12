@@ -6,7 +6,7 @@ import { API, shell } from "./api";
  * (`update_check`), downloads and installs it (`update_install`), and reports
  * progress (`update_status`). This file decides when:
  *
- * - a check 5 s after the window opens, then every 6 hours, and on the button;
+ * - a check 5 s after the window opens, then every 30 minutes, and on the button;
  * - with "Install updates by themselves" on (the default), an update found while
  *   no factory run is working installs after a 15 s countdown you can stop;
  *   one found mid-run waits until the factory is idle;
@@ -39,7 +39,7 @@ async function invoke<T>(cmd: string, args: Record<string, unknown>): Promise<T>
 
 const COUNTDOWN_S = 15;
 const FIRST_CHECK_MS = 5_000;
-const EVERY_MS = 6 * 3_600_000;
+const EVERY_MS = 30 * 60_000;
 
 export function useUpdates(online: boolean) {
   const desktop = "__TAURI_INTERNALS__" in window;
