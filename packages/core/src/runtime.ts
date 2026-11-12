@@ -27,6 +27,13 @@ export interface AgentRequest {
    * File edits there are accepted without a prompt; nothing outside it is.
    */
   cwd?: string;
+  /**
+   * The workbench (factory/workbench.ts): shell commands this agent may run in `cwd` without a prompt,
+   * as command prefixes ("node", "npm test"). Only with a folder; without it the shell is not offered.
+   */
+  commands?: string[];
+  /** A longer (or shorter) limit for this one call than the runtime's default, in ms. */
+  timeoutMs?: number;
 }
 
 export interface AgentResult {
@@ -105,7 +112,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     if (req.systemPrompt && req.systemPrompt.length <= MAX_ARG_ROLE) args.push("--append-system-prompt", req.systemPrompt);
     for (const dir of req.pluginDirs ?? []) args.push("--plugin-dir", dir);
     // --tools takes built-in tools only; an MCP server's tools come from --mcp-config and are allowed by name.
-    const builtin = (req.tools ?? []).filter((t) => !t.startsWith("mcp__") && (req.cwd || !FILE_TOOLS.includes(t)));
+    const shell = !!req.cwd && !!req.commands?.length;
+    const builtin = [...new Set([...(req.tools ?? []), ...(shell ? ["Bash"] : [])])].filter((t) => !t.startsWith("mcp__") && (req.cwd || !FILE_TOOLS.includes(t)) && (t !== "Bash" || shell));
     if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", builtin.join(","));
     // Without this a station agent with the Skill tool sees every skill and plugin the person installed
     // (130+ on Assaf's PC), not just its own kit. An agent that edits a working copy keeps the person's settings.
@@ -121,6 +129,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     // Allowed without a prompt: read-only web tools, the Skill tool (it reads the agent's own skills), and the
     // agent's own MCP servers. Headless, anything unapproved is simply refused.
     const allowed = (req.tools ?? []).filter((t) => WEB_TOOLS.includes(t) || t === "Skill" || (req.cwd && READ_TOOLS.includes(t)) || (req.mcpConfig && t.startsWith("mcp__")));
+    // The workbench's shell: only the listed command prefixes run; any other command is refused headless.
+    if (shell) allowed.push(...req.commands!.map((c) => `Bash(${c}:*)`));
     if (allowed.length) args.push("--allowedTools", allowed.join(","));
     return args;
   }
@@ -149,7 +159,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       child.stdin.end(this.stdinFor(req), "utf8");
       let out = "";
       let err = "";
-      const timer = setTimeout(() => { killTree(child, true); reject(new Error(`Agent timed out after ${this.opts.timeoutMs} ms`)); }, this.opts.timeoutMs);
+      const limit = req.timeoutMs ?? this.opts.timeoutMs;
+      const timer = setTimeout(() => { killTree(child, true); reject(new Error(`Agent timed out after ${limit} ms`)); }, limit);
       child.stdout.on("data", (d) => (out += d));
       child.stderr.on("data", (d) => (err += d));
       child.on("error", (e) => { clearTimeout(timer); reject(e); });

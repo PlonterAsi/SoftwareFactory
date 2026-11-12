@@ -67,7 +67,8 @@ describe("agent runtime", () => {
 
   it("lets the web tools run headless without a permission prompt, and nothing else", () => {
     const args = new ClaudeCodeRuntime({ profile: "lean" }).buildArgs({ prompt: "hi", tools: ["WebSearch", "WebFetch", "Bash"] });
-    expect(args[args.indexOf("--tools") + 1]).toBe("WebSearch,WebFetch,Bash");
+    // Bash only comes with the workbench (a folder and its command list); a stray Bash in an agent's settings is dropped.
+    expect(args[args.indexOf("--tools") + 1]).toBe("WebSearch,WebFetch");
     expect(args[args.indexOf("--allowedTools") + 1]).toBe("WebSearch,WebFetch");
   });
 

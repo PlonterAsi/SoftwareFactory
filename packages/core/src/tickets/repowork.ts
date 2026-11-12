@@ -11,6 +11,7 @@ import { describeSecrets, scanFiles } from "../safety/secrets.js";
 import { fastGates } from "../safety/gates.js";
 import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
 import { stopReason } from "../factory/stoprules.js";
+import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, statusPath, workbenchContract } from "../factory/workbench.js";
 import { parseGitHubRepo, type GitHubRepo } from "./github.js";
 
 /**
@@ -35,11 +36,16 @@ export interface RepoRef { source: string; dir: string; branch: string | null; g
 export const REPO_CONTRACT = [
   "Station contract: repo. You are working inside an existing code repository: the current folder is a clone on its own branch.",
   "Make the smallest change that does what the ticket asks, in the style of the code around it. Read before you edit.",
-  "Do not run git and do not touch files outside this folder. If you cannot edit files, answer with <<<FILE path ... FILE>>> blocks holding whole files.",
-  "End with at most 6 short lines: what you changed, and anything left for a person to decide.",
+  "Do not touch files outside this folder. If you cannot edit files, answer with <<<FILE path ... FILE>>> blocks holding whole files.",
 ].join("\n");
 
-const TOOLS = ["Read", "Edit", "Write", "Glob", "Grep"];
+/** The ticket Builder's workbench: file tools and the shell (factory/workbench.ts), so it runs the tests it touches. */
+const TOOLS = WORKBENCH_TOOLS;
+const REPO_BENCH = workbenchContract({
+  test: "npm test (or npx vitest run <file> inside the package you changed)",
+  protect: ["existing tests to make them pass (fix the code instead; add new tests for new behaviour)", "anything under .git"],
+  extra: "Dependencies are already installed. Typecheck what you changed (npx tsc --noEmit -p <the package's tsconfig>) before you finish.",
+});
 
 /**
  * The repo a project's tickets are worked in: the import's working copy, else
@@ -212,7 +218,8 @@ export function defaultRunTests(dir: string, files: string[]): CheckResult {
   return { ok: !out, output: out };
 }
 
-const changedFiles = (dir: string) => git(dir, "status", "--porcelain", "--untracked-files=all").split("\n").map((l) => l.slice(3).trim().replace(/^"|"$/g, "")).filter(Boolean);
+// The git helper trims its output, so the first status line can lose its leading space: parse by pattern, not by column.
+const changedFiles = (dir: string) => git(dir, "status", "--porcelain", "--untracked-files=all").split("\n").filter(Boolean).map(statusPath).filter(Boolean);
 
 /** The repo's own guidance for the Builder, trimmed: CLAUDE.md and .claude/rules/*.md. */
 export function repoGuidance(dir: string, maxChars = 6000): string {
@@ -265,14 +272,16 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     const run = await runAgent(log, runtime, b?.id ?? "builder", {
       prompt,
       model: b?.model ?? "sonnet",
-      systemPrompt: `${b?.role.split("Station contract:")[0].trim() ?? "You are the Builder: you write working code."}\n\n${REPO_CONTRACT}`,
+      systemPrompt: `${b?.role.split("Station contract:")[0].trim() ?? "You are the Builder: you write working code."}\n\n${REPO_CONTRACT}\n${REPO_BENCH}`,
       budgetUsd: Math.min(left(), share, b?.budgetUsd ?? share),
       pluginDirs: b?.pluginDirs.length ? b.pluginDirs : undefined,
       // The working-copy tools, plus the Builder's own skills and MCP servers.
       tools: [...new Set([...TOOLS, ...(b?.tools ?? [])])],
       mcpConfig: b?.mcpConfig,
       cwd: dir,
-    }, { agentVersion: b?.version, station: "repo" });
+      commands: WORKBENCH_COMMANDS,
+      timeoutMs: 25 * 60_000,
+    }, { agentVersion: b?.version, station: "repo", workbench: true });
     spent += run.result?.costUsd ?? 0;
     if (run.error || !run.result) { step(name, "failed", run.error ?? "no reply"); return { text: "", error: run.error ?? "no reply" }; }
     const blocks = parseFileBlocks(run.result.text);
@@ -281,6 +290,8 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     return { text: run.result.text };
   };
 
+  // The Builder runs the tests itself, so the clone's dependencies go in before it starts (once; skipped when present).
+  if (o.checks) { const why = ensureDeps(dir); if (why) step("install", "skipped", why); }
   step("orient", "passed", "repo rules and code map added to the prompt");
   const first = await build(`${o.document}\n\nYou are on branch ${branch} of a clone of ${o.repo.source}.${repoGuidance(dir)}${overviewBlock(log, o.projectId)}`, o.maxUsd * 0.5, "build");
   if (first.error) return fail(first.error);

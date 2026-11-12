@@ -168,7 +168,7 @@ describe("factory loop", () => {
     expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
   });
 
-  it("escalates when the Fixer changes nothing, and an unattended run stops", async () => {
+  it("climbs the ladder when the Fixer changes nothing, then an unattended run stops", async () => {
     const log = new EventLog();
     const rt = new MockRuntime();
     const lazy: AgentRuntime = { name: "lazy", run: async (req) => {
@@ -181,7 +181,8 @@ describe("factory loop", () => {
     await f.wait(run);
     const fin = events(log, "factory.run.finished").at(-1);
     expect(fin.outcome).toBe("stopped");
-    expect(fin.reason).toContain("The Fixer changed nothing");
+    expect(fin.reason).toContain("The same tests failed twice");
+    expect(events(log, "factory.files").filter((p) => p.station === "fix").every((p) => p.noChange === "The Fixer changed nothing.")).toBe(true);
   });
 
   it("closes runs left in flight when the core restarts, as resumable", () => {
