@@ -521,7 +521,7 @@ async function updatePhase() {
     if (!back) { launch(findExe(installDir), "after-update"); await until("the updated core", health, 120_000, 1000); }
     const after = await health();
     check(`the installed app is now v${NEW}`, after?.appVersion === NEW, `appVersion ${after?.appVersion}`);
-    check("the installer stopped the stray node.exe instead of failing on the locked file", !alive(stray.pid), `pid ${stray.pid}`);
+    check("the installer stopped the stray node.exe instead of failing on the locked file", !alive(stray.pid), `pid ${stray.pid}; installer hook log: ${readTail(join(process.env.TEMP ?? "", "SoftwareFactory-installer.log")).trim().replace(/\r?\n/g, " | ")}`);
     await waitBridge(60_000);
     screenshot("8-updated");
     const notes = (await api("/api/signals")).body;

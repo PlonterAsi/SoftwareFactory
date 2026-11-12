@@ -10,8 +10,17 @@
 
 !macro SF_STOP_BUNDLED_NODE
   DetailPrint "Stopping SoftwareFactory's background processes..."
-  nsExec::ExecToLog "$\"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe$\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $\"$$n = Join-Path '$INSTDIR' 'node\node.exe'; $$p = @(Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and ($$_.Path -ieq $$n) }); if ($$p.Count) { Write-Output ('Stopping ' + $$p.Count + ' process(es) using ' + $$n); $$p | Stop-Process -Force -ErrorAction SilentlyContinue; $$p | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue } else { Write-Output 'Nothing is using the bundled Node.js' }$\""
+  ; The installer is a 32-bit program. A 32-bit PowerShell cannot read the path of a 64-bit
+  ; process through Get-Process (it comes back empty), so use the 64-bit PowerShell
+  ; (Sysnative) when there is one, and ask WMI (Win32_Process.ExecutablePath), which works
+  ; across 32/64-bit either way. What it did goes to %TEMP%\SoftwareFactory-installer.log.
+  Push $R9
+  StrCpy $R9 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 +2
+    StrCpy $R9 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+  nsExec::ExecToLog "$\"$R9$\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $\"$$log = Join-Path $$env:TEMP 'SoftwareFactory-installer.log'; $$n = Join-Path '$INSTDIR' 'node\node.exe'; $$p = @(Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and ($$_.ExecutablePath -ieq $$n) }); $$m = (Get-Date -Format o) + ' ' + $$p.Count + ' process(es) using ' + $$n + ': ' + (($$p | ForEach-Object { $$_.ProcessId }) -join ','); Write-Output $$m; Add-Content -Path $$log -Value $$m -ErrorAction SilentlyContinue; foreach ($$x in $$p) { Stop-Process -Id $$x.ProcessId -Force -ErrorAction SilentlyContinue }; foreach ($$x in $$p) { Wait-Process -Id $$x.ProcessId -Timeout 10 -ErrorAction SilentlyContinue }$\""
   Pop $0
+  Pop $R9
   ; Windows can hold the file a moment after the process is gone.
   Sleep 500
 !macroend
