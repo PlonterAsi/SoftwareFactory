@@ -7,6 +7,7 @@ import type { AgentBay } from "../bay/bay.js";
 import { commitAll, git, parseFileBlocks, writeFiles } from "../factory/workspace.js";
 import { importOf, moduleNotes } from "../imports/explorer.js";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
+import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
 import { parseGitHubRepo, type GitHubRepo } from "./github.js";
 
 /**
@@ -135,6 +136,9 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
   const touched = git(dir, "status", "--porcelain", "--untracked-files=all").split("\n").map((l) => l.slice(3).trim().replace(/^"|"$/g, "")).filter(Boolean);
   const hits = scanFiles(Object.fromEntries(touched.filter((f) => existsSync(join(dir, f))).map((f) => [f, readFileSync(join(dir, f), "utf8")])));
   if (hits.length) return { ok: false, dir, branch, base, sha: null, files: touched, costUsd: run.result.costUsd, summary: "", error: `Not committed: the change holds what looks like a real secret.\n${describeSecrets(hits)}` };
+  // The test integrity guard (SF-24): no commit when the agent deleted, moved or skipped tests.
+  const gamed = testIntegrity(dir, base);
+  if (gamed.length) return { ok: false, dir, branch, base, sha: null, files: touched, costUsd: run.result.costUsd, summary: "", error: `Not committed: the change games the tests.\n${describeIntegrity(gamed)}` };
   const sha = commitAll(dir, `${o.key}: ${o.title}\n\nWorked by SoftwareFactory's crew on branch ${branch}.`);
   const files = sha ? git(dir, "diff", "--name-only", `${base}..HEAD`).split("\n").filter(Boolean) : [];
   const summary = run.result.text.replace(/<<<\s*FILE[\s\S]*?(?:FILE\s*>>>|$)/g, "").trim().split("\n").filter(Boolean).slice(-6).join("\n");
