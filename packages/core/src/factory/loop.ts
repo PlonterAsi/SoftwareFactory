@@ -1,7 +1,11 @@
 import { failureLines } from "./trim.js";
+import { SAME_TESTS_REASON, stopReason, type RoundRecord } from "./stoprules.js";
 import { recallBlock } from "../brain/recall.js";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
+import { fastGates } from "../safety/gates.js";
+import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
@@ -109,6 +113,9 @@ export class Factory {
 
   /** Runs this core found in flight when it started (closed as stopped, resumable). */
   readonly interrupted: number[] = [];
+
+  /** Wall-clock limit per run in minutes (the `maxRunMinutes` setting). */
+  maxRunMinutes: number | undefined;
 
   constructor(private log: EventLog, private runtime: AgentRuntime, readonly projectsDir: string, readonly crew: CrewSource = builtinCrew) {
     // Agent calls cut off by the restart would otherwise pulse as "running" forever.
@@ -318,6 +325,9 @@ class Run {
   private dir = "";
   private plan!: Plan;
   private lockedHash = "";
+  /** The commit the tests were locked in, and how many cases the suite showed first (SF-24). Not kept across a resume. */
+  private lockedSha = "";
+  private lockedCases: number | undefined;
   private fixRounds = 0;
   private brief: CouncilBrief | null = null;
   /** A feature run: the plan that shipped, which the next version builds on. */
@@ -471,6 +481,7 @@ class Run {
     this.log.append("factory.files", { run: this.id, station: "tests", round: 1, ...res });
     const sha = commitAll(this.dir, "Acceptance tests (locked)");
     this.lockedHash = testsHash(this.dir);
+    this.lockedSha = git(this.dir, "rev-parse", "HEAD");
     this.log.append("factory.tests.locked", { run: this.id, hash: this.lockedHash, files: res.written.map((w) => w.path), sha });
   }
 
@@ -503,26 +514,35 @@ class Run {
   }
 
   private builder: CrewMember | null = null;
+  private startedAt = Date.now();
+  private lastFixFiles: Record<string, string> = {};
+  private lastFixBefore: Record<string, string> = {};
 
   private async testFixLoop(extraFeedback = "", rerun = false) {
     let run = await this.station("test", () => this.runSuite(0));
     if (!rerun && this.builder) this.verdict(this.builder, "build", run.failed === 0, 0, run.failed ? `${run.failed} failing` : undefined);
-    let lastFailing = "";
+    let history: RoundRecord[] = [];
+    let files: Record<string, string> = {};
+    let before: Record<string, string> = {};
     let budget = this.o.maxFixRounds;
     let feedback = extraFeedback;
     while (run.failed > 0 || feedback) {
       const failing = run.cases.filter((c) => !c.pass).map((c) => c.name).sort().join("\n");
-      let reason = "";
-      if (budget <= 0) reason = `Tests still fail after ${this.o.maxFixRounds} fix rounds.`;
-      else if (failing && failing === lastFailing) reason = "The same tests failed twice in a row after a fix.";
+      history.push({ failing: run.failed, names: failing, files, before });
+      const stop = stopReason({ rounds: history, startedAt: this.startedAt, now: Date.now(), maxMinutes: this.f.maxRunMinutes });
+      // Only "the same tests failed twice" may be waved on by a person; the other rules end the run.
+      if (stop && stop !== SAME_TESTS_REASON) {
+        this.mark("fix", "fail", this.fixRounds || undefined, `Stopped: ${stop}`);
+        throw new StopRun(stop);
+      }
+      const reason = budget <= 0 ? `Tests still fail after ${this.o.maxFixRounds} fix rounds.` : stop ?? "";
       if (reason) {
         const d = await this.gate("escalation", `${reason} Grant 2 more fix rounds?`, { action: "2 more fix rounds", kind: "rounds" });
         if (!d.approve) throw new StopRun(reason);
         budget = 2;
-        lastFailing = "";
+        history = [history[history.length - 1]];
         feedback = d.note ?? feedback;
       }
-      lastFailing = failing;
       budget--;
       this.fixRounds++;
       const round = this.fixRounds;
@@ -533,6 +553,8 @@ class Run {
         fixer = await this.fix(run, round, note);
         return this.runSuite(round);
       }, round);
+      files = this.lastFixFiles;
+      before = this.lastFixBefore;
       this.verdict(fixer, "fix", run.failed === 0, round, run.failed ? `${run.failed} failing` : undefined);
       // The Test station shows the latest verdict, not only the first run's.
       if (run.failed === 0) this.mark("test", "pass", round, `green after fix round ${round}`);
@@ -552,12 +574,16 @@ class Run {
     ].filter(Boolean).join("\n\n");
     const fixer = this.one("fix");
     const files = parseFileBlocks(await this.ask(fixer, prompt, { round }));
+    // What each file held before this round, so the stop rules (SF-25) see a revert to the build's version.
+    const norm = (p: string) => p.replace(/\\/g, "/").replace(/^\.\//, "");
+    this.lastFixBefore = Object.fromEntries(files.map((f) => norm(f.path)).filter((p) => existsSync(join(this.dir, p))).map((p) => [p, createHash("sha256").update(readFileSync(join(this.dir, p), "utf8")).digest("hex")]));
     const res = writeFiles(this.dir, files, { lockTests: true });
     if (!res.written.length) {
       this.log.append("factory.files", { run: this.id, station: "fix", round, ...res });
       throw new Error(res.refused.length ? "The Fixer only tried to change the locked tests." : "The Fixer changed nothing.");
     }
     this.log.append("factory.files", { run: this.id, station: "fix", round, ...res });
+    this.lastFixFiles = Object.fromEntries(res.written.map((w) => [w.path, w.sha256]));
     commitAll(this.dir, `Fix round ${round}`);
     return fixer;
   }
@@ -611,6 +637,17 @@ class Run {
 
   private async runSuite(round: number): Promise<TestRun> {
     if (testsHash(this.dir) !== this.lockedHash) throw new Error("The locked acceptance tests were changed. Refusing to run.");
+    // Fast gates (SF-26): free checks on what the last commit changed, before the slower suite. A failure goes straight to the fixer.
+    let changed: string[] = [];
+    try { changed = git(this.dir, "diff", "--name-only", "HEAD~1", "HEAD").split("\n").filter(Boolean); } catch { changed = Object.keys(readTree(this.dir)); }
+    const gates = fastGates(this.dir, changed.filter((f) => !isKitFile(f)));
+    for (const g of gates.results) this.log.append("factory.fastgate", { run: this.id, round, gate: g.gate, state: g.state, note: g.note, messages: g.messages.slice(0, 20) });
+    if (!gates.ok) {
+      const bad = gates.results.find((g) => g.state === "fail")!;
+      const failed: TestRun = { cases: [{ name: `fast check: ${bad.gate}`, file: changed[0] ?? "", pass: false, error: gates.messages, durationMs: 0 }], passed: 0, failed: 1, exitCode: 1, timedOut: false, output: gates.messages };
+      this.log.append("factory.tests", { run: this.id, round, cases: failed.cases, passed: 0, failed: 1, timedOut: false });
+      return failed;
+    }
     const r = await runTests(this.dir);
     // Every project is a real program: the app check (or, for plans from before apps, the page check)
     // is one more cell in the grid, fixed like a failing test.
@@ -634,6 +671,14 @@ class Run {
     r.cases.push({ name: "no secrets in the code (API keys, tokens, private keys)", file: secrets[0]?.file ?? "", pass: !secrets.length, error: secrets.length ? describeSecrets(secrets) : undefined } as (typeof r.cases)[number]);
     if (secrets.length) { r.failed++; r.output = `Secret check:\n${describeSecrets(secrets)}\nRead keys from an environment variable instead.\n\n${r.output}`.slice(0, 4000); }
     else r.passed++;
+    // The test integrity guard (SF-24): deleted, moved or skipped tests fail the step like a failing test.
+    if (this.lockedSha) {
+      const gamed = testIntegrity(this.dir, this.lockedSha, { locked: this.lockedCases, ran: this.lockedCases === undefined ? undefined : r.cases.filter((c) => isLockedTest(c.file)).length });
+      r.cases.push({ name: "tests left intact (none deleted, moved or skipped)", file: "", pass: !gamed.length, error: gamed.length ? describeIntegrity(gamed) : undefined } as (typeof r.cases)[number]);
+      if (gamed.length) { r.failed++; r.output = `Test integrity:\n${describeIntegrity(gamed)}\nFix the code, not the tests.\n\n${r.output}`.slice(0, 4000); }
+      else r.passed++;
+      if (this.lockedCases === undefined) this.lockedCases = r.cases.filter((c) => isLockedTest(c.file)).length;
+    }
     this.log.append("factory.tests", { run: this.id, round, cases: r.cases, passed: r.passed, failed: r.failed, timedOut: r.timedOut });
     return r;
   }
