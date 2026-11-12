@@ -9,6 +9,7 @@ import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseS
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
 import { checkUi, uiCase } from "./uicheck.js";
+import { appCase, checkAppLive, installKit, isKitFile } from "./appkit.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
 } from "./workspace.js";
@@ -41,6 +42,16 @@ export interface Plan {
   cli?: string;
   /** Ready-to-run inputs for the CLI; written to run.json for the Run tab. */
   examples?: { label: string; args: string; input?: string }[];
+  /**
+   * A real program on the app kit (the Brain's "real-programs"): every plan written since has it.
+   * Plans from before have none and are held only to the page check.
+   */
+  app?: boolean;
+  /** What the app manages: each entity gets full CRUD screens from the kit. */
+  entities?: { name: string; label?: string; fields: { name: string; type?: string; required?: boolean; options?: string[]; to?: string }[]; seed?: string }[];
+  flows?: { name: string; steps: string[] }[];
+  /** The app's own views (a dashboard, a board...), beside the kit's screens. */
+  views?: { id: string; label: string; shows: string }[];
   acceptance: string[];
   tasks: { id: string; title: string; dependsOn: string[] }[];
   files: string[];
@@ -138,7 +149,7 @@ export class Factory {
       if (normIdea(r.idea) !== norm) continue;
       const running = r.outcome == null || this.active.has(r.id);
       const stopped = r.outcome === "stopped" && this.resumable(r.id).ok;
-      const shipped = r.outcome === "shipped" && (r.finished_at ?? r.started_at) >= since;
+      const shipped = r.outcome === "shipped" && (r.finished_at ?? r.started_at) > since;
       if (!running && !stopped && !shipped) continue;
       let own: { project_id: number } | undefined;
       try { own = this.log.db.prepare("SELECT project_id FROM project_links WHERE kind = 'factory_run' AND ref = ?").get(String(r.id)) as typeof own; } catch { /* projects not loaded */ }
@@ -215,8 +226,9 @@ export class Factory {
     const tags = git(dir, "tag", "--list", "v*").split("\n").map((t) => t.match(/^v(\d+)\.(\d+)\.(\d+)$/)).filter(Boolean) as RegExpMatchArray[];
     const minor = Math.max(0, ...tags.map((m) => Number(m[1]) * 1000 + Number(m[2]))) + 1;
     const screen: ScreenRun = { kind: "screen", baseRun, baseSha: git(dir, "rev-parse", "HEAD"), tag: `v${Math.floor(minor / 1000)}.${minor % 1000}.0` };
-    const plan: Plan = { ...base.plan, ui: base.plan.ui?.trim() || defaultUi(base.plan) };
-    const idea = `Add a screen to ${plan.name}`;
+    // A project the factory shipped as a script becomes a real program: an app on the kit, same logic, same locked tests.
+    const plan: Plan = { ...base.plan, ui: base.plan.ui?.trim() || defaultUi(base.plan), app: true };
+    const idea = `Turn ${plan.name} into an app`;
     const o = { maxUsd: opts.maxUsd ?? 1, maxFixRounds: 4, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: "never" as const, review: true };
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
     const ev = this.log.append("factory.run.started", { idea, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}) });
@@ -407,11 +419,13 @@ class Run {
   }
 
   private async build() {
+    // The app kit goes in first, so the Builder writes the model and views on top of it.
+    if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
     this.builder = this.one("build");
     const text = await this.ask(this.builder, this.screen
       ? [
-        `This project already shipped and its locked acceptance tests pass, but it has no screen. Add its page now, as the spec's "ui" says, on top of the existing code.`,
-        `Keep every existing export, file and command working (the CLI too, if there is one). If the logic the page needs lives in a module that imports node: modules, move that logic into a browser-safe module under src/ and have the old module import it from there; the locked tests must still pass. Return only the files you add or change, each in full, and update README.md to say how to open the page.`,
+        `This project already shipped and its locked acceptance tests pass, but it is a script, not a program. Turn it into a real app on the app kit (already in the folder), on top of the existing code: write src/schema.js (the entities it works on and keeps, such as its inputs, settings and a history of its results, each with sample records), web/app.js with views that run its logic through forms and draw the results, index.html and web/style.css.`,
+        `Keep every existing export, file and command working (the CLI too, if there is one). If the logic the app needs lives in a module that imports node: modules, move the pure part into a browser-safe module under src/ and have the old module import it from there; work that truly needs the disk goes in api.js. The locked tests must still pass. Return only the files you add or change, each in full, and update README.md to say the app opens from the Run tab's Start.`,
         `Spec:\n${JSON.stringify(this.plan, null, 2)}`,
         `Locked acceptance tests (read only):\n${this.testsText()}`,
         `Current code:\n${this.codeText()}`,
@@ -490,7 +504,7 @@ class Run {
     for (let round = 1; round <= 2; round++) {
       const r = await this.station("review", async () => {
         const m = this.one("review");
-        const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md").map(([p, c]) => `<<<FILE ${p}\n${c.length > 12000 ? c.slice(0, 12000) + "\n...(cut: file continues)\n" : c}FILE>>>`).join("\n");
+        const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md" && !isKitFile(p) && !p.startsWith("data/")).map(([p, c]) => `<<<FILE ${p}\n${c.length > 12000 ? c.slice(0, 12000) + "\n...(cut: file continues)\n" : c}FILE>>>`).join("\n");
         const text = await this.ask(m, `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 48000)}`, { round });
         let res: ReviewResult;
         try { res = parseReview(text); } catch (e) { this.verdict(m, "review", false, round, (e as Error).message); throw e; }
@@ -517,12 +531,13 @@ class Run {
 
   private async ship(): Promise<string> {
     // Ready-to-run inputs for the Run tab, so nobody has to guess the arguments.
-    const examples = (this.plan.examples ?? []).filter((x) => x && x.args != null).slice(0, 5);
+    // Apps start with one press and need none; a CLI the idea asked for keeps its examples.
+    const examples = this.plan.app && !this.plan.cli ? [] : (this.plan.examples ?? []).filter((x) => x && x.args != null).slice(0, 5);
     if (examples.length && !existsSync(join(this.dir, "run.json"))) {
       const runJson = { summary: this.plan.summary, examples: examples.map((x) => ({ label: String(x.label || x.args), profile: "cli", args: String(x.args), ...(x.input ? { input: String(x.input) } : {}) })) };
       writeFiles(this.dir, [{ path: "run.json", content: JSON.stringify(runJson, null, 2) + "\n" }], { lockTests: true });
     }
-    commitAll(this.dir, this.screen ? `Ship: ${this.plan.name} with a screen` : "Ship");
+    commitAll(this.dir, this.screen ? `Ship: ${this.plan.name} as an app` : "Ship");
     git(this.dir, "tag", "-f", this.screen?.tag ?? "v0.1.0");
     return git(this.dir, "rev-parse", "--short", "HEAD");
   }
@@ -532,9 +547,17 @@ class Run {
   private async runSuite(round: number): Promise<TestRun> {
     if (testsHash(this.dir) !== this.lockedHash) throw new Error("The locked acceptance tests were changed. Refusing to run.");
     const r = await runTests(this.dir);
-    // Every project ships a screen: the page check is one more cell in the grid, fixed like a failing test.
-    // Plans written before the GUI default have no "ui" and are not held to it.
-    if (this.plan?.ui) {
+    // Every project is a real program: the app check (or, for plans from before apps, the page check)
+    // is one more cell in the grid, fixed like a failing test.
+    if (this.plan?.app) {
+      const restored = installKit(this.dir);
+      if (restored.length) commitAll(this.dir, `App kit put back (${restored.join(", ")})`);
+      const app = await checkAppLive(this.dir);
+      this.log.append("factory.ui", { run: this.id, round, ...app, app: true, kitRestored: restored });
+      r.cases.push(appCase(app));
+      if (!app.pass) { r.failed++; r.output = `App check:\n${app.problems.join("\n")}\n\n${r.output}`.slice(0, 4000); }
+      else r.passed++;
+    } else if (this.plan?.ui) {
       const ui = checkUi(this.dir);
       this.log.append("factory.ui", { run: this.id, round, ...ui });
       r.cases.push(uiCase(ui));
@@ -547,7 +570,8 @@ class Run {
 
   /** The project's code (not the locked tests, not the spec) as file blocks. */
   private codeText() {
-    return Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md")
+    // The kit is the same in every app and the agents may not change it: they get its API in their contract, not its source.
+    return Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md" && !isKitFile(p) && !p.startsWith("data/"))
       .map(([p, c]) => `<<<FILE ${p}\n${c}FILE>>>`).join("\n");
   }
 
@@ -714,20 +738,32 @@ export function validatePlan(p: Plan): Plan {
     ui: typeof p.ui === "string" && p.ui.trim() ? p.ui.trim() : defaultUi(p),
     cli: typeof p.cli === "string" ? p.cli.trim() : "",
     examples,
+    // Every new plan is a real program on the app kit (the Brain's "real-programs").
+    app: true,
+    entities: (Array.isArray(p.entities) ? p.entities : []).filter((e: any) => e && typeof e.name === "string").slice(0, 8).map((e: any) => ({
+      name: String(e.name), ...(e.label ? { label: String(e.label) } : {}),
+      fields: (Array.isArray(e.fields) ? e.fields : []).filter((f: any) => f && typeof f.name === "string").map((f: any) => ({ name: String(f.name), type: String(f.type ?? "text"), ...(f.required ? { required: true } : {}), ...(Array.isArray(f.options) ? { options: f.options.map(String) } : {}), ...(f.to ? { to: String(f.to) } : {}) })),
+      ...(e.seed ? { seed: String(e.seed).slice(0, 300) } : {}),
+    })),
+    flows: (Array.isArray(p.flows) ? p.flows : []).filter((x: any) => x && x.name).slice(0, 6).map((x: any) => ({ name: String(x.name), steps: (Array.isArray(x.steps) ? x.steps : []).map(String).slice(0, 10) })),
+    views: (Array.isArray(p.views) ? p.views : []).filter((x: any) => x && (x.id || x.label)).slice(0, 4).map((x: any) => ({ id: String(x.id ?? x.label).toLowerCase().replace(/[^a-z0-9-]+/g, "-"), label: String(x.label ?? x.id), shows: String(x.shows ?? "") })),
     tasks: p.tasks.map((t) => ({ id: String(t.id), title: String(t.title ?? t.id), dependsOn: (Array.isArray(t.dependsOn) ? t.dependsOn : []).map(String).filter((d) => ids.has(d)) })),
   };
 }
 
 /** The screen a plan gets when nobody described one. */
 export function defaultUi(p: Pick<Plan, "summary" | "interface">): string {
-  return `One page for: ${p.summary.trim()} It opens with a built-in sample already filled in and its result shown, has inputs for what the core takes (${p.interface.trim().slice(0, 300)}), a button that runs the core, and draws the result visually (a table, bars or a preview), with any error shown on the page.`;
+  return `An app for: ${p.summary.trim()} It opens with sample records already in it, lets the person create, edit and delete everything it keeps through forms, runs the core (${p.interface.trim().slice(0, 300)}) from a view of its own and draws the results visually (a table, bars or a preview), with any error shown on the screen.`;
 }
 
 export function specMarkdown(idea: string, p: Plan): string {
   return [
     `# ${p.name}`, "", `> ${idea}`, "", p.summary, "",
     "## Interface", "", p.interface, "",
-    ...(p.ui ? ["## Screen", "", p.ui, "", "Open it from the project's Run tab in SoftwareFactory (it serves the folder and shows `index.html`).", ""] : []),
+    ...(p.ui ? [p.app ? "## The app" : "## Screen", "", p.ui, "", p.app ? "Open it from the project's Run tab in SoftwareFactory and press Start: no arguments, no files to write. Data is kept in `data/db.json`." : "Open it from the project's Run tab in SoftwareFactory (it serves the folder and shows `index.html`).", ""] : []),
+    ...(p.entities?.length ? ["## What it manages", "", ...p.entities.map((e) => `- **${e.label ?? e.name}**: ${e.fields.map((f) => `${f.name} (${f.type ?? "text"}${f.to ? ` → ${f.to}` : ""}${f.required ? ", required" : ""})`).join(", ")}. Create, edit, delete and search them in the app.`), ""] : []),
+    ...(p.flows?.length ? ["## Flows", "", ...p.flows.map((f) => `- **${f.name}**: ${f.steps.join(" → ")}`), ""] : []),
+    ...(p.views?.length ? ["## Views", "", ...p.views.map((v) => `- **${v.label}**: ${v.shows}`), ""] : []),
     ...(p.cli ? ["## Command line", "", "```", p.cli, "```", ""] : []),
     "## Acceptance criteria", "", ...p.acceptance.map((a, i) => `${i + 1}. ${a}`), "",
     "## Tasks", "", ...p.tasks.map((t) => `- **${t.id}** ${t.title}${t.dependsOn.length ? ` (after ${t.dependsOn.join(", ")})` : ""}`), "",

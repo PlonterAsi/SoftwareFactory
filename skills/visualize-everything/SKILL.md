@@ -5,7 +5,7 @@ description: Run at the end of every SoftwareFactory station, and whenever an ag
 
 # visualizeEverything
 
-SoftwareFactory rule: **nothing exists only as text.** If it runs, thinks, costs or changes, it has a picture someone can understand at a glance. A station is not done until this skill passes.
+SoftwareFactory rule: **nothing exists only as text.** For what the factory builds, visualizing means full CRUD and full visibility in the project's own UI, never a diagram preview (the Brain's principle "Visualize everything: full CRUD and full visibility"). If it runs, thinks, costs or changes, it has a picture someone can understand at a glance. A station is not done until this skill passes.
 
 ## When it runs
 
@@ -34,7 +34,7 @@ For each thing the station produced, confirm a visual exists and is fed from the
 | Computation (agent call, tool run) | A pulse on the computation timeline: model, time, tokens, cost |
 | Plan, spec | A task graph or flow diagram, not only a document |
 | Code, tests | Changed files as a heat map; tests as a pass and fail grid |
-| A finished project | Its own screen: `index.html` at the project root that the Run tab previews, held by the page check (`packages/core/src/factory/uicheck.ts`) like a failing test. A CLI comes only next to the page. |
+| A finished project | A real program, not a diagram: every entity has full CRUD screens (list, search, create, edit, delete), every flow its steps, every feature a place in the navigation, every change an activity entry, the data location shown and the code browsable in the app's System view. Built on the app kit and held by the app check (`packages/core/src/factory/appkit.ts`, see docs/apps.md) like a failing test. It starts with one press and never needs arguments or hand-written JSON. A CLI comes only next to the app. |
 
 ## What to do when a visual is missing
 

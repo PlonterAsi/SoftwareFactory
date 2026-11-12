@@ -9,3 +9,4 @@ src-tauri/node/
 src-tauri/tauri.ci.json
 src-tauri/tauri.old.json
 smoke-update/
+ui-tour-out/

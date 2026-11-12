@@ -1,0 +1,10 @@
+{
+  "id": "game-workshop",
+  "name": "Game demo: The Workshop",
+  "version": "0.1.0",
+  "description": "Practice demo of a puzzle game door: rewire a project's loop (agents per station, fuse, governor, gate, plugin cartridge), replay last week's recorded tickets through it for free, and commit. Practice data only; it writes nothing and spends nothing.",
+  "permissions": [],
+  "panels": [
+    { "id": "play", "title": "The Workshop (demo)", "entry": "ui/index.html", "where": "page", "order": 62 }
+  ]
+}

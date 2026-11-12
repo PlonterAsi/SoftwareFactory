@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { EmptyState } from "../ui";
 import { DuplicateNotice } from "../DuplicateNotice";
 import { duplicateOf, projectsApi, setupApi, type DuplicateRun, PROJECT_KINDS, PROJECT_STATUSES, type ProjectDetail, type ProjectSummary, type SfEvent } from "../api";
 import { href } from "./router";
@@ -81,7 +82,7 @@ function Overview({ project: p, events, go, showRun }: PanelContext) {
           <ol className="pj-feed">
             {recent.map((e) => <li key={e.id}><time>{ago(e.ts)}</time><span>{describe(e)}</span></li>)}
           </ol>
-        ) : <p className="empty">Nothing has happened here yet. Build an idea above, or file notes in the Overseer.</p>}
+        ) : <p className="empty">Nothing has happened here yet. Build an idea above, or file notes with the Assistant.</p>}
         <button className="ghost sm" onClick={() => go("history")}>Full history</button>
       </section>
     </div>
@@ -133,7 +134,7 @@ function Ideas({ order, factory }: PanelContext) {
 function Runs({ project, factory, pickedRun, showRun }: PanelContext) {
   const mine = useMemo(() => factory.factoryRuns.filter((r) => project.runIds.includes(r.run)), [factory.factoryRuns, project.runIds]);
   const selected = mine.find((r) => r.run === pickedRun) ?? mine.at(-1);
-  if (!mine.length) return <p className="empty pad">No runs in this project yet. Use Build it on the Overview, or ask the Overseer while this project is open.</p>;
+  if (!mine.length) return <EmptyState title="No builds in this project yet">Use Build it on the Overview, or ask the Assistant while this project is open. Each build shows here, station by station.</EmptyState>;
   return (
     <div className="pj-runs">
       <FactoryFloor runs={factory.runs} factoryRuns={mine} selected={selected} onSelect={showRun} mode={factory.mode} />
@@ -145,7 +146,7 @@ function Runs({ project, factory, pickedRun, showRun }: PanelContext) {
 // ---- Agents: who worked here and what it cost ----
 function Agents({ project, bay }: PanelContext) {
   const byId = new Map(bay.agents.map((a) => [a.def.id, a.def]));
-  if (!project.agents.length) return <p className="empty pad">No agent has worked on this project yet.</p>;
+  if (!project.agents.length) return <EmptyState title="No agent has worked here yet">When a build runs, each agent that takes a step shows here with its calls and spend.</EmptyState>;
   const max = Math.max(...project.agents.map((a) => a.costUsd), 1e-9);
   return (
     <table className="pj-table">
@@ -173,7 +174,7 @@ function Agents({ project, bay }: PanelContext) {
 function History({ project, events, showRun }: PanelContext) {
   const sets = useMemo(() => projectSets(project), [project]);
   const items = useMemo(() => events.filter((e) => inProject(e, project, sets)).map((e) => ({ e, text: describe(e) })).filter((x) => x.text).reverse().slice(0, 300), [events, project, sets]);
-  if (!items.length) return <p className="empty pad">No history yet.</p>;
+  if (!items.length) return <EmptyState title="No history yet">Everything that happens in this project is listed here, newest first.</EmptyState>;
   return (
     <ol className="pj-feed long">
       {items.map(({ e, text }) => {
@@ -245,7 +246,19 @@ function MergeInto({ project: p }: { project: ProjectDetail }) {
   const same = others.filter((x) => x.name === p.name);
   const rest = others.filter((x) => x.name !== p.name).sort((a, b) => a.name.localeCompare(b.name));
   if (!others.length) return null;
-  const label = (x: ProjectSummary) => `${x.name} · #${x.id} · ${x.rollup.runs} run${x.rollup.runs === 1 ? "" : "s"}`;
+  // Copies share a name, so the label carries what tells them apart: how much work each holds and when.
+  const label = (x: ProjectSummary) => `${x.name} · #${x.id} · ${x.rollup.runs} run${x.rollup.runs === 1 ? "" : "s"}, ${x.rollup.agentCalls} agent calls, $${x.rollup.spendUsd.toFixed(2)} · ${ago(x.rollup.lastActive ?? x.updatedAt)}`;
+  async function gather() {
+    if (busy || !same.length) return;
+    if (!confirm(`Move the ${same.length} other ${same.length === 1 ? "copy" : "copies"} of "${p.name}" (${same.map((x) => "#" + x.id).join(", ")}) into this one (#${p.id})? Every run and folder is kept; only the duplicate entries go.`)) return;
+    setBusy(true);
+    try {
+      for (const x of same) await projectsApi.merge(x.id, p.id);
+      setMsg(`Merged ${same.length} ${same.length === 1 ? "copy" : "copies"} into this project.`);
+      setAll(await projectsApi.list());
+    } catch (x) { setMsg((x as Error).message); }
+    finally { setBusy(false); }
+  }
   async function merge() {
     const target = others.find((x) => String(x.id) === into);
     if (!target || busy) return;
@@ -258,7 +271,10 @@ function MergeInto({ project: p }: { project: ProjectDetail }) {
   return (
     <fieldset className="pj-merge">
       <legend>Merge into another project</legend>
-      {same.length > 0 && <p className="muted small">{same.length === 1 ? "Another project has" : `${same.length} other projects have`} this same name, so this is likely a copy. Merging keeps every run and its folder; only the duplicate entry goes.</p>}
+      {same.length > 0 && <>
+        <p className="muted small">{same.length === 1 ? "Another project has" : `${same.length} other projects have`} this same name, so this is likely a copy. Merging keeps every run and its folder; only the duplicate entry goes.</p>
+        <div className="row"><button type="button" disabled={busy} onClick={gather}>{busy ? "Merging…" : `Keep this one: bring the ${same.length === 1 ? "copy" : `${same.length} copies`} here`}</button></div>
+      </>}
       <div className="row">
         <select value={into} onChange={(e) => setInto(e.target.value)} aria-label="Project to merge into">
           <option value="">Choose a project…</option>

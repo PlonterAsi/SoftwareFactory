@@ -26,6 +26,7 @@ import { Integrations } from "./integrations/service.js";
 import { integrationsRoute, serveExtension } from "./integrations/routes.js";
 import { PluginHost } from "./plugins/host.js";
 import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
+import { brainRoute } from "./brain/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
 import { GitHub, parseGitHubRepo } from "./tickets/github.js";
@@ -35,6 +36,8 @@ import { classifyIntake, ensureSelfProject, filedAlready, projectToTicket } from
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
 import { ImproveCouncil, type Target } from "./improve/council.js";
+import { BaseHost, type BootedBase } from "./bases/host.js";
+import { BaseRegistry } from "./bases/registry.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
 
 /** The built-in Overseer's prompt with its station contract (the live one comes from the Agent Bay). */
@@ -379,6 +382,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname.startsWith("/plugins/") && servePluginFile(plugins, req, res, url)) return;
+      if (url.pathname === "/api/brain" || url.pathname.startsWith("/api/brain/")) {
+        const r = await brainRoute({ log, bay, readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
       if (url.pathname.startsWith("/api/improve/")) {
         const r = await improveRoute(improve, req, url.pathname, log, factory, (idea, projectId) => {
           if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");
@@ -663,12 +670,13 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   return raw ? JSON.parse(raw) : {};
 }
 
-// Started directly (dev, or as the Tauri sidecar): listen on localhost only.
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) {
-  const dbPath = process.env.SF_DB ?? resolve(process.cwd(), ".sf-data/factory.db");
+/**
+ * Open one base's factory: its database, crew, core and background timers.
+ * The default base keeps the old env overrides (SF_PROJECTS, SF_DROP); other bases keep
+ * everything inside their own folder.
+ */
+export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boolean } = {}): BootedBase & { core: ReturnType<typeof createCore>; log: EventLog } {
   if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
-  const port = Number(process.env.SF_PORT ?? 4317);
   const log = new EventLog(dbPath);
   // Crew mode: what you last picked in the Bridge, else what the shell found (real when Claude Code is installed).
   const picked = readSettings(log).crewMode;
@@ -676,13 +684,16 @@ if (isMain) {
   const mode = picked ?? envMode;
   const runtime = new SwitchableRuntime(mode === "real" && process.env.SF_RUNTIME?.startsWith("claude-code") ? runtimeFromEnv() : runtimeFor(mode), mode);
   const dataDir = dbPath === ":memory:" ? process.cwd() : dirname(dbPath);
-  const projectsDir = process.env.SF_PROJECTS ?? resolve(dataDir, "projects");
+  const projectsDir = (isDefault ? process.env.SF_PROJECTS : undefined) ?? resolve(dataDir, "projects");
+  const dropDir = isDefault ? process.env.SF_DROP : join(dataDir, "Drop");
   const orderMode = process.env.SF_ORDER_MODE as "agent" | "heuristic" | undefined;
   const orderMax = process.env.SF_ORDER_MAX_USD ? Number(process.env.SF_ORDER_MAX_USD) : undefined;
   const improveMax = process.env.SF_IMPROVE_MAX_USD ? Number(process.env.SF_IMPROVE_MAX_USD) : undefined;
   const improveEvery = process.env.SF_IMPROVE_EVERY_H ? Number(process.env.SF_IMPROVE_EVERY_H) : undefined;
-  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir: process.env.SF_DROP, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
+  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir, order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
   core.drop.start();
+  const timers: NodeJS.Timeout[] = [];
+  faultCore = core; // the open base hears what the process throws
   core.ensureSelf(); // SoftwareFactory has a project of its own from the first start
   core.tickets.backfillKeys(); // projects whose tickets came before keys get theirs (SF for SoftwareFactory)
   // SoftwareFactory's own tickets are worked in its own repo, as PRs (Assaf, 11 Nov 2026: the crew may open PRs, never push to main).
@@ -690,8 +701,7 @@ if (isMain) {
   // Follow the crew's open PRs: a merge moves the ticket on. At start, then every 5 minutes.
   const follow = () => core.tickets.followPrs().catch((e) => console.error("following PRs failed:", e));
   follow();
-  setInterval(follow, 5 * 60_000).unref();
-  const server = createServer(core);
+  timers.push(setInterval(follow, 5 * 60_000).unref());
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.
   const { order } = core;
   const sweepIfDue = () => {
@@ -701,27 +711,58 @@ if (isMain) {
     if (!last || Date.now() - Date.parse(last.ts) >= 86_400_000) order.sweep();
   };
   sweepIfDue();
-  setInterval(sweepIfDue, 3_600_000).unref();
+  timers.push(setInterval(sweepIfDue, 3_600_000).unref());
   // The Improvement Council looks again on its own (real crew only, within its caps): first a few minutes after start, then every 15 minutes it checks if a look is due.
   const improveTick = () => { core.improve.tick().catch((e) => { console.error("improve tick failed:", e); core.fault("improvement council tick", e); }); };
-  // Nothing thrown is lost: it is a bug ticket before anything else happens.
-  process.on("unhandledRejection", (e) => { console.error("unhandled rejection:", e); core.fault("the core (unhandled promise rejection)", e); });
-  process.on("uncaughtException", (e) => {
-    console.error("uncaught exception:", e);
-    core.fault("the core (uncaught exception, the core stopped)", e);
-    try { log.close(); } catch { /* already closed */ }
-    process.exit(1);
-  });
-  setTimeout(improveTick, 3 * 60_000).unref();
-  setInterval(improveTick, 15 * 60_000).unref();
-  // Runs the app closed on pick up again from their last completed station (SF_AUTO_RESUME=0 leaves them for the Resume button).
+  timers.push(setTimeout(improveTick, 3 * 60_000).unref());
+  timers.push(setInterval(improveTick, 15 * 60_000).unref());
   // Plugins you turned on start with the core and stop with it.
   for (const id of core.plugins.startAll()) console.log(`Plugin ${id} started`);
-  process.on("exit", () => core.plugins.stopAll());
+  // Runs the app closed on pick up again from their last completed station (SF_AUTO_RESUME=0 leaves them for the Resume button).
   if (process.env.SF_AUTO_RESUME !== "0" && core.factory.interrupted.length) {
     if (!checkGit().found) console.log("Not resuming interrupted runs: Git is not installed.");
     else for (const id of core.factory.resumeInterrupted()) console.log(`Resumed run #${id} where it left off`);
   }
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    for (const t of timers) clearTimeout(t);
+    try { core.drop.stop(); } catch { /* not watching */ }
+    try { core.plugins.stopAll(); } catch (e) { console.error("stopping plugins failed:", e); }
+    try { core.launcher.stopAll(); } catch (e) { console.error("stopping launched apps failed:", e); }
+    log.removeAllListeners();
+    try { log.close(); } catch { /* already closed */ }
+  };
+  return { handler: core, activeRuns: () => core.factory.activeCount(), dispose, core, log };
+}
+
+/** The core of the base opened last: errors the process throws are filed there. */
+let faultCore: { fault: (where: string, e: unknown) => void } | null = null;
+
+// Started directly (dev, or as the Tauri sidecar): listen on localhost only.
+const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const dbPath = process.env.SF_DB ?? resolve(process.cwd(), ".sf-data/factory.db");
+  const port = Number(process.env.SF_PORT ?? 4317);
+  // Bases: the home folder (where factory.db has always been) keeps the list of factories this app hosts.
+  // The factory that was here before is "Main factory"; the others live in their own folders.
+  const home = dbPath === ":memory:" ? null : dirname(dbPath);
+  const host = home ? new BaseHost(new BaseRegistry(home), (b) => {
+    console.log(`${new Date().toISOString()} opening base #${b.id} "${b.name}" at ${b.folder}`);
+    return bootBase(b.isDefault ? dbPath : join(b.folder, "factory.db"), { isDefault: b.isDefault });
+  }, openFolder) : null;
+  const single = host ? null : bootBase(dbPath);
+  const server = createServer(host ? host.handle : single!.handler);
+  process.on("exit", () => { if (host) host.dispose(); else single!.dispose(); });
+  // Nothing thrown is lost: it is a bug ticket on the open base before anything else happens.
+  process.on("unhandledRejection", (e) => { console.error("unhandled rejection:", e); faultCore?.fault("the core (unhandled promise rejection)", e); });
+  process.on("uncaughtException", (e) => {
+    console.error("uncaught exception:", e);
+    faultCore?.fault("the core (uncaught exception, the core stopped)", e);
+    process.exit(1); // the exit handler closes the open base's database
+  });
+  const runtime = { name: process.env.SF_RUNTIME ?? "auto" };
   // Started by the desktop shell: leave with it. Polling is cheap and works on every OS,
   // including when the shell is killed outright and cannot stop its child.
   const parent = Number(process.env.SF_PARENT_PID);
@@ -730,8 +771,7 @@ if (isMain) {
       try { process.kill(parent, 0); } catch (e) {
         if ((e as NodeJS.ErrnoException).code === "EPERM") return; // alive, just not ours to signal
         console.log(`The app (pid ${parent}) is gone; the core stops too.`);
-        try { log.close(); } catch { /* already closed */ }
-        process.exit(0);
+        process.exit(0); // the exit handler closes the open base's database
       }
     }, 1000).unref();
   }
@@ -753,5 +793,5 @@ if (isMain) {
     if (stalled >= 2_000) console.error(`${new Date(now).toISOString()} the core was busy for ${(stalled / 1000).toFixed(1)} s and could not answer`);
     tick = now;
   }, 500).unref();
-  server.listen(port, "127.0.0.1", () => console.log(`${new Date().toISOString()} SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, db ${dbPath})`));
+  server.listen(port, "127.0.0.1", () => console.log(`${new Date().toISOString()} SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, base ${host ? `"${host.current.name}" at ${host.current.folder}` : dbPath})`));
 }

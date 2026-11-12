@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -59,6 +59,17 @@ describe("plugin manifests", () => {
     expect(matchesType("factory.run.*", "factory.station")).toBe(false);
     expect(matchesType("*", "anything")).toBe(true);
     expect(matchesType("order.node", "order.node")).toBe(true);
+  });
+
+  it("the three game demos are page-only plugins that ask for nothing and load nothing from outside", () => {
+    for (const id of ["game-dock", "game-sector", "game-workshop"]) {
+      const m = readManifest(join(EXAMPLES_DIR, id));
+      expect(m).toMatchObject({ id, permissions: [], main: null, agents: [] });
+      expect(m.panels).toEqual([expect.objectContaining({ where: "page", entry: "ui/index.html" })]);
+      const html = readFileSync(join(EXAMPLES_DIR, id, "ui/index.html"), "utf8");
+      expect(html).not.toMatch(/<(script|link|img)[^>]+(src|href)="https?:/i);
+      expect(html).toMatch(/nothing is written to SoftwareFactory/i);
+    }
   });
 
   it("the bundled example is a valid plugin", () => {

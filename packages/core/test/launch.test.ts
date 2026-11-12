@@ -228,11 +228,12 @@ describe("launch: running a project from the Bridge", () => {
       const info = (await call(`/api/launch/projects/${pid}`)).body;
       expect(info.folders[0]).toMatchObject({ source: "run", ref: run, exists: true });
       expect(projectFolders(log, pid)[0].label).toMatch(/shipped/);
-      const cli = info.profiles.find((p: any) => p.kind === "cli");
-      expect(cli).toBeTruthy();
+      // A factory build is an app: it starts with one press as a web app, no arguments.
+      const app = info.profiles.find((p: any) => p.kind === "web");
+      expect(app).toMatchObject({ id: "script:start", recommended: true });
       // A long-running program, so it is still running when the app "closes".
       writeFileSync(join(info.dir, "server.js"), WEB_SERVER);
-      const web = (await call(`/api/launch/projects/${pid}/start`, { profileId: "file:server.js" })).body;
+      const web = (await call(`/api/launch/projects/${pid}/start`, { profileId: app.id })).body;
       sid = web.id;
       await until(async () => (await call(`/api/launch/sessions/${sid}`)).body.session.url);
       core.launcher.stopAll();

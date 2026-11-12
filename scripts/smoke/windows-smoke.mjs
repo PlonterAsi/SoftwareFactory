@@ -271,34 +271,43 @@ console.log("seeded", db);
   try {
     const pid1 = (await api(`/api/projects/of?kind=factory_run&ref=${run1}`)).body.projectId;
     const li = (await api(`/api/launch/projects/${pid1}`)).body;
-    const cli = li.profiles?.find((p) => p.kind === "cli");
-    check("the Run tab finds the shipped CLI in its folder", cli && li.dir === fin1.dir, JSON.stringify({ dir: li.dir, profiles: li.profiles?.map((p) => p.id) }));
-    if (cli) {
-      const s = (await api(`/api/launch/projects/${pid1}/start`, { method: "POST", body: JSON.stringify({ profileId: cli.id, args: "SPEC.md" }) })).body;
-      const done = await until("the CLI ends", async () => { const r = (await api(`/api/launch/sessions/${s.id}`)).body; return r.session?.state !== "running" && r.session?.state !== "starting" ? r : null; }, 30_000);
-      const out = (done?.lines ?? []).filter((l) => l.stream === "out").map((l) => l.text);
-      check("the shipped CLI runs from the app with arguments (bundled Node, no command line)", done?.session.exitCode === 0 && out.some((t) => /^\d+$/.test(t.trim())), JSON.stringify({ state: done?.session.state, code: done?.session.exitCode, out: out.slice(0, 3), all: done?.lines?.slice(-4).map((l) => l.text) }));
+    // A factory build is a real program: its first choice on the Run tab is Start (npm start, no arguments, no files to write).
+    const appP = li.profiles?.[0];
+    check("the shipped project is an app, and Start is first on the Run tab", appP?.kind === "web" && appP.id === "script:start" && appP.recommended && li.dir === fin1.dir && existsSync(join(fin1.dir, "src", "schema.js")), JSON.stringify({ dir: li.dir, profiles: li.profiles?.map((p) => `${p.id}${p.recommended ? "*" : ""}`) }));
+    if (appP?.kind === "web") {
+      const as = (await api(`/api/launch/projects/${pid1}/start`, { method: "POST", body: JSON.stringify({ profileId: appP.id }) })).body;
+      const up1 = await until("the app prints its address", async () => { const r = (await api(`/api/launch/sessions/${as.id}`)).body; return r.session?.url ? r : null; }, 30_000);
+      const base = up1?.session.url ?? "http://127.0.0.1:1/";
+      const j = async (path, init) => { try { const r = await fetch(new URL(path, base), init); return { status: r.status, body: await r.json().catch(() => null) }; } catch (e) { return { status: 0, body: String(e) }; } };
+      let html = "";
+      try { html = await (await fetch(base)).text(); } catch (e) { html = String(e); }
+      const db0 = await j("api/_db");
+      check("the started app serves its screens and opens with sample data (bundled Node, no arguments)", /<script type="module" src="web\/app.js">/.test(html) && (db0.body?.data?.piece?.length ?? 0) >= 1, JSON.stringify({ url: up1?.session.url, html: html.slice(0, 80), pieces: db0.body?.data?.piece?.length }));
+      const made = await j("api/piece", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Smoke piece", text: "one two three", goal: 10, status: "draft" }) });
+      const id = made.body?.record?.id;
+      const bad = await j("api/piece", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "no title" }) });
+      const edited = id ? await j(`api/piece/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ goal: 20 }) }) : null;
+      const gone = id ? await j(`api/piece/${id}`, { method: "DELETE" }) : null;
+      const onDisk = existsSync(join(fin1.dir, "data", "db.json"));
+      check("full CRUD in the started app: create, validate, edit, delete, kept in data/db.json", made.status === 201 && bad.status === 422 && edited?.body?.record?.goal === 20 && gone?.status === 200 && onDisk, JSON.stringify({ made: made.status, bad: bad.status, edited: edited?.body?.record?.goal, gone: gone?.status, onDisk }));
+      await api(`/api/launch/sessions/${as.id}/stop`, { method: "POST", body: "{}" });
     }
-    // visualizeEverything: the shipped project has a screen, it is the Run tab's first choice, and its page and modules are served.
-    const pg = li.profiles?.[0];
-    check("the shipped project has a screen, first on the Run tab", pg?.kind === "static" && pg.recommended && existsSync(join(fin1.dir, "index.html")), JSON.stringify(li.profiles?.map((p) => `${p.id}${p.recommended ? "*" : ""}`)));
-    if (pg?.kind === "static") {
-      const ps = (await api(`/api/launch/projects/${pid1}/start`, { method: "POST", body: JSON.stringify({ profileId: pg.id }) })).body;
-      const ready = await until("the page preview is ready", async () => { const r = (await api(`/api/launch/sessions/${ps.id}`)).body; return r.session?.url ? r : null; }, 15_000);
-      const at = (p) => new URL(p, ready?.session.url.startsWith("http") ? ready.session.url : `http://127.0.0.1:4317${ready?.session.url ?? "/"}`).href;
-      let html = "", app = "";
-      try { html = await (await fetch(at("index.html"))).text(); app = await (await fetch(at("web/app.js"))).text(); } catch (e) { html = String(e); }
-      check("the shipped page and its script are served for the in-app preview", /<script type="module" src="web\/app.js">/.test(html) && app.includes("../src/count.js"), JSON.stringify({ url: ready?.session.url, html: html.slice(0, 80), app: app.slice(0, 60) }));
-      await api(`/api/launch/sessions/${ps.id}/stop`, { method: "POST", body: "{}" });
-    }
-    // No arguments to know: the Run tab offers example runs; the sample-text one types into the tool.
-    const sample = cli?.usage?.examples?.find((x) => x.stdin);
-    if (sample) {
-      const s2 = (await api(`/api/launch/projects/${pid1}/start`, { method: "POST", body: JSON.stringify({ profileId: cli.id, argv: sample.argv, stdin: sample.stdin }) })).body;
-      const d2 = await until("the sample run ends", async () => { const r = (await api(`/api/launch/sessions/${s2.id}`)).body; return r.session?.state === "exited" ? r : null; }, 30_000);
-      const o2 = (d2?.lines ?? []).filter((l) => l.stream === "out").map((l) => l.text);
-      check("a tool runs from an example button with no arguments typed (sample text as its input)", d2?.session.exitCode === 0 && o2.some((t) => /^\d+$/.test(t.trim())), JSON.stringify({ examples: cli.usage.examples.map((x) => x.label), out: o2.slice(0, 3) }));
-    } else check("a tool runs from an example button with no arguments typed (sample text as its input)", false, JSON.stringify(cli?.usage ?? null));
+    // One Start press for a tool that needs a CSV nobody has: the app makes one from its spec, runs it, and the file can be edited in the app.
+    const csvDir = join(OUT, "csv-tool");
+    mkdirSync(join(csvDir, "bin"), { recursive: true });
+    writeFileSync(join(csvDir, "SPEC.md"), "# Expense summary\n\nSums a CSV of expenses by category. The CSV has the columns date, category, amount.\n\nusage: expenses <file.csv>\n");
+    writeFileSync(join(csvDir, "bin", "expenses.js"), `import { readFileSync } from "node:fs";\nconst f = process.argv[2];\nif (!f) { console.error("usage: expenses <file.csv>"); process.exit(2); }\nconst [h, ...rows] = readFileSync(f, "utf8").trim().split(/\\r?\\n/);\nconst c = h.split(","), ci = c.indexOf("category"), ai = c.indexOf("amount"), by = {};\nfor (const r of rows) { const x = r.split(","); by[x[ci]] = (by[x[ci]] ?? 0) + Number(x[ai]); }\nfor (const [k, v] of Object.entries(by)) console.log(k + ": " + v.toFixed(2));\n`);
+    const cp2 = (await api("/api/projects", { method: "POST", body: JSON.stringify({ name: "Smoke CSV tool" }) })).body.id;
+    await api(`/api/launch/projects/${cp2}/folder`, { method: "POST", body: JSON.stringify({ dir: csvDir }) });
+    const g = (await api(`/api/launch/projects/${cp2}/go`, { method: "POST", body: "{}" })).body;
+    const gd = g?.session ? await until("the one-press run ends", async () => { const r = (await api(`/api/launch/sessions/${g.session.id}`)).body; return r.session?.state === "exited" ? r : null; }, 30_000) : null;
+    const go = (gd?.lines ?? []).filter((l) => l.stream === "out").map((l) => l.text);
+    check("one Start press runs a CSV tool on a sample made from its spec (no file, no arguments)", gd?.session.exitCode === 0 && g.made?.[0]?.path === "samples/date-category.csv" && go.some((t) => /^food: \d+\.\d\d$/.test(t)), JSON.stringify({ g: g?.error ?? g?.why, made: g?.made, out: go.slice(0, 3) }));
+    await api(`/api/launch/projects/${cp2}/files`, { method: "POST", body: JSON.stringify({ path: "samples/date-category.csv", content: "date,category,amount\n2024-01-01,books,40\n2024-01-02,books,2\n" }) });
+    const g2 = (await api(`/api/launch/projects/${cp2}/go`, { method: "POST", body: "{}" })).body;
+    const gd2 = g2?.session ? await until("the edited run ends", async () => { const r = (await api(`/api/launch/sessions/${g2.session.id}`)).body; return r.session?.state === "exited" ? r : null; }, 30_000) : null;
+    const go2 = (gd2?.lines ?? []).map((l) => l.text);
+    check("a sample edited in the app's data editor is what the next Start uses", go2.includes("books: 42.00"), JSON.stringify(go2.slice(-4)));
     const webDir = join(OUT, "web-app");
     mkdirSync(webDir, { recursive: true });
     writeFileSync(join(webDir, "package.json"), JSON.stringify({ name: "smoke-web", type: "module", scripts: { start: "node server.js" } }));
@@ -322,11 +331,13 @@ console.log("seeded", db);
   // ---------- 4c. add the shipped project into SoftwareFactory as a tool, and use it ----------
   try {
     const owner = (await api(`/api/projects/of?kind=factory_run&ref=${run1}`)).body.projectId;
-    const asked = await api("/api/integrations", { method: "POST", body: JSON.stringify({ projectId: owner, form: "tool" }) });
+    // A factory app joins SoftwareFactory as a panel (its screens), not as a command-line tool.
+    const asked = await api("/api/integrations", { method: "POST", body: JSON.stringify({ projectId: owner, form: "panel" }) });
     const approved = asked.status === 201 ? await api(`/api/integrations/${asked.body.id}/decide`, { method: "POST", body: JSON.stringify({ approve: true }) }) : asked;
     check("a shipped project is added as a feature after approval", approved.body?.status === "installed" && existsSync(approved.body.dir ?? ""), JSON.stringify(approved.body).slice(0, 300));
-    const used = await api(`/api/integrations/${asked.body.id}/run`, { method: "POST", body: JSON.stringify({ args: "", stdin: "one two three" }) });
-    check("the installed feature runs on the bundled Node.js", used.body?.exitCode === 0 && /3/.test(used.body.stdout ?? ""), JSON.stringify(used.body).slice(0, 300));
+    let shown = "";
+    try { shown = await (await fetch(`http://127.0.0.1:4317/ext/${asked.body.id}/web/kit/shell.js`)).text(); } catch (e) { shown = String(e); }
+    check("the installed feature's screens are served inside SoftwareFactory", shown.includes("startApp"), shown.slice(0, 120));
   } catch (e) {
     check("a shipped project is added as a feature after approval", false, e.message);
   }

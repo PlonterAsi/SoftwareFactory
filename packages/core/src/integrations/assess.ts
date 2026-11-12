@@ -63,7 +63,9 @@ export function detectForms(dir: string): { forms: FormOption[]; manifest: Manif
   const pkg = readJson(join(dir, "package.json"));
   // tool: manifest entry, then package.json bin, then main, then a `node x.js` start script, then common names.
   const bin = typeof pkg?.bin === "string" ? pkg.bin : pkg?.bin && typeof pkg.bin === "object" ? Object.values(pkg.bin)[0] as string : null;
-  const start = typeof pkg?.scripts?.start === "string" ? pkg.scripts.start.match(/^node\s+(\S+\.(?:c|m)?js)\b/)?.[1] ?? null : null;
+  let start = typeof pkg?.scripts?.start === "string" ? pkg.scripts.start.match(/^node\s+(\S+\.(?:c|m)?js)\b/)?.[1] ?? null : null;
+  // A start script that runs a server is an app, not a command-line tool (factory apps start `node server.js`).
+  if (start) { try { if (/\bcreateServer\s*\(|\.listen\s*\(/.test(readFileSync(join(dir, start), "utf8"))) start = null; } catch { /* missing: skipped below */ } }
   // Factory builds often put their command in bin/ without naming it in package.json: take bin/'s only script.
   let binDir: string[] = [];
   try { binDir = readdirSync(join(dir, "bin")).filter((n) => /\.(c|m)?js$/.test(n)).map((n) => `bin/${n}`); } catch { /* no bin/ */ }

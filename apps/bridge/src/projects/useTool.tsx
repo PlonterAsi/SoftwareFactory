@@ -38,6 +38,11 @@ export function ToolForm({ usage, command, busy, onRun, onWindow }: {
   const [stdin, setStdin] = useState("");
   const [picking, setPicking] = useState<UsageField | null>(null);
   const [raw, setRaw] = useState<string | null>(null);
+  // Required files and folders start filled with the project's own sample, so Run works straight away.
+  const firstPicks = usage.fields.filter((f) => f.required && f.suggestions?.length).map((f) => `${f.id}=${f.suggestions![0]}`).join("\n");
+  useEffect(() => {
+    setValues((x) => { const n = { ...x }; for (const f of usage.fields) if (f.required && f.suggestions?.length && !n[f.id]) n[f.id] = f.suggestions[0]; return n; });
+  }, [firstPicks]); // eslint-disable-line react-hooks/exhaustive-deps
   const { argv, missing } = buildArgv(usage.fields, values);
   const set = (id: string, v: string) => setValues((x) => ({ ...x, [id]: v }));
   const req = (): ToolRunRequest => (raw != null ? { argv: raw.trim() ? splitLine(raw) : [], stdin: stdin || undefined } : { argv, stdin: stdin || undefined });

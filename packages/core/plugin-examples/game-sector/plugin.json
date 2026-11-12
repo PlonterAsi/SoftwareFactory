@@ -1,0 +1,16 @@
+{
+  "id": "game-sector",
+  "name": "Game: Sector",
+  "version": "0.2.0",
+  "description": "A real-time base builder over your factory. The Command Center is SoftwareFactory; build a Refinery, Barracks and Apps around it, connect them, train agents, approve plans and hold off bug waves. Missions, ranks and unlocks. Practice data for now: it writes nothing and spends nothing.",
+  "permissions": [],
+  "panels": [
+    {
+      "id": "play",
+      "title": "Sector (practice)",
+      "entry": "ui/index.html",
+      "where": "page",
+      "order": 61
+    }
+  ]
+}

@@ -2,6 +2,28 @@
 
 A finished project should not need a command line. Every project has a **Run** tab (right after Overview) that starts it from its own folder and shows it.
 
+## One Start press
+
+The big **Start** button at the top of the Run tab runs the project the best way it knows, with nothing to fill in (`POST /api/launch/projects/:id/go`, `packages/core/src/launch/quick.ts`):
+
+- a web app or a factory-built app (`npm start` → `node server.js`) starts and opens in the preview; pages open in the preview;
+- a command-line tool runs on the project's own example: a `run.json` or README example, a sample file the project ships, or sample text;
+- a tool that needs a file nobody has gets one made first, under `samples/`: what its tests feed it (CSV or JSON written inline in `test/*.js`), else CSV/JSON blocks in its SPEC.md or README, else a table with the columns its spec names (`date, category, amount` gets eight rows of dates, categories and amounts). A line under the button says what was made and what ran.
+
+Nothing is overwritten: a second batch of samples gets new names. A field that names its kind (`<expenses.csv>`) is only offered files of that kind, never SPEC.md or README.md, and a required file field starts filled with the first sample, so its form's **Run** works at once too.
+
+## Data files, without writing raw files
+
+Under **Data** the Run tab lists the project's data files (`packages/core/src/launch/files.ts`), samples first, then the app's own data (`data/db.json` for factory apps), other files, test inputs and docs. Code, packages and `node_modules` are left out. Opening one shows an editor:
+
+- **tables** (.csv, .tsv): a grid; add or remove rows and columns, rename columns; blank rows are dropped on save;
+- **JSON**: a form; a list of records shows as a grid, objects as fields (add or remove fields), true/false as checkboxes, numbers as number boxes;
+- **text** and anything else: plain text. **Plain text** shows any file as text.
+
+Save, rename (edit the name at the top), delete. JSON must be valid to save, so a slip can never break the app's data. **Make sample data** makes samples on demand; **New table** and **New JSON** start a new file under `samples/`.
+
+![Editing a sample table on the Run tab](img/bridge-run-data.png)
+
 ## What it finds
 
 ![The Run tab previewing a web app](img/bridge-run-tab.png)
@@ -66,6 +88,10 @@ GET  /api/launch/sessions/:sid/stream     server-sent events: `state`, `line`
 POST /api/launch/sessions/:sid/stop
 POST /api/launch/sessions/:sid/input      { text } or { end: true }
 POST /api/launch/open                     { url } a local address, in your browser
+POST /api/launch/projects/:id/go          { dir?, profileId? } one press: best profile, on samples made for it if needed → { session, why, made }
+GET  /api/launch/projects/:id/files?dir=  its data files; with &path= one file's content
+POST /api/launch/projects/:id/files       { path, content, create? } save · { path, delete: true } · { from, to } rename  (inside the folder only, data files only)
+POST /api/launch/projects/:id/samples     { want?: "table" | "json" | "text" } make sample inputs → { made, files }
 GET  /api/launch/browse?path=             a folder's folders and files, for the pickers (starts at home; lists drives on Windows)
 GET  /preview/:id/...                     plain pages, while that project's preview is on
 ```

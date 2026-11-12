@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { setupApi, type CrewMode, type SetupView, type ToolCheck } from "./api";
 import { UpdatesSection, type Updates } from "./Updates";
 import { CrewGitHub } from "./CrewGitHub";
+import type { Layout } from "./shell/prefs";
 
 /**
  * Ship's systems: which crew works (free practice crew or real Claude Code
  * agents), what this computer has, and where everything lands on disk.
  * Every check is free; nothing here calls a model.
  */
-export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onClose: () => void; dropsAt: number; updates?: Updates }) {
+export function Setup({ open, onClose, dropsAt, updates, layout, onLayout }: { open: boolean; onClose: () => void; dropsAt: number; updates?: Updates; layout?: Layout; onLayout?: (l: Layout) => void }) {
   const [s, setS] = useState<SetupView | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -40,10 +41,10 @@ export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onCl
   if (!open) return null;
   return (
     <div className="scrim" onClick={onClose}>
-      <aside className="setup" role="dialog" aria-modal="true" aria-label="Ship's systems" onClick={(e) => e.stopPropagation()}>
+      <aside className="setup" role="dialog" aria-modal="true" aria-label="Systems" onClick={(e) => e.stopPropagation()}>
         <header className="setup-head">
           <div>
-            <div className="setup-kicker mono">SHIP'S SYSTEMS</div>
+            <div className="setup-kicker">Systems</div>
             <h2>Who builds, and where it lands</h2>
           </div>
           <button className="ghost" onClick={onClose} aria-label="Close">Close</button>
@@ -66,6 +67,24 @@ export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onCl
             </div>
           </section>
 
+          {onLayout && (
+            <section className="setup-sec">
+              <h3>Layout</h3>
+              <div className="crew-modes">
+                <button className={`mode-card${layout !== "foundry" ? " on" : ""}`} onClick={() => onLayout("classic")} aria-pressed={layout !== "foundry"}>
+                  <span className="mode-name">Classic</span>
+                  <span className="mode-tag">old top bar</span>
+                  <span className="mode-body">Pages along the top, the Assistant always on the right.</span>
+                </button>
+                <button className={`mode-card${layout === "foundry" ? " on" : ""}`} onClick={() => onLayout("foundry")} aria-pressed={layout === "foundry"}>
+                  <span className="mode-name">Foundry Glass</span>
+                  <span className="mode-tag">new · default</span>
+                  <span className="mode-body">A sidebar with Needs you and recent projects, Ctrl K to file, build or go anywhere, Ctrl J to show or hide the Assistant.</span>
+                </button>
+              </div>
+            </section>
+          )}
+
           <section className="setup-sec">
             <h3>This computer <button className="link" disabled={busy} onClick={() => load(true)}>{busy ? "checking…" : "Check again"}</button></h3>
             <Check name="Node.js" c={{ found: s.node.ok, version: `v${s.node.version}`, path: s.node.path, hint: s.node.ok ? "Runs the factory's core and the tests it writes." : "Node 22.5 or newer is needed." }} />
@@ -85,7 +104,7 @@ export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onCl
                   <button className="ghost sm" onClick={() => setEditDrop(!editDrop)}>{editDrop ? "Cancel" : "Change"}</button>
                 </span>
               </div>
-              <div className="place-hint">Save a .txt or .md note here, even from your phone, and it becomes a Signal within seconds. Point it at a OneDrive or Google Drive folder to capture ideas away from the desk.</div>
+              <div className="place-hint">Save a .txt or .md note here, even from your phone, and it becomes a note within seconds. Point it at a OneDrive or Google Drive folder to capture ideas away from the desk.</div>
               {editDrop
                 ? <div className="place-edit"><input value={dropDir} onChange={(e) => setDropDir(e.target.value)} aria-label="Drop folder path" /><button className="sm" disabled={busy || !dropDir.trim()} onClick={saveDrop}>Use this folder</button></div>
                 : <code className="place-path">{s.paths.drop}</code>}

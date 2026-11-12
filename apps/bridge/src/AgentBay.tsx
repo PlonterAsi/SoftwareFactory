@@ -15,9 +15,9 @@ export function AgentBay({ bay }: { bay: BayState }) {
   const total = Object.values(bay.stats).reduce((s, x) => s + x.costUsd, 0);
   const run = async (fn: () => Promise<unknown>) => { setErr(null); try { await fn(); } catch (e) { setErr((e as Error).message); } };
   return (
-    <section className="pane bay" aria-label="Agent Bay">
+    <section className="pane bay" aria-label="Agents">
       <header className="pane-head">
-        <span>Agent Bay</span>
+        <span>Agents</span>
         <span className="muted mono">{bay.agents.filter((a) => !a.retired).length} agents · {Object.values(bay.stats).reduce((s, x) => s + x.calls, 0)} calls · ${total.toFixed(4)}</span>
       </header>
       <NewAgent onMade={(a) => setSel(a.def.id)} onError={setErr} />

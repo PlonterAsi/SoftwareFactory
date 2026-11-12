@@ -215,8 +215,8 @@ const MOCK = {
   council: (role: string) => {
     const seat = role.match(/You are the (\w+) on the SoftwareFactory Council/)?.[1] ?? "Seat";
     const take = {
-      Visionary: { take: "Worth building: one command, instant answer.", proposals: ["read from a file or stdin", "print one number"], concerns: [], vote: "build", scope: "small" },
-      Architect: { take: "One pure function and a thin CLI.", proposals: ["pure countWords function in src", "read from a file or stdin"], concerns: ["unicode whitespace"], vote: "build", scope: "small" },
+      Visionary: { take: "Worth building as a small writing app: pieces with goals and a live count.", proposals: ["pieces with a word goal", "a progress dashboard"], concerns: [], vote: "build", scope: "small" },
+      Architect: { take: "One pure countWords function, one entity, one dashboard view.", proposals: ["pure countWords function in src", "pieces with a word goal"], concerns: ["unicode whitespace"], vote: "build", scope: "small" },
       Skeptic: { take: "Fine if empty input is handled.", proposals: [], concerns: ["empty input must give 0", "unicode whitespace"], vote: "build", scope: "small" },
     } as Record<string, unknown>;
     return "```json\n" + JSON.stringify(take[seat] ?? { take: `${seat} agrees.`, proposals: [], concerns: [], vote: "build", scope: "small" }) + "\n```";
@@ -241,79 +241,109 @@ const MOCK = {
   review: "```json\n" + JSON.stringify({ verdict: "pass", findings: [{ severity: "low", text: "README could show an example with a file argument" }] }) + "\n```",
   order: (prompt: string) => "```json\n" + JSON.stringify({ nodes: [], fragments: [{ text: (prompt.match(/"""\n([\s\S]*?)\n"""/)?.[1] ?? prompt).slice(0, 200), kind: "note", important: false, node: null, confidence: 0.4, contradicts: [] }] }) + "\n```",
   plan: "```json\n" + JSON.stringify({
-    name: "Word Counter", slug: "word-counter", summary: "Counts words in text from stdin or a file.",
-    interface: "src/count.js exports countWords(text: string): number. bin/wc.js prints countWords of the file given as argv[2].",
-    ui: "A text box prefilled with a sample paragraph; the word count updates as you type, shown as a big number with a bar per line.",
-    cli: "usage: wc [file]",
-    examples: [{ label: "Count the words in the spec", args: "SPEC.md" }],
-    acceptance: ["empty text has 0 words", "words are split on any whitespace", "punctuation-only tokens still count"],
-    tasks: [{ id: "t1", title: "countWords", dependsOn: [] }, { id: "t2", title: "CLI wrapper", dependsOn: ["t1"] }, { id: "t3", title: "README", dependsOn: ["t2"] }],
-    files: ["package.json", "src/count.js", "bin/wc.js", "index.html", "web/app.js", "web/style.css"],
+    name: "Word Counter", slug: "word-counter", summary: "Keeps your writing pieces and shows how many words each has against its goal.",
+    interface: "src/count.js exports countWords(text: string): number and progress(words: number, goal: number|null): number (percent of the goal, 0 to 100; 0 when there is no goal). src/schema.js exports app, entities (piece), flows, features.",
+    entities: [{ name: "piece", label: "Pieces", fields: [{ name: "title", type: "text", required: true }, { name: "text", type: "longtext" }, { name: "goal", type: "number" }, { name: "status", type: "choice", options: ["draft", "editing", "done"], required: true }], seed: "three short pieces at different stages" }],
+    flows: [{ name: "Write to a goal", steps: ["Create a piece", "Set its word goal", "Write", "Watch its bar fill on Progress"] }],
+    views: [{ id: "dashboard", label: "Progress", shows: "total words, a bar per piece against its goal, and a quick count box" }],
+    ui: "A writing desk: Pieces (list, create, edit, delete) in the navigation, and a Progress dashboard with a bar per piece against its goal and a box that counts words as you type.",
+    cli: "",
+    examples: [],
+    acceptance: ["empty text has 0 words", "words are split on any whitespace", "punctuation-only tokens still count", "progress is the share of the goal, capped at 100"],
+    tasks: [{ id: "t1", title: "countWords and progress", dependsOn: [] }, { id: "t2", title: "schema: pieces with samples", dependsOn: ["t1"] }, { id: "t3", title: "Progress view", dependsOn: ["t2"] }],
+    files: ["package.json", "src/count.js", "src/schema.js", "index.html", "web/app.js", "web/style.css"],
   }) + "\n```",
   tests: `<<<FILE test/count.test.js
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { countWords } from "../src/count.js";
+import { countWords, progress } from "../src/count.js";
 test("empty text has 0 words", () => assert.equal(countWords(""), 0));
 test("words are split on any whitespace", () => assert.equal(countWords("a  b\\tc\\nd"), 4));
 test("punctuation-only tokens still count", () => assert.equal(countWords("hi - there"), 3));
+test("progress is the share of the goal, capped at 100", () => { assert.equal(progress(50, 200), 25); assert.equal(progress(300, 200), 100); assert.equal(progress(10, null), 0); });
 FILE>>>`,
   build: (bug: boolean) => `<<<FILE package.json
-{ "name": "word-counter", "type": "module", "scripts": { "test": "node --test" } }
+{ "name": "word-counter", "type": "module", "scripts": { "start": "node server.js", "test": "node --test" } }
 FILE>>>
 <<<FILE src/count.js
 export function countWords(text) {
-  return text.split(${bug ? '" "' : "/\\s+/"}).filter(Boolean).length;
+  return String(text ?? "").split(${bug ? '" "' : "/\\s+/"}).filter(Boolean).length;
+}
+export function progress(words, goal) {
+  if (!goal || goal <= 0) return 0;
+  return Math.min(100, Math.round((words / goal) * 100));
 }
 FILE>>>
-<<<FILE bin/wc.js
-#!/usr/bin/env node
-import { readFileSync } from "node:fs";
-import { countWords } from "../src/count.js";
-if (process.argv[2] === "--help") { console.log("usage: wc [file]"); process.exit(0); }
-console.log(countWords(readFileSync(process.argv[2] ?? 0, "utf8")));
+<<<FILE src/schema.js
+import { countWords, progress } from "./count.js";
+export const app = { name: "Word Counter", slug: "word-counter", tagline: "Writing desk", summary: "Keep your pieces of writing and watch each one grow toward its word goal." };
+export const entities = [{
+  name: "piece", label: "Pieces", singular: "Piece", description: "Everything you are writing.", title: "title",
+  fields: [
+    { name: "title", type: "text", required: true },
+    { name: "text", type: "longtext", help: "The words themselves." },
+    { name: "goal", label: "Word goal", type: "number", min: 0 },
+    { name: "status", type: "choice", options: ["draft", "editing", "done"], required: true },
+  ],
+  computed: [
+    { name: "words", label: "Words", value: (r) => countWords(r.text) },
+    { name: "progress", label: "% of goal", value: (r) => progress(countWords(r.text), r.goal) },
+  ],
+  seed: [
+    { title: "Morning pages", text: "Woke early and wrote three lines before coffee. The house was quiet.", goal: 50, status: "draft" },
+    { title: "Launch note", text: "SoftwareFactory now builds real apps: every project opens with its data, its screens and a system view.", goal: 40, status: "editing" },
+    { title: "Haiku", text: "An old silent pond, a frog jumps into the pond, splash! Silence again.", goal: 17, status: "done" },
+  ],
+}];
+export const flows = [{ name: "Write to a goal", description: "From an empty page to a finished piece.", steps: ["Create a piece", "Set its word goal", "Write", "Watch its bar fill on Progress"] }];
+export const features = [{ name: "Progress", description: "Every piece against its goal", where: "home" }, { name: "Quick count", description: "Count any text as you type", where: "home" }];
 FILE>>>
 <<<FILE index.html
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Word Counter</title><link rel="stylesheet" href="web/style.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Word Counter</title>
+<link rel="stylesheet" href="web/kit/kit.css"><link rel="stylesheet" href="web/style.css"></head>
 <body>
-<main>
-  <h1>Word Counter</h1>
-  <textarea id="text" rows="8">SoftwareFactory builds every project with a screen.
-Type here and watch the count change.</textarea>
-  <p class="total"><span id="count">0</span> words</p>
-  <div id="lines"></div>
-</main>
+<div id="app"></div>
 <script type="module" src="web/app.js"></script>
 </body>
 </html>
 FILE>>>
 <<<FILE web/app.js
-import { countWords } from "../src/count.js";
-const text = document.getElementById("text");
-const count = document.getElementById("count");
-const lines = document.getElementById("lines");
-function draw() {
-  count.textContent = String(countWords(text.value));
-  lines.replaceChildren(...text.value.split("\\n").map((line) => {
-    const bar = document.createElement("div");
-    bar.className = "bar";
-    bar.style.width = Math.min(100, countWords(line) * 8) + "%";
-    bar.title = countWords(line) + " words";
-    return bar;
-  }));
-}
-text.addEventListener("input", draw);
-draw();
+import * as schema from "../src/schema.js";
+import { startApp } from "./kit/shell.js";
+import { countWords, progress } from "../src/count.js";
+
+const dashboard = {
+  id: "dashboard", label: "Progress", description: "Every piece against its word goal, and a quick count box",
+  render(el, { store, h, bars, stat, go }) {
+    const pieces = store.list("piece");
+    const total = pieces.reduce((a, p) => a + countWords(p.text), 0);
+    const done = pieces.filter((p) => p.status === "done").length;
+    const out = h("span", { class: "big" }, "0");
+    const box = h("textarea", { rows: "4", placeholder: "Paste or type any text to count it", oninput: (e) => { out.textContent = String(countWords(e.target.value)); } });
+    el.append(
+      h("header", { class: "kit-head" }, h("h1", {}, "Progress"), h("p", { class: "kit-sub" }, "Every piece against its word goal.")),
+      h("div", { class: "kit-cards" }, stat("Words written", total), stat("Pieces", pieces.length, done + " done"), stat("Average progress", pieces.length ? Math.round(pieces.reduce((a, p) => a + progress(countWords(p.text), p.goal), 0) / pieces.length) + "%" : "—")),
+      h("div", { class: "kit-panel" }, h("h2", {}, "Pieces"), pieces.length
+        ? bars(pieces.map((p) => ({ label: p.title, value: countWords(p.text), max: p.goal || countWords(p.text) || 1 })), { format: (v, i) => v + (i.max ? " / " + i.max : "") })
+        : h("p", { class: "kit-muted" }, "No pieces yet."),
+        h("div", { class: "kit-actions" }, h("button", { class: "kit-primary", onclick: () => go("e/piece/new") }, "New piece"))),
+      h("div", { class: "kit-panel" }, h("h2", {}, "Quick count"), box, h("p", {}, out, " words")),
+    );
+  },
+};
+
+startApp({ schema, views: [dashboard] });
 FILE>>>
 <<<FILE web/style.css
-body { font: 15px system-ui, sans-serif; background: #0b1020; color: #e6ecff; margin: 0; }
-main { max-width: 640px; margin: 32px auto; padding: 0 16px; }
-textarea { width: 100%; background: #111a33; color: inherit; border: 1px solid #2a3a66; border-radius: 8px; padding: 10px; }
-.total { font-size: 28px; }
-#count { color: #7cf; font-weight: 700; }
-.bar { height: 8px; margin: 4px 0; background: #7cf; border-radius: 4px; }
+.big { font-size: 28px; font-weight: 700; color: var(--kit-accent); }
+FILE>>>
+<<<FILE README.md
+# Word Counter
+
+A writing desk: keep your pieces, give each a word goal and watch its bar fill.
+Open it from the project's Run tab in SoftwareFactory and press Start. No arguments, no files to write; data lives in data/db.json.
 FILE>>>`,
 };
 

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { git } from "../src/factory/workspace.js";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
@@ -18,6 +19,11 @@ async function shipped() {
   const f = new Factory(log, new MockRuntime({ delayMs: 0 }), join(data, "projects"));
   const run = f.start("a CLI that counts words", { autoApprove: true });
   await f.wait(run);
+  // Factory builds are apps; a command line comes only when the idea asks for one, next to the app.
+  const dir = (log.list({ type: "factory.run.finished", limit: 10 }).at(-1)!.payload as { dir: string }).dir;
+  mkdirSync(join(dir, "bin"), { recursive: true });
+  writeFileSync(join(dir, "bin", "wc.js"), 'import { readFileSync } from "node:fs";\nimport { countWords } from "../src/count.js";\nif (process.argv[2] === "--help") { console.log("usage: wc <file>"); process.exit(0); }\nconsole.log(countWords(readFileSync(process.argv[2], "utf8")));\n');
+  git(dir, "add", "-A"); git(dir, "commit", "-q", "-m", "CLI next to the app");
   const projectId = projectOf(log, { kind: "factory_run", ref: run })!;
   return { data, log, run, projectId, integrations: new Integrations(log, join(data, "extensions")) };
 }

@@ -13,7 +13,8 @@
     "test": "vitest run",
     "spike": "tsx src/spike.ts",
     "factory": "tsx src/factory-cli.ts",
-    "order": "tsx src/order-cli.ts"
+    "order": "tsx src/order-cli.ts",
+    "kit": "node scripts/kit.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

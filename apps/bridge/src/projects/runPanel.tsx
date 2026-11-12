@@ -4,6 +4,7 @@ import { registerProjectPanel, type PanelContext } from "./panels";
 import { ago } from "./builtin";
 import { ToolForm, type ToolRunRequest } from "./useTool";
 import { AddScreen } from "./addScreen";
+import { DataFiles } from "./dataFiles";
 
 /**
  * The Run tab: start a finished project from its own folder without a command line.
@@ -57,6 +58,8 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
   const [actErr, setActErr] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [newDir, setNewDir] = useState("");
+  const [why, setWhy] = useState<string | null>(null);
+  const [dataVersion, setDataVersion] = useState(0);
 
   // Show the newest live session on arrival, else the newest one.
   useEffect(() => {
@@ -71,6 +74,16 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
     try {
       const s = await launchApi.start(pid, { profileId: p.id, ...(run ? { argv: run.argv, stdin: run.stdin } : { args: args[p.id] }), dir: dir ?? undefined, mode });
       if (mode === "inline") setPicked(s.id);
+      reload();
+    } catch (x) { setActErr((x as Error).message); } finally { setBusy(null); }
+  }
+  /** The one big Start: the best way to run it, with sample data made for it if it needs some. */
+  async function go(p?: RunProfileView) {
+    setBusy(p?.id ?? "go"); setActErr(null); setWhy(null);
+    try {
+      const r = await launchApi.go(pid, dir, p?.id);
+      setPicked(r.session.id); setWhy(r.why);
+      if (r.made.length) setDataVersion((v) => v + 1);
       reload();
     } catch (x) { setActErr((x as Error).message); } finally { setBusy(null); }
   }
@@ -113,7 +126,29 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
         {folder && !info.exists && <p className="error rn-note">The folder is not on disk any more.</p>}
         {info.exists && !main.length && <p className="muted rn-note">Nothing runnable was found here: no package.json scripts, bin/ tools, index.html, or Python, Rust or Go entry point. Use Terminal here to run it your way.</p>}
 
-        {main.length > 0 && <h3>Launch pad</h3>}
+        {main.length > 0 && (() => {
+          const best = main.find((p) => p.recommended) ?? main[0];
+          const s = liveByProfile.get(best.id);
+          return (
+            <section className="rn-hero">
+              {s ? (
+                <div className="rn-hero-live">
+                  <button className="rn-go live" onClick={() => setPicked(s.id)} title="Show it on the right">
+                    <span aria-hidden>●</span> Running<span className="rn-go-sub">{best.label} · show it</span>
+                  </button>
+                  <button className="stop" onClick={() => stop(s.id)}>Stop</button>
+                </div>
+              ) : (
+                <button className="rn-go" onClick={() => go(best)} disabled={busy != null}>
+                  <span aria-hidden>▶</span> {busy === best.id || busy === "go" ? "Starting…" : best.kind === "static" ? "Open it" : "Start"}
+                  <span className="rn-go-sub">{best.label}</span>
+                </button>
+              )}
+              {why && <p className="rn-why" role="status">{why}</p>}
+            </section>
+          );
+        })()}
+        {main.length > 0 && <h3>{main.length > 1 ? "All the ways to run it" : "Details"}</h3>}
         <ul className="rn-profiles">
           {main.map((p) => <ProfileCard key={p.id} p={p} s={liveByProfile.get(p.id)} args={args[p.id] ?? ""} setArgs={(v) => setArgs((a) => ({ ...a, [p.id]: v }))}
             busy={busy === p.id} onStart={(m, r) => start(p, m, r)} onStop={stop} onShow={setPicked} picked={picked} />)}
@@ -127,6 +162,7 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
           </>
         )}
         {actErr && <p className="error rn-note" role="alert">{actErr}</p>}
+        {info.exists && dir && <DataFiles pid={pid} dir={dir} version={dataVersion} onChanged={reload} />}
         {info.exists && folder?.source === "run" && folder.ref != null && main.length > 0 && !main.some((p) => p.kind === "web" || p.kind === "static") && <AddScreen ctx={ctx} baseRun={folder.ref} />}
 
         {info.sessions.length > 0 && (
@@ -146,7 +182,7 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
           </section>
         )}
       </aside>
-      <Stage id={picked} onStop={stop} recommended={main[0] ?? null} onStart={(p) => start(p)} />
+      <Stage id={picked} onStop={stop} recommended={main.find((p) => p.recommended) ?? main[0] ?? null} onStart={(p) => go(p)} />
     </div>
   );
 }
@@ -161,7 +197,7 @@ function ProfileCard({ p, s, args, setArgs, busy, onStart, onStop, onShow, picke
     <li className={`rn-card k-${p.kind}${on ? " live" : ""}${p.recommended ? " best" : ""}${s && picked === s.id ? " shown" : ""}`}>
       <div className="rn-card-head">
         <span className="rn-glyph" aria-hidden>{GLYPH[p.kind]}</span>
-        <span className="rn-card-title">{p.label}<span className="rn-kind">{KIND_LABEL[p.kind]}{p.recommended ? " · best guess" : ""}</span></span>
+        <span className="rn-card-title">{p.label}<span className="rn-kind">{KIND_LABEL[p.kind]}{p.recommended ? " · starts first" : ""}</span></span>
         {on && <span className={`rn-light st-${s!.state}`} title={s!.state} />}
       </div>
       <code className="rn-cmd">{p.command}</code>
@@ -208,8 +244,8 @@ function Stage({ id, onStop, recommended, onStart }: { id: number | null; onStop
         <div className="rn-idle">
           <div className="rn-ring" aria-hidden><span>▶</span></div>
           <p>{id != null ? "Connecting…" : recommended ? `Ready to start ${recommended.label}.` : "Nothing is running."}</p>
-          {id == null && recommended && !(recommended.kind === "cli" && recommended.usage) && <button onClick={() => onStart(recommended)}>{recommended.kind === "static" ? "Preview" : "Start"} {recommended.label}</button>}
-          {id == null && recommended?.kind === "cli" && recommended.usage && <p>{recommended.usage.examples.length ? "Press one of its example runs on the left, or fill in its form." : "Fill in its form on the left and press Run."}</p>}
+          {id == null && recommended && <button onClick={() => onStart(recommended)}>{recommended.kind === "static" ? "Open" : "Start"} {recommended.label}</button>}
+          {id == null && recommended?.kind === "cli" && <p className="muted">It runs on sample data from the project, made for it if there is none. Change the data under Data on the left.</p>}
           <p className="muted">Its output shows here, and anything that serves pages opens right inside the app.</p>
         </div>
       </section>

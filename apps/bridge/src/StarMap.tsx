@@ -118,7 +118,7 @@ export function StarMap({ signals, order, selected, onSelect, factoryRuns = [], 
             return (
               <g key={b.node.id} className={`body k-${b.node.kind}${b.stale ? " stale" : ""}${sel ? " sel" : ""}${drag ? " droppable" : ""}`}
                 onClick={(e) => { e.stopPropagation(); onSelect(b.node.id); }} onDoubleClick={() => { const r = runOf.get(b.node.id); if (r) onShowRun?.(r.run); }} onPointerUp={() => drop(b.node.id)}
-                onMouseEnter={() => { const r = runOf.get(b.node.id); setHover({ title: `${b.node.kind} · ${b.count} fragments${(order.canon[b.node.id]?.length ?? 0) ? ` · ${order.canon[b.node.id].length} in Canon` : ""}${r ? ` · factory run #${r.run}: ${r.finished?.outcome ?? (r.waiting ? "waiting for you" : "building")} (double-click to watch)` : ""}`, body: b.node.title }); }} onMouseLeave={() => setHover(null)}>
+                onMouseEnter={() => { const r = runOf.get(b.node.id); setHover({ title: `${b.node.kind} · ${b.count} fragments${(order.canon[b.node.id]?.length ?? 0) ? ` · ${order.canon[b.node.id].length} in project rules` : ""}${r ? ` · factory run #${r.run}: ${r.finished?.outcome ?? (r.waiting ? "waiting for you" : "building")} (double-click to watch)` : ""}`, body: b.node.title }); }} onMouseLeave={() => setHover(null)}>
                 {b.glow && <circle cx={b.x} cy={b.y} r={b.r * 2.6} fill="url(#glow)" className="halo" />}
                 {hot && <circle cx={b.x} cy={b.y} r={b.r + 1.6} className="hot-ring" />}
                 {runOf.has(b.node.id) && (() => {
@@ -159,10 +159,10 @@ export function StarMap({ signals, order, selected, onSelect, factoryRuns = [], 
             );
           })}
         </svg>
-        <div className="belt-label">{tray.length ? "Unsorted belt · drag a rock onto a body to file it" : "Unsorted belt · empty, everything is filed"}</div>
+        <div className="belt-label">{tray.length ? "Loose ideas · drag a rock onto a body to file it" : "Loose ideas · none, everything is filed"}</div>
         {hover && <div className="star-tip"><span className="mono muted">{hover.title}</span>{hover.body.slice(0, 260)}</div>}
         {err && <div className="star-tip err">{err}</div>}
-        {!order.nodes.length && <div className="empty">No bodies yet. Say something in the Overseer channel, for example "Project: My idea".</div>}
+        {!order.nodes.length && <div className="empty">No bodies yet. Say something to the Assistant, for example "Project: My idea".</div>}
       </div>
     </section>
   );
