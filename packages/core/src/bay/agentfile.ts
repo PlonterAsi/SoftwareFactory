@@ -19,7 +19,7 @@
  */
 
 /** The places an agent can work. Every station has a contract the core appends to the agent's prompt. */
-export const SLOTS = ["council", "plan", "tests", "build", "review", "fix", "order", "overseer", "improve", "map", "survey"] as const;
+export const SLOTS = ["council", "design", "critique", "plan", "tests", "build", "review", "fix", "order", "overseer", "improve", "map", "survey"] as const;
 export type Slot = (typeof SLOTS)[number];
 export type HomeStation = Slot | "none";
 

@@ -37,8 +37,9 @@ const X = [0, 190, 380, 570, 760];
 const STATIONS: [string, string, string, number, number, boolean?, boolean?][] = [
   ["intake", "One-line idea", "saved as a note", X[0], 0],
   ["council", "Council", "up to 6 seats · big ideas", X[1], -95],
-  ["plan", "Spec and plan", "Planner", X[1], 0],
-  ["gateA", "Your OK: plan", "one tap", X[2], 0, true],
+  ["discover", "Product design", "Designer ⇄ Critic loop", X[1], 0],
+  ["plan", "Spec and plan", "Planner", X[2], 0],
+  ["gateA", "Your OK: plan", "one tap", X[3], 0, true],
   ["tests", "Acceptance tests", "Tester, then locked", X[0], 130],
   ["build", "Build", "Builder", X[1], 130],
   ["test", "Test", "node --test", X[2], 130],
@@ -48,12 +49,12 @@ const STATIONS: [string, string, string, number, number, boolean?, boolean?][] =
   ["ship", "Ship to disk", "git repo, tagged", X[4], 260],
 ];
 const EDGES: [string, string, string?, string?][] = [
-  ["intake", "plan"], ["intake", "council", "tb"], ["council", "plan", undefined, "t"], ["plan", "gateA"], ["gateA", "tests", "b", "t"], ["tests", "build"],
+  ["intake", "discover"], ["intake", "council", "tb"], ["council", "discover", undefined, "t"], ["discover", "plan"], ["plan", "gateA"], ["gateA", "tests", "b", "t"], ["tests", "build"],
   ["build", "test"], ["test", "fix", "b1", "t1"], ["fix", "test", "t2", "b2"], ["test", "review"], ["review", "fix", "b", "r"], ["review", "gateB"], ["gateB", "ship", "b", "t"],
 ];
 
 // Agent-call stations ("tests" is the Tester; the floor's "test" box is node --test).
-const CALL_STATION: Record<string, string> = { council: "council", plan: "plan", tests: "tests", build: "build", fix: "fix", review: "review" };
+const CALL_STATION: Record<string, string> = { council: "council", discover: "design", plan: "plan", tests: "tests", build: "build", fix: "fix", review: "review" };
 
 function nodesFor(run?: FactoryRunView, runs: AgentRunView[] = [], crew: CrewIndex = {}): Node<StationData>[] {
   const working = runs.filter((r) => r.state === "running" && run && r.factoryRun === run.run);
@@ -64,6 +65,7 @@ function nodesFor(run?: FactoryRunView, runs: AgentRunView[] = [], crew: CrewInd
     if (id === "fix" && run?.fixRounds) badge = `${run.fixRounds}/${run.maxFixRounds}`;
     if (id === "test" && run?.tests.length) { const t = run.tests.at(-1)!; badge = `${t.passed}/${t.passed + t.failed}`; }
     if (id === "council" && run?.council.length) { const b = run.council.at(-1)!.brief; badge = `${Object.values(b.votes).filter((v) => v === b.outcome).length}× ${b.outcome}`; }
+    if (id === "discover" && run?.discovery.length) { const d = run.discovery.at(-1)!; badge = d.pass ? "passed" : d.settled ? "best kept" : `round ${d.round}`; }
     if (id === "review" && run?.reviews.length) { const r = run.reviews.at(-1)!; badge = r.findings.length ? `${r.findings.length} note${r.findings.length > 1 ? "s" : ""}` : "clean"; }
     return { id, type: "station", position: { x, y }, draggable: false, data: { label, sub, gate, later, state: later ? "idle" : s?.state ?? "idle", badge, note: s?.note, workers } };
   });

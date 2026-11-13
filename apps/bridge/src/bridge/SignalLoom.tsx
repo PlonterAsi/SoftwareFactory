@@ -10,11 +10,11 @@ import type { CrewIndex } from "../FactoryFloor";
  * Plain SVG, redrawn only when events arrive (no animation loop), so it runs on any GPU.
  */
 export const LOOM_STATIONS: [string, string][] = [
-  ["intake", "Idea"], ["council", "Council"], ["plan", "Plan"], ["gateA", "Your OK"], ["tests", "Write tests"], ["build", "Build"],
+  ["intake", "Idea"], ["council", "Council"], ["discover", "Design"], ["plan", "Plan"], ["gateA", "Your OK"], ["tests", "Write tests"], ["build", "Build"],
   ["test", "Run tests"], ["review", "Review"], ["fix", "Fix"], ["gateB", "Your OK"], ["ship", "Ship"],
 ];
 const IDX: Record<string, number> = Object.fromEntries(LOOM_STATIONS.map(([id], i) => [id, i]));
-const LABEL: Record<string, string> = { intake: "Idea", council: "Council", plan: "Plan", gateA: "Your OK: plan", tests: "Write tests", build: "Build", test: "Run tests", review: "Review", fix: "Fix", gateB: "Your OK: build", ship: "Ship" };
+const LABEL: Record<string, string> = { intake: "Idea", council: "Council", discover: "Product design", plan: "Plan", gateA: "Your OK: plan", tests: "Write tests", build: "Build", test: "Run tests", review: "Review", fix: "Fix", gateB: "Your OK: build", ship: "Ship" };
 
 const isWaiting = (r: FactoryRunView) => !!r.waiting && !r.finished;
 const runName = (r: FactoryRunView) => r.plan?.name ?? (r.idea.length > 38 ? r.idea.slice(0, 36) + "…" : r.idea);
@@ -62,7 +62,7 @@ export function SignalLoom({ factoryRuns, runs, crew, projectOf, onShowRun, now 
     ro.observe(box.current);
     return () => ro.disconnect();
   }, []);
-  const L = W < 1000 ? 170 : 210, CW = (W - L - 20) / 11, narrow = CW < 85, HEAD = narrow ? 108 : 100, LANE = 72, H = HEAD + Math.max(1, lanes.length) * LANE + 16;
+  const L = W < 1000 ? 170 : 210, CW = (W - L - 20) / LOOM_STATIONS.length, narrow = CW < 85, HEAD = narrow ? 108 : 100, LANE = 72, H = HEAD + Math.max(1, lanes.length) * LANE + 16;
   const cx = (i: number) => L + CW * i + CW / 2;
   const glyph = (id: string) => crew[id]?.avatar ?? "◆";
 

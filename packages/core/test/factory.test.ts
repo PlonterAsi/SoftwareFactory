@@ -68,7 +68,7 @@ describe("factory loop", () => {
     await f.wait(run);
 
     const fin = events(log, "factory.run.finished").at(-1);
-    expect(fin).toMatchObject({ run, outcome: "shipped", fixRounds: 1, agentCalls: 5 });
+    expect(fin).toMatchObject({ run, outcome: "shipped", fixRounds: 1, agentCalls: 8 });
     expect(fin.totalUsd).toBeCloseTo(0.0005);
     expect(existsSync(join(fin.dir, "SPEC.md"))).toBe(true);
     expect(git(fin.dir, "tag")).toBe("v0.1.0");
@@ -90,13 +90,13 @@ describe("factory loop", () => {
     expect(readFileSync(join(fin.dir, "SPEC.md"), "utf8")).toContain("## What it manages");
     const visuals = events(log, "factory.visual");
     expect(visuals.every((v) => v.pass)).toBe(true);
-    expect(visuals.map((v) => v.station)).toEqual(["intake", "plan", "tests", "build", "test", "fix", "review", "ship"]);
+    expect(visuals.map((v) => v.station)).toEqual(["intake", "discover", "plan", "tests", "build", "test", "fix", "review", "ship"]);
     // A short, single-ask idea skips the Council; the Reviewer passes with a note for the build gate.
     expect(events(log, "factory.station").find((s) => s.station === "council")).toMatchObject({ state: "skipped" });
     expect(events(log, "factory.review")[0]).toMatchObject({ verdict: "pass", agent: "reviewer" });
     expect(events(log, "factory.gate").find((g) => g.gate === "gateB")?.question).toContain("1 note");
     // Every agent's work got a verdict: the builder's first build failed a test, the fix made it green.
-    expect(events(log, "agent.verdict").map((v) => [v.agent, v.pass])).toEqual([["planner", true], ["tester", true], ["builder", false], ["fixer", true], ["reviewer", true]]);
+    expect(events(log, "agent.verdict").map((v) => [v.agent, v.pass])).toEqual([["designer", true], ["planner", true], ["tester", true], ["builder", false], ["fixer", true], ["reviewer", true]]);
     expect(events(log, "factory.gate").filter((g) => g.state === "approved").map((g) => g.gate)).toEqual(["gateA", "gateB"]);
     expect(events(log, "agent.run.completed").every((a) => a.factoryRun === run)).toBe(true);
   });
@@ -227,7 +227,7 @@ describe("resuming runs", () => {
     // The organized table follows: stopped, then back in flight, then shipped.
     expect(log.db.prepare("SELECT outcome, resumes, resumed_from FROM factory_runs WHERE id = ?").get(run)).toMatchObject({ outcome: "shipped", resumes: 1, resumed_from: "build" });
     // Spend carries over: the calls before the cut still count.
-    expect(fin.agentCalls).toBe(6); // plan, tests, the cut-off build, then build, fix, review
+    expect(fin.agentCalls).toBe(9); // design, critique, plan, its coverage check, tests, the cut-off build, then build, fix, review
     expect(fin.totalUsd).toBeCloseTo(0.0005);
   });
 

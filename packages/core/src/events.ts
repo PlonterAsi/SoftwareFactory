@@ -45,6 +45,7 @@ export type EventType =
   | "factory.continued"
   | "factory.links"
   | "factory.plan.gaps"
+  | "factory.discovery"
   | "factory.budget"
   | "order.node"
   | "order.fragment"

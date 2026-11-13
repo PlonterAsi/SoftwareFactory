@@ -286,7 +286,7 @@ function NewTicket({ meta, projectId, projects, onDone, onError }: { meta: Meta;
   );
 }
 
-const STATION_ORDER = ["intake", "council", "plan", "gateA", "tests", "build", "test", "fix", "review", "gateB", "ship"];
+const STATION_ORDER = ["intake", "council", "discover", "plan", "gateA", "tests", "build", "test", "fix", "review", "gateB", "ship"];
 
 /** The ticket page: the work document, edited one field at a time, with its thread and the crew hand-off. */
 function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowRun, onError }: {

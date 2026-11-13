@@ -4,6 +4,7 @@ import type { AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { bind, kitOf, type CrewMember, type CrewSource } from "../factory/crew.js";
 import { parseSeatTake } from "../factory/council.js";
+import { RUBRIC, validateDocs } from "../factory/discovery.js";
 import { parseFileBlocks, parseJsonBlock, isLockedTest } from "../factory/workspace.js";
 import { validatePlan, parseReview, type Plan } from "../factory/loop.js";
 import { archivistPrompt, parseArchivistPlan } from "../order/archivist.js";
@@ -347,7 +348,7 @@ function changeNote(a: AgentDef, b: AgentDef): string {
 
 function samplePrompt(station: HomeStation, sample: string): string {
   switch (station) {
-    case "council": case "plan": return `Idea: ${sample}`;
+    case "council": case "plan": case "design": return `Idea: ${sample}`;
     case "tests": return `Approved spec:\n${sample}`;
     case "build": return `Spec:\n${sample}`;
     case "order": return archivistPrompt(sample, foldOrder([]));
@@ -361,6 +362,8 @@ export function verify(station: HomeStation, text: string): { label: string; pas
   const check = (label: string, fn: () => boolean) => { try { return { label, pass: fn() }; } catch { return { label, pass: false }; } };
   switch (station) {
     case "council": return [check("a seat take with a vote (council format)", () => !!parseSeatTake(text))];
+    case "design": return [check("product documents: a brief, journeys, screens and requirements", () => !!validateDocs(parseJsonBlock(text)))];
+    case "critique": return [check("a score for every rubric line", () => { const c = parseJsonBlock<{ scores?: Record<string, unknown> }>(text); return RUBRIC.every((k) => Number.isFinite(Number(c?.scores?.[k]))); })];
     case "plan": return [check("a spec with acceptance criteria and a task graph", () => !!validatePlan(parseJsonBlock<Plan>(text)))];
     case "tests": return [check("test/*.js files in file blocks", () => parseFileBlocks(text).some((f) => isLockedTest(f.path) && f.path.endsWith(".js")))];
     case "build": case "fix": return [check("source files in file blocks, none under test/", () => { const f = parseFileBlocks(text); return f.length > 0 && f.every((x) => !isLockedTest(x.path)); })];

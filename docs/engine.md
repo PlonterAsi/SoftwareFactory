@@ -41,6 +41,23 @@ plan → locked tests → build ⟲ → core checks → fix ⟲ (ladder) → ver
 
 The Fixer at the workbench found the stray test line and said so (`TEST_WRONG`). But the ladder climbed to a stronger model instead of questioning the test, and opus started with $0.18 left. It hit the cap in 6 seconds, twice, and those calls were not counted. The four changes above close each of those gaps, and the dry run means the stray line is now caught before the tests are locked.
 
+## Discovery: the idea is designed before it is planned (2026-11-13)
+
+The engine had a good inner loop (test, fix, retry) and no outer loop: one line went straight to a code plan in a single call on the cheapest model, so nothing designed the product and nothing judged the design. The research behind this is in [loop-engineering.md](loop-engineering.md).
+
+Discovery is a station between the Council and the Plan, and it is a loop of its own (`packages/core/src/factory/discovery.ts`):
+
+1. The **Designer** (station `design`) researches how people really do the thing, then writes the product documents: a brief (who, problem, promise, what it is not), the journeys step by step, 2 to 6 screens in navigation order, and the requirements (the person's own asks first, never merged or weakened).
+2. The **Critic** (station `critique`), a separate agent that sees only the person's words and the documents, scores them 1 to 5 on five lines: coverage, journey, screens, originality, buildable.
+3. The core decides, not the Critic: every score must reach 4. Under the bar, the Designer gets its own documents back with the Critic's problems and revises.
+4. It stops when the documents pass, after 3 rounds, or when discovery has used 35% of the run's budget. The best-scored documents go on, and the log says why it settled (`factory.discovery` with `settled`).
+
+Then the Planner plans from the documents (one view per screen, one flow per journey, criteria for every must-have requirement), the Critic checks the plan against them (`factory.plan.gaps`), and the documents are written into the project as `docs/product/BRIEF.md`, `JOURNEYS.md`, `SCREENS.md` and `REQUIREMENTS.md`. The next version of a shipped app skips discovery: it keeps its design.
+
+In the app: a "Product design" box on the factory floor, a Design station on the Bridge, and a Product tab on every run with each round's scores and documents.
+
+Next in the same direction: build one feature at a time from a list on disk with a fresh session each, and an evaluator that uses the running app and scores it as a product.
+
 ## Where to see it
 
 On the Bridge, in the Run deck:

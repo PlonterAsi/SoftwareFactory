@@ -40,15 +40,15 @@ describe("storage: database, files and cache", () => {
     const { log } = await seeded(dir);
     expect(listSignals(log).map((s) => s.text).slice(0, 2)).toEqual(["Project SoftwareFactory. Rule: approval stations must be minimal.", "idea: a star map of every project"]);
     const run = rows(log, "SELECT * FROM factory_runs")[0];
-    expect(run).toMatchObject({ outcome: "shipped", fix_rounds: 1, agent_calls: 5 });
+    expect(run).toMatchObject({ outcome: "shipped", fix_rounds: 1, agent_calls: 8 });
     expect(existsSync(run.dir)).toBe(true);
     // Artifacts point at real files, with hashes; a file rewritten by the fix round has 2 versions.
     const arts = rows(log, "SELECT path, sha256, versions FROM artifacts WHERE run = ?", run.id);
     expect(arts.map((a) => a.path)).toEqual(expect.arrayContaining(["SPEC.md", "src/count.js"]));
     expect(arts.every((a) => /^[0-9a-f]{64}$/.test(a.sha256))).toBe(true);
     expect(arts.find((a) => a.path === "src/count.js")!.versions).toBe(2);
-    expect(rows(log, "SELECT status, count(*) AS n FROM agent_runs GROUP BY status")).toEqual([{ status: "done", n: 5 }]);
-    expect(costSummary(log)).toMatchObject({ runs: 5, failed: 0 });
+    expect(rows(log, "SELECT status, count(*) AS n FROM agent_runs GROUP BY status")).toEqual([{ status: "done", n: 8 }]);
+    expect(costSummary(log)).toMatchObject({ runs: 8, failed: 0 });
     expect(count(log, "order_nodes")).toBeGreaterThan(0);
     expect(rows(log, "SELECT kind FROM order_fragments WHERE important = 1").map((r) => r.kind)).toContain("rule");
     expect(log.projectionStatus().every((p) => p.lastEventId === log.lastId() && !p.error)).toBe(true);

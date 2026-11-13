@@ -47,7 +47,7 @@ describe("Agent Bay", () => {
     const log = new EventLog();
     const bay = new AgentBay(log);
     new AgentBay(log);
-    expect(bay.agents().map((a) => a.def.id)).toEqual(["overseer", "archivist", "visionary", "architect", "skeptic", "planner", "tester", "builder", "reviewer", "fixer",
+    expect(bay.agents().map((a) => a.def.id)).toEqual(["overseer", "archivist", "visionary", "architect", "skeptic", "designer", "critic", "planner", "tester", "builder", "reviewer", "fixer",
       "integrator", "automator", "simplifier", "enricher", "ux-lens", "flow-lens", "cartographer", "surveyor", "researcher"]);
     expect(bay.slots().council).toEqual(["visionary", "architect", "skeptic"]);
     const [planner] = bay.crewFor("plan");

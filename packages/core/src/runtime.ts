@@ -228,6 +228,8 @@ export class MockRuntime implements AgentRuntime {
     else if (station === "build") text = MOCK.build(this.opts.plantBug !== false && builds === 1);
     else if (station === "fix") text = MOCK.build(false);
     else if (station === "council") text = MOCK.council(role);
+    else if (station === "design") text = MOCK.design;
+    else if (station === "critique") text = MOCK.critique;
     else if (station === "review") text = MOCK.review;
     else if (station === "order") text = MOCK.order(req.prompt);
     else if (station === "overseer") text = MOCK.overseer(req.prompt);
@@ -241,6 +243,16 @@ export class MockRuntime implements AgentRuntime {
 }
 
 const MOCK = {
+  // The practice Designer and Critic: fixed documents that fit the practice plan, and a pass on the first round.
+  design: "```json\n" + JSON.stringify({
+    brief: { who: "Someone trying the practice crew.", problem: "They want to see the whole loop run without paying for it.", promise: "A tiny app that shows the loop end to end.", notThis: ["a real design: switch to the real crew for that"] },
+    research: [{ finding: "The practice crew cannot search the web." }],
+    journeys: [{ moment: "First time", goal: "See it work", steps: ["Open the app", "Look at the home screen", "Add a record"] }],
+    screens: [{ id: "dashboard", name: "Home", purpose: "Shows what the logic works out.", shows: ["the result"], actions: ["add a record"] }, { id: "history", name: "History", purpose: "Shows what was done before.", shows: ["past records"], actions: ["open one"] }],
+    requirements: [{ id: "R1", text: "It does what the idea says.", from: "person", must: true }],
+    assumptions: ["Practice crew: nothing was researched."],
+  }) + "\n```",
+  critique: "```json\n" + JSON.stringify({ scores: { coverage: 4, journey: 4, screens: 4, originality: 4, buildable: 5 }, problems: [] }) + "\n```",
   // The practice crew cannot read a codebase; it leaves a note file on the branch so the whole path can be tried for free.
   repo: (prompt: string) => {
     // The work document starts "# SF-4 Title" (a project's key and number) or "# #4 Title".

@@ -6,6 +6,7 @@ import { ClaudeCodeRuntime, EventLog, Factory, MockRuntime, parseFileBlocks, run
 import { WORKBENCH_COMMANDS, restoreProtected, testDispute, changedFiles, hasWorkbench } from "../src/factory/workbench.js";
 import { modelFloorUsd, strongerModel } from "../src/factory/loop.js";
 import { checkLinks, linksIn } from "../src/factory/linkcheck.js";
+import { critiquePasses, validateCritique, validateDocs } from "../src/factory/discovery.js";
 import { dryRunTests, lockedTestFaults, relativeImports } from "../src/factory/testcheck.js";
 import { initRepo, commitAll } from "../src/factory/workspace.js";
 import { probeStart } from "../src/factory/appkit.js";
@@ -314,7 +315,7 @@ describe("the plan keeps what the person asked for", () => {
     const crew: AgentRuntime = { name: "mock", run: async (req) => {
       const r = await rt.run(req);
       if (station(req) === "plan") plans.push(req);
-      if (station(req) === "tests" && /You check a plan/.test(req.prompt)) r.text = '{"missing": ["a session log with date and minutes"]}';
+      if (station(req) === "critique" && /you check a plan/.test(req.prompt)) r.text = '{"missing": ["a session log with date and minutes"]}';
       return r;
     } };
     const f = new Factory(log, crew, tmp("sf-proj-"));
@@ -406,5 +407,100 @@ describe("every screen in a real browser", () => {
     expect(screenProblem("<div id=\"app\"></div>", [])).toMatch(/did not start/);
     expect(screenProblem('<div class="kit-app"><main class="kit-main"><div class="kit-error"><h2>Board could not draw</h2><pre>x is not defined</pre></div></main></div>', [])).toBe("Board could not draw: x is not defined");
     expect(screenProblem('<div class="kit-app"><main class="kit-main"><h1>Hi</h1></main></div>', [])).toBeNull();
+  });
+});
+
+describe("discovery: the idea becomes a designed product before any plan", () => {
+  const good = { coverage: 5, journey: 4, screens: 4, originality: 4, buildable: 5 };
+  const docs = (home: string) => ({
+    brief: { who: "A Rocket League player stuck at Platinum.", problem: "Guides are scattered and not sorted by level.", promise: "Shows the three things worth practising today.", notThis: ["a wiki"] },
+    research: [{ finding: "Air dribbles are taught by the community, not the game.", source: "https://liquipedia.net/rocketleague/Air_Dribble" }],
+    journeys: [{ moment: "A normal day", goal: "Know what to practise", steps: ["Open Today", "Pick a drill", "Log the session"] }],
+    screens: [{ id: "dashboard", name: home, purpose: "The three drills for today.", shows: ["drills"], actions: ["start a drill"] }, { id: "tree", name: "Skill tree", purpose: "Where I stand.", shows: ["skills"], actions: ["open a skill"] }],
+    requirements: [{ id: "R1", text: "Rank what to practise by the player's level", from: "person", must: true }, { id: "R2", text: "A streak counter", from: "design", must: false }],
+    assumptions: [],
+  });
+  const block = (j: unknown) => "```json\n" + JSON.stringify(j) + "\n```";
+  function crewWith(critiques: Record<string, number>[]) {
+    const mock = new MockRuntime({ plantBug: false });
+    const seen: { station: string; req: AgentRequest }[] = [];
+    let designs = 0, crits = 0;
+    const rt: AgentRuntime = { name: "mock", run: async (req) => {
+      const r = await mock.run(req);
+      const st = station(req);
+      seen.push({ station: st, req });
+      if (st === "design") r.text = block(docs(`Today v${++designs}`));
+      if (st === "critique" && !/you check a plan/.test(req.prompt)) {
+        const scores = critiques[Math.min(crits++, critiques.length - 1)];
+        r.text = block({ scores, problems: scores.screens < 4 ? [{ where: "screens/tree", problem: "The skill tree is only a list.", fix: "Draw it as a tree with locked branches." }] : [] });
+      }
+      return r;
+    } };
+    return { rt, seen };
+  }
+
+  it("the Critic sends the design back until every score reaches the bar; the Planner then plans from the documents", async () => {
+    const log = new EventLog();
+    const { rt, seen } = crewWith([{ ...good, screens: 2 }, good]);
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    const run = f.start("a coach for one game", { autoApprove: true, autoRetries: 0, maxUsd: 5 });
+    await f.wait(run);
+    const fin = events(log, "factory.run.finished").at(-1);
+    expect(fin.outcome).toBe("shipped");
+    const rounds = events(log, "factory.discovery");
+    expect(rounds.map((r) => r.pass)).toEqual([false, true]);
+    // Round 2: the Designer got its own documents and the Critic's problem, not a blank page.
+    const designs = seen.filter((x) => x.station === "design");
+    expect(designs).toHaveLength(2);
+    expect(designs[1].req.prompt).toMatch(/Today v1/);
+    expect(designs[1].req.prompt).toMatch(/only a list.*Draw it as a tree/s);
+    // The Critic never sees the Designer's reasoning, only the person's words and the documents.
+    expect(seen.find((x) => x.station === "critique")!.req.prompt).toMatch(/a coach for one game/);
+    // The Planner plans from the documents that passed.
+    const plan = seen.find((x) => x.station === "plan")!.req.prompt;
+    expect(plan).toMatch(/Product documents/);
+    expect(plan).toMatch(/Today v2/);
+    expect(plan).toMatch(/R1: Rank what to practise/);
+    // They live in the project for every later agent and the person.
+    expect(readFileSync(join(fin.dir, "docs/product/SCREENS.md"), "utf8")).toMatch(/Today v2/);
+    expect(readFileSync(join(fin.dir, "docs/product/REQUIREMENTS.md"), "utf8")).toMatch(/Rank what to practise/);
+    expect(readFileSync(join(fin.dir, "docs/product/BRIEF.md"), "utf8")).toMatch(/stuck at Platinum/);
+    // The station order on the floor.
+    const order = events(log, "factory.station").filter((s) => s.state === "pass").map((s) => s.station);
+    expect(order.indexOf("discover")).toBeLessThan(order.indexOf("plan"));
+  });
+
+  it("stops after three rounds, goes on with the best-scored documents and says why", async () => {
+    const log = new EventLog();
+    const { rt, seen } = crewWith([{ ...good, screens: 2 }, { ...good, screens: 3 }, { ...good, screens: 2 }]);
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    const run = f.start("a coach for one game", { autoApprove: true, autoRetries: 0, maxUsd: 5 });
+    await f.wait(run);
+    expect(seen.filter((x) => x.station === "design")).toHaveLength(3);
+    const last = events(log, "factory.discovery").at(-1);
+    expect(last).toMatchObject({ pass: false, round: 2, settled: "still under the bar after 3 rounds" });
+    expect(seen.find((x) => x.station === "plan")!.req.prompt).toMatch(/Today v2/);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+  });
+
+  it("the core decides from the scores: a missing score fails, and unusable documents are refused", () => {
+    expect(critiquePasses(validateCritique({ scores: good }))).toBe(true);
+    expect(critiquePasses(validateCritique({ scores: { ...good, originality: 3 } }))).toBe(false);
+    expect(validateCritique({ scores: { coverage: 5 } }).scores.journey).toBe(1);
+    expect(() => validateDocs({ ...docs("Today"), screens: [docs("Today").screens[0]] })).toThrow(/at least two screens/);
+    expect(() => validateDocs({ ...docs("Today"), journeys: [] })).toThrow(/no journey/);
+  });
+
+  it("the next version of a shipped app keeps its design: no discovery", async () => {
+    const log = new EventLog();
+    const { rt, seen } = crewWith([good]);
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    const run = f.start("a coach for one game", { autoApprove: true, autoRetries: 0, maxUsd: 5 });
+    await f.wait(run);
+    const before = seen.filter((x) => x.station === "design").length;
+    const next = f.addFeature(run, "add a weekly summary", { autoApprove: true, autoRetries: 0, maxUsd: 5 });
+    await f.wait(next);
+    expect(seen.filter((x) => x.station === "design").length).toBe(before);
+    expect(events(log, "factory.station").some((s) => s.run === next && s.station === "discover" && s.state === "skipped")).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FactoryRunView, LoopEventView, SeatView, Vote } from "./api";
 
-type Tab = "council" | "plan" | "tests" | "loop" | "files" | "review" | "visuals";
+type Tab = "council" | "product" | "plan" | "tests" | "loop" | "files" | "review" | "visuals";
 
 /** What the selected run produced, drawn instead of listed: task graph, test grid, file heat map, visual checks. */
 export function RunDeck({ run }: { run?: FactoryRunView }) {
@@ -11,8 +11,10 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
   const vFail = run?.visuals.filter((v) => !v.pass).length ?? 0;
   const lastCouncil = run?.council.at(-1);
   const lastReview = run?.reviews.at(-1);
+  const lastDisc = run?.discovery.at(-1);
   const tabs: [Tab, string][] = [
     ["council", `Council${lastCouncil ? ` · ${lastCouncil.brief.outcome}` : run?.stations.council?.state === "skipped" ? " · skipped" : ""}`],
+    ["product", `Product${lastDisc ? ` · ${lastDisc.pass ? "passed" : `round ${lastDisc.round}`}` : ""}`],
     ["plan", `Plan${run?.plan ? ` · ${run.plan.tasks.length}` : ""}`],
     ["tests", `Tests${last ? ` · ${last.passed}/${last.passed + last.failed}` : ""}`],
     ["loop", `Loop${run?.loop.length ? ` · ${run.loop.filter((l) => l.kind === "attempt").length}` : ""}`],
@@ -36,6 +38,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
         {run && tab === "files" && <HeatMap run={run} />}
         {run && tab === "visuals" && <Visuals run={run} />}
         {run && tab === "council" && <CouncilView run={run} />}
+        {run && tab === "product" && <ProductView run={run} />}
         {run && tab === "review" && <ReviewView run={run} />}
       </div>
     </section>
@@ -184,6 +187,61 @@ function CouncilView({ run }: { run: FactoryRunView }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Discovery, drawn: the scores of each round as a bar per rubric line, then the documents the plan is built from. */
+function ProductView({ run }: { run: FactoryRunView }) {
+  const [at, setAt] = useState<number | null>(null);
+  if (!run.discovery.length) return <div className="empty">{run.stations.discover?.state === "skipped" ? run.stations.discover.note ?? "No product design on this run." : "The Designer is working out what this product is: who it is for, the journeys, the screens. The Critic then scores it."}</div>;
+  const i = at != null && at < run.discovery.length ? at : run.discovery.length - 1;
+  const r = run.discovery[i];
+  const d = r.docs;
+  return (
+    <div className="product">
+      <div className="product-top">
+        <div className="rounds">{run.discovery.map((x, k) => <button key={k} className={`tiny ${k === i ? "" : "ghost"}`} onClick={() => setAt(k)}>{x.settled ? "Kept" : `Round ${x.round}`}{x.pass ? " ✓" : ""}</button>)}</div>
+        <div className={`product-verdict ${r.pass ? "ok" : "warn"}`}>{r.pass ? "The Critic passed this design." : r.settled ? `Went on with the best design: ${r.settled}.` : "Sent back to the Designer."}</div>
+      </div>
+      {r.critique && (
+        <div className="scores" role="img" aria-label={`Design scores: ${Object.entries(r.critique.scores).map(([k, v]) => `${k} ${v} of 5`).join(", ")}`}>
+          {Object.entries(r.critique.scores).map(([k, v]) => (
+            <div key={k} className={`score ${v >= r.bar ? "ok" : "low"}`}><span className="score-k">{k}</span><span className="score-bar"><i style={{ width: `${v * 20}%` }} /></span><span className="mono">{v}/5</span></div>
+          ))}
+        </div>
+      )}
+      {!!r.critique?.problems.length && <BriefList title="What the Critic wants changed" cls="concerns" items={r.critique.problems.map((p) => `${p.problem}${p.fix ? ` → ${p.fix}` : ""}`)} />}
+      <div className="product-brief">
+        <p><strong>For:</strong> {d.brief.who}</p>
+        <p><strong>Problem:</strong> {d.brief.problem}</p>
+        <p><strong>Promise:</strong> {d.brief.promise}</p>
+        {!!d.brief.notThis.length && <p className="muted"><strong>Not:</strong> {d.brief.notThis.join("; ")}</p>}
+      </div>
+      <h4>Screens</h4>
+      <div className="product-screens">
+        {d.screens.map((s, k) => (
+          <div key={s.id} className="product-screen">
+            <div className="take-head"><span className="mono muted">{k + 1}</span> <strong>{s.name}</strong>{k === 0 && <span className="vote">home</span>}</div>
+            <div className="take-text">{s.purpose}</div>
+            <ul>{s.shows.map((x) => <li key={x}>{x}</li>)}</ul>
+            <div className="product-actions">{s.actions.map((x) => <span key={x} className="chip">{x}</span>)}</div>
+          </div>
+        ))}
+      </div>
+      <h4>Journeys</h4>
+      {d.journeys.map((j) => (
+        <div key={j.moment} className="product-journey">
+          <div className="take-head"><strong>{j.moment}</strong> <span className="muted">{j.goal}</span></div>
+          <ol className="product-steps">{j.steps.map((s, k) => <li key={k}>{s}</li>)}</ol>
+        </div>
+      ))}
+      <h4>Requirements</h4>
+      <table className="product-reqs"><tbody>
+        {d.requirements.map((q) => <tr key={q.id}><td className="mono muted">{q.id}</td><td>{q.text}</td><td className="muted">{q.from === "person" ? "you asked" : "design"}</td><td className="muted">{q.must ? "must" : "nice to have"}</td></tr>)}
+      </tbody></table>
+      {!!d.research.length && <><h4>Research</h4><ul className="product-research">{d.research.map((x, k) => <li key={k}>{x.finding}{x.source && <> <span className="mono muted">{x.source}</span></>}</li>)}</ul></>}
+      {!!d.assumptions.length && <BriefList title="Assumptions" cls="props" items={d.assumptions} />}
     </div>
   );
 }
