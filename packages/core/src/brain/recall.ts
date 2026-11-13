@@ -54,13 +54,16 @@ export function recallQuery(text: string): string {
 export interface Recalled { kind: string; ref: string; ts: string; event: number; text: string }
 
 /** The past notes and decisions most relevant to this text, best first. Never throws: no index, no recall. */
-export function recall(log: EventLog, text: string, k = 5, skipEvent?: number): Recalled[] {
+/** What the person wrote themselves, as opposed to what agents produced (plans, Council decisions, proposals). */
+export const PERSON_KINDS = ["note", "filed note", "ticket", "ticket note"];
+
+export function recall(log: EventLog, text: string, k = 5, skipEvent?: number, kinds?: string[]): Recalled[] {
   const q = recallQuery(text);
   if (!q) return [];
   try {
-    const rows = log.db.prepare("SELECT kind, ref, ts, event, text FROM recall_fts WHERE recall_fts MATCH ? ORDER BY bm25(recall_fts) LIMIT ?").all(q, k + 5) as unknown as Recalled[];
+    const rows = log.db.prepare("SELECT kind, ref, ts, event, text FROM recall_fts WHERE recall_fts MATCH ? ORDER BY bm25(recall_fts) LIMIT ?").all(q, (k + 5) * (kinds ? 4 : 1)) as unknown as Recalled[];
     const seen = new Set<string>();
-    return rows.filter((r) => Number(r.event) !== skipEvent).filter((r) => {
+    return rows.filter((r) => Number(r.event) !== skipEvent && (!kinds || kinds.includes(r.kind))).filter((r) => {
       const key = r.text.slice(0, 120);
       if (seen.has(key)) return false;
       seen.add(key);
@@ -70,8 +73,8 @@ export function recall(log: EventLog, text: string, k = 5, skipEvent?: number): 
 }
 
 /** A prompt block with the top matches, or "" when there are none. */
-export function recallBlock(log: EventLog, text: string, k = 5): string {
-  const hits = recall(log, text, k);
+export function recallBlock(log: EventLog, text: string, k = 5, kinds?: string[]): string {
+  const hits = recall(log, text, k, undefined, kinds);
   if (!hits.length) return "";
   return `Past notes and decisions that may matter (from the person's history; use what fits, ignore the rest):\n${hits.map((h) => `- [${h.kind}${h.ref ? ` ${h.ref}` : ""}, ${h.ts.slice(0, 10)}] ${h.text.replace(/\s+/g, " ").slice(0, 300)}`).join("\n")}`;
 }

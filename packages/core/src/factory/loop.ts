@@ -1,6 +1,6 @@
 import { failureLines } from "./trim.js";
 import { SAME_TESTS_REASON, stopReason, type RoundRecord } from "./stoprules.js";
-import { recallBlock } from "../brain/recall.js";
+import { PERSON_KINDS, recallBlock } from "../brain/recall.js";
 import { existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
@@ -922,7 +922,10 @@ class Run {
   /** The person's past notes and decisions closest to this idea (SF-22), worked out once per run and logged. */
   private recalled(): string {
     if (this.recallText === null) {
-      this.recallText = recallBlock(this.log, this.idea, 5);
+      // Only the person's own words (notes, tickets). Past plans and Council decisions anchored every new build
+      // of an idea to the first, weakest one (Assaf, 2026-11-13: "every next version is based on the first").
+      // A version built on a shipped app goes through the feature path, which reads its plan on purpose.
+      this.recallText = recallBlock(this.log, this.idea, 5, PERSON_KINDS);
       this.log.append("factory.recall", { run: this.id, count: this.recallText ? this.recallText.split("\n").length - 1 : 0 });
     }
     return this.recallText;
