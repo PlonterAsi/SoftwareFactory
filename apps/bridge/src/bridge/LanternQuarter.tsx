@@ -47,7 +47,7 @@ export function LanternQuarter({ projects, factoryRuns, runs, agents, stats, pro
           const ts = tickets.filter((t) => t.project === p.id && t.level !== "subtask").slice(0, 14);
           const ag = live ? working(live.run) : [];
           return (
-            <a key={p.id} className={`lq-d${wait ? " wait" : live ? " live" : ""}`} href={href({ page: "project", id: p.id, ...(wait || live ? { panel: "runs", run: (live ?? latest)!.run } : {}) })} title={p.name}>
+            <a key={p.id} className={`lq-d${wait ? " wait" : live ? " live" : ""}`} href={href({ page: "project", id: p.id, ...(wait || live ? { panel: "overview", run: (live ?? latest)!.run } : {}) })} title={p.name}>
               <h4><i className={`lq-porch${wait ? " ask" : live ? " on" : ""}`} aria-hidden /><span>{shortName(p.name, 34)}</span></h4>
               <div className="lq-street" aria-label={latest ? `Latest build at ${at}` : "No builds yet"}>
                 {LOOM_STATIONS.map(([id, label], i) => {

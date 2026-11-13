@@ -32,7 +32,7 @@ export function Workspace({ id, panel, run, factory, order, bay, go }: {
   const ctx: PanelContext = {
     project: detail, events: factory.events, factory, order: scoped, bay,
     go: (p) => go({ page: "project", id, panel: p }),
-    showRun: (r) => go({ page: "project", id, panel: "runs", run: r }),
+    showRun: (r) => go({ page: "project", id, panel: "overview", run: r }),
     pickedRun: run ?? null,
   };
   const r = detail.rollup;

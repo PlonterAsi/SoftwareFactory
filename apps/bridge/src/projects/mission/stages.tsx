@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { DiscoveryRoundView, FactoryRunView, ProductDocsView } from "../../api";
 import { GateActions } from "../../GateActions";
+import { Blueprint } from "./Blueprint";
 import { CouncilView, JudgeView, LoopView, ReviewView, TestGrid } from "../../RunDeck";
 import { designRounds, type StopId } from "./model";
 
@@ -137,42 +138,11 @@ function PlanBoard({ run }: { run: FactoryRunView }) {
       </Stage>
     );
   }
-  // Columns by dependency depth: step 1 needs nothing, step 2 needs step 1, and so on.
-  const depth = new Map<string, number>();
-  const d = (id: string, seen = new Set<string>()): number => {
-    if (depth.has(id)) return depth.get(id)!;
-    if (seen.has(id)) return 0;
-    seen.add(id);
-    const t = plan.tasks.find((x) => x.id === id);
-    const v = t && t.dependsOn.length ? 1 + Math.max(...t.dependsOn.map((x) => d(x, seen))) : 0;
-    depth.set(id, v);
-    return v;
-  };
-  plan.tasks.forEach((t) => d(t.id));
-  const cols: typeof plan.tasks[] = [];
-  plan.tasks.forEach((t) => (cols[depth.get(t.id)!] ??= []).push(t));
-  const builtFiles = new Set(Object.keys(run.files));
-  const doneTask = (title: string) => [...builtFiles].some((f) => title.includes(f));
   return (
-    <Stage title={plan.name || "Plan"} lead={plan.summary}>
-      <div className="ms-meter">
-        <div><b>{plan.tasks.length}</b><span>tasks</span></div>
-        <div><b>{cols.length}</b><span>steps</span></div>
-        <div><b>{plan.acceptance.length}</b><span>checks that mean done</span></div>
-        {docs && <div><b>{docs.requirements.length}</b><span>requirements</span></div>}
-      </div>
-      <div className="ms-board steps">
-        {cols.map((c, i) => (
-          <div key={i} className="ms-lane">
-            <h5>Step {i + 1}<span>{i === 0 ? "needs nothing" : `after step ${i}`}</span></h5>
-            {c.map((t) => <div key={t.id} className={`ms-task${doneTask(t.title) ? " done" : ""}`}><b className="mono">{t.id}</b>{t.title}{t.dependsOn.length > 0 && <span className="ms-dep">needs {t.dependsOn.join(", ")}</span>}</div>)}
-          </div>
-        ))}
-      </div>
-      <h3>Done means</h3>
-      <ol className="ms-checks">{plan.acceptance.map((a, i) => <li key={i}>{a}</li>)}</ol>
+    <div className="ms-stage-in">
+      <Blueprint run={run} />
       {docs && <Reqs docs={docs} met={met} />}
-    </Stage>
+    </div>
   );
 }
 
@@ -193,7 +163,7 @@ function GateStage({ run, gate, title, lead }: { run: FactoryRunView; gate: "gat
   return (
     <Stage title={title} lead={lead}>
       {waiting && <div className="ms-gate"><GateActions run={run} /></div>}
-      {gate === "gateA" && run.plan && <p>The plan: <b>{run.plan.tasks.length} tasks</b>, <b>{run.plan.acceptance.length} checks</b>. Open the Plan stop to read it.</p>}
+      {gate === "gateA" && run.plan && (waiting ? <Blueprint run={run} /> : <p>The plan: <b>{run.plan.views?.length ?? run.plan.tasks.length} {run.plan.views ? "screens" : "tasks"}</b>, <b>{run.plan.acceptance.length} checks</b>. Open the Plan stop to read it.</p>)}
       {gate === "gateB" && lastEval && <p>The Judge saw <b>{lastEval.requirements.filter((q) => q.met).length} of {lastEval.requirements.length}</b> requirements working. Open the Judge stop for the red ones.</p>}
       {!waiting && <p className="muted">{run.stations[gate]?.state === "pass" ? "Approved." : "Not reached yet."}</p>}
     </Stage>

@@ -71,7 +71,7 @@ export function App() {
   const showRun = async (run: number) => {
     try {
       const r = await fetch(`${API}/api/projects/of?kind=factory_run&ref=${run}`).then((x) => x.json());
-      if (r.projectId != null) return go({ page: "project", id: r.projectId, panel: "runs", run });
+      if (r.projectId != null) return go({ page: "project", id: r.projectId, panel: "overview", run });
     } catch { /* fall back to the factory floor */ }
     setPicked(run);
     go({ page: "factory", view: "factory" });
@@ -103,7 +103,7 @@ export function App() {
   }, [f.online]);
   const overseer = (
     <Overseer signals={f.signals} runs={f.runs} factoryRuns={f.factoryRuns} briefings={order.briefings} ingests={order.ingests}
-      onRunStarted={(r, pid) => (pid != null ? go({ page: "project", id: pid, panel: "runs", run: r }) : showRun(r))}
+      onRunStarted={(r, pid) => (pid != null ? go({ page: "project", id: pid, panel: "overview", run: r }) : showRun(r))}
       mode={f.mode} since={since} onDismissSince={() => setSince(null)} onSetup={() => setSetupOpen(true)} onShowRun={showRun}
       projectId={projectId} projectName={projectName} projects={projects.list} routes={chatRoutes} />
   );
@@ -202,7 +202,7 @@ export function App() {
         </div>
       </div>
       <Helm open={helmOpen} onClose={() => setHelmOpen(false)} projects={projects.list} projectId={projectId} projectName={projectName} go={go}
-        onSystems={() => setSetupOpen(true)} onRunStarted={(r, pid) => (pid != null ? go({ page: "project", id: pid, panel: "runs", run: r }) : showRun(r))} />
+        onSystems={() => setSetupOpen(true)} onRunStarted={(r, pid) => (pid != null ? go({ page: "project", id: pid, panel: "overview", run: r }) : showRun(r))} />
       <ShortcutSheet open={keysOpen} onClose={() => setKeysOpen(false)} />
       {setup}
       <CoreDown online={f.online} />

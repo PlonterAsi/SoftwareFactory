@@ -85,7 +85,7 @@ export interface FactoryRunView {
   spentUsd: number;
   maxFixRounds: number;
   stations: Record<string, { state: StationState; round?: number; note?: string }>;
-  plan?: { name: string; summary: string; acceptance: string[]; tasks: { id: string; title: string; dependsOn: string[] }[] };
+  plan?: PlanView;
   /** What the gaps check found missing from the plan, and whether it was added before the approval. */
   planGaps?: { missing: string[]; added: boolean }[];
   dir?: string;
@@ -115,6 +115,15 @@ export interface FactoryRunView {
 }
 
 export interface EvaluationView { round: number; pass: boolean; skipped?: string; bar: number; screens: number; requirements: { id: string; met: boolean; evidence: string }[]; scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] }
+/** The approved spec as the Planner wrote it. Everything past tasks and acceptance is optional (older plans lack it). */
+export interface PlanView {
+  name: string; summary: string; acceptance: string[];
+  tasks: { id: string; title: string; dependsOn: string[] }[];
+  interface?: string; ui?: string; files?: string[];
+  entities?: { name: string; label?: string; fields: { name: string; type?: string; required?: boolean; options?: string[]; to?: string }[] }[];
+  flows?: { name: string; steps: string[] }[];
+  views?: { id: string; label: string; shows: string }[];
+}
 export interface EngineReviewView {
   outcome: string; reason: string; spentUsd: number; maxUsd: number; minutes: number;
   stages: { station: string; calls: number; failedCalls: number; costUsd: number; seconds: number; rounds: number; state: string }[];

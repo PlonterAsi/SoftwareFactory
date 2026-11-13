@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../ui";
-import { projectsApi, setupApi, PROJECT_KINDS, PROJECT_STATUSES, type ProjectDetail, type ProjectSummary, type SfEvent } from "../api";
+import { projectsApi, setupApi, PROJECT_KINDS, PROJECT_STATUSES, type ProjectDetail, type ProjectSummary, type SfEvent, type FactoryRunView } from "../api";
 import { href } from "./router";
 import { StarMap } from "../StarMap";
 import { OrderDeck } from "../OrderDeck";
-import { FactoryFloor } from "../FactoryFloor";
 import { RunDeck } from "../RunDeck";
 import { inProject, projectSets, registerProjectPanel, type PanelContext } from "./panels";
 import { TurnIntoTicket } from "../Intake";
@@ -52,14 +51,33 @@ function Ideas({ order, factory }: PanelContext) {
   );
 }
 
-// ---- Runs: the factory floor, only this project's runs ----
+// ---- Builds: every build of this project as a list; one opens on the Mission tab ----
 function Runs({ project, factory, pickedRun, showRun }: PanelContext) {
   const mine = useMemo(() => factory.factoryRuns.filter((r) => project.runIds.includes(r.run)), [factory.factoryRuns, project.runIds]);
-  const selected = mine.find((r) => r.run === pickedRun) ?? mine.at(-1);
-  if (!mine.length) return <EmptyState title="No builds in this project yet">Use Build it on the Mission tab, or ask the Assistant while this project is open. Each build shows here, station by station.</EmptyState>;
+  const [open, setOpen] = useState<number | null>(pickedRun);
+  const selected = mine.find((r) => r.run === open) ?? mine.at(-1);
+  if (!mine.length) return <EmptyState title="No builds in this project yet">Use Build it on the Mission tab, or ask the Assistant while this project is open. Each build shows here.</EmptyState>;
+  const label = (r: FactoryRunView) => r.waiting ? ["waits for you", "gate"] : !r.finished ? ["building", "live"] : r.finished.outcome === "shipped" ? ["shipped", "done"] : [r.finished.outcome, "fail"];
   return (
-    <div className="pj-runs">
-      <FactoryFloor runs={factory.runs} factoryRuns={mine} selected={selected} onSelect={showRun} mode={factory.mode} />
+    <div className="pj-builds">
+      <ol className="pb-list">
+        {[...mine].reverse().map((r) => {
+          const [l, tone] = label(r);
+          return (
+            <li key={r.run} className={r.run === selected?.run ? "on" : ""}>
+              <button className="pb-row" onClick={() => setOpen(r.run)} aria-pressed={r.run === selected?.run}>
+                <span className="mono muted">#{r.run}</span>
+                <span className="pb-name">{r.plan?.name ?? r.idea.split("\n")[0].slice(0, 90)}</span>
+                <span className={`pb-state ${tone}`}>{l}</span>
+                <span className="mono muted">${r.spentUsd.toFixed(2)}</span>
+                <span className="muted">{new Date(r.startedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+              </button>
+              <button className="pb-open" onClick={() => showRun(r.run)}>Open on Mission</button>
+            </li>
+          );
+        })}
+      </ol>
+      <p className="pb-note muted">Engine details for build #{selected?.run}: every tab the engine records. The Mission tab tells the same build as a story.</p>
       <RunDeck run={selected} />
     </div>
   );
