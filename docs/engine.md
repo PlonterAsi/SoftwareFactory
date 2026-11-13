@@ -76,7 +76,7 @@ Now, for a real crew on a product-sized run (`maxUsd` of $3 or more), the build 
 
 1. The core turns the approved plan into a feature list, with no agent call: the model and shell, the domain logic the locked tests pin down, then one feature per screen (with that screen's purpose, contents and actions from the product documents).
 2. Each feature gets its own fresh Builder session. It is told its one feature and where the spine is (`SPEC.md`, `docs/product/`, `features.json`, `PROGRESS.md`); it reads only what it needs.
-3. After each session the core runs the locked tests for free. A test that passed before and fails now sends the feature back once, with that evidence.
+3. After each session the core runs the locked tests for free. A test that passed before and fails now sends the feature back once, with that evidence. A screen feature is also opened in a real browser, its schema and links are checked, and then the product judge looks at that one screen (at most $0.15) against what the design says it shows and lets the person do. What the judge did not find goes back to the same session once, as the list of missing items (`factory.screen.look`). Run 3185 showed why: every check passed per feature, and the judge only saw a hollow product at the very end, when most of the money was gone.
 4. The core commits (`Feature F3: Screen: Today`), appends the session's closing note to `PROGRESS.md` for the next session, and updates `features.json`. Only the core writes those two files.
 5. Each session's cap is its share of 55% of the run's budget, never under $0.15 or over the Builder's own cap. A retried build picks up at the first feature not built.
 

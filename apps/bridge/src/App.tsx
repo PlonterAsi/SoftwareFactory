@@ -25,6 +25,7 @@ import { ImproveDeck, useImprove } from "./ImproveDeck";
 import { Cycles } from "./Cycles";
 import "./projects/improvePanel";
 import "./projects/runPanel";
+import "./projects/budgetPanel";
 import "./CodeMap";
 import { FeaturesPage, useIntegrations } from "./Features";
 import { PluginsPage, syncPluginPanels, usePlugins } from "./Plugins";

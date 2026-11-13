@@ -204,6 +204,25 @@ describe("resuming runs", () => {
   };
   const until = async (pred: () => boolean) => { for (let i = 0; i < 400 && !pred(); i++) await new Promise((r) => setTimeout(r, 10)); expect(pred()).toBe(true); };
 
+  it("leaves a run that waited for your Retry stopped after a restart, instead of retrying and paying by itself (run 3185)", async () => {
+    const log = new EventLog();
+    const projects = tmp("sf-proj-");
+    const failing: AgentRuntime = { name: "mock", run: async () => { throw new Error("claude exited 1: error_max_budget_usd"); } };
+    const first = new Factory(log, failing, projects);
+    const run = first.start("a CLI that counts words", { autoApprove: false, autoRetries: 0 });
+    await until(() => first.waitingGate(run) === "escalation");
+
+    // The app updates and opens again while the question is open.
+    const rt = new MockRuntime();
+    const second = new Factory(log, rt, projects);
+    expect(second.resumeInterrupted()).toEqual([]);
+    expect(rt.calls).toHaveLength(0);
+    const fin = events(log, "factory.run.finished").at(-1);
+    expect(fin).toMatchObject({ run, outcome: "stopped", resumable: true, reason: expect.stringMatching(/waited for your answer: .*Retry it\?.*Press Resume/s) });
+    // Your Resume is the answer: then it goes on.
+    expect(second.resumable(run)).toMatchObject({ ok: true });
+  });
+
   it("picks a run up at the station the app closed on, without redoing finished work", async () => {
     const log = new EventLog();
     const projects = tmp("sf-proj-");

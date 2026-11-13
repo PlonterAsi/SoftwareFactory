@@ -15,7 +15,7 @@ import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
-import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
+import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
@@ -151,6 +151,11 @@ export class Factory {
 
   /** Wall-clock limit per run in minutes (the `maxRunMinutes` setting). */
   maxRunMinutes: number | undefined;
+  /**
+   * How much more a running build may be given when its own limit is spent: the project's budget may allow
+   * less than the "Add 50% more" asked for. The server wires it to the project budgets; by default no ceiling.
+   */
+  extraBudget: (run: number, wantUsd: number) => number = (_run, want) => want;
 
   constructor(private log: EventLog, private runtime: AgentRuntime, readonly projectsDir: string, readonly crew: CrewSource = builtinCrew) {
     // Agent calls cut off by the restart would otherwise pulse as "running" forever.
@@ -162,8 +167,12 @@ export class Factory {
     // marked resumable: resumeInterrupted() (or the Bridge's Resume) picks them up
     // again from the last station they completed.
     for (const id of unfinishedRuns(log)) {
-      log.append("factory.run.finished", { run: id, outcome: "stopped", reason: "The app closed while this run was in flight.", resumable: true, totalUsd: null });
-      this.interrupted.push(id);
+      // Run 3185: the app updated while the run waited at "Review failed. Retry it?", and the restart resumed it
+      // and paid for the retry nobody pressed. A run that was waiting for the person's answer stays stopped
+      // until they answer with Resume; it is not picked up by itself.
+      const asked = waitingEscalation(log, id);
+      log.append("factory.run.finished", { run: id, outcome: "stopped", reason: asked ? `The app closed while this run waited for your answer: ${asked.slice(0, 300)} Press Resume to go on, or leave it stopped.` : "The app closed while this run was in flight.", resumable: true, totalUsd: null, ...(asked ? { waitedFor: asked.slice(0, 300) } : {}) });
+      if (!asked) this.interrupted.push(id);
     }
   }
 
@@ -721,14 +730,18 @@ class Run {
           const sc = await this.f.checkScreens(this.dir).catch(() => null);
           if (sc && !sc.skipped) crashed = sc.screens.filter((x) => !x.ok).map((x) => `#/${x.route}: ${x.problem}`);
         }
-        f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length || invalid.length || deadLinks.length ? "broken" : "built";
+        // A screen that draws can still be hollow: the judge looks at it now, not only at the end.
+        let hollow: string[] = [];
+        if (attempt === 1 && files.length && !broke.length && !invalid.length && !crashed.length && this.docs && /^Screen: /.test(f.title)) hollow = await this.lookAtScreen(f);
+        f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length || invalid.length || deadLinks.length || hollow.length ? "broken" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, workbench: true }); }
-        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}), ...(invalid.length ? { invalid } : {}), ...(deadLinks.length ? { deadLinks } : {}) });
+        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}), ...(invalid.length ? { invalid } : {}), ...(deadLinks.length ? { deadLinks } : {}), ...(hollow.length ? { hollow } : {}) });
         if (f.state === "broken" && attempt === 1) {
           const sources = [...new Set((this.docs?.research ?? []).map((r) => r.source).filter((u): u is string => !!u))].slice(0, 12);
           retry = [
             invalid.length ? `The app kit refuses the schema you left, so the app cannot start:\n${invalid.join("\n")}\n\nFix src/schema.js: every field needs a lowerCamelCase "name" (letters and digits only, like "bandOverride"), a known type, and options for a choice.` : "",
             deadLinks.length ? `The core opened every link you wrote and these do not exist:\n${deadLinks.join("\n")}\n\n${sources.length ? `Addresses the research found, which do exist:\n${sources.join("\n")}\n\n` : ""}Never write a link from memory. Use only addresses listed in docs/product/BRIEF.md (the research), or search the web for the real page and use the address the search returned. If you cannot find the real one, leave the link empty: an empty link is right, a made-up one is a defect.` : "",
+            hollow.length ? `A product judge opened the running app after your call and did not find these on the screen you built:\n${hollow.map((h) => `- ${h}`).join("\n")}\n\nMake each one real on that screen: shown with sample records from the seed, and every action a control that changes the data through the store.` : "",
             crashed.length ? `The core opened the app in a real browser after your call, and these screens did not draw:\n${crashed.slice(0, 10).join("\n").slice(0, 1500)}\n\nFix the cause in the page code (a value read before it exists, a wrong import, a missing record) and make sure every screen draws with the sample records and with none.` : "",
           ].filter(Boolean).join("\n\n");
           continue;
@@ -1024,7 +1037,16 @@ class Run {
         return res;
       }, round);
       this.reviewNotes = r;
-      if (r.verdict === "pass" || round === 2) return;
+      if (r.verdict === "pass") return;
+      if (round === 2) {
+        // Run 3185: the second review still said "fix" with 5 criteria failing, and the run went on as if it had
+        // passed. What is still open is recorded, shown on the review station, and handed to the repair loop.
+        const failing = (r.criteria ?? []).filter((c) => !c.pass);
+        const open = r.findings.filter((f) => f.severity === "high" && !/^Acceptance criterion not met/.test(f.text));
+        this.log.append("factory.review.open", { run: this.id, round, failing: failing.map((c) => c.text).slice(0, 20), findings: open.map((f) => f.text).slice(0, 20) });
+        this.mark("review", "pass", round, `still "fix" after ${round} reviews: ${failing.length} criteria failing, ${open.length} serious findings, handed to the repair loop`);
+        return;
+      }
       const high = r.findings.filter((f) => f.severity === "high").map((f) => `- ${f.text}`).join("\n");
       await this.testFixLoop(`The Reviewer found these problems; fix them without breaking the tests:\n${high}`, true);
     }
@@ -1036,6 +1058,23 @@ class Run {
    * loop as work and is judged once more; what is still open then is shown at the build gate.
    */
   private evaluation: Evaluation | null = null;
+  /** The judge's look at one screen just built: what of its design a person would not find. [] when it all shows or the look cannot run. */
+  private async lookAtScreen(f: Feature): Promise<string[]> {
+    const id = f.what.match(/^The view "([^"]+)"/)?.[1];
+    const docs = id && this.docs ? screenLookDocs(this.docs, id) : null;
+    if (!docs || this.o.maxUsd - this.spent < SCREEN_LOOK_USD * 2) return [];
+    const shots = await this.f.readScreens(this.dir).catch(() => null);
+    if (!shots?.length) return [];
+    const mine = shots.filter((s) => s.route === id || s.route.startsWith(`${id}/`));
+    try {
+      const e = validateEvaluation(parseJsonBlock(await this.ask(this.one("evaluate"), screenLookPrompt(this.idea, docs, mine.length ? mine : shots), { round: 0 }, { capUsd: SCREEN_LOOK_USD })), docs);
+      const req = (rid: string) => docs.requirements.find((r) => r.id === rid)?.text ?? rid;
+      const out = e.requirements.filter((r) => !r.met).map((r) => `${req(r.id)} (the judge saw: ${r.evidence})`);
+      this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, seen: e.requirements.length - out.length, of: e.requirements.length, missing: out.slice(0, 20) });
+      return out.slice(0, 12);
+    } catch (e) { if (e instanceof StopRun) throw e; return []; }
+  }
+
   private async evaluateLoop() {
     const skip = (why: string) => { this.mark("evaluate", "skipped", undefined, why); };
     if (!this.docs || !this.plan.app || this.screen) return skip("No product design to judge this build against");
@@ -1064,7 +1103,14 @@ class Run {
       // What the judge found goes back to the build loop as features, each in a fresh session (run 2898: one
       // fix round was handed 25 unmet requirements at once). A small run keeps the single fix round.
       const pool = Math.min(this.o.maxUsd * REPAIR_BUDGET_SHARE, this.o.maxUsd - this.spent - 0.4);
-      const work = this.bench && this.builder && this.o.maxUsd >= FEATURE_LOOP_MIN_USD && existsSync(join(this.dir, "features.json")) ? repairFeatures(ev.e, docs, Math.floor(pool / REPAIR_FEATURE_USD)) : [];
+      const most = Math.floor(pool / REPAIR_FEATURE_USD);
+      // Run 3185 was resumed after the build (the app restarted), so the Builder was never picked in this
+      // process and the judge's findings silently skipped the repair features. Pick it here when needed.
+      this.builder ??= this.one("build");
+      const work: Feature[] = this.bench && this.o.maxUsd >= FEATURE_LOOP_MIN_USD && existsSync(join(this.dir, "features.json")) ? repairFeatures(ev.e, docs, most) : [];
+      // What the Reviewer proved still broken (by running it) goes first: the judge only sees screens.
+      const left = round === 1 && this.reviewNotes?.verdict === "fix" ? reviewRepair(this.reviewNotes) : null;
+      if (left && work.length) { work.unshift(left); if (work.length > most) work.pop(); }
       if (work.length) {
         this.log.append("factory.repair", { run: this.id, round, features: work.map((f) => ({ id: f.id, title: f.title })), poolUsd: Number(pool.toFixed(2)) });
         await this.buildByFeature(work, pool);
@@ -1249,9 +1295,15 @@ class Run {
       await this.gateTurn(async () => {
         if (this.o.maxUsd - this.spent >= 0.01) return;
         if (this.budgetRefused) throw new StopRun("Budget spent.");
-        const d = await this.gate("escalation", `The run's budget of $${this.o.maxUsd.toFixed(2)} is spent. Add 50% more?`, { neverAuto: true, action: "Add 50% more", kind: "budget" }, true);
+        // The project's own budget may allow less than half again, or nothing at all.
+        const want = this.o.maxUsd * 0.5;
+        const more = this.f.extraBudget(this.id, want);
+        if (more < 0.01 && more < want) { this.budgetRefused = true; throw new StopRun(`Budget spent: the run's $${this.o.maxUsd.toFixed(2)} is used and the project's budget has nothing left. Raise the project's total on its page to go on.`); }
+        const all = more < want - 0.005;
+        const d = await this.gate("escalation", `The run's budget of $${this.o.maxUsd.toFixed(2)} is spent. Add $${more.toFixed(2)} more${all ? " (all the project's budget has left)" : ""}?`, { neverAuto: true, action: `Add $${more.toFixed(2)}`, kind: "budget" }, true);
         if (!d.approve) { this.budgetRefused = true; throw new StopRun("Budget spent."); }
-        this.o.maxUsd *= 1.5;
+        // Asked again after the approval: another build of the project may have spent in the meantime.
+        this.o.maxUsd += this.f.extraBudget(this.id, more);
         this.log.append("factory.budget", { run: this.id, maxUsd: this.o.maxUsd });
       });
     }
@@ -1539,6 +1591,27 @@ export interface RestoredState {
  * Where a run stands, from the event log alone (the source of truth): which
  * stations it completed, what it spent, its plan, repo and locked tests.
  */
+/** What the Reviewer left failing, as one repair feature: the criteria it ran and saw fail, and its serious findings. */
+export function reviewRepair(r: ReviewResult): Feature | null {
+  const failing = (r.criteria ?? []).filter((c) => !c.pass);
+  // A failing criterion is also listed as a finding (parseReview); it is said once.
+  const high = r.findings.filter((f) => f.severity === "high" && !/^Acceptance criterion not met/.test(f.text));
+  if (!failing.length && !high.length) return null;
+  return {
+    id: "J0", title: "Judge: what the Reviewer proved still broken", state: "todo",
+    what: ["The Reviewer ran the code and these still fail. Fix each one in src/ and on the screen that shows it:",
+      ...failing.map((c) => `- Criterion: ${c.text}${c.evidence ? `\n  What it saw: ${c.evidence}` : ""}`),
+      ...high.map((f) => `- ${f.text}`)].join("\n"),
+    done: "Each criterion above passes when run, each finding is gone, and every test still passes.",
+  };
+}
+
+/** The question of an escalation (a Retry, more budget) a run was still waiting on, or null. */
+export function waitingEscalation(log: EventLog, run: number): string | null {
+  const g = log.list({ type: "factory.gate", sinceId: run - 1, limit: 1e6 }).map((e) => e.payload as { run: number; gate: string; state: string; question?: string }).filter((p) => p.run === run).at(-1);
+  return g && g.gate === "escalation" && g.state === "waiting" ? String(g.question ?? "a question") : null;
+}
+
 export function restoreState(log: EventLog, run: number): RestoredState {
   const evs = log.list({ sinceId: run - 1, limit: 1e7 }).filter((e) => { const p = e.payload as { run?: number; factoryRun?: number }; return p?.run === run || p?.factoryRun === run; });
   const of = (type: string) => evs.filter((e) => e.type === type).map((e) => e.payload as any);

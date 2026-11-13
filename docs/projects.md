@@ -92,3 +92,19 @@ GET  /api/chat/routes                                  { filed: { signalId: [pro
 **Whole factory** in the top bar is the cross-project view from before (star map, factory floor, Agent Bay, Order deck, Data vault).
 
 Addresses: `#/` projects, `#/p/12/runs/57` project 12's Runs panel showing run 57, `#/factory/bay` the Agent Bay. The old `#order`, `#bay`, `#data` still work.
+
+## Money: limits per project and per version
+
+A project may have a **total** (the most it may ever spend) and **version defaults** (what a first version, a new
+app, gets, and what each later version, a feature or a screen on top, gets). They are set on the project's
+**Money** panel or with `POST /api/projects/:id/budget { totalUsd?, firstUsd?, nextUsd? }` (null or 0 clears one)
+and stored as `project.budget` events (`packages/core/src/projects/budget.ts`).
+
+- A build started from the project without its own limit takes the version default; any build gets at most what
+  the project has left (its total minus what was spent and what running builds still hold). Below $0.25 left, a
+  new build is refused with the reason.
+- When a running build uses up its own limit, the "add more" approval offers only what the project has left; with
+  nothing left the build stops and says to raise the total.
+- Spend is read from the agent calls in the log. The panel lists every version with its limit and what it spent.
+- A project with no budget behaves as before. Builds started outside a project (the Assistant's Build it) make a
+  new project and have no project budget.

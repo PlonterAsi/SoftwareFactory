@@ -82,6 +82,9 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
     else bad.push(`Research: the Designer was allowed ${plural(r.searches, "search", "searches")} and came back with no sourced finding${r.error ? ` (${String(r.error).slice(0, 120)})` : ""}. The product was designed from memory.`);
   }
 
+  // The review loop.
+  for (const o of of("factory.review.open")) bad.push(`Review loop: still "fix" after ${o.round} reviews, ${plural((o.failing ?? []).length, "criterion", "criteria")} failing when run${(o.failing ?? []).length ? ` (${String(o.failing[0]).slice(0, 120)})` : ""}; the run went on to the judge with them open.`);
+
   // The plan.
   const gaps = of("factory.plan.gaps");
   const leftOut = gaps.filter((g) => !g.addedByCore).flatMap((g) => g.missing ?? []);
@@ -97,7 +100,7 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
     const first = ids.filter((id) => { const mine = feats.filter((f) => f.id === id); return mine.length === 1 && mine[0].state === "built"; });
     const notBuilt = ids.filter((id) => feats.filter((f) => f.id === id).at(-1)!.state !== "built");
     (first.length === ids.length ? good : bad).push(`Build loop: ${first.length} of ${plural(ids.length, "feature")} built on the first try, each in its own session.`);
-    for (const f of feats.filter((x) => x.state === "broken")) bad.push(`Build loop: ${f.id} (${f.title}) reported done while ${f.invalid?.length ? `the app could not start: ${String(f.invalid[0]).slice(0, 160)}` : f.deadLinks?.length ? `it held ${plural(f.deadLinks.length, "made-up link")}: ${String(f.deadLinks[0]).slice(0, 120)}` : `a screen did not draw: ${String(f.crashed?.[0] ?? "").slice(0, 160)}`}`);
+    for (const f of feats.filter((x) => x.state === "broken")) bad.push(`Build loop: ${f.id} (${f.title}) reported done while ${f.invalid?.length ? `the app could not start: ${String(f.invalid[0]).slice(0, 160)}` : f.deadLinks?.length ? `it held ${plural(f.deadLinks.length, "made-up link")}: ${String(f.deadLinks[0]).slice(0, 120)}` : f.hollow?.length ? `the product judge did not find on its screen ${plural(f.hollow.length, "designed item")}, first: ${String(f.hollow[0]).slice(0, 140)}` : `a screen did not draw: ${String(f.crashed?.[0] ?? "").slice(0, 160)}`}`);
     for (const f of feats.filter((x) => x.state === "regressed")) bad.push(`Build loop: ${f.id} (${f.title}) broke ${plural((f.broke ?? []).length, "test")} that passed before it.`);
     if (notBuilt.length) bad.push(`Build loop: ${notBuilt.join(", ")} did not end built.`);
   }
@@ -105,6 +108,11 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
   if (continued.length) bad.push(`Build loop: ${plural(continued.length, "call")} ran out of ${continued.length === 1 ? "its" : "their"} own budget mid-work and had to be continued.`);
 
   // The checks: a check that catches something is the engine working; what it caught is the builder's miss.
+  const looks = of("factory.screen.look");
+  if (looks.length) {
+    const short = looks.filter((l) => (l.missing ?? []).length);
+    good.push(`Checks: the product judge looked at ${plural(looks.length, "screen")} just after ${looks.length === 1 ? "it was" : "they were"} built${short.length ? ` and sent ${short.length} back with what was missing` : " and found every designed item"}.`);
+  }
   const firstScreens = of("factory.screens")[0];
   if (firstScreens && !firstScreens.skipped) {
     const crashed = (firstScreens.screens ?? []).filter((s: any) => !s.ok);
