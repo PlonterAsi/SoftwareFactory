@@ -213,7 +213,7 @@ function BuildStage({ run }: { run: FactoryRunView }) {
         <div className="ms-feats">
           {f.map((x) => {
             const t = (x.passed ?? 0) + (x.failed ?? 0);
-            const label = { built: "built", building: "building now", regressed: `broke ${x.broke?.length ?? ""} test${x.broke?.length === 1 ? "" : "s"}, sent back`, empty: "nothing changed" }[x.state];
+            const label = { built: "built", building: "building now", regressed: `broke ${x.broke?.length ?? ""} test${x.broke?.length === 1 ? "" : "s"}, sent back`, empty: "nothing changed", broken: `screen did not draw${x.crashed?.length ? ": " + x.crashed[0] : ""}, sent back` }[x.state];
             return (
               <div key={x.id} className={`ms-feat fs-${x.state}`}>
                 <span className="mono muted">{x.id}</span><span className="ms-feat-t">{x.title}{x.attempt > 1 ? <span className="muted"> · try {x.attempt}</span> : null}</span>

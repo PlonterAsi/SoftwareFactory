@@ -1,5 +1,5 @@
 import { failureLines } from "./trim.js";
-import { SAME_TESTS_REASON, stopReason, type RoundRecord } from "./stoprules.js";
+import { SAME_TESTS_REASON, runMinutes, stopReason, type RoundRecord } from "./stoprules.js";
 import { PERSON_KINDS, recallBlock } from "../brain/recall.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -12,9 +12,9 @@ import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
-import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, revisePrompt, validateCritique, validateDocs, type Critique, type ProductDocs } from "./discovery.js";
+import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
-import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
+import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
@@ -22,7 +22,7 @@ import { checkUi, uiCase } from "./uicheck.js";
 import { appCase, checkAppLive, installKit, isKitFile, probeStart } from "./appkit.js";
 import { checkScreens, readScreens, screenCase, type ScreenCheck } from "./screencheck.js";
 import { dryRunTests, lockedTestFaults } from "./testcheck.js";
-import { checkLinks, linkCase, linksIn } from "./linkcheck.js";
+import { checkLinks, linkCase, linkFiles } from "./linkcheck.js";
 import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, answerSummary, changedFiles, hasWorkbench, restoreFromHead, restoreProtected, testDispute, workbenchContract, writtenOnDisk } from "./workbench.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
@@ -130,6 +130,13 @@ export class Factory {
    * What each screen of a built app shows, for the product judge: the core starts the app and reads its
    * screens in a real browser. null when that cannot be done here (no browser, or the screen check is off).
    */
+  /** Open every screen of the app in `dir` in a real browser. Null when the check is off. Tests replace it. */
+  checkScreens: (dir: string) => Promise<ScreenCheck | null> = async (dir) => {
+    if (process.env.SF_SCREEN_CHECK === "off") return null;
+    let out: ScreenCheck | null = null;
+    await probeStart(dir, 15_000, async (url) => { out = await checkScreens(url); return []; });
+    return out;
+  };
   readScreens: (dir: string) => Promise<ScreenText[] | null> = async (dir) => {
     if (process.env.SF_SCREEN_CHECK === "off") return null;
     let out: ScreenText[] | null = null;
@@ -467,16 +474,21 @@ class Run {
     let best: { docs: ProductDocs; critique: Critique | null; round: number } | null = null;
     let last: { docs: ProductDocs; critique: Critique | null } | null = null;
     let why = "";
+    let found: Finding[] | null = null;
     for (let round = 1; round <= MAX_DISCOVERY_ROUNDS; round++) {
       const got = await this.station("discover", async () => {
         const designer = this.one("design");
         // Design is worth a real share of the run, but a small run cannot afford much research: say so up front.
         const designCap = Math.min(designer.budgetUsd, this.o.maxUsd * 0.25);
         const searches = round > 1 ? 0 : designCap >= 0.3 ? 6 : designCap >= 0.12 ? 2 : 0;
+        // Research is a step of its own, not a suggestion: in run 2898 the Designer was offered six searches,
+        // answered in one turn without any, and designed a research product from memory.
+        if (searches && this.bench && !found) found = await this.research(designer, searches, designCap);
         const prompt = (last?.critique
           ? revisePrompt(this.idea, last.docs, last.critique, round)
           : `Idea: ${this.idea}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}`)
-          + `\n\n${searches ? `You can afford at most ${searches} web searches on this call.` : "Do not search the web on this call: work from what you know and what is above."}`;
+          + (found?.length ? `\n\n${researchForDesigner(found)}` : "")
+          + `\n\n${found ? "Do not search the web on this call: the research above is what was found." : searches ? `You can afford at most ${searches} web searches on this call.` : "Do not search the web on this call: work from what you know and what is above."}`;
         let docs: ProductDocs;
         try { docs = validateDocs(parseJsonBlock(await this.ask(designer, prompt, { round }, { capUsd: designCap }))); }
         catch (e) { if (!(e instanceof StopRun)) this.verdict(designer, "design", false, round, (e as Error).message); throw e; }
@@ -502,6 +514,25 @@ class Run {
     if (why) this.log.append("factory.discovery", { run: this.id, round: best!.round, docs: best!.docs, critique: best!.critique, pass: false, bar: PASS_SCORE, settled: why });
   }
 
+  /**
+   * The Designer researches before it designs: one call that only searches and reports what it found, each
+   * finding with the page it came from. The core counts the sourced findings; with none it asks once more.
+   * A research call that fails does not stop the run: the design then says it was not researched.
+   */
+  private async research(designer: CrewMember, searches: number, designCap: number): Promise<Finding[]> {
+    let findings: Finding[] = [];
+    let error = "";
+    for (let attempt = 1; attempt <= 2 && !findings.some((f) => f.source); attempt++) {
+      try {
+        const text = await this.ask(designer, researchPrompt(this.idea, searches, attempt), { round: 1 }, { capUsd: Math.max(0.05, designCap * 0.5) });
+        findings = validateFindings(parseJsonBlock(text));
+        error = "";
+      } catch (e) { if (e instanceof StopRun) throw e; error = (e as Error).message; }
+    }
+    this.log.append("factory.research", { run: this.id, findings, sourced: findings.filter((f) => f.source).length, searches, ...(error ? { error } : {}) });
+    return findings;
+  }
+
   private async planLoop(written = false) {
     let feedback = "";
     for (;;) {
@@ -525,6 +556,10 @@ class Run {
               plan = validatePlan(parseJsonBlock<Plan>(t2));
             } catch (e) { if (e instanceof StopRun) throw e; /* the first plan stands; the gaps are on the record */ }
           }
+        }
+        if (this.docs && !this.basePlan) {
+          const fixed = withDesignedScreens(plan, this.docs);
+          if (fixed.added.length) { plan = fixed.plan; this.log.append("factory.plan.gaps", { run: this.id, missing: fixed.added.map((n) => `screen: ${n}`), addedByCore: true }); }
         }
         if (this.basePlan) { plan.slug = this.basePlan.slug; plan.app = true; }
         this.plan = plan;
@@ -620,7 +655,7 @@ class Run {
    * still failing at the end goes to the test and fix loop as before. A retried build picks up at the first
    * feature not built yet.
    */
-  private async buildByFeature() {
+  private async buildByFeature(more: Feature[] = [], pool?: number) {
     const builder = this.builder!;
     const path = join(this.dir, "features.json");
     let features = featuresOf(this.plan, this.docs);
@@ -629,6 +664,8 @@ class Run {
       const kept = (JSON.parse(readFileSync(path, "utf8")).features ?? []) as { id: string; state: string }[];
       for (const f of features) if (kept.find((k) => k.id === f.id)?.state === "built") f.state = "built";
     } catch { /* first time */ }
+    // Work the product judge sent back joins the same list: the first build's features are done and stay done.
+    if (more.length) { for (const f of features) f.state = "built"; features = [...features, ...more]; }
     const progress = join(this.dir, "PROGRESS.md");
     if (!existsSync(progress)) writeFileSync(progress, `# Progress\n\nOne entry per feature, written by SoftwareFactory after each build session.\n\n`);
     const buildStart = this.spent;
@@ -641,7 +678,7 @@ class Run {
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
         const left = features.filter((x) => x.state !== "built").length;
-        const cap = Math.min(builder.budgetUsd, Math.max(FEATURE_MIN_USD, (this.o.maxUsd * BUILD_BUDGET_SHARE - (this.spent - buildStart)) / left));
+        const cap = Math.min(builder.budgetUsd, Math.max(FEATURE_MIN_USD, ((pool ?? this.o.maxUsd * BUILD_BUDGET_SHARE) - (this.spent - buildStart)) / left));
         this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: "building", attempt, capUsd: Number(cap.toFixed(3)) });
         const text = await this.askBench(builder, featurePrompt(this.plan, features, f, !!this.docs, retry), { round: i + 1 }, { capUsd: cap });
         const res = this.takeWork(text);
@@ -650,9 +687,20 @@ class Run {
         const now = new Set(t.cases.filter((c) => c.pass).map((c) => `${c.file}::${c.name}`));
         const broke = [...passing].filter((k) => !now.has(k));
         f.passed = t.passed; f.total = t.passed + t.failed;
-        f.state = !files.length ? "empty" : broke.length ? "regressed" : "built";
+        // A screen is built when it draws, not when the unit tests pass: in run 2898 six sessions reported
+        // 82 of 82 tests and the home screen threw in the browser. The session that wrote the screen fixes it.
+        let crashed: string[] = [];
+        if (files.length && !broke.length && /^(Screen|Judge): /.test(f.title)) {
+          const sc = await this.f.checkScreens(this.dir).catch(() => null);
+          if (sc && !sc.skipped) crashed = sc.screens.filter((x) => !x.ok).map((x) => `#/${x.route}: ${x.problem}`);
+        }
+        f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length ? "broken" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, workbench: true }); }
-        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}) });
+        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}) });
+        if (f.state === "broken" && attempt === 1) {
+          retry = `The core opened the app in a real browser after your call, and these screens did not draw:\n${crashed.slice(0, 10).join("\n").slice(0, 1500)}\n\nFix the cause in the page code (a value read before it exists, a wrong import, a missing record) and make sure every screen draws with the sample records and with none.`;
+          continue;
+        }
         if (f.state === "regressed" && attempt === 1) {
           retry = `These tests passed before your call and fail after it:\n${broke.slice(0, 10).map((k) => `- ${k.replace("::", ": ")}`).join("\n")}\n\n${t.output.slice(0, 1500)}`;
           continue;
@@ -665,7 +713,7 @@ class Run {
         break;
       }
     }
-    if (!wroteAny) throw new Error("The Builder returned no files");
+    if (!wroteAny && !more.length) throw new Error("The Builder returned no files");
   }
 
   /** A real crew works at the workbench (factory/workbench.ts): it runs the tests itself and fixes until they pass. */
@@ -711,7 +759,7 @@ class Run {
     while (run.failed > 0 || feedback) {
       const failing = run.cases.filter((c) => !c.pass).map((c) => c.name).sort().join("\n");
       history.push({ failing: run.failed, names: failing, files, before });
-      const stop = stopReason({ rounds: history, startedAt: this.startedAt, now: Date.now(), maxMinutes: this.f.maxRunMinutes });
+      const stop = stopReason({ rounds: history, startedAt: this.startedAt + this.waitedMs, now: Date.now(), maxMinutes: runMinutes(this.o.maxUsd, this.f.maxRunMinutes) });
       const timeUp = !!stop && /longer than/.test(stop);
       // A stall climbs the ladder before anyone is asked (H6): a deeper fix on a stronger model, then the locked
       // test itself is questioned. Each step once per stall; the wall clock is never waived.
@@ -970,7 +1018,15 @@ class Run {
       if (ev.pass || round === MAX_EVALUATION_ROUNDS) return;
       // Not worth starting a fix it cannot finish: the person sees what is open at the build gate.
       if (this.o.maxUsd - this.spent < 0.3) return;
-      await this.testFixLoop(evaluationFeedback(ev.e, docs), true);
+      // What the judge found goes back to the build loop as features, each in a fresh session (run 2898: one
+      // fix round was handed 25 unmet requirements at once). A small run keeps the single fix round.
+      const pool = Math.min(this.o.maxUsd * REPAIR_BUDGET_SHARE, this.o.maxUsd - this.spent - 0.4);
+      const work = this.bench && this.builder && this.o.maxUsd >= FEATURE_LOOP_MIN_USD && existsSync(join(this.dir, "features.json")) ? repairFeatures(ev.e, docs, Math.floor(pool / REPAIR_FEATURE_USD)) : [];
+      if (work.length) {
+        this.log.append("factory.repair", { run: this.id, round, features: work.map((f) => ({ id: f.id, title: f.title })), poolUsd: Number(pool.toFixed(2)) });
+        await this.buildByFeature(work, pool);
+        await this.testFixLoop("", true);
+      } else await this.testFixLoop(evaluationFeedback(ev.e, docs), true);
     }
   }
 
@@ -1031,7 +1087,9 @@ class Run {
       else r.passed++;
       // Every link the app ships, opened for real (run 2623 shipped 14 made-up YouTube links).
       if (process.env.SF_LINK_CHECK !== "off") {
-        const links = await checkLinks(linksIn(this.dir, (p) => isLockedTest(p) || isKitFile(p)));
+        const where = linkFiles(this.dir, (p) => isLockedTest(p) || isKitFile(p));
+        const links = await checkLinks(Object.keys(where));
+        links.dead = links.dead.map((d) => ({ ...d, file: where[d.url] }));
         this.log.append("factory.links", { run: this.id, round, pass: links.pass, checked: links.checked, unknown: links.unknown, dead: links.dead.slice(0, 30), ...(links.skipped ? { skipped: links.skipped } : {}) });
         if (!links.skipped && links.checked) {
           const c = linkCase(links);
@@ -1140,6 +1198,8 @@ class Run {
   /** One agent call, inside both its own cap and what is left of the run's cap. */
   /** The CLI session of the last successful call, so a follow-up can continue it. */
   private lastSession: string | undefined;
+  /** Time this run spent waiting at gates for the person. */
+  private waitedMs = 0;
   private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number } = {}): Promise<string> {
     if (this.o.maxUsd - this.spent < 0.01) {
       // Council seats ask at the same time: one question, and the others see the answer.
@@ -1243,9 +1303,12 @@ class Run {
     // `auto`: nobody is asked, the run approves itself (screens and tickets then say nothing waits for you).
     this.log.append("factory.gate", { run: this.id, gate, state: "waiting", question, ...info, ...(auto ? { auto: true } : {}) });
     // An unattended run never hangs: an escalation it may not retry stops the run.
+    const asked = Date.now();
     const d: GateDecision = auto ? { approve: true, by: "auto" }
       : this.o.autoApprove ? { approve: false, by: "auto" }
       : await this.f.awaitGate(this.id, gate);
+    // The clock measures the factory's work, not how long the person took to answer.
+    this.waitedMs += Date.now() - asked;
     this.log.append("factory.gate", { run: this.id, gate, state: d.approve ? "approved" : "rejected", note: d.note, by: d.by ?? "you", ...(info.kind ? { kind: info.kind, station: info.station, attempt: info.attempt } : {}) });
     if (gate !== "escalation") this.mark(station, d.approve ? "pass" : "fail", undefined, d.note);
     return d;
@@ -1307,6 +1370,26 @@ function stationName(id: StationId) {
   return ({ intake: "Intake", council: "Council", discover: "Discovery", plan: "Plan", gateA: "Plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", review: "Review", evaluate: "Product judge", gateB: "Build gate", ship: "Ship" } as const)[id];
 }
 
+/** A plan may have as many views as a design may have screens (it was 4: run 2898's plan lost two of six designed screens to the cut). */
+export const MAX_VIEWS = 6;
+
+/**
+ * Every designed screen is a view of the plan. The core checks this itself and adds what the Planner left
+ * out: a screen the person saw in the design must not depend on an agent remembering it.
+ */
+export function withDesignedScreens(plan: Plan, docs: ProductDocs): { plan: Plan; added: string[] } {
+  const key = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const views = [...(plan.views ?? [])];
+  const added: string[] = [];
+  docs.screens.forEach((s, i) => {
+    const has = views.some((v) => key(v.id) === key(s.id) || key(v.label) === key(s.name) || (i === 0 && v.id === "dashboard"));
+    if (has || views.length >= MAX_VIEWS) return;
+    views.splice(Math.min(i, views.length), 0, { id: i === 0 ? "dashboard" : s.id, label: s.name, shows: [s.purpose, s.shows.length ? `Shows: ${s.shows.join("; ")}.` : "", s.actions.length ? `Actions: ${s.actions.join("; ")}.` : ""].filter(Boolean).join(" ") });
+    added.push(s.name);
+  });
+  return { plan: added.length ? { ...plan, views } : plan, added };
+}
+
 export function validatePlan(p: Plan): Plan {
   if (!p || typeof p !== "object") throw new Error("The plan is not an object");
   for (const k of ["name", "slug", "summary", "interface"] as const) if (typeof p[k] !== "string" || !p[k].trim()) throw new Error(`The plan is missing "${k}"`);
@@ -1330,7 +1413,7 @@ export function validatePlan(p: Plan): Plan {
       ...(e.seed ? { seed: String(e.seed).slice(0, 300) } : {}),
     })),
     flows: (Array.isArray(p.flows) ? p.flows : []).filter((x: any) => x && x.name).slice(0, 6).map((x: any) => ({ name: String(x.name), steps: (Array.isArray(x.steps) ? x.steps : []).map(String).slice(0, 10) })),
-    views: (Array.isArray(p.views) ? p.views : []).filter((x: any) => x && (x.id || x.label)).slice(0, 4).map((x: any) => ({ id: String(x.id ?? x.label).toLowerCase().replace(/[^a-z0-9-]+/g, "-"), label: String(x.label ?? x.id), shows: String(x.shows ?? "") })),
+    views: (Array.isArray(p.views) ? p.views : []).filter((x: any) => x && (x.id || x.label)).slice(0, MAX_VIEWS).map((x: any) => ({ id: String(x.id ?? x.label).toLowerCase().replace(/[^a-z0-9-]+/g, "-"), label: String(x.label ?? x.id), shows: String(x.shows ?? "") })),
     tasks: p.tasks.map((t) => ({ id: String(t.id), title: String(t.title ?? t.id), dependsOn: (Array.isArray(t.dependsOn) ? t.dependsOn : []).map(String).filter((d) => ids.has(d)) })),
   };
 }

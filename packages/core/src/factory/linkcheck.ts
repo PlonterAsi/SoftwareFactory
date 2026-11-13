@@ -10,7 +10,7 @@ import { readTree } from "./workspace.js";
  * proves nothing either way and is not counted against the app. Free: no AI call.
  */
 
-export interface LinkResult { url: string; ok: boolean | null; status?: number; note?: string }
+export interface LinkResult { url: string; ok: boolean | null; status?: number; note?: string; /** The file the link was found in. */ file?: string }
 export interface LinkCheck { pass: boolean; skipped?: string; checked: number; dead: LinkResult[]; unknown: number }
 
 const URL_RE = /https?:\/\/[^\s"'`<>)\]\\]+/g;
@@ -20,19 +20,29 @@ const NOT_CONTENT = /^(www\.w3\.org|json-schema\.org|schema\.org|registry\.npmjs
 
 /** The links the app's own files carry (its data, seeds and pages), not its tests, kit or dependencies. */
 export function linksIn(dir: string, isExcluded: (p: string) => boolean): string[] {
-  const out = new Set<string>();
+  return Object.keys(linkFiles(dir, isExcluded));
+}
+
+/**
+ * Each link and the first file it is in, so a dead link can be handed to the Fixer with its place. The app's
+ * own data store (data/) is not the app: it is seeded on first start and never committed. In run 2898 the
+ * Fixer removed six made-up links from the seed, the store kept the old copies, and the check failed twice
+ * more on links that were no longer in the code.
+ */
+export function linkFiles(dir: string, isExcluded: (p: string) => boolean): Record<string, string> {
+  const out: Record<string, string> = {};
   for (const [p, content] of Object.entries(readTree(dir))) {
-    if (isExcluded(p) || !/\.(js|mjs|json|html|md|csv)$/i.test(p) || /^(node_modules|\.git)\//.test(p) || p === "SPEC.md" || p === "README.md") continue;
+    if (isExcluded(p) || !/\.(js|mjs|json|html|md|csv)$/i.test(p) || /^(node_modules|\.git|data)\//.test(p) || p === "SPEC.md" || p === "README.md") continue;
     for (const m of content.matchAll(URL_RE)) {
       const url = m[0].replace(/[.,;:!?]+$/, "");
       try {
         const u = new URL(url);
         if (SKIP_HOST.test(u.hostname) || NOT_CONTENT.test(u.hostname) || url.includes("${")) continue;
-        out.add(url);
+        out[url] ??= p;
       } catch { /* not a URL */ }
     }
   }
-  return [...out];
+  return out;
 }
 
 const youtubeId = (url: string): string | null => {
@@ -94,7 +104,7 @@ export function linkCase(c: LinkCheck) {
     name: `every link in the app opens (${c.checked - c.dead.length - c.unknown} open, ${c.dead.length} dead, ${c.unknown} unknown)`,
     file: "src/",
     pass: c.pass,
-    error: c.pass ? undefined : `These links do not exist (made up?). Replace each with a real page you can show exists, or remove it:\n${c.dead.map((d) => `- ${d.url}: ${d.note ?? d.status}`).join("\n")}`.slice(0, 2500),
+    error: c.pass ? undefined : `These links do not exist (made up?). The product needs the real ones: search the web for the page or video each was meant to be and put in the address a search returned. Remove a link only when a search finds no real page for it, and never write an address from memory:\n${c.dead.map((d) => `- ${d.url}${d.file ? ` (in ${d.file})` : ""}: ${d.note ?? d.status}`).join("\n")}`.slice(0, 2500),
     durationMs: 0,
   };
 }

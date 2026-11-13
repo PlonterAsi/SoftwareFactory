@@ -532,6 +532,26 @@ describe("the build loop: one feature per fresh session", () => {
     return { rt, builds };
   }
 
+  it("opens the app in a browser after each screen feature and hands a screen that does not draw back to its builder", async () => {
+    const log = new EventLog();
+    const { rt, builds } = featureCrew();
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    let checks = 0;
+    f.checkScreens = async () => (++checks === 1
+      ? { pass: false, screens: [{ route: "dashboard", ok: false, problem: "Cannot read properties of undefined (reading 'game')" }, { route: "manage", ok: true }] }
+      : { pass: true, screens: [{ route: "dashboard", ok: true }] });
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    const feats = events(log, "factory.feature").filter((e) => e.id === "F3" && e.state !== "building");
+    expect(feats.map((e) => e.state)).toEqual(["broken", "built"]);
+    expect(feats[0].crashed[0]).toMatch(/#\/dashboard: Cannot read properties of undefined/);
+    const f3 = builds.filter((b) => /Your feature, F3/.test(b.prompt));
+    expect(f3).toHaveLength(2);
+    expect(f3[1].prompt).toMatch(/real browser[\s\S]*reading 'game'/);
+    // The model and logic features have no screen of their own to open.
+    expect(checks).toBe(3);
+  });
+
   it("builds the plan as a list of features, each in its own call, with the list and the progress on disk", async () => {
     const log = new EventLog();
     const { rt, builds } = featureCrew();
@@ -540,10 +560,10 @@ describe("the build loop: one feature per fresh session", () => {
     await f.wait(run);
     const fin = events(log, "factory.run.finished").at(-1);
     expect(fin.outcome).toBe("shipped");
-    // Foundation, logic, and one per view of the plan.
-    expect(builds.map((b) => b.prompt.match(/Your feature, (F\d+)/)?.[1])).toEqual(["F1", "F2", "F3"]);
+    // Foundation, logic, and one per view: the plan's own, plus the designed screen the Planner left out (the core adds it).
+    expect(builds.map((b) => b.prompt.match(/Your feature, (F\d+)/)?.[1])).toEqual(["F1", "F2", "F3", "F4"]);
     // Each call gets its one feature and the pointers to the spine, not the whole spec and all the tests pasted in.
-    expect(builds[2].prompt).toMatch(/ONE feature \(F3, number 3 of 3\)/);
+    expect(builds[2].prompt).toMatch(/ONE feature \(F3, number 3 of 4\)/);
     expect(builds[2].prompt).toMatch(/Screen: Progress/);
     expect(builds[2].prompt).toMatch(/features\.json.*PROGRESS\.md/s);
     expect(builds[2].prompt).not.toMatch(/Locked acceptance tests:/);
@@ -551,13 +571,13 @@ describe("the build loop: one feature per fresh session", () => {
     expect(builds.every((b) => (b.budgetUsd ?? 9) <= 0.6 && (b.budgetUsd ?? 0) >= 0.15)).toBe(true);
     // The spine: the list (all built, with the tests passing after each) and what each session left for the next.
     const list = JSON.parse(readFileSync(join(fin.dir, "features.json"), "utf8")).features;
-    expect(list.map((x: any) => x.state)).toEqual(["built", "built", "built"]);
+    expect(list.map((x: any) => x.state)).toEqual(["built", "built", "built", "built"]);
     expect(readFileSync(join(fin.dir, "PROGRESS.md"), "utf8")).toMatch(/## F2 The domain logic: built[\s\S]*reuse countWords/);
     // A commit per feature.
     expect(git(fin.dir, "log", "--format=%s")).toMatch(/Feature F3: Screen: Progress[\s\S]*Feature F2: The domain logic[\s\S]*Feature F1/);
     // The logic feature is where the locked tests go green; the core saw it.
     const built = events(log, "factory.feature").filter((e) => e.state === "built");
-    expect(built.map((e) => e.id)).toEqual(["F1", "F2", "F3"]);
+    expect(built.map((e) => e.id)).toEqual(["F1", "F2", "F3", "F4"]);
     expect(built[0].failed).toBeGreaterThan(0);
     expect(built[1].failed).toBe(0);
   });
@@ -621,6 +641,34 @@ describe("the product judge: the running app is judged as a product", () => {
     return { rt, seen };
   }
   const screens = [{ route: "home", text: "Progress Morning pages 12 / 50", controls: ["New piece"] }];
+
+  it("with a real crew and a product budget, what the judge found is built as features in fresh sessions, then judged again", async () => {
+    const log = new EventLog();
+    const { rt: inner, seen } = crewWith([{ r2: false }, { r2: true }]);
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    expect(events(log, "factory.evaluation").map((e) => e.pass)).toEqual([false, true]);
+    const repair = events(log, "factory.repair");
+    expect(repair).toHaveLength(1);
+    expect(repair[0].features[0].title).toMatch(/^Judge: requirements R2/);
+    const j1 = seen.filter((x) => x.station === "build" && /Your feature, J1/.test(x.req.prompt));
+    expect(j1).toHaveLength(1);
+    expect(j1[0].req.prompt).toMatch(/R2: A session log with date and minutes[\s\S]*There is no session log screen/);
+    expect(events(log, "factory.feature").filter((e) => e.id === "J1" && e.state === "built")).toHaveLength(1);
+  });
 
   it("an unmet requirement goes back to the fix loop as work, and the app is judged again", async () => {
     const log = new EventLog();
@@ -688,5 +736,144 @@ describe("the product judge: the running app is judged as a product", () => {
 
   it("with no browser there are no screens to read", async () => {
     expect(await readScreens("http://127.0.0.1:1", { browser: null })).toBeNull();
+  });
+});
+
+describe("what run 2898 taught the engine", () => {
+  it("keeps a long requirement whole, so the Critic never judges text the engine cut", async () => {
+    const { validateDocs, DOC_LIMITS } = await import("../src/factory/discovery.js");
+    const long = `${"The knowledge list ranks every item by its fit to the player's level. ".repeat(7)}End.`;
+    expect(long.length).toBeGreaterThan(300);
+    expect(long.length).toBeLessThanOrEqual(DOC_LIMITS.requirementChars);
+    const docs = validateDocs({
+      brief: { who: "a player", promise: "the few best things to learn next" },
+      journeys: [{ moment: "A normal day", goal: "practise", steps: ["open", "pick"] }],
+      screens: [{ id: "today", name: "Today" }, { id: "tree", name: "Skill tree" }],
+      requirements: Array.from({ length: 34 }, (_, i) => ({ id: `R${i + 1}`, text: long })),
+      rules: [{ name: "Today's three", rule: "Pick the three highest ranked items the player has not marked as got it; ties go to the newest." }, "A plain string rule also counts."],
+    });
+    expect(docs.requirements).toHaveLength(34);
+    expect(docs.requirements[33]!.text.endsWith("End.")).toBe(true);
+    expect(docs.rules).toHaveLength(2);
+  });
+
+  it("gives the Planner and the project the product's rules", async () => {
+    const { validateDocs, docsForPlanner, docsFiles } = await import("../src/factory/discovery.js");
+    const docs = validateDocs({
+      brief: { who: "a player", promise: "p" }, journeys: [{ moment: "m", steps: ["s"] }],
+      screens: [{ id: "a", name: "A" }, { id: "b", name: "B" }], requirements: ["r"],
+      rules: [{ name: "Ranking", rule: "Score is relevance times freshness." }],
+    });
+    expect(docsForPlanner(docs)).toContain("Ranking: Score is relevance times freshness.");
+    expect(docsFiles("idea", docs, null).find((f) => f.path.endsWith("REQUIREMENTS.md"))!.content).toContain("## Rules");
+    // Documents saved before rules existed still load.
+    expect(() => docsForPlanner({ ...docs, rules: undefined as never })).not.toThrow();
+  });
+
+  it("tries a call once more when the CLI's sign-in check fails at start, and only then", async () => {
+    const { EventLog } = await import("../src/events.js");
+    const { runAgent } = await import("../src/agents.js");
+    process.env.SF_SIGNIN_RETRY_MS = "1";
+    const log = new EventLog(":memory:");
+    let calls = 0;
+    const flaky = { name: "flaky", run: async () => { if (++calls === 1) throw new Error("Not logged in · Please run /login"); return { text: "ok", costUsd: 0.01, durationMs: 1 }; } };
+    const r = await runAgent(log, flaky as never, "visionary", { prompt: "x" });
+    expect(r.result?.text).toBe("ok");
+    expect(log.list({ type: "agent.run.retried" })).toHaveLength(1);
+    calls = 0;
+    const down = { name: "down", run: async () => { calls++; throw new Error("Not logged in · Please run /login"); } };
+    const r2 = await runAgent(log, down as never, "visionary", { prompt: "x" });
+    expect(calls).toBe(2);
+    expect(r2.error).toContain("not signed in");
+    calls = 0;
+    const other = { name: "other", run: async () => { calls++; throw new Error("Agent timed out after 5 ms"); } };
+    await runAgent(log, other as never, "visionary", { prompt: "x" });
+    expect(calls).toBe(1);
+    delete process.env.SF_SIGNIN_RETRY_MS;
+  });
+  it("keeps all six designed screens in the plan, and adds the ones the Planner left out", async () => {
+    const { validatePlan, withDesignedScreens } = await import("../src/factory/loop.js");
+    const { validateDocs } = await import("../src/factory/discovery.js");
+    const names = ["Library", "Game Today", "Skill Tree", "Knowledge", "Practice", "Progress"];
+    const docs = validateDocs({
+      brief: { who: "a player", promise: "p" }, journeys: [{ moment: "m", steps: ["s"] }], requirements: ["r"],
+      screens: names.map((n) => ({ id: n.toLowerCase().replace(/ /g, "-"), name: n, purpose: `The ${n} job.`, shows: ["a"], actions: ["b"] })),
+    });
+    const base = { name: "GM", slug: "gm", summary: "s", interface: "i", acceptance: ["a"], tasks: [{ id: "t1", title: "t" }] };
+    const six = validatePlan({ ...base, views: names.map((n, i) => ({ id: i ? n.toLowerCase().replace(/ /g, "-") : "dashboard", label: n, shows: "x" })) } as never);
+    expect(six.views).toHaveLength(6);
+    expect(withDesignedScreens(six, docs).added).toEqual([]);
+    const four = validatePlan({ ...base, views: six.views!.slice(0, 4) } as never);
+    const fixed = withDesignedScreens(four, docs);
+    expect(fixed.added).toEqual(["Practice", "Progress"]);
+    expect(fixed.plan.views!.map((v) => v.label)).toEqual(names);
+    expect(fixed.plan.views![4]!.shows).toContain("The Practice job.");
+  });
+  it("makes a real crew's Designer research before it designs, and asks again when nothing has a source", async () => {
+    const mock = new MockRuntime({ plantBug: false });
+    const asked: string[] = [];
+    let n = 0;
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      if (/This time you only research/.test(req.prompt)) {
+        asked.push(req.prompt);
+        const r = await mock.run({ ...req, prompt: "x" });
+        r.text = ++n === 1
+          ? '```json\n{"research": [{"finding": "From memory, no page."}]}\n```'
+          : '```json\n{"research": [{"finding": "Players learn the air dribble from community videos.", "source": "https://example.com/air-dribble"}, {"finding": "A made-up source is dropped.", "source": "a forum"}]}\n```';
+        return r;
+      }
+      if (/Station contract: design\./.test(req.systemPrompt ?? "")) asked.push(req.prompt);
+      return mock.run(req);
+    } };
+    const log = new EventLog();
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 2.5 });
+    await f.wait(run);
+    const res = events(log, "factory.research");
+    expect(res).toHaveLength(1);
+    expect(res[0].sourced).toBe(1);
+    expect(res[0].findings[1].source).toBeUndefined();
+    // Two research calls (the first had no source), then the design call that carries the findings and may not search.
+    expect(asked[1]).toMatch(/an answer from memory is not research/);
+    expect(asked[2]).toMatch(/Research done for this design[\s\S]*https:\/\/example\.com\/air-dribble[\s\S]*Do not search the web on this call/);
+  });
+  it("checks the links in the app's code, not in its seeded data store, and says which file each is in", async () => {
+    const { linkFiles, linkCase } = await import("../src/factory/linkcheck.js");
+    const dir = tmp("sf-links-");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    mkdirSync(join(dir, "data"), { recursive: true });
+    writeFileSync(join(dir, "src/schema.js"), 'export const seed = [{ video: "https://www.youtube.com/watch?v=real123" }];');
+    writeFileSync(join(dir, "data/db.json"), '{"items":[{"video":"https://www.youtube.com/watch?v=example1"}]}');
+    const where = linkFiles(dir, () => false);
+    expect(where).toEqual({ "https://www.youtube.com/watch?v=real123": "src/schema.js" });
+    const c = linkCase({ pass: false, checked: 1, unknown: 0, dead: [{ url: "https://www.youtube.com/watch?v=real123", ok: false, note: "no such YouTube video", file: "src/schema.js" }] });
+    expect(c.error).toContain("(in src/schema.js)");
+  });
+  it("gives a product run time in proportion to its budget, and leaves a small run's limit alone", async () => {
+    const { runMinutes } = await import("../src/factory/stoprules.js");
+    expect(runMinutes(1.5)).toBe(30);
+    expect(runMinutes(0.6, 20)).toBe(20);
+    expect(runMinutes(10)).toBe(150);
+    expect(runMinutes(10, 0.01)).toBeLessThan(1);
+    expect(runMinutes(100)).toBe(240);
+  });
+
+  it("turns what the product judge found into build features, the person's own asks first, within what the budget allows", async () => {
+    const { repairFeatures } = await import("../src/factory/evaluate.js");
+    const { validateDocs } = await import("../src/factory/discovery.js");
+    const docs = validateDocs({
+      brief: { who: "a player", promise: "p" }, journeys: [{ moment: "m", steps: ["s"] }], screens: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+      requirements: [...Array.from({ length: 7 }, (_, i) => ({ id: `R${i + 1}`, text: `Thing ${i + 1}`, from: i === 6 ? "person" : "design" })), { id: "R8", text: "Extra", from: "design", must: false }],
+    });
+    const e = { requirements: docs.requirements.map((r) => ({ id: r.id, met: r.id === "R1", evidence: r.id === "R1" ? "seen" : "not on any screen" })), scores: { function: 2, design: 2, content: 2 }, problems: [{ where: "today", problem: "Lists 2 things, not 3", fix: "Show three" }] };
+    const all = repairFeatures(e, docs, 9);
+    expect(all.map((f) => f.id)).toEqual(["J1", "J2", "J3"]);
+    // The person's own ask leads; the nice-to-have comes last.
+    expect(all[0].title).toMatch(/^Judge: requirements R7, R2, R3, R4, R5$/);
+    expect(all[1].title).toMatch(/R6, R8$/);
+    expect(all[0].what).toMatch(/R7: Thing 7\n  What the judge saw: not on any screen/);
+    expect(all[2].what).toMatch(/\[today\] Lists 2 things, not 3 Fix: Show three/);
+    expect(repairFeatures(e, docs, 1)).toHaveLength(1);
+    expect(repairFeatures(e, docs, 0)).toEqual([]);
   });
 });

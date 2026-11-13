@@ -1769,7 +1769,7 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .feat { border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-left-width: 3px; border-radius: 8px; padding: 8px 12px; display: grid; gap: 6px; }
 .feat.built { border-left-color: var(--ok, #4fd18b); }
 .feat.building { border-left-color: var(--accent, #6ea8fe); }
-.feat.regressed, .feat.empty { border-left-color: var(--warn, #e6b450); }
+.feat.regressed, .feat.broken, .feat.empty { border-left-color: var(--warn, #e6b450); }
 .feat-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .feat-state { margin-left: auto; font-size: 12px; color: var(--muted); }
 .product-reqs tr.unmet td { color: var(--warn, #e6b450); }

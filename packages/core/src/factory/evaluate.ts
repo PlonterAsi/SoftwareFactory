@@ -1,3 +1,4 @@
+import type { Feature } from "./features.js";
 import type { ProductDocs } from "./discovery.js";
 
 /**
@@ -67,4 +68,34 @@ export function evaluationFeedback(e: Evaluation, docs: ProductDocs): string {
     ...e.problems.map((p) => `- ${p.where ? `[${p.where}] ` : ""}${p.problem}${p.fix ? ` Fix: ${p.fix}` : ""}`),
     ...PRODUCT_RUBRIC.filter((k) => e.scores[k] < PRODUCT_PASS_SCORE).map((k) => `- Scored ${e.scores[k]} of 5 on ${k}: ${PRODUCT_RUBRIC_TEXT[k]}.`),
   ].join("\n").slice(0, 4000);
+}
+
+/** The share of the run's budget the judge's findings may spend in the build loop, and what one such feature is sized at. */
+export const REPAIR_BUDGET_SHARE = 0.25;
+export const REPAIR_FEATURE_USD = 0.4;
+const REPAIR_GROUP = 5;
+
+/**
+ * The judge's findings as build work: unmet requirements in groups small enough for one fresh session, the
+ * person's own asks first, then one feature for what the judge noticed beyond the requirements. `max` is how
+ * many features the budget allows; what does not fit stays open and is shown at the build gate.
+ */
+export function repairFeatures(e: Evaluation, docs: ProductDocs, max: number): Feature[] {
+  const out: Feature[] = [];
+  const req = (id: string) => docs.requirements.find((r) => r.id === id);
+  const unmet = e.requirements.filter((r) => !r.met).map((r) => ({ ...r, req: req(r.id) }))
+    .sort((a, b) => Number(b.req?.must ?? true) - Number(a.req?.must ?? true) || Number(b.req?.from === "person") - Number(a.req?.from === "person"));
+  const add = (title: string, what: string, done: string) => out.push({ id: `J${out.length + 1}`, title: `Judge: ${title}`, what, done, state: "todo" });
+  for (let i = 0; i < unmet.length; i += REPAIR_GROUP) {
+    const g = unmet.slice(i, i + REPAIR_GROUP);
+    add(`requirements ${g.map((r) => r.id).join(", ")}`,
+      ["A product judge used the running app and did not see these requirements working. Make each one real on the screen where the person would look for it, using the store and the logic under src/:",
+        ...g.map((r) => `- ${r.id}: ${r.req?.text ?? r.id}\n  What the judge saw: ${r.evidence || "nothing that shows it"}`)].join("\n"),
+      "Each requirement above can be seen and used in the running app, with sample records that show it, and every test still passes.");
+  }
+  const notes = e.problems.filter((p) => p.problem);
+  if (notes.length) add("what a user would notice",
+    ["A product judge used the running app and noticed these problems. Fix each one:", ...notes.map((p) => `- ${p.where ? `[${p.where}] ` : ""}${p.problem}${p.fix ? ` Fix: ${p.fix}` : ""}`)].join("\n"),
+    "None of the problems above can be seen in the running app, and every test still passes.");
+  return out.slice(0, Math.max(0, max));
 }

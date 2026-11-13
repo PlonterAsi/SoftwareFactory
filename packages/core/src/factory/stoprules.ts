@@ -12,6 +12,18 @@ export interface RoundRecord {
 }
 
 export const DEFAULT_MAX_RUN_MINUTES = 30;
+/**
+ * The wall-clock limit of one run. The setting was sized for a small run (up to $2); a product run with a real
+ * budget gets time in proportion (run 2898 was stopped at 30 minutes with $5.33 of its $10 unspent, as the
+ * product judge's findings came back). A $10 run gets five times the setting; never more than 4 hours.
+ */
+export const FULL_TIME_USD = 2;
+export const MAX_RUN_MINUTES_CEILING = 240;
+export function runMinutes(maxUsd: number, setting?: number): number {
+  const base = setting ?? DEFAULT_MAX_RUN_MINUTES;
+  return maxUsd <= FULL_TIME_USD ? base : Math.min(Math.max(base, MAX_RUN_MINUTES_CEILING), Math.round(base * (maxUsd / FULL_TIME_USD)));
+}
+
 export const SAME_TESTS_REASON = "The same tests failed twice in a row after a fix.";
 
 export function stopReason(h: { rounds: RoundRecord[]; startedAt: number; now: number; maxMinutes?: number }): string | null {

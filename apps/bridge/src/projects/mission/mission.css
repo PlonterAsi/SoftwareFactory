@@ -176,7 +176,7 @@
 .ms-feat-s { font-size: 13px; text-align: right; color: var(--muted); }
 .ms-feat.fs-built .ms-feat-s { color: var(--good); }
 .ms-feat.fs-building { border-color: var(--accent); } .ms-feat.fs-building .ms-feat-s { color: var(--accent); }
-.ms-feat.fs-regressed .ms-feat-s { color: var(--bad); }
+.ms-feat.fs-regressed .ms-feat-s, .ms-feat.fs-broken .ms-feat-s { color: var(--bad); }
 .ms-feat.fs-empty, .ms-feat.fs-ahead { opacity: 0.6; }
 
 /* judge */
