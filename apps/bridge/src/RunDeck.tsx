@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Blueprint } from "./projects/mission/Blueprint";
 import type { FactoryRunView, LoopEventView, SeatView, Vote } from "./api";
 
 type Tab = "council" | "product" | "build" | "judge" | "plan" | "tests" | "loop" | "files" | "review" | "visuals";
@@ -16,7 +17,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
   const tabs: [Tab, string][] = [
     ["council", `Council${lastCouncil ? ` · ${lastCouncil.brief.outcome}` : run?.stations.council?.state === "skipped" ? " · skipped" : ""}`],
     ["product", `Product${lastDisc ? ` · ${lastDisc.pass ? "passed" : `round ${lastDisc.round}`}` : ""}`],
-    ["plan", `Plan${run?.plan ? ` · ${run.plan.tasks.length}` : ""}`],
+    ["plan", `Plan${run?.plan ? ` · ${run.plan.views?.length ? `${run.plan.views.length} screens` : run.plan.tasks.length}` : ""}`],
     ["tests", `Tests${last ? ` · ${last.passed}/${last.passed + last.failed}` : ""}`],
     ["build", `Build${run?.features.length ? ` · ${run.features.filter((f) => f.state === "built").length}/${run.features.length}` : ""}`],
     ["loop", `Loop${run?.loop.length ? ` · ${run.loop.filter((l) => l.kind === "attempt").length}` : ""}`],
@@ -35,7 +36,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
       </header>
       <div className="deck-body">
         {!run && <div className="empty">Start a run to see its plan as a task graph, its tests as a grid and its files as a heat map.</div>}
-        {run && tab === "plan" && <TaskGraph run={run} />}
+        {run && tab === "plan" && (run.plan ? <Blueprint run={run} /> : <TaskGraph run={run} />)}
         {run && tab === "tests" && <TestGrid run={run} />}
         {run && tab === "loop" && <LoopView run={run} />}
         {run && tab === "files" && <HeatMap run={run} />}

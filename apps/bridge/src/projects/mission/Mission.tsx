@@ -24,6 +24,8 @@ function Mission(ctx: PanelContext) {
   const { project: p, factory, events } = ctx;
   const mine = useMemo(() => factory.factoryRuns.filter((r) => p.runIds.includes(r.run)), [factory.factoryRuns, p.runIds]);
   const [runId, setRunId] = useState<number | null>(ctx.pickedRun);
+  // A link that opens a run (a notice, the Builds list) lands here with it picked.
+  useEffect(() => { if (ctx.pickedRun != null) setRunId(ctx.pickedRun); }, [ctx.pickedRun]);
   const run = mine.find((r) => r.run === runId) ?? mine.at(-1);
   const stops = useMemo(() => stopsFor(run), [run]);
   const cur = currentStop(stops);

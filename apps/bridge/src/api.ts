@@ -85,7 +85,9 @@ export interface FactoryRunView {
   spentUsd: number;
   maxFixRounds: number;
   stations: Record<string, { state: StationState; round?: number; note?: string }>;
-  plan?: { name: string; summary: string; acceptance: string[]; tasks: { id: string; title: string; dependsOn: string[] }[] };
+  plan?: PlanView;
+  /** What the plan check found missing against the design (shown on the plan, never blocks it). */
+  planGaps?: string[];
   dir?: string;
   tests: { round: number; passed: number; failed: number; cases: TestCaseView[] }[];
   files: Record<string, { lines: number; writes: number; last: string; locked: boolean }>;
@@ -111,6 +113,15 @@ export interface FactoryRunView {
 }
 
 export interface EvaluationView { round: number; pass: boolean; skipped?: string; bar: number; screens: number; requirements: { id: string; met: boolean; evidence: string }[]; scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] }
+/** The approved spec as the Planner wrote it. Everything past tasks and acceptance is optional (older plans lack it). */
+export interface PlanView {
+  name: string; summary: string; acceptance: string[];
+  tasks: { id: string; title: string; dependsOn: string[] }[];
+  interface?: string; ui?: string; files?: string[];
+  entities?: { name: string; label?: string; fields: { name: string; type?: string; required?: boolean; options?: string[]; to?: string }[] }[];
+  flows?: { name: string; steps: string[] }[];
+  views?: { id: string; label: string; shows: string }[];
+}
 export interface FeatureView { id: string; title: string; state: "building" | "built" | "empty" | "regressed" | "broken"; attempt: number; /** Its place in the build order and how many features the build has. */ index?: number; of?: number; passed?: number; failed?: number; files?: string[]; broke?: string[]; crashed?: string[] }
 export interface ProductDocsView {
   brief: { who: string; problem: string; promise: string; notThis: string[] };
@@ -149,6 +160,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         if (p.station === "fix" && p.round) r.fixRounds = Math.max(r.fixRounds, p.round);
         break;
       case "factory.plan": r.plan = p.plan; r.dir = p.dir; break;
+      case "factory.plan.gaps": r.planGaps = Array.isArray(p.missing) ? p.missing.map(String) : []; break;
       case "factory.council": r.council.push({ round: p.round, seats: p.seats, brief: p.brief }); break;
       case "factory.evaluation": r.evaluations.push({ round: p.round, pass: !!p.pass, skipped: p.skipped, bar: p.bar ?? 4, screens: p.screens ?? 0, requirements: p.requirements ?? [], scores: p.scores ?? {}, problems: p.problems ?? [] }); break;
       case "factory.feature": {
