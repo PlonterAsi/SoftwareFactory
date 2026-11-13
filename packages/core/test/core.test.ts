@@ -161,8 +161,16 @@ describe("core HTTP API", () => {
     const ctrl = new AbortController();
     const res = await fetch(`${base}/api/events`, { signal: ctrl.signal });
     const reader = res.body!.getReader();
-    const { value } = await reader.read();
-    expect(new TextDecoder().decode(value)).toContain('"signal.captured"');
+    // The replay can arrive in more than one chunk (the built-in crew alone is 21 events): read until the signal shows up.
+    const dec = new TextDecoder();
+    let text = "";
+    const end = Date.now() + 5000;
+    while (!text.includes('"signal.captured"') && Date.now() < end) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += dec.decode(value, { stream: true });
+    }
+    expect(text).toContain('"signal.captured"');
     ctrl.abort();
   });
 });
