@@ -36,7 +36,7 @@ export interface PrincipleView extends Principle {
   by: string | null;
 }
 
-const MAKERS: Slot[] = ["council", "design", "critique", "plan", "tests", "build", "review", "fix", "improve", "overseer", "survey"];
+const MAKERS: Slot[] = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "improve", "overseer", "survey"];
 
 export const DEFAULT_PRINCIPLES: Principle[] = [
   {

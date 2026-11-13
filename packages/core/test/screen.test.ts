@@ -121,7 +121,7 @@ describe("adding a screen to a finished project", () => {
     expect(git(fin.dir, "ls-files", "test")).toBe(testsBefore);
     expect(git(fin.dir, "tag").split("\n").sort()).toEqual(["v0.1.0", "v0.2.0"]);
     expect(events(log, "factory.ui").at(-1)).toMatchObject({ run, pass: true });
-    expect(events(log, "factory.station").filter((s) => s.run === run && s.state === "skipped").map((s) => s.station)).toEqual(["intake", "council", "plan", "tests"]);
+    expect(events(log, "factory.station").filter((s) => s.run === run && s.state === "skipped").map((s) => s.station)).toEqual(["intake", "council", "plan", "tests", "evaluate"]);
     expect(events(log, "factory.visual").filter((v) => v.run === run).every((v) => v.pass)).toBe(true);
   });
 

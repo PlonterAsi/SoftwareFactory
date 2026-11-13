@@ -89,6 +89,15 @@ Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"scores": {"coverage": 3, "journey": 4, "screens": 2, "originality": 3, "buildable": 5},
  "problems": [{"where": "screens/today", "problem": "what is wrong, concretely", "fix": "the change that would fix it"}]}
 Scores are whole numbers from 1 to 5. At most 10 problems, the worst first. Do not rewrite the documents yourself.`,
+  evaluate: `Station contract: evaluate.
+You judge a built app as a product, the way the person it was made for would. You did not build it and you see no code: only what the person asked for, the design, and what every screen of the running app really shows (its text and its controls, read from a real browser).
+For EACH must-have requirement, find the screen where the person would see it working. It is met only when a screen shows it and has the controls it needs; a label, a heading or a placeholder that only names it does not count. Quote what you saw as evidence, or say what is missing.
+Then walk each journey step by step through the screens, and score the product.
+Answer with ONE fenced json block and nothing else, shaped exactly like:
+{"requirements": [{"id": "R1", "met": false, "evidence": "Today shows a heading 'Drills' and no drills"}],
+ "scores": {"function": 2, "design": 3, "content": 2},
+ "problems": [{"where": "the screen", "problem": "what a user would hit, concretely", "fix": "what to change"}]}
+One entry per requirement, in order. Scores are whole numbers from 1 to 5. At most 12 problems, the worst first. Never ask for features the design does not have.`,
   plan: `Station contract: plan.
 ${TARGET}
 ${APP_SHAPE}
@@ -209,6 +218,12 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     prompt: "You are the Product Critic of SoftwareFactory. You are hard to please and specific. You judge a design the way its future user would: does it do what was asked, can I get through my day with it, is every screen there for a reason. You never praise, you never rewrite; you score and you name what must change.",
   },
   {
+    id: "judge", name: "Product Judge", avatar: "⚑", station: "evaluate", model: "sonnet", budgetUsd: 0.4, plugins: [], skills: [], tools: [], mcp: [],
+    description: "Looks at the running app the way its user would and scores it against the product design.",
+    sample: "What the person asked for: a habit tracker.\n\nThe must-have requirements:\n- R1: Mark a habit done for today\n\n=== Screen #/home ===\nHabits\nControls: (none)",
+    prompt: "You are the Product Judge of SoftwareFactory. You stand in for the person the app was made for. You believe only what the screens show: a feature you cannot see working does not exist. You are specific, you quote what you saw, and you never soften a verdict because the build was hard.",
+  },
+  {
     id: "planner", name: "Planner", avatar: "◇", station: "plan", model: "haiku", budgetUsd: 0.2, plugins: [], skills: ["architecture-blueprint", "code-exploration"], tools: ["Read", "Glob", "Grep"], mcp: [],
     description: "Writes the spec and the task graph.",
     sample: "a CLI that renames photos by the date they were taken",
@@ -277,12 +292,12 @@ function lens(id: string, name: string, avatar: string, focus: string, descripti
 /** Who works each station when nobody has been assigned. The Council seats three by default and takes up to six. */
 export const DEFAULT_SLOTS: Record<Slot, string[]> = {
   council: ["visionary", "architect", "skeptic"],
-  design: ["designer"], critique: ["critic"],
+  design: ["designer"], critique: ["critic"], evaluate: ["judge"],
   plan: ["planner"], tests: ["tester"], build: ["builder"], review: ["reviewer"], fix: ["fixer"], order: ["archivist"], overseer: ["overseer"],
   improve: ["integrator", "automator", "simplifier", "enricher", "ux-lens", "flow-lens"], map: ["cartographer"], survey: ["surveyor"],
 };
 
-export const SLOT_SEATS: Record<Slot, number> = { council: 6, design: 1, critique: 1, plan: 1, tests: 1, build: 1, review: 1, fix: 1, order: 1, overseer: 1, improve: 6, map: 1, survey: 1 };
+export const SLOT_SEATS: Record<Slot, number> = { council: 6, design: 1, critique: 1, plan: 1, tests: 1, build: 1, review: 1, evaluate: 1, fix: 1, order: 1, overseer: 1, improve: 6, map: 1, survey: 1 };
 
 /**
  * The system prompt an agent runs with on a station: its own prompt, then the Brain's principles

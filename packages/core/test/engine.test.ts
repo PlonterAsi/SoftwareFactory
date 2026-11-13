@@ -7,6 +7,8 @@ import { WORKBENCH_COMMANDS, restoreProtected, testDispute, changedFiles, hasWor
 import { modelFloorUsd, strongerModel } from "../src/factory/loop.js";
 import { checkLinks, linksIn } from "../src/factory/linkcheck.js";
 import { critiquePasses, validateCritique, validateDocs } from "../src/factory/discovery.js";
+import { evaluationPasses, validateEvaluation } from "../src/factory/evaluate.js";
+import { readScreens } from "../src/factory/screencheck.js";
 import { dryRunTests, lockedTestFaults, relativeImports } from "../src/factory/testcheck.js";
 import { initRepo, commitAll } from "../src/factory/workspace.js";
 import { probeStart } from "../src/factory/appkit.js";
@@ -589,5 +591,102 @@ describe("the build loop: one feature per fresh session", () => {
     await f.wait(run);
     expect(builds).toHaveLength(1);
     expect(events(log, "factory.feature")).toHaveLength(0);
+  });
+});
+
+describe("the product judge: the running app is judged as a product", () => {
+  const block = (j: unknown) => "```json\n" + JSON.stringify(j) + "\n```";
+  const docs = {
+    brief: { who: "A writer.", problem: "No idea how far along each piece is.", promise: "Shows each piece against its goal.", notThis: [] },
+    research: [], assumptions: [],
+    journeys: [{ moment: "A normal day", goal: "See progress", steps: ["Open Progress", "Add words"] }],
+    screens: [{ id: "dashboard", name: "Progress", purpose: "Each piece against its goal.", shows: ["a bar per piece"], actions: ["add a piece"] }, { id: "log", name: "Session log", purpose: "What I wrote when.", shows: ["sessions"], actions: ["log a session"] }],
+    requirements: [{ id: "R1", text: "A bar per piece against its goal", from: "person", must: true }, { id: "R2", text: "A session log with date and minutes", from: "person", must: true }, { id: "R3", text: "Confetti", from: "design", must: false }],
+  };
+  function crewWith(verdicts: { r2: boolean }[]) {
+    const mock = new MockRuntime({ plantBug: false });
+    const seen: { station: string; req: AgentRequest }[] = [];
+    let n = 0;
+    const rt: AgentRuntime = { name: "mock", run: async (req) => {
+      const r = await mock.run(req);
+      const st = station(req);
+      seen.push({ station: st, req });
+      if (st === "design") r.text = block(docs);
+      if (st === "evaluate") {
+        const v = verdicts[Math.min(n++, verdicts.length - 1)];
+        r.text = block({ requirements: [{ id: "R1", met: true, evidence: "Progress shows 3 bars" }, { id: "R2", met: v.r2, evidence: v.r2 ? "Session log lists 2 sessions" : "There is no session log screen" }], scores: { function: v.r2 ? 4 : 2, design: 4, content: 4 }, problems: v.r2 ? [] : [{ where: "navigation", problem: "The Session log screen is missing.", fix: "Add the log view." }] });
+      }
+      return r;
+    } };
+    return { rt, seen };
+  }
+  const screens = [{ route: "home", text: "Progress Morning pages 12 / 50", controls: ["New piece"] }];
+
+  it("an unmet requirement goes back to the fix loop as work, and the app is judged again", async () => {
+    const log = new EventLog();
+    const { rt, seen } = crewWith([{ r2: false }, { r2: true }]);
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 5 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    const evs = events(log, "factory.evaluation");
+    expect(evs.map((e) => e.pass)).toEqual([false, true]);
+    // The judge sees the person's words, the design and the screens; never the code.
+    const judge = seen.find((x) => x.station === "evaluate")!.req.prompt;
+    expect(judge).toMatch(/a writing desk/);
+    expect(judge).toMatch(/R2: A session log/);
+    expect(judge).not.toMatch(/R3/);
+    expect(judge).toMatch(/=== Screen #\/home ===\nProgress Morning pages 12 \/ 50\nControls: New piece/);
+    expect(judge).not.toMatch(/<<<FILE/);
+    // The Fixer got the failure as concrete work.
+    const fix = seen.filter((x) => x.station === "fix").at(-1)!.req.prompt;
+    expect(fix).toMatch(/Requirement R2 is not met: A session log with date and minutes/);
+    expect(fix).toMatch(/There is no session log screen/);
+    // Order: review, then the judge, then the build gate.
+    const order = events(log, "factory.station").filter((s) => s.state === "pass").map((s) => s.station);
+    expect(order.lastIndexOf("review")).toBeLessThan(order.indexOf("evaluate"));
+  });
+
+  it("what is still open after the second look is put in front of the person at the build gate", async () => {
+    const log = new EventLog();
+    const { rt } = crewWith([{ r2: false }]);
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoRetries: 0, maxUsd: 5 });
+    for (let i = 0; i < 400; i++) {
+      const g = events(log, "factory.gate").at(-1);
+      if (g?.state === "waiting" && g.gate === "gateB") break;
+      if (g?.state === "waiting") f.decide(run, g.gate, { approve: true });
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(events(log, "factory.evaluation")).toHaveLength(2);
+    expect(events(log, "factory.gate").at(-1).question).toMatch(/product judge: 1 of 2 requirements not seen working/);
+    f.decide(run, "gateB", { approve: true });
+    await f.wait(run);
+  });
+
+  it("no browser, no verdict: the judge is skipped and says so, it never guesses", async () => {
+    const log = new EventLog();
+    const { rt, seen } = crewWith([{ r2: true }]);
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 5 });
+    await f.wait(run);
+    expect(seen.some((x) => x.station === "evaluate")).toBe(false);
+    expect(events(log, "factory.evaluation")[0]).toMatchObject({ pass: false, skipped: expect.stringMatching(/could not be read/) });
+    expect(events(log, "factory.station").some((s) => s.station === "evaluate" && s.state === "skipped")).toBe(true);
+  });
+
+  it("the core decides: a requirement the judge skipped is not met, and a missing score fails", () => {
+    const e = validateEvaluation({ requirements: [{ id: "R1", met: true, evidence: "x" }], scores: { function: 5, design: 5, content: 5 } }, docs as any);
+    expect(e.requirements.map((r) => [r.id, r.met])).toEqual([["R1", true], ["R2", false]]);
+    expect(evaluationPasses(e)).toBe(false);
+    const ok = validateEvaluation({ requirements: [{ id: "R1", met: true, evidence: "x" }, { id: "R2", met: true, evidence: "y" }], scores: { function: 4, design: 4 } }, docs as any);
+    expect(ok.scores.content).toBe(1);
+    expect(evaluationPasses(ok)).toBe(false);
+  });
+
+  it("with no browser there are no screens to read", async () => {
+    expect(await readScreens("http://127.0.0.1:1", { browser: null })).toBeNull();
   });
 });

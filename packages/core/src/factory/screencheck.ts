@@ -122,6 +122,35 @@ export async function checkScreens(baseUrl: string, o: { browser?: string | null
   return { pass: screens.every((s) => s.ok), browser, screens };
 }
 
+/**
+ * What each of the app's screens shows, as the person would read it: the text of its main area and the
+ * labels of its controls. For the product judge (evaluate.ts). null when no browser can be read.
+ */
+export async function readScreens(baseUrl: string, o: { browser?: string | null; max?: number } = {}): Promise<{ route: string; text: string; controls: string[] }[] | null> {
+  const browser = o.browser === undefined ? findBrowser() : o.browser;
+  if (!browser) return null;
+  const read = (dom: string) => {
+    const main = dom.match(/<main[^>]*class="kit-main"[^>]*>([\s\S]*?)<\/main>/)?.[1] ?? dom.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<nav[\s\S]*?<\/nav>/g, " ");
+    // Each kind on its own pass: a button inside a link or a table row is still a control.
+    const controls = [
+      ...[...main.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map((m) => strip(m[1]).slice(0, 40)),
+      ...[...main.matchAll(/<a\b[^>]*href=[^>]*>([\s\S]*?)<\/a>/g)].map((m) => strip(m[1]).slice(0, 40)),
+      ...[...main.matchAll(/<(input|textarea|select)\b([^>]*)>/g)].map((m) => `${m[1]}: ${m[2].match(/(?:placeholder|aria-label|name)="([^"]*)"/)?.[1] ?? m[2].match(/type="([^"]*)"/)?.[1] ?? "field"}`),
+    ].filter(Boolean);
+    return { text: strip(main).slice(0, 2500), controls: [...new Set(controls)].slice(0, 30) };
+  };
+  const home = await dumpScreen(browser, `${baseUrl}/#/home`);
+  if (!home.dom.trim() || !/class="kit-app"/.test(home.dom)) return null;
+  const out = [{ route: "home", ...read(home.dom) }];
+  // The app's own views first (they are the product), then the data lists; the System view is the kit's.
+  const routes = routesOf(home.dom).filter((r) => r !== "home" && r !== "system");
+  for (const route of [...routes.filter((r) => r.startsWith("v/")), ...routes.filter((r) => !r.startsWith("v/"))].slice(0, (o.max ?? 10) - 1)) {
+    const s = await dumpScreen(browser, `${baseUrl}/#/${route}`);
+    if (s.dom.trim()) out.push({ route, ...read(s.dom) });
+  }
+  return out;
+}
+
 /** The check as one cell in the test grid, fixed like a failing test. */
 export function screenCase(c: ScreenCheck) {
   const bad = c.screens.filter((s) => !s.ok);

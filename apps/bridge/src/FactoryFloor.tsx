@@ -46,15 +46,16 @@ const STATIONS: [string, string, string, number, number, boolean?, boolean?][] =
   ["review", "Review", "Reviewer vs spec", X[3], 130],
   ["gateB", "Your OK: build", "one tap", X[4], 130, true],
   ["fix", "Fix", "Fixer loop", X[2], 260],
+  ["evaluate", "Product judge", "reads the running app", X[3], 260],
   ["ship", "Ship to disk", "git repo, tagged", X[4], 260],
 ];
 const EDGES: [string, string, string?, string?][] = [
   ["intake", "discover"], ["intake", "council", "tb"], ["council", "discover", undefined, "t"], ["discover", "plan"], ["plan", "gateA"], ["gateA", "tests", "b", "t"], ["tests", "build"],
-  ["build", "test"], ["test", "fix", "b1", "t1"], ["fix", "test", "t2", "b2"], ["test", "review"], ["review", "fix", "b", "r"], ["review", "gateB"], ["gateB", "ship", "b", "t"],
+  ["build", "test"], ["test", "fix", "b1", "t1"], ["fix", "test", "t2", "b2"], ["test", "review"], ["review", "fix", "b", "r"], ["review", "evaluate", "b", "t"], ["evaluate", "gateB", undefined, "b2"], ["gateB", "ship", "b", "t"],
 ];
 
 // Agent-call stations ("tests" is the Tester; the floor's "test" box is node --test).
-const CALL_STATION: Record<string, string> = { council: "council", discover: "design", plan: "plan", tests: "tests", build: "build", fix: "fix", review: "review" };
+const CALL_STATION: Record<string, string> = { council: "council", discover: "design", plan: "plan", tests: "tests", build: "build", fix: "fix", review: "review", evaluate: "evaluate" };
 
 function nodesFor(run?: FactoryRunView, runs: AgentRunView[] = [], crew: CrewIndex = {}): Node<StationData>[] {
   const working = runs.filter((r) => r.state === "running" && run && r.factoryRun === run.run);
@@ -66,6 +67,7 @@ function nodesFor(run?: FactoryRunView, runs: AgentRunView[] = [], crew: CrewInd
     if (id === "test" && run?.tests.length) { const t = run.tests.at(-1)!; badge = `${t.passed}/${t.passed + t.failed}`; }
     if (id === "council" && run?.council.length) { const b = run.council.at(-1)!.brief; badge = `${Object.values(b.votes).filter((v) => v === b.outcome).length}× ${b.outcome}`; }
     if (id === "discover" && run?.discovery.length) { const d = run.discovery.at(-1)!; badge = d.pass ? "passed" : d.settled ? "best kept" : `round ${d.round}`; }
+    if (id === "evaluate" && run?.evaluations.length) { const e = run.evaluations.at(-1)!; badge = e.skipped ? "skipped" : e.pass ? "passed" : `${e.requirements.filter((q) => !q.met).length} open`; }
     if (id === "review" && run?.reviews.length) { const r = run.reviews.at(-1)!; badge = r.findings.length ? `${r.findings.length} note${r.findings.length > 1 ? "s" : ""}` : "clean"; }
     return { id, type: "station", position: { x, y }, draggable: false, data: { label, sub, gate, later, state: later ? "idle" : s?.state ?? "idle", badge, note: s?.note, workers } };
   });

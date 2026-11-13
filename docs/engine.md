@@ -70,7 +70,18 @@ Now, for a real crew on a product-sized run (`maxUsd` of $3 or more), the build 
 
 Whatever still fails at the end goes to the test and fix loop as before. Small runs (a ticket at $0.60) and the practice crew still build in one call. In the app: a Build tab on every run with a row per feature and the locked tests passing after it (`factory.feature`).
 
-Next in the same direction: an evaluator that uses the running app and scores it as a product.
+## The product judge: the running app is judged as a product (2026-11-13)
+
+Passing tests prove the code matches the plan, not that the product does its job. Run 2623 passed 58 of 58 checks, drew all 13 screens, and scored 3 of 10 on what was asked for.
+
+After the review, a new station judges the product (`packages/core/src/factory/evaluate.ts`):
+
+1. The core starts the app and reads every screen in a real browser: the text of its main area and the labels of its controls (`readScreens` in `screencheck.ts`). This costs nothing.
+2. The **Product Judge** (station `evaluate`), a separate agent that sees no code, gets the person's words, the product design and those screens. For each must-have requirement it says whether it saw it working, with what it saw; then it scores function, design and content from 1 to 5.
+3. The core decides: every must-have requirement seen working and every score at 4 or more. A requirement the judge did not answer for counts as not met.
+4. What fails goes to the fix loop as concrete work ("Requirement R2 is not met: ... What the judge saw: ..."), and the app is judged once more. What is still open after that is named in the build gate's question.
+
+It never guesses: with no browser on the computer the station is skipped and says so. Its limit today: it reads what screens show and which controls they have, but it does not click through a journey. In the app: a Judge station on the Bridge and a Judge tab on every run (`factory.evaluation`).
 
 ## Where to see it
 

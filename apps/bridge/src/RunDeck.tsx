@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FactoryRunView, LoopEventView, SeatView, Vote } from "./api";
 
-type Tab = "council" | "product" | "build" | "plan" | "tests" | "loop" | "files" | "review" | "visuals";
+type Tab = "council" | "product" | "build" | "judge" | "plan" | "tests" | "loop" | "files" | "review" | "visuals";
 
 /** What the selected run produced, drawn instead of listed: task graph, test grid, file heat map, visual checks. */
 export function RunDeck({ run }: { run?: FactoryRunView }) {
@@ -12,6 +12,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
   const lastCouncil = run?.council.at(-1);
   const lastReview = run?.reviews.at(-1);
   const lastDisc = run?.discovery.at(-1);
+  const lastEval = run?.evaluations.at(-1);
   const tabs: [Tab, string][] = [
     ["council", `Council${lastCouncil ? ` · ${lastCouncil.brief.outcome}` : run?.stations.council?.state === "skipped" ? " · skipped" : ""}`],
     ["product", `Product${lastDisc ? ` · ${lastDisc.pass ? "passed" : `round ${lastDisc.round}`}` : ""}`],
@@ -21,6 +22,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
     ["loop", `Loop${run?.loop.length ? ` · ${run.loop.filter((l) => l.kind === "attempt").length}` : ""}`],
     ["files", `Files${fileCount ? ` · ${fileCount}` : ""}`],
     ["review", `Review${lastReview ? ` · ${lastReview.findings.length}` : ""}`],
+    ["judge", `Judge${lastEval ? (lastEval.skipped ? " · skipped" : lastEval.pass ? " · passed" : ` · ${lastEval.requirements.filter((q) => !q.met).length} open`) : ""}`],
     ["visuals", `Visuals${run?.visuals.length ? (vFail ? ` · ${vFail} missing` : " · all") : ""}`],
   ];
   return (
@@ -41,6 +43,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
         {run && tab === "council" && <CouncilView run={run} />}
         {run && tab === "product" && <ProductView run={run} />}
         {run && tab === "build" && <BuildView run={run} />}
+        {run && tab === "judge" && <JudgeView run={run} />}
         {run && tab === "review" && <ReviewView run={run} />}
       </div>
     </section>
@@ -189,6 +192,33 @@ function CouncilView({ run }: { run: FactoryRunView }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** The product judge, drawn: a row per must-have requirement (seen working or not, with what the judge saw) and the scores. */
+function JudgeView({ run }: { run: FactoryRunView }) {
+  const [at, setAt] = useState<number | null>(null);
+  if (!run.evaluations.length) return <div className="empty">{run.stations.evaluate?.state === "skipped" ? run.stations.evaluate.note ?? "The product was not judged on this run." : "After the review, a separate judge reads every screen of the running app and checks it against the product design: each requirement, then scores for function, design and content."}</div>;
+  const i = at != null && at < run.evaluations.length ? at : run.evaluations.length - 1;
+  const e = run.evaluations[i];
+  if (e.skipped) return <div className="empty">Not judged: {e.skipped}.</div>;
+  const met = e.requirements.filter((q) => q.met).length;
+  return (
+    <div className="product">
+      <div className="product-top">
+        <div className="rounds">{run.evaluations.map((x, k) => <button key={k} className={`tiny ${k === i ? "" : "ghost"}`} onClick={() => setAt(k)}>Look {x.round}{x.pass ? " ✓" : ""}</button>)}</div>
+        <div className={`product-verdict ${e.pass ? "ok" : "warn"}`}>{e.pass ? "The judge saw every requirement working." : `${met} of ${e.requirements.length} requirements seen working on ${e.screens} screens.`}</div>
+      </div>
+      <div className="scores" role="img" aria-label={`Product scores: ${Object.entries(e.scores).map(([k, v]) => `${k} ${v} of 5`).join(", ")}`}>
+        {Object.entries(e.scores).map(([k, v]) => (
+          <div key={k} className={`score ${v >= e.bar ? "ok" : "low"}`}><span className="score-k">{k}</span><span className="score-bar"><i style={{ width: `${v * 20}%` }} /></span><span className="mono">{v}/5</span></div>
+        ))}
+      </div>
+      <table className="product-reqs"><tbody>
+        {e.requirements.map((q) => <tr key={q.id} className={q.met ? "" : "unmet"}><td className="mono muted">{q.id}</td><td>{q.met ? "✓ seen working" : "✗ not seen"}</td><td>{q.evidence}</td></tr>)}
+      </tbody></table>
+      {!!e.problems.length && <BriefList title="What a user would hit" cls="concerns" items={e.problems.map((p) => `${p.where ? `${p.where}: ` : ""}${p.problem}${p.fix ? ` → ${p.fix}` : ""}`)} />}
     </div>
   );
 }

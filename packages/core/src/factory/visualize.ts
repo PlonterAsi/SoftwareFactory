@@ -30,6 +30,7 @@ export function visualCheck(log: EventLog, run: number, station: StationId, roun
     const feats = of("factory.feature");
     if (feats.length) need(`build: a row per feature (${new Set(feats.map((e) => (e.payload as any).id)).size})`, feats.some((e) => (e.payload as any).state !== "building"));
   }
+  if (station === "evaluate") need(`evaluate: the judge's requirement checks and scores (round ${round ?? 1})`, of("factory.evaluation", sameRound).length > 0);
   if (station === "discover") {
     const d = of("factory.discovery", sameRound).at(-1)?.payload as any;
     need(`discover: product documents and their scores (round ${round ?? 1})`, !!d?.docs?.screens?.length);

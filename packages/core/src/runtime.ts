@@ -230,6 +230,7 @@ export class MockRuntime implements AgentRuntime {
     else if (station === "council") text = MOCK.council(role);
     else if (station === "design") text = MOCK.design;
     else if (station === "critique") text = MOCK.critique;
+    else if (station === "evaluate") text = MOCK.evaluate;
     else if (station === "review") text = MOCK.review;
     else if (station === "order") text = MOCK.order(req.prompt);
     else if (station === "overseer") text = MOCK.overseer(req.prompt);
@@ -252,6 +253,7 @@ const MOCK = {
     requirements: [{ id: "R1", text: "It does what the idea says.", from: "person", must: true }],
     assumptions: ["Practice crew: nothing was researched."],
   }) + "\n```",
+  evaluate: "```json\n" + JSON.stringify({ requirements: [{ id: "R1", met: true, evidence: "Practice crew: the home screen shows it." }], scores: { function: 4, design: 4, content: 4 }, problems: [] }) + "\n```",
   critique: "```json\n" + JSON.stringify({ scores: { coverage: 4, journey: 4, screens: 4, originality: 4, buildable: 5 }, problems: [] }) + "\n```",
   // The practice crew cannot read a codebase; it leaves a note file on the branch so the whole path can be tried for free.
   repo: (prompt: string) => {
