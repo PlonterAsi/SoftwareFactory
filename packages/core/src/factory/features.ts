@@ -15,6 +15,18 @@ import type { ProductDocs } from "./discovery.js";
  * Only the core writes features.json and PROGRESS.md; an agent's edits to them are overwritten.
  */
 
+/**
+ * The designed screen a planned view builds. By id first, then by name (the Planner may rename an id, as in
+ * run 3609 where "My Games" had no design id to match), and the home view falls back to the first screen.
+ */
+export function designScreenFor(docs: ProductDocs | null | undefined, id: string, label?: string): ProductDocs["screens"][number] | undefined {
+  if (!docs) return undefined;
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return docs.screens.find((x) => x.id === id)
+    ?? docs.screens.find((x) => norm(x.id) === norm(id) || (!!label && norm(x.name) === norm(label)))
+    ?? (id === "dashboard" ? docs.screens[0] : undefined);
+}
+
 export interface Feature {
   id: string;
   title: string;
@@ -51,7 +63,7 @@ export function featuresOf(plan: Plan, docs: ProductDocs | null): Feature[] {
     `The pure functions under src/ that the locked tests in test/ import and check, and that the screens will call. The plan's interface: ${plan.interface}`,
     "Every locked test passes (`node --test`).");
   for (const v of views) {
-    const s = docs?.screens.find((x) => x.id === v.id) ?? (v.id === "dashboard" ? docs?.screens[0] : undefined);
+    const s = designScreenFor(docs, v.id, v.label);
     const journeys = (docs?.journeys ?? []).filter((j) => s && j.steps.some((st) => st.toLowerCase().includes(s.name.toLowerCase())));
     add(`Screen: ${v.label}`,
       [

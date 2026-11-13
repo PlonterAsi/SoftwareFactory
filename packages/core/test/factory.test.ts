@@ -72,7 +72,7 @@ describe("factory loop", () => {
     expect(fin.totalUsd).toBeCloseTo(0.0005);
     expect(existsSync(join(fin.dir, "SPEC.md"))).toBe(true);
     expect(git(fin.dir, "tag")).toBe("v0.1.0");
-    expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Fix round 1", "Build: Word Counter", "App kit", "Acceptance tests (locked)", "Spec and plan: Word Counter"]);
+    expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Fix round 1", "Build: Word Counter", "Acceptance tests (locked)", "App kit", "Spec and plan: Word Counter"]);
 
     const tests = events(log, "factory.tests");
     // Four locked tests, the app check, the secret gate (SF-17) and the test integrity guard (SF-24), one cell each.
@@ -242,7 +242,7 @@ describe("resuming runs", () => {
     expect(fin).toMatchObject({ run, outcome: "shipped" });
     // Only the stations after the cut were worked again: no second plan or test-writing call.
     expect(rt.calls.map((c) => c.systemPrompt?.match(/Station contract: (\w+)/)?.[1])).toEqual(["build", "fix", "review"]);
-    expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Fix round 1", "Build: Word Counter", "App kit", "Acceptance tests (locked)", "Spec and plan: Word Counter"]);
+    expect(git(fin.dir, "log", "--format=%s").split("\n")).toEqual(["Fix round 1", "Build: Word Counter", "Acceptance tests (locked)", "App kit", "Spec and plan: Word Counter"]);
     // The organized table follows: stopped, then back in flight, then shipped.
     expect(log.db.prepare("SELECT outcome, resumes, resumed_from FROM factory_runs WHERE id = ?").get(run)).toMatchObject({ outcome: "shipped", resumes: 1, resumed_from: "build" });
     // Spend carries over: the calls before the cut still count.

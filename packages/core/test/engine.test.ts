@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ClaudeCodeRuntime, EventLog, Factory, MockRuntime, parseFileBlocks, runTests, git, type AgentRequest, type AgentRuntime } from "../src/index.js";
@@ -771,6 +771,99 @@ describe("the product judge: the running app is judged as a product", () => {
     expect(ask.req.prompt).toMatch(/=== Screen #\/dashboard ===/);
     expect(ask.req.prompt).not.toMatch(/=== Screen #\/home ===/);
     expect(events(log, "factory.retro").at(-1).bad.join("\n")).toMatch(/judge did not find on its screen/);
+    // After the retry the judge looks again, and this time it all shows.
+    const mine = looks.filter((l) => l.feature === looks[0].feature);
+    expect(mine.map((l) => [l.attempt, l.seen, l.of])).toEqual([[1, 1, 2], [2, 2, 2]]);
+    expect(events(log, "factory.retro").at(-1).good.join("\n")).toMatch(/every screen sent back had what was missing on the second look/);
+  });
+
+  it("a screen still hollow after its retry is not taken on the Builder's word (run 3609)", async () => {
+    const log = new EventLog();
+    const { rt: inner } = crewWith([{ r2: true }], (prompt) => lookAnswer(prompt, ["S1"]));
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => [{ route: "dashboard", text: "Progress", controls: [] }, ...screens];
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    const first = events(log, "factory.screen.look").find((l) => !l.skipped)!;
+    const feats = events(log, "factory.feature").filter((e) => e.id === first.feature && e.state !== "building");
+    expect(feats.map((e) => [e.attempt, e.state])).toEqual([[1, "broken"], [2, "broken"]]);
+    const retro = events(log, "factory.retro").at(-1);
+    expect(retro.bad.join("\n")).toMatch(/still missed designed items on the second look \(dashboard: 1 of 2/);
+  });
+
+  it("finds the designed screen for a view by its name when the Planner renamed its id (run 3609)", async () => {
+    const { designScreenFor } = await import("../src/factory/features.js");
+    const d = { ...docs, screens: [{ ...docs.screens[0], id: "progress", name: "My Games" }, docs.screens[1]] } as never;
+    expect(designScreenFor(d, "my-games", "My Games")?.id).toBe("progress");
+    expect(designScreenFor(d, "session_log", "Session Log")?.id).toBe("log");
+    expect(designScreenFor(d, "Log")?.id).toBe("log");
+    expect(designScreenFor(d, "practice", "Practice")).toBeUndefined();
+    expect(designScreenFor(d, "dashboard")?.id).toBe("progress");
+  });
+
+  it("a repair that cannot finish never fails the run: the build gate gets what is built (run 3609)", async () => {
+    const log = new EventLog();
+    const { rt: inner } = crewWith([{ r2: false }, { r2: false }]);
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      if (station(req) === "build" && /Your feature, J\d+/.test(req.prompt)) {
+        // The repair writes half a file and dies at its cap, every time.
+        if (req.cwd) writeFileSync(join(req.cwd, "web/half.js"), "export const half = ");
+        throw new Error("claude exited 1: error_max_budget_usd");
+      }
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run).catch(() => {});
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    const stopped = events(log, "factory.repair.stopped");
+    expect(stopped[0].reason).toMatch(/a repair call failed: .*error_max_budget_usd/);
+    const fin = events(log, "factory.run.finished").at(-1);
+    expect(existsSync(join(fin.dir, "web/half.js"))).toBe(false);
+    expect(events(log, "factory.retro").at(-1).bad.join("\n")).toMatch(/Repair: stopped/);
+  });
+
+  it("a repair the money left cannot fund does not start (run 3609)", async () => {
+    const log = new EventLog();
+    const { rt: inner, seen } = crewWith([{ r2: false }, { r2: false }]);
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+        // The first repair eats the whole repair pool.
+        if (/^J/.test(id)) r.costUsd = 5;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run).catch(() => {});
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    const repairs = seen.filter((x) => x.station === "build" && /Your feature, J\d+/.test(x.req.prompt));
+    expect(repairs).toHaveLength(1);
+    expect(events(log, "factory.repair.stopped")[0]).toMatchObject({ reason: expect.stringMatching(/left for repairs, under the \$0\.30 one needs/) });
   });
 
   it("a review that still says fix after its last round is recorded and goes first into the repair features (run 3185)", async () => {
@@ -1067,5 +1160,21 @@ describe("what run 2898 taught the engine", () => {
     expect(sourced).toMatch(/real content, not filler[\s\S]*one of the pages listed in that research, copied exactly[\s\S]*Never write a web address from memory/);
     expect(featuresOf(plan, validateDocs(base))[0].what).toMatch(/Leave every link field empty/);
     expect(featuresOf(plan, null)[0].what).not.toMatch(/sample records are real content/);
+  });
+});
+
+describe("what run 3609 taught the engine", () => {
+  it("has the Tester write the person's journeys through the kit's data layer, which is in the folder before the tests", async () => {
+    const log = new EventLog();
+    const mock = new MockRuntime({ plantBug: false });
+    let prompt = "";
+    const dir = tmp("sf-proj-");
+    const rt: AgentRuntime = { name: "mock", run: async (req) => { if (station(req) === "tests") prompt = req.prompt; return mock.run(req); } };
+    const f = new Factory(log, rt, dir);
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0 });
+    await f.wait(run);
+    expect(prompt).toMatch(/test\/journeys\.test\.js[\s\S]*seedDb\(schema\)[\s\S]*createRecord[\s\S]*every sample record/);
+    const fin = events(log, "factory.run.finished").at(-1);
+    expect(git(fin.dir, "log", "--format=%s").split("\n").slice(-3)).toEqual(["Acceptance tests (locked)", "App kit", "Spec and plan: Word Counter"]);
   });
 });

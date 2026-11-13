@@ -15,7 +15,7 @@ import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
-import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
+import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
@@ -601,12 +601,19 @@ class Run {
   private async writeTests() {
     // Tests are locked once written, so they must at least parse: one quiet retry with the error before escalating.
     let feedback = "";
+    // Run 3609: 8 locked files and 186 passing tests, and the Reviewer then found 9 of 12 acceptance criteria
+    // unmet when it used the app ("Add game" failed for three games: their starter items broke the schema).
+    // The tests checked the logic the Builder would write, never a person's action through the app's data.
+    // So the kit goes in first and the Tester also writes journeys through the kit's own data layer, the
+    // same create and update the app's server runs, with the app's real schema and sample records.
+    if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
+    const journeys = this.plan.app ? `\n\n${journeyTestRule(this.plan)}` : "";
     let files: ReturnType<typeof parseFileBlocks> = [];
     let tests: typeof files = [];
     let res!: ReturnType<typeof writeFiles>;
     for (let attempt = 1; ; attempt++) {
       const kept = this.basePlan ? this.testsText() : "";
-      const text = await this.ask(this.one("tests"), `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${kept ? `\n\nThis is the next version of a shipped app. Its locked tests stay as they are (read only):\n${kept}\n\nWrite NEW test files, with new names under test/, for the acceptance criteria above only.` : ""}${feedback}`);
+      const text = await this.ask(this.one("tests"), `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${journeys}${kept ? `\n\nThis is the next version of a shipped app. Its locked tests stay as they are (read only):\n${kept}\n\nWrite NEW test files, with new names under test/, for the acceptance criteria above only.` : ""}${feedback}`);
       files = parseFileBlocks(text);
       // Fixtures (test/fixtures/*.csv and the like) belong to the locked suite too.
       // A feature run never rewrites a locked test: a new file with an old name gets the version in its name.
@@ -692,7 +699,18 @@ class Run {
     for (let i = 0; i < features.length; i++) {
       const f = features[i];
       if (f.state === "built") continue;
+      // A repair gets at least what that work needs, or it does not start (run 3609: J2 got $0.15, died at
+      // its cap three times and used up the run). What is built goes to the build gate as it is.
+      if (more.includes(f)) {
+        const room = Math.min((pool ?? Infinity) - (this.spent - buildStart), this.o.maxUsd - this.spent - 0.15);
+        if (room < REPAIR_FEATURE_MIN_USD) {
+          const skipped = features.slice(i).filter((x) => x.state !== "built").map((x) => x.id);
+          this.log.append("factory.repair.stopped", { run: this.id, reason: `$${Math.max(0, room).toFixed(2)} left for repairs, under the $${REPAIR_FEATURE_MIN_USD.toFixed(2)} one needs`, skipped, spentUsd: Number(this.spent.toFixed(4)) });
+          break;
+        }
+      }
       let retry = "";
+      let wasHollow = false;
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
         const left = features.filter((x) => x.state !== "built").length;
@@ -730,9 +748,12 @@ class Run {
           const sc = await this.f.checkScreens(this.dir).catch(() => null);
           if (sc && !sc.skipped) crashed = sc.screens.filter((x) => !x.ok).map((x) => `#/${x.route}: ${x.problem}`);
         }
-        // A screen that draws can still be hollow: the judge looks at it now, not only at the end.
+        // A screen that draws can still be hollow: the judge looks at it now, not only at the end. After a
+        // retry for what it missed, it looks once more: in run 3609 all five looked-at screens were hollow on
+        // the first look, and "built" on the second try was taken on the Builder's word.
         let hollow: string[] = [];
-        if (attempt === 1 && files.length && !broke.length && !invalid.length && !crashed.length && this.docs && /^Screen: /.test(f.title)) hollow = await this.lookAtScreen(f);
+        if ((attempt === 1 || wasHollow) && files.length && !broke.length && !invalid.length && !crashed.length && this.docs && /^Screen: /.test(f.title)) hollow = await this.lookAtScreen(f, attempt);
+        if (attempt === 1) wasHollow = hollow.length > 0;
         f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length || invalid.length || deadLinks.length || hollow.length ? "broken" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, workbench: true }); }
         this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}), ...(invalid.length ? { invalid } : {}), ...(deadLinks.length ? { deadLinks } : {}), ...(hollow.length ? { hollow } : {}) });
@@ -1059,9 +1080,10 @@ class Run {
    */
   private evaluation: Evaluation | null = null;
   /** The judge's look at one screen just built: what of its design a person would not find. [] when it all shows or the look cannot run. */
-  private async lookAtScreen(f: Feature): Promise<string[]> {
+  private async lookAtScreen(f: Feature, attempt = 1): Promise<string[]> {
     const id = f.what.match(/^The view "([^"]+)"/)?.[1];
-    const docs = id && this.docs ? screenLookDocs(this.docs, id) : null;
+    const docs = id && this.docs ? screenLookDocs(this.docs, id, f.title.replace(/^Screen: /, "")) : null;
+    if (id && !docs) this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, attempt, skipped: "no designed screen matches this view" });
     if (!docs || this.o.maxUsd - this.spent < SCREEN_LOOK_USD * 2) return [];
     const shots = await this.f.readScreens(this.dir).catch(() => null);
     if (!shots?.length) return [];
@@ -1070,7 +1092,7 @@ class Run {
       const e = validateEvaluation(parseJsonBlock(await this.ask(this.one("evaluate"), screenLookPrompt(this.idea, docs, mine.length ? mine : shots), { round: 0 }, { capUsd: SCREEN_LOOK_USD })), docs);
       const req = (rid: string) => docs.requirements.find((r) => r.id === rid)?.text ?? rid;
       const out = e.requirements.filter((r) => !r.met).map((r) => `${req(r.id)} (the judge saw: ${r.evidence})`);
-      this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, seen: e.requirements.length - out.length, of: e.requirements.length, missing: out.slice(0, 20) });
+      this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, attempt, seen: e.requirements.length - out.length, of: e.requirements.length, missing: out.slice(0, 20) });
       return out.slice(0, 12);
     } catch (e) { if (e instanceof StopRun) throw e; return []; }
   }
@@ -1113,9 +1135,20 @@ class Run {
       if (left && work.length) { work.unshift(left); if (work.length > most) work.pop(); }
       if (work.length) {
         this.log.append("factory.repair", { run: this.id, round, features: work.map((f) => ({ id: f.id, title: f.title })), poolUsd: Number(pool.toFixed(2)) });
-        await this.buildByFeature(work, pool);
+        // Repairs are extra work on a product that is already built: one that cannot finish never fails the
+        // run (run 3609 spent its last $0.42 on three dead calls of one repair and ended "failed" with
+        // nothing at the build gate). Its half-written files go back to the last built feature.
+        try { await this.buildByFeature(work, pool); }
+        catch (e) {
+          if (e instanceof StopRun) throw e;
+          try { git(this.dir, "checkout", "--", "."); git(this.dir, "clean", "-fdq", "src", "web"); } catch { /* the gate shows the folder as it is */ }
+          this.log.append("factory.repair.stopped", { run: this.id, round, reason: `a repair call failed: ${String((e as Error).message).slice(0, 200)}`, spentUsd: Number(this.spent.toFixed(4)) });
+        }
+        if (this.o.maxUsd - this.spent < 0.3) return;
         await this.testFixLoop("", true);
       } else await this.testFixLoop(evaluationFeedback(ev.e, docs), true);
+      // The judge's second look needs money too; without it the person decides on the first look.
+      if (this.o.maxUsd - this.spent < 0.15) return;
     }
   }
 
@@ -1495,6 +1528,18 @@ export function withDesignedScreens(plan: Plan, docs: ProductDocs): { plan: Plan
  * snake_case (band_min), the kit refuses those, the app could not start, and every feature still "built". The
  * plan is put right once, here, so the Tester and the Builder never see a name the kit will refuse.
  */
+/** What the Tester is told for an app: journeys through the kit's data layer, one per action criterion. */
+export function journeyTestRule(plan: Plan): string {
+  const ents = (plan.entities ?? []).map((e) => e.name);
+  return [
+    "This is an app, so besides the logic tests write test/journeys.test.js: what a person does, through the app's own data layer, exactly as the running app does it.",
+    "- Import the app's model with `import * as schema from \"../src/schema.js\"` and the kit's data layer with `import { seedDb, createRecord, updateRecord, deleteRecord, query } from \"../web/kit/db.js\"` (it exists already; the server runs these same functions, and a record they refuse is refused in the app too).",
+    "- Start each journey from `seedDb(schema)`, the sample records the person sees on first open, and do the person's action with createRecord / updateRecord and the src/ functions the screens will call. Then assert what the person would see in the data afterwards.",
+    `- One journey per acceptance criterion that is about something the person does (adds, edits, refreshes, plans, picks, logs), named after the criterion.${ents.length ? ` The entities are ${ents.join(", ")}.` : ""}`,
+    "- Also one test that every sample record in seedDb(schema) passes the kit's validation (createRecord of a copy of it does not throw), and that every kind of thing the person named has sample records.",
+  ].join("\n");
+}
+
 export function kitName(x: unknown): string {
   const parts = String(x ?? "").trim().split(/[^A-Za-z0-9]+/).filter(Boolean);
   const s = parts.map((w, i) => (i ? w[0].toUpperCase() + w.slice(1) : w[0].toLowerCase() + w.slice(1))).join("").replace(/^[0-9]+/, "");

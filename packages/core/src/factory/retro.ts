@@ -108,11 +108,17 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
   if (continued.length) bad.push(`Build loop: ${plural(continued.length, "call")} ran out of ${continued.length === 1 ? "its" : "their"} own budget mid-work and had to be continued.`);
 
   // The checks: a check that catches something is the engine working; what it caught is the builder's miss.
-  const looks = of("factory.screen.look");
+  const allLooks = of("factory.screen.look");
+  const looks = allLooks.filter((l) => !l.skipped && (l.attempt ?? 1) === 1);
   if (looks.length) {
     const short = looks.filter((l) => (l.missing ?? []).length);
     good.push(`Checks: the product judge looked at ${plural(looks.length, "screen")} just after ${looks.length === 1 ? "it was" : "they were"} built${short.length ? ` and sent ${short.length} back with what was missing` : " and found every designed item"}.`);
+    const again = allLooks.filter((l) => !l.skipped && l.attempt === 2);
+    const still = again.filter((l) => (l.missing ?? []).length);
+    if (again.length) (still.length ? bad : good).push(`Builder: ${still.length ? `${still.length} of ${plural(again.length, "screen")} sent back still missed designed items on the second look (${still.map((l) => `${l.screen}: ${l.seen} of ${l.of}`).join(", ")})` : `every screen sent back had what was missing on the second look (${plural(again.length, "screen")})`}.`);
   }
+  const unmatched = allLooks.filter((l) => l.skipped);
+  if (unmatched.length) bad.push(`Planner: ${plural(unmatched.length, "view")} matched no designed screen, so the judge could not look at ${unmatched.length === 1 ? "it" : "them"} while building (${unmatched.map((l) => l.screen).join(", ")}).`);
   const firstScreens = of("factory.screens")[0];
   if (firstScreens && !firstScreens.skipped) {
     const crashed = (firstScreens.screens ?? []).filter((s: any) => !s.ok);
@@ -151,6 +157,7 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
   } else if (of("factory.evaluation").length) bad.push(`Product judge: the product was not judged (${String(of("factory.evaluation")[0].skipped).slice(0, 160)}).`);
   const repairs = of("factory.repair");
   if (repairs.length) good.push(`Judge loop: the judge's findings went back to the build loop as ${plural(repairs.reduce((a, r) => a + (r.features ?? []).length, 0), "feature")}.`);
+  for (const s of of("factory.repair.stopped")) bad.push(`Repair: stopped before the build gate (${String(s.reason).slice(0, 160)}${s.skipped?.length ? `; not built: ${s.skipped.join(", ")}` : ""}).`);
 
   // Agent calls and the run as a whole.
   const retried = of("agent.run.retried").length;
