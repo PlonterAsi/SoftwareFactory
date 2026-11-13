@@ -1164,6 +1164,14 @@ describe("what run 2898 taught the engine", () => {
 });
 
 describe("what run 3609 taught the engine", () => {
+  it("tells the Designer and the Critic what an app's values can come from, so buildable is judged on real origins", async () => {
+    const { CONTRACTS } = await import("../src/bay/builtin.js");
+    const { critiquePrompt } = await import("../src/factory/discovery.js");
+    expect(CONTRACTS.design).toMatch(/never vote or view counts, video timestamps[\s\S]*Every value a screen shows needs an origin/);
+    const docs = { brief: { who: "w", problem: "p", promise: "x", notThis: [] }, research: [], assumptions: [], journeys: [], screens: [], requirements: [] };
+    expect(critiquePrompt("idea", docs as never, 1)).toMatch(/buildable: .*every value a screen shows has an origin that can really supply it/);
+  });
+
   it("has the Tester write the person's journeys through the kit's data layer, which is in the folder before the tests", async () => {
     const log = new EventLog();
     const mock = new MockRuntime({ plantBug: false });
