@@ -26,6 +26,10 @@ export function visualCheck(log: EventLog, run: number, station: StationId, roun
     need(`${station}: agent calls as timeline pulses (${started.length})`, started.length > 0 && started.every((s) => doneIds.has(s.id)));
   }
   if (station === "intake") need("idea: star on the star map", log.list({ type: "signal.captured", sinceId: run - 1, limit: 1e6 }).some((e) => (e.payload as any).source === "factory"));
+  if (station === "discover") {
+    const d = of("factory.discovery", sameRound).at(-1)?.payload as any;
+    need(`discover: product documents and their scores (round ${round ?? 1})`, !!d?.docs?.screens?.length);
+  }
   if (station === "council") {
     const c = of("factory.council", sameRound).at(-1)?.payload as any;
     need(`council: seats around the table (${c?.seats?.length ?? 0} takes, round ${round ?? 1})`, !!c?.seats?.length && !!c?.brief);

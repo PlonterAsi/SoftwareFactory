@@ -1,6 +1,6 @@
 import { failureLines } from "./trim.js";
 import { SAME_TESTS_REASON, stopReason, type RoundRecord } from "./stoprules.js";
-import { recallBlock } from "../brain/recall.js";
+import { PERSON_KINDS, recallBlock } from "../brain/recall.js";
 import { existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
@@ -12,6 +12,7 @@ import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
+import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, revisePrompt, validateCritique, validateDocs, type Critique, type ProductDocs } from "./discovery.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
@@ -39,7 +40,7 @@ import {
  * station may pass. All state is written to the event log; the Bridge draws
  * from it.
  */
-export type StationId = "intake" | "council" | "plan" | "gateA" | "tests" | "build" | "test" | "fix" | "review" | "gateB" | "ship";
+export type StationId = "intake" | "council" | "discover" | "plan" | "gateA" | "tests" | "build" | "test" | "fix" | "review" | "gateB" | "ship";
 export type GateId = "gateA" | "gateB" | "escalation";
 
 export interface Plan {
@@ -339,6 +340,9 @@ class Run {
   private lockedCases: number | undefined;
   private fixRounds = 0;
   private brief: CouncilBrief | null = null;
+  /** The product documents discovery settled on, and the Critic's last word on them. */
+  private docs: ProductDocs | null = null;
+  private docsCritique: Critique | null = null;
   /** A feature run: the plan that shipped, which the next version builds on. */
   private basePlan: Plan | null = null;
 
@@ -360,6 +364,7 @@ class Run {
       const done = from?.done ?? new Set<string>();
       if (!done.has("intake")) await this.station("intake", async () => { captureSignal(this.log, this.idea, "factory"); });
       if (!done.has("council")) await this.councilLoop();
+      if (!done.has("discover")) await this.discoverLoop();
       if (!done.has("plan")) await this.planLoop(done.has("planWritten"));
       if (!done.has("tests")) await this.station("tests", () => this.writeTests());
       if (!done.has("build")) await this.station("build", () => this.build());
@@ -383,6 +388,8 @@ class Run {
     this.calls = st.calls;
     this.fixRounds = st.fixRounds;
     this.brief = st.brief;
+    this.docs = st.docs;
+    this.docsCritique = st.docsCritique;
     this.reviewNotes = st.review;
     if (st.plan) { this.plan = st.plan; this.dir = st.dir ?? ""; }
     if (st.lockedHash) {
@@ -434,6 +441,53 @@ class Run {
     function votesOf(all: SeatResult[], round: number) { return all.filter((s) => s.round === round && s.take).map((s) => s.take!.vote); }
   }
 
+  /**
+   * Discovery: the idea becomes product documents in a loop of its own, before any plan (discovery.ts).
+   * The Designer writes them, the Critic scores them, the Designer revises; the core decides from the scores.
+   * It ends when every score reaches the bar, or after MAX_DISCOVERY_ROUNDS, or when discovery has used its
+   * share of the budget; the best-scored documents go on, and their scores are shown at the plan gate.
+   */
+  private async discoverLoop() {
+    // The next version of a shipped app keeps the design it has: its plan is the base.
+    if (this.screen) { this.mark("discover", "skipped", undefined, "The next version of a shipped app keeps its design"); return; }
+    let best: { docs: ProductDocs; critique: Critique | null; round: number } | null = null;
+    let last: { docs: ProductDocs; critique: Critique | null } | null = null;
+    let why = "";
+    for (let round = 1; round <= MAX_DISCOVERY_ROUNDS; round++) {
+      const got = await this.station("discover", async () => {
+        const designer = this.one("design");
+        // Design is worth a real share of the run, but a small run cannot afford much research: say so up front.
+        const designCap = Math.min(designer.budgetUsd, this.o.maxUsd * 0.25);
+        const searches = round > 1 ? 0 : designCap >= 0.3 ? 6 : designCap >= 0.12 ? 2 : 0;
+        const prompt = (last?.critique
+          ? revisePrompt(this.idea, last.docs, last.critique, round)
+          : `Idea: ${this.idea}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}`)
+          + `\n\n${searches ? `You can afford at most ${searches} web searches on this call.` : "Do not search the web on this call: work from what you know and what is above."}`;
+        let docs: ProductDocs;
+        try { docs = validateDocs(parseJsonBlock(await this.ask(designer, prompt, { round }, { capUsd: designCap }))); }
+        catch (e) { if (!(e instanceof StopRun)) this.verdict(designer, "design", false, round, (e as Error).message); throw e; }
+        // A separate agent judges: an agent asked to grade its own design praises it.
+        const critic = this.one("critique");
+        let critique: Critique | null = null;
+        try { critique = validateCritique(parseJsonBlock(await this.ask(critic, critiquePrompt(this.idea, docs, round), { round }, { capUsd: Math.max(0.05, this.o.maxUsd * 0.1) }))); }
+        catch (e) { if (e instanceof StopRun) throw e; this.verdict(critic, "critique", false, round, (e as Error).message); }
+        const pass = !!critique && critiquePasses(critique);
+        if (critique) this.verdict(designer, "design", pass, round, pass ? undefined : critique.problems[0]?.problem);
+        this.log.append("factory.discovery", { run: this.id, round, docs, critique, pass, bar: PASS_SCORE });
+        return { docs, critique, pass };
+      }, round);
+      last = got;
+      if (!best || (got.critique ? critiqueTotal(got.critique) : 0) >= (best.critique ? critiqueTotal(best.critique) : 0)) best = { ...got, round };
+      if (got.pass) break;
+      if (!got.critique) { why = "the Critic gave no usable scores"; break; }
+      if (round === MAX_DISCOVERY_ROUNDS) { why = `still under the bar after ${round} rounds`; break; }
+      if (this.spent >= this.o.maxUsd * DISCOVERY_BUDGET_SHARE) { why = "discovery used its share of the budget"; break; }
+    }
+    this.docs = best!.docs;
+    this.docsCritique = best!.critique;
+    if (why) this.log.append("factory.discovery", { run: this.id, round: best!.round, docs: best!.docs, critique: best!.critique, pass: false, bar: PASS_SCORE, settled: why });
+  }
+
   private async planLoop(written = false) {
     let feedback = "";
     for (;;) {
@@ -443,7 +497,7 @@ class Run {
         const onTop = this.basePlan
           ? `This app already shipped. Its approved plan:\n${JSON.stringify(this.basePlan, null, 2)}\n\nThe person now asks to add: ${this.idea}\n\nWrite the plan for its next version in the same JSON shape: keep the same name and slug, and every existing entity, field, view, flow and exported function (they still work and their tests stay locked); add what the ask needs. New fields on existing entities are optional, so records already saved still load. In "acceptance", list ONLY the new criteria: the old ones stay as they are.`
           : `Idea: ${this.idea}`;
-        const text = await this.ask(this.one("plan"), `${onTop}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
+        const text = await this.ask(this.one("plan"), `${onTop}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${this.docs ? `\n\n${docsForPlanner(this.docs)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
         let plan = validatePlan(parseJsonBlock<Plan>(text));
         // Nothing the person asked for may fall out of the plan (run 2623's plan dropped the skill tree, the
         // practice plan, the session log and the genre shapes). A second agent lists what the plan misses; the
@@ -464,7 +518,8 @@ class Run {
           this.dir = resolve(join(this.f.projectsDir, `${plan.slug}-${this.id}`));
           initRepo(this.dir);
         }
-        const spec = writeFiles(this.dir, [{ path: "SPEC.md", content: specMarkdown(this.idea, plan) }], { lockTests: true });
+        // The product documents live in the project: every later agent and the person can read them there.
+        const spec = writeFiles(this.dir, [{ path: "SPEC.md", content: specMarkdown(this.idea, plan) }, ...(this.docs ? docsFiles(this.idea, this.docs, this.docsCritique) : [])], { lockTests: true });
         const sha = commitAll(this.dir, `Spec and plan: ${plan.name}`);
         this.log.append("factory.plan", { run: this.id, plan, dir: this.dir, sha, written: spec.written });
       });
@@ -756,13 +811,17 @@ class Run {
 
   /** What the person asked for that the plan leaves out, as short phrases; [] when it covers everything or the check fails. */
   private async planGaps(plan: Plan): Promise<string[]> {
-    if (this.idea.trim().split(/[.!?\n]+/).filter((x) => x.trim().length > 12).length < 3) return [];
+    const reqs = this.docs ? mustRequirements(this.docs) : [];
+    if (!reqs.length && this.idea.trim().split(/[.!?\n]+/).filter((x) => x.trim().length > 12).length < 3) return [];
     try {
-      const text = await this.ask(this.one("tests"), [
-        "You check a plan against what the person asked for. Do not write tests or files.",
+      // With product documents the Critic checks the plan against them (it already judged them); without, the Tester does.
+      const text = await this.ask(this.docs ? this.one("critique") : this.one("tests"), [
+        "This time you check a plan against what the person asked for. Do not score anything and do not write tests or files.",
         `What the person asked for:\n${this.idea}`,
+        ...(reqs.length ? [`The product requirements the plan must implement:\n${reqs.map((x) => `- ${x}`).join("\n")}`] : []),
+        ...(this.docs ? [`The screens it must have: ${this.docs.screens.map((s) => `${s.id} (${s.name})`).join(", ")}`] : []),
         `The plan:\n${JSON.stringify(plan, null, 2)}`,
-        "List every distinct requirement in what the person asked for (a feature, screen, kind of data, behaviour or example they named). For each, decide whether the plan covers it in its acceptance criteria, entities, views or flows.",
+        "List every distinct requirement in what the person asked for (a feature, screen, kind of data, behaviour or example they named), and every product requirement and screen above when given. For each, decide whether the plan covers it in its acceptance criteria, entities, views or flows.",
         'Answer only JSON: {"missing": ["short phrase for each requirement the plan does not cover"]}. An empty list when it covers everything.',
       ].join("\n\n"));
       const j = parseJsonBlock<{ missing?: unknown }>(text);
@@ -922,7 +981,10 @@ class Run {
   /** The person's past notes and decisions closest to this idea (SF-22), worked out once per run and logged. */
   private recalled(): string {
     if (this.recallText === null) {
-      this.recallText = recallBlock(this.log, this.idea, 5);
+      // Only the person's own words (notes, tickets). Past plans and Council decisions anchored every new build
+      // of an idea to the first, weakest one (Assaf, 2026-11-13: "every next version is based on the first").
+      // A version built on a shipped app goes through the feature path, which reads its plan on purpose.
+      this.recallText = recallBlock(this.log, this.idea, 5, PERSON_KINDS);
       this.log.append("factory.recall", { run: this.id, count: this.recallText ? this.recallText.split("\n").length - 1 : 0 });
     }
     return this.recallText;
@@ -970,7 +1032,7 @@ class Run {
   /** One agent call, inside both its own cap and what is left of the run's cap. */
   /** The CLI session of the last successful call, so a follow-up can continue it. */
   private lastSession: string | undefined;
-  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean } = {}): Promise<string> {
+  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number } = {}): Promise<string> {
     if (this.o.maxUsd - this.spent < 0.01) {
       // Council seats ask at the same time: one question, and the others see the answer.
       await this.gateTurn(async () => {
@@ -984,7 +1046,7 @@ class Run {
     }
     // A hint you gave with Retry reaches the next agent call of that station.
     if (this.hint) prompt += `\n\nThe person retried this step after it failed (${this.hint.error.slice(0, 300)}) and said: ${this.hint.note}`;
-    const cap = Math.max(0.01, Math.min(m.budgetUsd, this.o.maxUsd - this.spent));
+    const cap = Math.max(0.01, Math.min(x.capUsd ?? m.budgetUsd, m.budgetUsd, this.o.maxUsd - this.spent));
     this.calls++;
     // The Builder and Fixer of a real crew work at the workbench: the project folder, file tools and a shell.
     const bench = !x.noTools && this.bench && (m.station === "build" || m.station === "fix") && !!this.dir && existsSync(this.dir);
@@ -1134,7 +1196,7 @@ export function strongerModel(model: string): string {
 }
 
 function stationName(id: StationId) {
-  return ({ intake: "Intake", council: "Council", plan: "Plan", gateA: "Plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", review: "Review", gateB: "Build gate", ship: "Ship" } as const)[id];
+  return ({ intake: "Intake", council: "Council", discover: "Discovery", plan: "Plan", gateA: "Plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", review: "Review", gateB: "Build gate", ship: "Ship" } as const)[id];
 }
 
 export function validatePlan(p: Plan): Plan {
@@ -1213,6 +1275,8 @@ export interface RestoredState {
   dir?: string;
   lockedHash?: string;
   brief: CouncilBrief | null;
+  docs: ProductDocs | null;
+  docsCritique: Critique | null;
   review: ReviewResult | null;
 }
 
@@ -1233,6 +1297,10 @@ export function restoreState(log: EventLog, run: number): RestoredState {
   const council = stations.filter((p) => p.station === "council").at(-1);
   const brief = (of("factory.council").at(-1)?.brief ?? null) as CouncilBrief | null;
   if (council?.state === "skipped" || plan || (council?.state === "pass" && brief && brief.outcome !== "drop")) done.add("council");
+  // Discovery is done when it was skipped, or when it settled on documents (it passed, or said why it stopped), or a plan exists.
+  const disc = of("factory.discovery");
+  const settled = disc.filter((d) => d.pass || d.settled).at(-1);
+  if (plan || settled || stations.some((p) => p.station === "discover" && p.state === "skipped")) done.add("discover");
   if (plan) done.add("planWritten");
   if (lastPlanAt >= 0 && evs.slice(lastPlanAt).some((e) => e.type === "factory.gate" && (e.payload as any).gate === "gateA" && (e.payload as any).state === "approved")) done.add("plan");
   const locked = of("factory.tests.locked").at(-1);
@@ -1241,7 +1309,7 @@ export function restoreState(log: EventLog, run: number): RestoredState {
   const gateB = gates.filter((g) => g.gate === "gateB");
   if (done.has("build") && gateB.length) done.add("reviewed");
   if (done.has("reviewed") && gateB.at(-1)?.state === "approved") done.add("accepted");
-  const order: [string, StationId][] = [["intake", "intake"], ["council", "council"], ["planWritten", "plan"], ["plan", "gateA"], ["tests", "tests"], ["build", "build"], ["reviewed", "test"], ["accepted", "gateB"]];
+  const order: [string, StationId][] = [["intake", "intake"], ["council", "council"], ["discover", "discover"], ["planWritten", "plan"], ["plan", "gateA"], ["tests", "tests"], ["build", "build"], ["reviewed", "test"], ["accepted", "gateB"]];
   const from = order.find(([k]) => !done.has(k))?.[1] ?? "ship";
   const completed = [...of("agent.run.completed"), ...of("agent.run.failed")];
   const reviews = of("factory.review");
@@ -1253,6 +1321,7 @@ export function restoreState(log: EventLog, run: number): RestoredState {
     maxUsd: budget?.maxUsd,
     fixRounds: Math.max(0, ...stations.filter((p) => p.station === "fix" && p.round).map((p) => Number(p.round))),
     plan: plan?.plan, dir: plan?.dir, lockedHash: done.has("tests") ? locked?.hash : undefined,
-    brief, review: reviews.length ? { verdict: reviews.at(-1).verdict, findings: reviews.at(-1).findings } : null,
+    brief, docs: (settled ?? disc.at(-1))?.docs ?? null, docsCritique: (settled ?? disc.at(-1))?.critique ?? null,
+    review: reviews.length ? { verdict: reviews.at(-1).verdict, findings: reviews.at(-1).findings } : null,
   };
 }

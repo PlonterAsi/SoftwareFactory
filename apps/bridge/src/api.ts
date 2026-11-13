@@ -96,6 +96,8 @@ export interface FactoryRunView {
   retrying?: { station: string; attempt: number; at: string };
   fixRounds: number;
   council: { round: number; seats: SeatView[]; brief: CouncilBriefView }[];
+  /** Discovery: each round's product documents and the Critic's scores; the last entry is what the plan is built from. */
+  discovery: DiscoveryRoundView[];
   reviews: ReviewView[];
   /** The engine's loop (H5, H6): every fix attempt, what it changed and what came of it, and each step up the ladder. */
   loop: LoopEventView[];
@@ -103,6 +105,16 @@ export interface FactoryRunView {
   /** Picked up again after the app closed: from which station, how many times, and whether on its own. */
   resumed?: { from: string; auto: boolean; count: number; at: string };
 }
+
+export interface ProductDocsView {
+  brief: { who: string; problem: string; promise: string; notThis: string[] };
+  research: { finding: string; source?: string }[];
+  journeys: { moment: string; goal: string; steps: string[] }[];
+  screens: { id: string; name: string; purpose: string; shows: string[]; actions: string[] }[];
+  requirements: { id: string; text: string; from: "person" | "design"; must: boolean }[];
+  assumptions: string[];
+}
+export interface DiscoveryRoundView { round: number; docs: ProductDocsView; critique: { scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] } | null; pass: boolean; bar: number; settled?: string }
 
 export type LoopEventView =
   | { kind: "attempt"; at: string; round: number; agent: string; model: string; before: number; after: number; files: string[]; said: string; dispute?: string; ladder: string }
@@ -116,7 +128,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
   for (const e of events) {
     const p = e.payload ?? {};
     if (e.type === "factory.run.started") {
-      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], reviews: [], loop: [] });
+      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], discovery: [], reviews: [], loop: [] });
       continue;
     }
     const r = runs.get(p.run ?? p.factoryRun);
@@ -131,6 +143,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         break;
       case "factory.plan": r.plan = p.plan; r.dir = p.dir; break;
       case "factory.council": r.council.push({ round: p.round, seats: p.seats, brief: p.brief }); break;
+      case "factory.discovery": r.discovery.push({ round: p.round, docs: p.docs, critique: p.critique ?? null, pass: !!p.pass, bar: p.bar ?? 4, settled: p.settled }); break;
       case "factory.review": r.reviews.push({ round: p.round, agent: p.agent, verdict: p.verdict, findings: p.findings, criteria: p.criteria }); break;
       case "factory.attempt": r.loop.push({ kind: "attempt", at: e.ts, round: p.round, agent: p.agent, model: p.model, before: p.before, after: p.after, files: p.files ?? [], said: p.said ?? "", dispute: p.dispute, ladder: p.ladder }); break;
       case "factory.ladder": r.loop.push({ kind: "ladder", at: e.ts, from: p.from, to: p.to, reason: p.reason, round: p.round }); break;
@@ -298,9 +311,9 @@ export function useOrder(events: SfEvent[]) {
 
 // ---- Agent Bay (milestone 4) ----
 
-export const SLOTS = ["council", "plan", "tests", "build", "review", "fix", "order", "overseer", "improve", "map", "survey"] as const;
+export const SLOTS = ["council", "design", "critique", "plan", "tests", "build", "review", "fix", "order", "overseer", "improve", "map", "survey"] as const;
 export type Slot = (typeof SLOTS)[number];
-export const SLOT_LABEL: Record<Slot, string> = { council: "Council", plan: "Spec and plan", tests: "Acceptance tests", build: "Build", review: "Review", fix: "Fix", order: "Order Engine", overseer: "Assistant", improve: "Improvement Council", map: "Code map", survey: "Code survey" };
+export const SLOT_LABEL: Record<Slot, string> = { council: "Council", design: "Product design", critique: "Design critic", plan: "Spec and plan", tests: "Acceptance tests", build: "Build", review: "Review", fix: "Fix", order: "Order Engine", overseer: "Assistant", improve: "Improvement Council", map: "Code map", survey: "Code survey" };
 export interface AgentDef { id: string; name: string; avatar: string; description: string; station: Slot | "none"; model: string; budgetUsd: number; plugins: string[]; skills: string[]; tools: string[]; mcp?: string[]; sample: string; prompt: string }
 /** What an agent's settings can choose from (core: bay/kits.ts). */
 export interface BayLibrary { skills: { name: string; description: string; source: "bundled" | "yours" }[]; tools: { name: string; note: string }[]; mcp: { name: string; command: string; note?: string; source?: "bundled" | "yours" }[]; mcpFile: string | null }

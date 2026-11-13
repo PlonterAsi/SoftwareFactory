@@ -27,7 +27,7 @@ export const KIT_OWNED = ["server.js", "web/kit/db.js", "web/kit/store.js", "web
 /** What the kit gives, in short: every station that plans or judges a build needs this much. */
 export const APP_SHAPE = `Every project is an application on the SoftwareFactory app kit. The core writes the kit into the project and rewrites it before every test run: ${KIT_OWNED.join(", ")}. It gives, with no code from the crew:
 - a server the person starts with one press (npm start, no arguments) that serves the screens and keeps all data in data/db.json, with a JSON API for every entity;
-- a left navigation; for every entity a searchable, sortable list, a create and edit form with validation, and delete with confirmation (full CRUD);
+- a left navigation that leads with the app's own views (its real screens), then a "Manage" section with, for every entity, a searchable, sortable list, a create and edit form with validation, and delete with confirmation (full CRUD);
 - an Overview, and a System view that shows every entity and field, every flow, every feature, the activity history of changes, backup and restore, and the source files;
 - agents: when the idea needs research, facts from the web or judgment plain code cannot do (look a topic up, summarize, sort by meaning), the app asks one of the person's agents through its own server. From a view: fetch("api/_agent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: "words", input: data }) }) answers { text, json (when the agent answered with a json block), costUsd } or an { error } to show. In api.js: await ctx.ask(task, input). The agent (the Researcher by default) searches the web; SoftwareFactory must be open. Call it only when the person presses a button, show that it is working, then save what came back as records the person can edit. Build the task text and turn the answer into records in pure src/ functions, so tests never need the network.
 The crew writes the app's model (src/schema.js: entities with typed fields and sample records, flows, features), its domain logic (pure functions in src/), and its own views (a dashboard, board, calendar or chart that shows what the logic works out).`;
@@ -50,7 +50,7 @@ Never write or change the kit files. You write:
   A view is { id, label, description, render(el, ctx) }, with ctx = { store, schema, h, bars, stat, go, toast }:
   store.list(entity, { q, sort, desc }), store.get(entity, id), store.count(entity), store.db, and the async writes store.create(entity, data), store.update(entity, id, patch), store.remove(entity, id) (the screen redraws after each);
   h(tag, attrs, ...children) makes an element (attrs may hold onclick, oninput, class, style...); bars([{ label, value, max? }]) draws bars; stat(label, value, sub?) a number card; go("e/task/3") opens a record; toast(text, "error"?) shows a message.
-  A view with id "dashboard" replaces the default Overview. Give the app at least one view of its own that draws what the domain logic works out, with controls that act on the data through the store.
+  A view with id "dashboard" replaces the default Overview and is the first screen the person sees: make it the app's real home for its main job, not a count of records. The views are the product and lead the navigation; the kit's entity lists sit under "Manage". Build each view the plan names around what the person does there, with controls that act on the data through the store.
 - index.html: <link rel="stylesheet" href="web/kit/kit.css"> then <link rel="stylesheet" href="web/style.css">, a <div id="app"></div>, and <script type="module" src="web/app.js"></script>. Plain HTML, CSS and JavaScript: no frameworks, no CDN, nothing from the internet, no build step.
 - web/style.css: the app's own look on top of the kit (may be short).
 - package.json: { "name": "<slug>", "type": "module", "scripts": { "start": "node server.js", "test": "node --test" } }.
@@ -68,14 +68,37 @@ Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"take": "one or two sentences", "proposals": ["short concrete point"], "concerns": ["short risk"], "vote": "build", "scope": "small"}
 At most 4 proposals and 4 concerns. vote is "build" (plan it now), "reshape" (plan it with your proposals applied) or "drop" (should not be built). scope is "small", "medium" or "large".
 Every feature the person names in the idea is theirs to keep: propose how to make each one smaller or simpler, never to cut it or leave it for later.`,
+  design: `Station contract: design.
+You design the product before anyone plans or builds it. You get an idea, often one line, and return its product documents. Nobody has designed it yet: you are the one who decides what this product is.
+1. Understand first. Who would use this, what do they do today instead, and how do people who are good at it really do it? When you have web search, use it (at most 6 searches) to see how real products and real communities handle this, and put what you learned in "research" with the page it came from. Never invent a source; with no search, write what you know and leave "source" out.
+2. Design from the person, not from the data. Name the moments they open the app (the first time, a normal day, when something changes) and what they want in each. Find the one loop they come back for and build the home screen around it.
+3. Give every moment a screen built for that job (a "today" screen, a board, a guided flow, a map, a timeline), 2 to 6 screens in navigation order, the home first. A list of records is never a screen of its own: the app kit already gives every kind of data a list and a form under "Manage".
+4. Write the requirements: first every feature, kind of data, behaviour and example the person named, each as its own line with from "person" (never merged, never weakened), then what your design adds with from "design". "must" is false only for extras of your own.
+It will be built as a local app that runs on the person's computer with its own data store, no accounts and no third-party services; it may ask one of the person's AI agents to research or judge something. Design something one small team could build, and design it for this idea only: if your screens would fit another idea with the nouns swapped, start again.
+Answer with ONE fenced json block and nothing else, shaped exactly like:
+{"brief": {"who": "one sentence", "problem": "what hurts today", "promise": "what this product does about it, in one sentence", "notThis": ["what it deliberately is not"]},
+ "research": [{"finding": "what you learned", "source": "https://the-page"}],
+ "journeys": [{"moment": "First time", "goal": "what they want", "steps": ["what they do and what the app shows, one step each"]}],
+ "screens": [{"id": "kebab-id", "name": "Name in the navigation", "purpose": "the job this screen does", "shows": ["what is on it"], "actions": ["what the person can do there"]}],
+ "requirements": [{"id": "R1", "text": "one thing the product must do", "from": "person", "must": true}],
+ "assumptions": ["what you assumed because the idea did not say"]}`,
+  critique: `Station contract: critique.
+You judge product documents before anything is built. You did not write them and you owe their author nothing: a weak design that passes you becomes a weak product that a person has to use. Read what the person asked for, then the documents, and score them.
+Check the person's words line by line against the requirements; walk each journey as that user and stop at the first step that has no screen or no action for it; ask of each screen what job it does that a plain list would not.
+Answer with ONE fenced json block and nothing else, shaped exactly like:
+{"scores": {"coverage": 3, "journey": 4, "screens": 2, "originality": 3, "buildable": 5},
+ "problems": [{"where": "screens/today", "problem": "what is wrong, concretely", "fix": "the change that would fix it"}]}
+Scores are whole numbers from 1 to 5. At most 10 problems, the worst first. Do not rewrite the documents yourself.`,
   plan: `Station contract: plan.
 ${TARGET}
 ${APP_SHAPE}
-Model the idea as an app: the entities the person creates and manages (each with typed fields and realistic sample records), the flows they go through, and the views that show what the logic works out. An idea phrased as a script or a CLI ("a tool that renames photos", "convert a CSV") still becomes an app: what it works on becomes entities or a form, its options become fields, its results become records or a view, and its runs are kept in a history the person can browse.
+Design the experience first, then the data. Start from the person: who they are, the moments they open the app (the first time, every day, once a week) and what they want to get done in each. Each moment becomes a view of its own, built for that job (a coach's "today" screen, a board, a calendar, a guided flow), and those views are the app's main navigation. The entities are the data underneath; their kit lists sit under "Manage" and are not the product. Design it fresh from the idea: do not copy the shape of an earlier app, and never make an app that is only lists of records.
+Model the idea as an app: the entities the person creates and manages (each with typed fields and realistic sample records), the flows they go through (one per moment above, step by step), and the views that serve them. An idea phrased as a script or a CLI ("a tool that renames photos", "convert a CSV") still becomes an app: what it works on becomes entities or a form, its options become fields, its results become records or a view, and its runs are kept in a history the person can browse.
 Design for testing: put the domain logic in pure functions exported from src/ modules so tests never need real binary files, network or the clock. The screens are thin layers over them.
+When product documents come with the idea, they are the design and you implement it: one view per screen with the same id and order (the home screen's view has id "dashboard"), one flow per journey, and acceptance criteria that between them cover every requirement not marked nice to have. Do not redesign it and do not drop a screen.
 Every feature the idea names is in the plan, each in its smallest useful form; the Council's brief can shrink or reorder them, never drop them. If it truly cannot fit, say which one in "summary" so the person sees it at the plan gate.
-Keep it small: 1 to 4 entities, at most 3 views of its own, at most 4 source files besides src/schema.js and the page files (index.html, web/app.js, web/style.css), at most 8 acceptance criteria. Acceptance criteria are about the src/ logic; the app's screens are checked separately.
-"ui" describes the app in two or three sentences: its navigation, its own views, and what the person does first.
+Size it to the idea: 1 to 6 entities, 2 to 6 views of its own, at most 6 source files besides src/schema.js and the page files (index.html, web/app.js, web/style.css), at most 12 acceptance criteria. Acceptance criteria are about the src/ logic; the app's screens are checked separately.
+"ui" describes the app in two or three sentences: the person's main journey, its views in navigation order, and what the person does first.
 "cli" is "" unless the idea explicitly asks for a command line; "examples" are then ready-to-run CLI inputs (at most 3), otherwise [].
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"name": "Human name", "slug": "kebab-case-name", "summary": "one sentence",
@@ -174,6 +197,18 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     prompt: "You are the Skeptic on the SoftwareFactory Council. You attack the idea: edge cases, data loss, ambiguity, scope creep, and anything that cannot be tested. Vote drop only when the idea cannot be built safely at all.",
   },
   {
+    id: "designer", name: "Designer", avatar: "✎", station: "design", model: "sonnet", budgetUsd: 0.4, plugins: [], skills: ["frontend-design"], tools: ["WebSearch", "WebFetch"], mcp: [],
+    description: "Turns the idea into product documents before any plan: who it is for, the journeys, the screens and the requirements.",
+    sample: "a coach that helps me get better at one video game",
+    prompt: "You are the Product Designer of SoftwareFactory. You turn a rough idea into a product a real person would open every day: you find out how people really do the thing, decide what the product is, and design its journeys and screens. You care more about the person's first minute and their daily loop than about the data model.",
+  },
+  {
+    id: "critic", name: "Critic", avatar: "⚖", station: "critique", model: "sonnet", budgetUsd: 0.2, plugins: [], skills: [], tools: [], mcp: [],
+    description: "Scores the product documents against a fixed rubric and sends them back until they are good.",
+    sample: "What the person asked for: a habit tracker.\n\nThe product documents: {\"brief\": {\"who\": \"anyone\", \"promise\": \"track habits\"}, \"screens\": [{\"id\": \"habits\", \"name\": \"Habits\", \"purpose\": \"a list of habits\"}]}",
+    prompt: "You are the Product Critic of SoftwareFactory. You are hard to please and specific. You judge a design the way its future user would: does it do what was asked, can I get through my day with it, is every screen there for a reason. You never praise, you never rewrite; you score and you name what must change.",
+  },
+  {
     id: "planner", name: "Planner", avatar: "◇", station: "plan", model: "haiku", budgetUsd: 0.2, plugins: [], skills: ["architecture-blueprint", "code-exploration"], tools: ["Read", "Glob", "Grep"], mcp: [],
     description: "Writes the spec and the task graph.",
     sample: "a CLI that renames photos by the date they were taken",
@@ -242,11 +277,12 @@ function lens(id: string, name: string, avatar: string, focus: string, descripti
 /** Who works each station when nobody has been assigned. The Council seats three by default and takes up to six. */
 export const DEFAULT_SLOTS: Record<Slot, string[]> = {
   council: ["visionary", "architect", "skeptic"],
+  design: ["designer"], critique: ["critic"],
   plan: ["planner"], tests: ["tester"], build: ["builder"], review: ["reviewer"], fix: ["fixer"], order: ["archivist"], overseer: ["overseer"],
   improve: ["integrator", "automator", "simplifier", "enricher", "ux-lens", "flow-lens"], map: ["cartographer"], survey: ["surveyor"],
 };
 
-export const SLOT_SEATS: Record<Slot, number> = { council: 6, plan: 1, tests: 1, build: 1, review: 1, fix: 1, order: 1, overseer: 1, improve: 6, map: 1, survey: 1 };
+export const SLOT_SEATS: Record<Slot, number> = { council: 6, design: 1, critique: 1, plan: 1, tests: 1, build: 1, review: 1, fix: 1, order: 1, overseer: 1, improve: 6, map: 1, survey: 1 };
 
 /**
  * The system prompt an agent runs with on a station: its own prompt, then the Brain's principles

@@ -75,10 +75,11 @@ export async function startApp({ schema, views, root, store }) {
     const here = parts.join("/");
     const link = (path, label, count) => h("a", { href: "#/" + path, "aria-current": here === path || here.startsWith(path + "/") ? "page" : null }, h("span", {}, label), count !== undefined ? h("span", { class: "kit-count" }, String(count)) : null);
     nav.replaceChildren(
+      // The app's own screens lead: they are the product. The entity lists are for managing the data.
       link("home", own.find((v) => v.id === "dashboard")?.label || "Overview"),
-      h("div", { class: "kit-nav-head" }, "Data"),
+      ...own.filter((v) => v.id !== "dashboard").map((v) => link("v/" + v.id, v.label || v.id)),
+      h("div", { class: "kit-nav-head" }, "Manage"),
       ...schema.entities.map((e) => link("e/" + e.name, plural(e), st.count(e.name))),
-      ...(own.filter((v) => v.id !== "dashboard").length ? [h("div", { class: "kit-nav-head" }, "Views"), ...own.filter((v) => v.id !== "dashboard").map((v) => link("v/" + v.id, v.label || v.id))] : []),
       h("div", { class: "kit-nav-head" }, "Inside"),
       link("system", "System"),
     );

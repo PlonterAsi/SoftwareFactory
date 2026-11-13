@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { AgentBay, ClaudeCodeRuntime, EventLog, parseClaudeJson } from "../src/index.js";
 import { findSecrets, scanFiles, secretHookFile } from "../src/safety/secrets.js";
 import { failureLines } from "../src/factory/trim.js";
-import { recall, recallBlock, recallQuery } from "../src/brain/recall.js";
+import { PERSON_KINDS, recall, recallBlock, recallQuery } from "../src/brain/recall.js";
 import { overviewBlock } from "../src/tickets/repowork.js";
 
 // Built at run time so this file never holds a real-looking key itself.
@@ -79,6 +79,10 @@ describe("SF-22: recall over past notes and decisions", () => {
     expect(hits.some((h) => h.kind === "ticket")).toBe(false);
     expect(recallBlock(log, "offline guides")).toMatch(/^Past notes and decisions that may matter/);
     expect(recallBlock(log, "")).toBe("");
+    // A fresh build hears only the person's own words: past plans and Council decisions anchored every rebuild to the first.
+    log.append("factory.plan", { run: 10, plan: { name: "Offline Game Guides", summary: "guides offline, genre template" } });
+    const fresh = recall(log, "offline game guides", 5, undefined, PERSON_KINDS);
+    expect(fresh.map((h) => h.kind)).toEqual(["note"]);
   });
 });
 
