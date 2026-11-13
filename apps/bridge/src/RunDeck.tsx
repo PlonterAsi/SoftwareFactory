@@ -226,7 +226,7 @@ function JudgeView({ run }: { run: FactoryRunView }) {
 /** The build loop, drawn: one row per feature, in build order, with the locked tests passing after it. */
 function BuildView({ run }: { run: FactoryRunView }) {
   if (!run.features.length) return <div className="empty">{run.stations.build?.state ? "This build was written in one call. Product-sized runs (from $3) are built one feature at a time, and each feature shows here." : "After the plan is approved, the app is built one feature at a time: the model and shell, the logic, then each screen."}</div>;
-  const LABEL = { building: "building now", built: "built", empty: "nothing changed", regressed: "broke a passing test" } as const;
+  const LABEL = { building: "building now", built: "built", empty: "nothing changed", regressed: "broke a passing test", broken: "a screen did not draw" } as const;
   return (
     <ol className="feat-list">
       {run.features.map((f) => {
@@ -237,6 +237,7 @@ function BuildView({ run }: { run: FactoryRunView }) {
             {total > 0 && <div className="score"><span className="score-k">locked tests</span><span className="score-bar"><i style={{ width: `${((f.passed ?? 0) / total) * 100}%` }} /></span><span className="mono">{f.passed}/{total}</span></div>}
             {!!f.files?.length && <div className="loop-files">{f.files.slice(0, 8).join(", ")}{f.files.length > 8 ? ` +${f.files.length - 8}` : ""}</div>}
             {!!f.broke?.length && <div className="loop-dispute">Broke: {f.broke.slice(0, 3).map((x) => x.split("::")[1] ?? x).join("; ")}</div>}
+            {!!f.crashed?.length && <div className="loop-dispute">Did not draw: {f.crashed.slice(0, 3).join("; ")}</div>}
           </li>
         );
       })}

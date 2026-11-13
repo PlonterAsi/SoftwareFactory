@@ -130,6 +130,13 @@ export class Factory {
    * What each screen of a built app shows, for the product judge: the core starts the app and reads its
    * screens in a real browser. null when that cannot be done here (no browser, or the screen check is off).
    */
+  /** Open every screen of the app in `dir` in a real browser. Null when the check is off. Tests replace it. */
+  checkScreens: (dir: string) => Promise<ScreenCheck | null> = async (dir) => {
+    if (process.env.SF_SCREEN_CHECK === "off") return null;
+    let out: ScreenCheck | null = null;
+    await probeStart(dir, 15_000, async (url) => { out = await checkScreens(url); return []; });
+    return out;
+  };
   readScreens: (dir: string) => Promise<ScreenText[] | null> = async (dir) => {
     if (process.env.SF_SCREEN_CHECK === "off") return null;
     let out: ScreenText[] | null = null;
@@ -678,9 +685,20 @@ class Run {
         const now = new Set(t.cases.filter((c) => c.pass).map((c) => `${c.file}::${c.name}`));
         const broke = [...passing].filter((k) => !now.has(k));
         f.passed = t.passed; f.total = t.passed + t.failed;
-        f.state = !files.length ? "empty" : broke.length ? "regressed" : "built";
+        // A screen is built when it draws, not when the unit tests pass: in run 2898 six sessions reported
+        // 82 of 82 tests and the home screen threw in the browser. The session that wrote the screen fixes it.
+        let crashed: string[] = [];
+        if (files.length && !broke.length && /^Screen: /.test(f.title)) {
+          const sc = await this.f.checkScreens(this.dir).catch(() => null);
+          if (sc && !sc.skipped) crashed = sc.screens.filter((x) => !x.ok).map((x) => `#/${x.route}: ${x.problem}`);
+        }
+        f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length ? "broken" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, workbench: true }); }
-        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}) });
+        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}) });
+        if (f.state === "broken" && attempt === 1) {
+          retry = `The core opened the app in a real browser after your call, and these screens did not draw:\n${crashed.slice(0, 10).join("\n").slice(0, 1500)}\n\nFix the cause in the page code (a value read before it exists, a wrong import, a missing record) and make sure every screen draws with the sample records and with none.`;
+          continue;
+        }
         if (f.state === "regressed" && attempt === 1) {
           retry = `These tests passed before your call and fail after it:\n${broke.slice(0, 10).map((k) => `- ${k.replace("::", ": ")}`).join("\n")}\n\n${t.output.slice(0, 1500)}`;
           continue;

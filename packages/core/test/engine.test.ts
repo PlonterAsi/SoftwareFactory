@@ -532,6 +532,26 @@ describe("the build loop: one feature per fresh session", () => {
     return { rt, builds };
   }
 
+  it("opens the app in a browser after each screen feature and hands a screen that does not draw back to its builder", async () => {
+    const log = new EventLog();
+    const { rt, builds } = featureCrew();
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    let checks = 0;
+    f.checkScreens = async () => (++checks === 1
+      ? { pass: false, screens: [{ route: "dashboard", ok: false, problem: "Cannot read properties of undefined (reading 'game')" }, { route: "manage", ok: true }] }
+      : { pass: true, screens: [{ route: "dashboard", ok: true }] });
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    const feats = events(log, "factory.feature").filter((e) => e.id === "F3" && e.state !== "building");
+    expect(feats.map((e) => e.state)).toEqual(["broken", "built"]);
+    expect(feats[0].crashed[0]).toMatch(/#\/dashboard: Cannot read properties of undefined/);
+    const f3 = builds.filter((b) => /Your feature, F3/.test(b.prompt));
+    expect(f3).toHaveLength(2);
+    expect(f3[1].prompt).toMatch(/real browser[\s\S]*reading 'game'/);
+    // The model and logic features have no screen of their own to open.
+    expect(checks).toBe(3);
+  });
+
   it("builds the plan as a list of features, each in its own call, with the list and the progress on disk", async () => {
     const log = new EventLog();
     const { rt, builds } = featureCrew();

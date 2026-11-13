@@ -63,6 +63,7 @@ In the app: a "Product design" box on the factory floor, a Design station on the
 - **Documents have `rules`**: how the product ranks, picks, counts and removes, each exact enough to test.
 - **Every designed screen is a view of the plan.** The plan kept only 4 views; it now keeps 6, and the core adds any designed screen the Planner left out (`withDesignedScreens`).
 - **A sign-in failure at start is retried once** (`agent.run.retried`): six CLIs starting together tripped three Council seats.
+- **A screen feature is built when its screen draws.** Six build sessions reported 82 of 82 tests and the home screen threw in the browser. After each screen feature the core opens the app in a real browser; a screen that does not draw goes back to the session that wrote it, once (feature state `broken`).
 
 ## The build loop: one feature per fresh session (2026-11-13)
 
