@@ -48,6 +48,7 @@ export type EventType =
   | "factory.plan.gaps"
   | "factory.discovery"
   | "factory.research"
+  | "factory.repair"
   | "factory.feature"
   | "factory.evaluation"
   | "factory.budget"

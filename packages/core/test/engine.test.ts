@@ -642,6 +642,34 @@ describe("the product judge: the running app is judged as a product", () => {
   }
   const screens = [{ route: "home", text: "Progress Morning pages 12 / 50", controls: ["New piece"] }];
 
+  it("with a real crew and a product budget, what the judge found is built as features in fresh sessions, then judged again", async () => {
+    const log = new EventLog();
+    const { rt: inner, seen } = crewWith([{ r2: false }, { r2: true }]);
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    expect(events(log, "factory.evaluation").map((e) => e.pass)).toEqual([false, true]);
+    const repair = events(log, "factory.repair");
+    expect(repair).toHaveLength(1);
+    expect(repair[0].features[0].title).toMatch(/^Judge: requirements R2/);
+    const j1 = seen.filter((x) => x.station === "build" && /Your feature, J1/.test(x.req.prompt));
+    expect(j1).toHaveLength(1);
+    expect(j1[0].req.prompt).toMatch(/R2: A session log with date and minutes[\s\S]*There is no session log screen/);
+    expect(events(log, "factory.feature").filter((e) => e.id === "J1" && e.state === "built")).toHaveLength(1);
+  });
+
   it("an unmet requirement goes back to the fix loop as work, and the app is judged again", async () => {
     const log = new EventLog();
     const { rt, seen } = crewWith([{ r2: false }, { r2: true }]);
@@ -820,5 +848,32 @@ describe("what run 2898 taught the engine", () => {
     expect(where).toEqual({ "https://www.youtube.com/watch?v=real123": "src/schema.js" });
     const c = linkCase({ pass: false, checked: 1, unknown: 0, dead: [{ url: "https://www.youtube.com/watch?v=real123", ok: false, note: "no such YouTube video", file: "src/schema.js" }] });
     expect(c.error).toContain("(in src/schema.js)");
+  });
+  it("gives a product run time in proportion to its budget, and leaves a small run's limit alone", async () => {
+    const { runMinutes } = await import("../src/factory/stoprules.js");
+    expect(runMinutes(1.5)).toBe(30);
+    expect(runMinutes(0.6, 20)).toBe(20);
+    expect(runMinutes(10)).toBe(150);
+    expect(runMinutes(10, 0.01)).toBeLessThan(1);
+    expect(runMinutes(100)).toBe(240);
+  });
+
+  it("turns what the product judge found into build features, the person's own asks first, within what the budget allows", async () => {
+    const { repairFeatures } = await import("../src/factory/evaluate.js");
+    const { validateDocs } = await import("../src/factory/discovery.js");
+    const docs = validateDocs({
+      brief: { who: "a player", promise: "p" }, journeys: [{ moment: "m", steps: ["s"] }], screens: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+      requirements: [...Array.from({ length: 7 }, (_, i) => ({ id: `R${i + 1}`, text: `Thing ${i + 1}`, from: i === 6 ? "person" : "design" })), { id: "R8", text: "Extra", from: "design", must: false }],
+    });
+    const e = { requirements: docs.requirements.map((r) => ({ id: r.id, met: r.id === "R1", evidence: r.id === "R1" ? "seen" : "not on any screen" })), scores: { function: 2, design: 2, content: 2 }, problems: [{ where: "today", problem: "Lists 2 things, not 3", fix: "Show three" }] };
+    const all = repairFeatures(e, docs, 9);
+    expect(all.map((f) => f.id)).toEqual(["J1", "J2", "J3"]);
+    // The person's own ask leads; the nice-to-have comes last.
+    expect(all[0].title).toMatch(/^Judge: requirements R7, R2, R3, R4, R5$/);
+    expect(all[1].title).toMatch(/R6, R8$/);
+    expect(all[0].what).toMatch(/R7: Thing 7\n  What the judge saw: not on any screen/);
+    expect(all[2].what).toMatch(/\[today\] Lists 2 things, not 3 Fix: Show three/);
+    expect(repairFeatures(e, docs, 1)).toHaveLength(1);
+    expect(repairFeatures(e, docs, 0)).toEqual([]);
   });
 });

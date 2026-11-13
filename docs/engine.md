@@ -65,6 +65,8 @@ In the app: a "Product design" box on the factory floor, a Design station on the
 - **A sign-in failure at start is retried once** (`agent.run.retried`): six CLIs starting together tripped three Council seats.
 - **A screen feature is built when its screen draws.** Six build sessions reported 82 of 82 tests and the home screen threw in the browser. After each screen feature the core opens the app in a real browser; a screen that does not draw goes back to the session that wrote it, once (feature state `broken`).
 - **The link check reads the code, not the data store.** `data/` is seeded on first start and never committed; stale copies of removed links there cost two fix rounds and a climb to a stronger model. Each dead link now reaches the Fixer with the file it is in, and the Fixer is told to search for the real page before it may remove one.
+- **The judge's findings are built as features.** One fix round was handed 25 unmet requirements at once. With a real crew and a product budget, unmet requirements go back to the build loop in groups of five, each in a fresh session (`repairFeatures`, features `J1`, `J2`..., event `factory.repair`), inside a quarter of the run's budget; then the checks run and the judge looks again.
+- **The time limit grows with the budget.** The 30-minute setting is for a run of up to $2; a $10 run gets 150 minutes (`runMinutes`), and time spent waiting for the person at a gate no longer counts. Run 2898 was stopped by the clock with $5.33 unspent.
 
 ## The build loop: one feature per fresh session (2026-11-13)
 

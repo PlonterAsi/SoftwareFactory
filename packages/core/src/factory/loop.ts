@@ -1,5 +1,5 @@
 import { failureLines } from "./trim.js";
-import { SAME_TESTS_REASON, stopReason, type RoundRecord } from "./stoprules.js";
+import { SAME_TESTS_REASON, runMinutes, stopReason, type RoundRecord } from "./stoprules.js";
 import { PERSON_KINDS, recallBlock } from "../brain/recall.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -14,7 +14,7 @@ import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
-import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
+import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
@@ -655,7 +655,7 @@ class Run {
    * still failing at the end goes to the test and fix loop as before. A retried build picks up at the first
    * feature not built yet.
    */
-  private async buildByFeature() {
+  private async buildByFeature(more: Feature[] = [], pool?: number) {
     const builder = this.builder!;
     const path = join(this.dir, "features.json");
     let features = featuresOf(this.plan, this.docs);
@@ -664,6 +664,8 @@ class Run {
       const kept = (JSON.parse(readFileSync(path, "utf8")).features ?? []) as { id: string; state: string }[];
       for (const f of features) if (kept.find((k) => k.id === f.id)?.state === "built") f.state = "built";
     } catch { /* first time */ }
+    // Work the product judge sent back joins the same list: the first build's features are done and stay done.
+    if (more.length) { for (const f of features) f.state = "built"; features = [...features, ...more]; }
     const progress = join(this.dir, "PROGRESS.md");
     if (!existsSync(progress)) writeFileSync(progress, `# Progress\n\nOne entry per feature, written by SoftwareFactory after each build session.\n\n`);
     const buildStart = this.spent;
@@ -676,7 +678,7 @@ class Run {
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
         const left = features.filter((x) => x.state !== "built").length;
-        const cap = Math.min(builder.budgetUsd, Math.max(FEATURE_MIN_USD, (this.o.maxUsd * BUILD_BUDGET_SHARE - (this.spent - buildStart)) / left));
+        const cap = Math.min(builder.budgetUsd, Math.max(FEATURE_MIN_USD, ((pool ?? this.o.maxUsd * BUILD_BUDGET_SHARE) - (this.spent - buildStart)) / left));
         this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: "building", attempt, capUsd: Number(cap.toFixed(3)) });
         const text = await this.askBench(builder, featurePrompt(this.plan, features, f, !!this.docs, retry), { round: i + 1 }, { capUsd: cap });
         const res = this.takeWork(text);
@@ -688,7 +690,7 @@ class Run {
         // A screen is built when it draws, not when the unit tests pass: in run 2898 six sessions reported
         // 82 of 82 tests and the home screen threw in the browser. The session that wrote the screen fixes it.
         let crashed: string[] = [];
-        if (files.length && !broke.length && /^Screen: /.test(f.title)) {
+        if (files.length && !broke.length && /^(Screen|Judge): /.test(f.title)) {
           const sc = await this.f.checkScreens(this.dir).catch(() => null);
           if (sc && !sc.skipped) crashed = sc.screens.filter((x) => !x.ok).map((x) => `#/${x.route}: ${x.problem}`);
         }
@@ -711,7 +713,7 @@ class Run {
         break;
       }
     }
-    if (!wroteAny) throw new Error("The Builder returned no files");
+    if (!wroteAny && !more.length) throw new Error("The Builder returned no files");
   }
 
   /** A real crew works at the workbench (factory/workbench.ts): it runs the tests itself and fixes until they pass. */
@@ -757,7 +759,7 @@ class Run {
     while (run.failed > 0 || feedback) {
       const failing = run.cases.filter((c) => !c.pass).map((c) => c.name).sort().join("\n");
       history.push({ failing: run.failed, names: failing, files, before });
-      const stop = stopReason({ rounds: history, startedAt: this.startedAt, now: Date.now(), maxMinutes: this.f.maxRunMinutes });
+      const stop = stopReason({ rounds: history, startedAt: this.startedAt + this.waitedMs, now: Date.now(), maxMinutes: runMinutes(this.o.maxUsd, this.f.maxRunMinutes) });
       const timeUp = !!stop && /longer than/.test(stop);
       // A stall climbs the ladder before anyone is asked (H6): a deeper fix on a stronger model, then the locked
       // test itself is questioned. Each step once per stall; the wall clock is never waived.
@@ -1016,7 +1018,15 @@ class Run {
       if (ev.pass || round === MAX_EVALUATION_ROUNDS) return;
       // Not worth starting a fix it cannot finish: the person sees what is open at the build gate.
       if (this.o.maxUsd - this.spent < 0.3) return;
-      await this.testFixLoop(evaluationFeedback(ev.e, docs), true);
+      // What the judge found goes back to the build loop as features, each in a fresh session (run 2898: one
+      // fix round was handed 25 unmet requirements at once). A small run keeps the single fix round.
+      const pool = Math.min(this.o.maxUsd * REPAIR_BUDGET_SHARE, this.o.maxUsd - this.spent - 0.4);
+      const work = this.bench && this.builder && this.o.maxUsd >= FEATURE_LOOP_MIN_USD && existsSync(join(this.dir, "features.json")) ? repairFeatures(ev.e, docs, Math.floor(pool / REPAIR_FEATURE_USD)) : [];
+      if (work.length) {
+        this.log.append("factory.repair", { run: this.id, round, features: work.map((f) => ({ id: f.id, title: f.title })), poolUsd: Number(pool.toFixed(2)) });
+        await this.buildByFeature(work, pool);
+        await this.testFixLoop("", true);
+      } else await this.testFixLoop(evaluationFeedback(ev.e, docs), true);
     }
   }
 
@@ -1188,6 +1198,8 @@ class Run {
   /** One agent call, inside both its own cap and what is left of the run's cap. */
   /** The CLI session of the last successful call, so a follow-up can continue it. */
   private lastSession: string | undefined;
+  /** Time this run spent waiting at gates for the person. */
+  private waitedMs = 0;
   private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number } = {}): Promise<string> {
     if (this.o.maxUsd - this.spent < 0.01) {
       // Council seats ask at the same time: one question, and the others see the answer.
@@ -1291,9 +1303,12 @@ class Run {
     // `auto`: nobody is asked, the run approves itself (screens and tickets then say nothing waits for you).
     this.log.append("factory.gate", { run: this.id, gate, state: "waiting", question, ...info, ...(auto ? { auto: true } : {}) });
     // An unattended run never hangs: an escalation it may not retry stops the run.
+    const asked = Date.now();
     const d: GateDecision = auto ? { approve: true, by: "auto" }
       : this.o.autoApprove ? { approve: false, by: "auto" }
       : await this.f.awaitGate(this.id, gate);
+    // The clock measures the factory's work, not how long the person took to answer.
+    this.waitedMs += Date.now() - asked;
     this.log.append("factory.gate", { run: this.id, gate, state: d.approve ? "approved" : "rejected", note: d.note, by: d.by ?? "you", ...(info.kind ? { kind: info.kind, station: info.station, attempt: info.attempt } : {}) });
     if (gate !== "escalation") this.mark(station, d.approve ? "pass" : "fail", undefined, d.note);
     return d;
