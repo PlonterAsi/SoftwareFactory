@@ -303,6 +303,31 @@ describe("a workbench call that runs out of budget mid-work", () => {
     expect(events(log, "factory.continued").some((c) => c.station === "review")).toBe(true);
   });
 
+  it("a Reviewer that runs out of budget at the workbench reviews by reading instead of stopping the run (run 3185)", async () => {
+    const { reviewCapUsd } = await import("../src/factory/loop.js");
+    expect([reviewCapUsd(0.2, 1.5), reviewCapUsd(0.2, 10), reviewCapUsd(0.2, 50)]).toEqual([0.2, 1, 1]);
+    const log = new EventLog();
+    const mock = new MockRuntime({ plantBug: false });
+    const reviews: AgentRequest[] = [];
+    const crew: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      if (station(req) === "review") {
+        reviews.push(req);
+        if (reviews.length === 1) throw new Error("claude exited 1: error_max_budget_usd");
+      }
+      return mock.run(req);
+    } };
+    const f = new Factory(log, crew, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    expect(events(log, "factory.gate").some((g) => g.gate === "escalation")).toBe(false);
+    // The first call may spend five times the Reviewer's own $0.20 on a $10 run; the second runs nothing.
+    expect(reviews[0].budgetUsd).toBe(1);
+    expect(reviews[1].tools).toEqual([]);
+    expect(reviews[1].prompt).toMatch(/do not run anything: review by reading/);
+    expect(events(log, "factory.continued").some((c) => c.station === "review" && /reviews by reading/.test(c.reason))).toBe(true);
+  });
+
   it("closes a file block on a bare >>> line", () => {
     const [f] = parseFileBlocks("<<<FILE test/a.test.js\nimport x from 'y';\n>>>\nthanks");
     expect(f.content).toBe("import x from 'y';\n");

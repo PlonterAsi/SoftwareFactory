@@ -989,7 +989,18 @@ class Run {
         const m = this.one("review");
         const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md" && !isKitFile(p) && !p.startsWith("data/")).map(([p, c]) => `<<<FILE ${p}\n${c.length > 12000 ? c.slice(0, 12000) + "\n...(cut: file continues)\n" : c}FILE>>>`).join("\n");
         const verify = this.bench ? `\n\n${VERIFY_CONTRACT}\nThe acceptance criteria:\n${this.plan.acceptance.map((a, i) => `${i + 1}. ${a}`).join("\n")}` : "";
-        const text = await this.ask(m, `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 48000)}${verify}`, { round });
+        const reviewPrompt = `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 48000)}`;
+        // Run 3185: verifying 12 criteria of a $10 product at the workbench ran past the Reviewer's fixed $0.20 and
+        // the run stopped with no verdict. The cap grows with the run, and a Reviewer that still runs out gives its
+        // verdict from reading the code instead of leaving the person a Retry that would die the same way.
+        let text: string;
+        try { text = await this.ask(m, reviewPrompt + verify, { round }, this.bench ? { capUsd: reviewCapUsd(m.budgetUsd, this.o.maxUsd), raiseCap: true } : {}); }
+        catch (e) {
+          if (!this.bench || !/max_budget/i.test(String((e as Error).message)) || this.o.maxUsd - this.spent < 0.05) throw e;
+          this.log.append("factory.continued", { run: this.id, station: "review", agent: m.id, round, attempt: 1, files: [], reason: "the Reviewer ran out of its budget while running the criteria; it reviews by reading instead" });
+          try { restoreFromHead(this.dir, changedFiles(this.dir)); } catch { /* nothing to put back */ }
+          text = await this.ask(m, `${reviewPrompt}\n\nYour first call ran out of its budget while running the acceptance criteria one by one. This time do not run anything: review by reading the code above, and in "criteria" mark each acceptance criterion you could not confirm by reading as not verified.\nThe acceptance criteria:\n${this.plan.acceptance.map((a, i) => `${i + 1}. ${a}`).join("\n")}`, { round }, { noTools: true });
+        }
         // The Reviewer may run things but not change them: whatever it left in the folder goes.
         if (this.bench) { try { restoreFromHead(this.dir, changedFiles(this.dir)); } catch { /* nothing to put back */ } }
         let res: ReviewResult;
@@ -1232,7 +1243,7 @@ class Run {
   private lastSession: string | undefined;
   /** Time this run spent waiting at gates for the person. */
   private waitedMs = 0;
-  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number } = {}): Promise<string> {
+  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number; /** The cap may go above the agent's own per-call budget (it stays inside the run's). */ raiseCap?: boolean } = {}): Promise<string> {
     if (this.o.maxUsd - this.spent < 0.01) {
       // Council seats ask at the same time: one question, and the others see the answer.
       await this.gateTurn(async () => {
@@ -1246,7 +1257,7 @@ class Run {
     }
     // A hint you gave with Retry reaches the next agent call of that station.
     if (this.hint) prompt += `\n\nThe person retried this step after it failed (${this.hint.error.slice(0, 300)}) and said: ${this.hint.note}`;
-    const cap = Math.max(0.01, Math.min(x.capUsd ?? m.budgetUsd, m.budgetUsd, this.o.maxUsd - this.spent));
+    const cap = Math.max(0.01, Math.min(x.capUsd ?? m.budgetUsd, x.raiseCap ? Infinity : m.budgetUsd, this.o.maxUsd - this.spent));
     this.calls++;
     // The Builder and Fixer of a real crew work at the workbench: the project folder, file tools and a shell.
     const bench = !x.noTools && this.bench && (m.station === "build" || m.station === "fix") && !!this.dir && existsSync(this.dir);
@@ -1436,6 +1447,11 @@ export function kitName(x: unknown): string {
   const parts = String(x ?? "").trim().split(/[^A-Za-z0-9]+/).filter(Boolean);
   const s = parts.map((w, i) => (i ? w[0].toUpperCase() + w.slice(1) : w[0].toLowerCase() + w.slice(1))).join("").replace(/^[0-9]+/, "");
   return s || "field";
+}
+
+/** What one Reviewer call may spend: its own budget on a small run, up to five times that on a product run. */
+export function reviewCapUsd(agentUsd: number, runUsd: number): number {
+  return Number((agentUsd * Math.min(5, Math.max(1, runUsd / 2))).toFixed(3));
 }
 
 export function validatePlan(p: Plan): Plan {
