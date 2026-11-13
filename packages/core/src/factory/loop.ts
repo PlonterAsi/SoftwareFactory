@@ -12,7 +12,7 @@ import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
-import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, revisePrompt, validateCritique, validateDocs, type Critique, type ProductDocs } from "./discovery.js";
+import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
 import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
@@ -467,16 +467,21 @@ class Run {
     let best: { docs: ProductDocs; critique: Critique | null; round: number } | null = null;
     let last: { docs: ProductDocs; critique: Critique | null } | null = null;
     let why = "";
+    let found: Finding[] | null = null;
     for (let round = 1; round <= MAX_DISCOVERY_ROUNDS; round++) {
       const got = await this.station("discover", async () => {
         const designer = this.one("design");
         // Design is worth a real share of the run, but a small run cannot afford much research: say so up front.
         const designCap = Math.min(designer.budgetUsd, this.o.maxUsd * 0.25);
         const searches = round > 1 ? 0 : designCap >= 0.3 ? 6 : designCap >= 0.12 ? 2 : 0;
+        // Research is a step of its own, not a suggestion: in run 2898 the Designer was offered six searches,
+        // answered in one turn without any, and designed a research product from memory.
+        if (searches && this.bench && !found) found = await this.research(designer, searches, designCap);
         const prompt = (last?.critique
           ? revisePrompt(this.idea, last.docs, last.critique, round)
           : `Idea: ${this.idea}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}`)
-          + `\n\n${searches ? `You can afford at most ${searches} web searches on this call.` : "Do not search the web on this call: work from what you know and what is above."}`;
+          + (found?.length ? `\n\n${researchForDesigner(found)}` : "")
+          + `\n\n${found ? "Do not search the web on this call: the research above is what was found." : searches ? `You can afford at most ${searches} web searches on this call.` : "Do not search the web on this call: work from what you know and what is above."}`;
         let docs: ProductDocs;
         try { docs = validateDocs(parseJsonBlock(await this.ask(designer, prompt, { round }, { capUsd: designCap }))); }
         catch (e) { if (!(e instanceof StopRun)) this.verdict(designer, "design", false, round, (e as Error).message); throw e; }
@@ -500,6 +505,25 @@ class Run {
     this.docs = best!.docs;
     this.docsCritique = best!.critique;
     if (why) this.log.append("factory.discovery", { run: this.id, round: best!.round, docs: best!.docs, critique: best!.critique, pass: false, bar: PASS_SCORE, settled: why });
+  }
+
+  /**
+   * The Designer researches before it designs: one call that only searches and reports what it found, each
+   * finding with the page it came from. The core counts the sourced findings; with none it asks once more.
+   * A research call that fails does not stop the run: the design then says it was not researched.
+   */
+  private async research(designer: CrewMember, searches: number, designCap: number): Promise<Finding[]> {
+    let findings: Finding[] = [];
+    let error = "";
+    for (let attempt = 1; attempt <= 2 && !findings.some((f) => f.source); attempt++) {
+      try {
+        const text = await this.ask(designer, researchPrompt(this.idea, searches, attempt), { round: 1 }, { capUsd: Math.max(0.05, designCap * 0.5) });
+        findings = validateFindings(parseJsonBlock(text));
+        error = "";
+      } catch (e) { if (e instanceof StopRun) throw e; error = (e as Error).message; }
+    }
+    this.log.append("factory.research", { run: this.id, findings, sourced: findings.filter((f) => f.source).length, searches, ...(error ? { error } : {}) });
+    return findings;
   }
 
   private async planLoop(written = false) {

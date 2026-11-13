@@ -761,4 +761,32 @@ describe("what run 2898 taught the engine", () => {
     expect(fixed.plan.views!.map((v) => v.label)).toEqual(names);
     expect(fixed.plan.views![4]!.shows).toContain("The Practice job.");
   });
+  it("makes a real crew's Designer research before it designs, and asks again when nothing has a source", async () => {
+    const mock = new MockRuntime({ plantBug: false });
+    const asked: string[] = [];
+    let n = 0;
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      if (/This time you only research/.test(req.prompt)) {
+        asked.push(req.prompt);
+        const r = await mock.run({ ...req, prompt: "x" });
+        r.text = ++n === 1
+          ? '```json\n{"research": [{"finding": "From memory, no page."}]}\n```'
+          : '```json\n{"research": [{"finding": "Players learn the air dribble from community videos.", "source": "https://example.com/air-dribble"}, {"finding": "A made-up source is dropped.", "source": "a forum"}]}\n```';
+        return r;
+      }
+      if (/Station contract: design\./.test(req.systemPrompt ?? "")) asked.push(req.prompt);
+      return mock.run(req);
+    } };
+    const log = new EventLog();
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 2.5 });
+    await f.wait(run);
+    const res = events(log, "factory.research");
+    expect(res).toHaveLength(1);
+    expect(res[0].sourced).toBe(1);
+    expect(res[0].findings[1].source).toBeUndefined();
+    // Two research calls (the first had no source), then the design call that carries the findings and may not search.
+    expect(asked[1]).toMatch(/an answer from memory is not research/);
+    expect(asked[2]).toMatch(/Research done for this design[\s\S]*https:\/\/example\.com\/air-dribble[\s\S]*Do not search the web on this call/);
+  });
 });

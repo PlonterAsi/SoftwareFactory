@@ -83,6 +83,33 @@ export function validateDocs(j: unknown): ProductDocs {
   return docs;
 }
 
+export type Finding = ProductDocs["research"][number];
+
+/** What the research call is asked: search only, design nothing yet. */
+export function researchPrompt(idea: string, searches: number, attempt = 1): string {
+  return [
+    "This time you only research. Do not design anything and do not write the product documents yet.",
+    `Idea: ${idea}`,
+    `Use your web search tool now, ${searches} searches at most, before you answer. Look for: how people who are good at this really do it, the communities, guides and videos they rely on, the real products that already try this and where they fall short, and the facts this product must get right (names, terms, structures) for each thing the person named.`,
+    attempt > 1 ? "Your last answer had no finding with a page it came from. Run the searches this time: an answer from memory is not research." : "",
+    'Answer with ONE fenced json block and nothing else: {"research": [{"finding": "one concrete thing you learned, specific enough to design from", "source": "https://the-page-you-read"}]}. 6 to 12 findings. Every source is a page a search returned on this call; never write a URL from memory.',
+  ].filter(Boolean).join("\n\n");
+}
+
+/** The research call's answer: findings, and a source only when it is a web address. */
+export function validateFindings(j: unknown): Finding[] {
+  const r = (j as { research?: unknown })?.research;
+  return (Array.isArray(r) ? r : []).map((x: any) => {
+    const source = str(x?.source, 300);
+    return { finding: str(typeof x === "string" ? x : x?.finding, DOC_LIMITS.ruleChars), ...(/^https?:\/\/\S+\.\S+/.test(source) ? { source } : {}) };
+  }).filter((x) => x.finding).slice(0, DOC_LIMITS.research);
+}
+
+/** The findings as the Designer reads them on its design call. */
+export function researchForDesigner(found: Finding[]): string {
+  return `Research done for this design (design from it, and keep these in "research" with their sources exactly as written):\n${found.map((f) => `- ${f.finding}${f.source ? ` (${f.source})` : " (no source)"}`).join("\n")}`;
+}
+
 /** The Critic's answer. A missing or unreadable score counts as 1: an unjudged design has not passed. */
 export function validateCritique(j: unknown): Critique {
   const c = (j ?? {}) as Record<string, any>;

@@ -56,6 +56,14 @@ Then the Planner plans from the documents (one view per screen, one flow per jou
 
 In the app: a "Product design" box on the factory floor, a Design station on the Bridge, and a Product tab on every run with each round's scores and documents.
 
+### What the first real run changed (run 2898, 2026-11-13)
+
+- **Research is a call of its own.** Offered six searches, the Designer answered in one turn with none. With a real crew the Designer now makes a research-only call first (`factory.research`); the core counts findings that carry a web address and asks once more when there are none. The design call gets the findings and may not search.
+- **The core never cuts what the Critic judges.** Requirements were cut at 300 characters and the Critic failed the design for text "cut off mid-sentence". The limits are generous, named (`DOC_LIMITS`) and written into the design contract.
+- **Documents have `rules`**: how the product ranks, picks, counts and removes, each exact enough to test.
+- **Every designed screen is a view of the plan.** The plan kept only 4 views; it now keeps 6, and the core adds any designed screen the Planner left out (`withDesignedScreens`).
+- **A sign-in failure at start is retried once** (`agent.run.retried`): six CLIs starting together tripped three Council seats.
+
 ## The build loop: one feature per fresh session (2026-11-13)
 
 One Builder call used to write the whole app. That is the first failure of every long-running harness: the call runs out half way and the conversation it carries grows with every file (run 2623: 407k tokens of context to write 3 files).
