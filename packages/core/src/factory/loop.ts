@@ -19,6 +19,7 @@ import { checkUi, uiCase } from "./uicheck.js";
 import { appCase, checkAppLive, installKit, isKitFile } from "./appkit.js";
 import { checkScreens, screenCase, type ScreenCheck } from "./screencheck.js";
 import { dryRunTests, lockedTestFaults } from "./testcheck.js";
+import { checkLinks, linkCase, linksIn } from "./linkcheck.js";
 import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, answerSummary, changedFiles, hasWorkbench, restoreFromHead, restoreProtected, testDispute, workbenchContract, writtenOnDisk } from "./workbench.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
@@ -443,7 +444,20 @@ class Run {
           ? `This app already shipped. Its approved plan:\n${JSON.stringify(this.basePlan, null, 2)}\n\nThe person now asks to add: ${this.idea}\n\nWrite the plan for its next version in the same JSON shape: keep the same name and slug, and every existing entity, field, view, flow and exported function (they still work and their tests stay locked); add what the ask needs. New fields on existing entities are optional, so records already saved still load. In "acceptance", list ONLY the new criteria: the old ones stay as they are.`
           : `Idea: ${this.idea}`;
         const text = await this.ask(this.one("plan"), `${onTop}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
-        const plan = validatePlan(parseJsonBlock<Plan>(text));
+        let plan = validatePlan(parseJsonBlock<Plan>(text));
+        // Nothing the person asked for may fall out of the plan (run 2623's plan dropped the skill tree, the
+        // practice plan, the session log and the genre shapes). A second agent lists what the plan misses; the
+        // Planner adds it once before you ever see the plan.
+        if (!this.basePlan && !feedback) {
+          const missing = await this.planGaps(plan);
+          if (missing.length) {
+            this.log.append("factory.plan.gaps", { run: this.id, missing });
+            try {
+              const t2 = await this.ask(this.one("plan"), `Idea: ${this.idea}\n\nYour plan:\n${JSON.stringify(plan, null, 2)}\n\nIt leaves out these things the person asked for:\n${missing.map((x) => `- ${x}`).join("\n")}\n\nReturn the whole plan again in the same JSON shape with each of them added: as acceptance criteria, and as the entities, views and flows they need. Keep everything else.`);
+              plan = validatePlan(parseJsonBlock<Plan>(t2));
+            } catch (e) { if (e instanceof StopRun) throw e; /* the first plan stands; the gaps are on the record */ }
+          }
+        }
         if (this.basePlan) { plan.slug = this.basePlan.slug; plan.app = true; }
         this.plan = plan;
         if (!this.basePlan) {
@@ -740,6 +754,22 @@ class Run {
     return true;
   }
 
+  /** What the person asked for that the plan leaves out, as short phrases; [] when it covers everything or the check fails. */
+  private async planGaps(plan: Plan): Promise<string[]> {
+    if (this.idea.trim().split(/[.!?\n]+/).filter((x) => x.trim().length > 12).length < 3) return [];
+    try {
+      const text = await this.ask(this.one("tests"), [
+        "You check a plan against what the person asked for. Do not write tests or files.",
+        `What the person asked for:\n${this.idea}`,
+        `The plan:\n${JSON.stringify(plan, null, 2)}`,
+        "List every distinct requirement in what the person asked for (a feature, screen, kind of data, behaviour or example they named). For each, decide whether the plan covers it in its acceptance criteria, entities, views or flows.",
+        'Answer only JSON: {"missing": ["short phrase for each requirement the plan does not cover"]}. An empty list when it covers everything.',
+      ].join("\n\n"));
+      const j = parseJsonBlock<{ missing?: unknown }>(text);
+      return Array.isArray(j?.missing) ? j.missing.map((x) => String(x).trim()).filter(Boolean).slice(0, 15) : [];
+    } catch (e) { if (e instanceof StopRun) throw e; return []; }
+  }
+
   /** The Reviewer reads the green build against the spec. High findings go to the Fixer once; the rest ride to the build gate. */
   private reviewNotes: ReviewResult | null = null;
   private async reviewLoop() {
@@ -832,6 +862,17 @@ class Run {
       r.cases.push(appCase(app));
       if (!app.pass) { r.failed++; r.output = `App check:\n${app.problems.join("\n")}\n\n${r.output}`.slice(0, 4000); }
       else r.passed++;
+      // Every link the app ships, opened for real (run 2623 shipped 14 made-up YouTube links).
+      if (process.env.SF_LINK_CHECK !== "off") {
+        const links = await checkLinks(linksIn(this.dir, (p) => isLockedTest(p) || isKitFile(p)));
+        this.log.append("factory.links", { run: this.id, round, pass: links.pass, checked: links.checked, unknown: links.unknown, dead: links.dead.slice(0, 30), ...(links.skipped ? { skipped: links.skipped } : {}) });
+        if (!links.skipped && links.checked) {
+          const c = linkCase(links);
+          r.cases.push(c);
+          if (!c.pass) { r.failed++; r.output = `Links:\n${c.error}\n\n${r.output}`.slice(0, 4000); }
+          else r.passed++;
+        }
+      }
       const sc = screens as ScreenCheck | null;
       if (sc) {
         this.log.append("factory.screens", { run: this.id, round, ...sc });

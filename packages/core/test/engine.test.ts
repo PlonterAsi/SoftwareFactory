@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { ClaudeCodeRuntime, EventLog, Factory, MockRuntime, parseFileBlocks, runTests, git, type AgentRequest, type AgentRuntime } from "../src/index.js";
 import { WORKBENCH_COMMANDS, restoreProtected, testDispute, changedFiles, hasWorkbench } from "../src/factory/workbench.js";
 import { modelFloorUsd, strongerModel } from "../src/factory/loop.js";
+import { checkLinks, linksIn } from "../src/factory/linkcheck.js";
 import { dryRunTests, lockedTestFaults, relativeImports } from "../src/factory/testcheck.js";
 import { initRepo, commitAll } from "../src/factory/workspace.js";
 import { probeStart } from "../src/factory/appkit.js";
@@ -302,6 +303,44 @@ describe("a workbench call that runs out of budget mid-work", () => {
   it("closes a file block on a bare >>> line", () => {
     const [f] = parseFileBlocks("<<<FILE test/a.test.js\nimport x from 'y';\n>>>\nthanks");
     expect(f.content).toBe("import x from 'y';\n");
+  });
+});
+
+describe("the plan keeps what the person asked for", () => {
+  it("a requirement the plan drops goes back to the Planner before the plan gate (run 2623)", async () => {
+    const log = new EventLog();
+    const rt = new MockRuntime();
+    const plans: AgentRequest[] = [];
+    const crew: AgentRuntime = { name: "mock", run: async (req) => {
+      const r = await rt.run(req);
+      if (station(req) === "plan") plans.push(req);
+      if (station(req) === "tests" && /You check a plan/.test(req.prompt)) r.text = '{"missing": ["a session log with date and minutes"]}';
+      return r;
+    } };
+    const f = new Factory(log, crew, tmp("sf-proj-"));
+    const run = f.start("Count words in my notes. Show a goal bar for each note. Keep a session log with date and minutes.", { autoApprove: true, autoRetries: 0 });
+    await f.wait(run);
+    expect(events(log, "factory.plan.gaps")[0].missing).toEqual(["a session log with date and minutes"]);
+    expect(plans.length).toBeGreaterThanOrEqual(2);
+    expect(plans[1].prompt).toMatch(/leaves out these things.*session log/s);
+  });
+});
+
+describe("every link in the app opens", () => {
+  it("finds the app's own links and names the made-up ones", async () => {
+    const dir = tmp("sf-links-");
+    mkdirSync(join(dir, "src"));
+    mkdirSync(join(dir, "test"));
+    writeFileSync(join(dir, "src", "seed.js"), 'export const tips = [{ video: "https://www.youtube.com/watch?v=rlAirD0001d" }, { guide: "https://liquipedia.net/rocketleague/Air_Dribble" }, { src: "https://www.reddit.com/r/RocketLeague/" }, { local: "http://localhost:3000/x" }];');
+    writeFileSync(join(dir, "test", "a.test.js"), '"https://made.up/in/tests"');
+    const urls = linksIn(dir, (p) => p.startsWith("test/"));
+    expect(urls.sort()).toEqual(["https://liquipedia.net/rocketleague/Air_Dribble", "https://www.reddit.com/r/RocketLeague/", "https://www.youtube.com/watch?v=rlAirD0001d"]);
+    const fake = (async (u: string) => ({ ok: !/oembed/.test(u) && !/reddit/.test(u), status: /oembed/.test(u) ? 400 : /reddit/.test(u) ? 403 : 200, body: null })) as unknown as typeof fetch;
+    const c = await checkLinks(urls, { fetcher: fake });
+    expect(c.pass).toBe(false);
+    expect(c.dead.map((d) => d.url)).toEqual(["https://www.youtube.com/watch?v=rlAirD0001d"]);
+    expect(c.dead[0].note).toMatch(/no such YouTube video/);
+    expect(c.unknown).toBe(1);
   });
 });
 

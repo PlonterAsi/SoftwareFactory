@@ -32,6 +32,8 @@ plan → locked tests → build ⟲ → core checks → fix ⟲ (ladder) → ver
 
 - **A call that runs out of budget mid-work goes on by itself.** When a Builder or Fixer at the workbench hits its own cap with files already written, a fresh call reads what is there and finishes it (at most twice, while the run has budget left), instead of stopping for a person to press Retry (run 2623).
 - **A lost verdict is asked for again.** If the Reviewer's last message has no JSON verdict (run 2623: a background server it started timed out and its last word was a note about that), the core asks once more in the same session, with no tools, for the verdict it reached. The Reviewer is also told to stop any process it starts and to end with the JSON.
+- **The plan keeps what you asked for.** After the Planner writes the plan, a second agent lists every requirement in your prompt that the plan does not cover, and the Planner adds them once before the plan gate (run 2623's plan dropped the skill tree, practice plan, session log and genre shapes). The gaps are logged as `factory.plan.gaps`.
+- **Every link in the app opens.** While the app is checked, every link in its own files is opened for real: YouTube through oEmbed, others with a plain request. A link that does not exist fails a cell in the test grid and goes to the Fixer (run 2623 shipped 14 made-up YouTube links). A site that refuses scripts is not counted against the app. Set `SF_LINK_CHECK=off` to turn it off.
 - **Every call is paid for on the record.** A call that fails (for example at its budget cap) still costs money, and that cost now counts toward the run's spend and shows on the agent's failed run.
 
 ## Why run 2366 failed again on 2026-11-13

@@ -43,6 +43,8 @@ export type EventType =
   | "factory.tests.disputed"
   | "factory.tests.dryrun"
   | "factory.continued"
+  | "factory.links"
+  | "factory.plan.gaps"
   | "factory.budget"
   | "order.node"
   | "order.fragment"
