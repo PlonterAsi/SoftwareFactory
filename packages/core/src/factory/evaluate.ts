@@ -1,4 +1,4 @@
-import type { Feature } from "./features.js";
+import { designScreenFor, type Feature } from "./features.js";
 import type { ProductDocs } from "./discovery.js";
 
 /**
@@ -53,8 +53,8 @@ export function validateEvaluation(j: unknown, docs: ProductDocs): Evaluation {
  * what a person would not find on it.
  */
 export const SCREEN_LOOK_USD = 0.15;
-export function screenLookDocs(docs: ProductDocs, screenId: string): ProductDocs | null {
-  const s = docs.screens.find((x) => x.id === screenId);
+export function screenLookDocs(docs: ProductDocs, screenId: string, label?: string): ProductDocs | null {
+  const s = designScreenFor(docs, screenId, label);
   if (!s || !(s.shows.length + s.actions.length)) return null;
   const requirements = [
     ...s.shows.map((t, i) => ({ id: `S${i + 1}`, text: `The ${s.name} screen shows ${t}, with real sample content`, from: "design" as const, must: true })),

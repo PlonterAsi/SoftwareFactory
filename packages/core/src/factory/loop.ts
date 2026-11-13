@@ -693,6 +693,7 @@ class Run {
       const f = features[i];
       if (f.state === "built") continue;
       let retry = "";
+      let wasHollow = false;
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
         const left = features.filter((x) => x.state !== "built").length;
@@ -730,9 +731,12 @@ class Run {
           const sc = await this.f.checkScreens(this.dir).catch(() => null);
           if (sc && !sc.skipped) crashed = sc.screens.filter((x) => !x.ok).map((x) => `#/${x.route}: ${x.problem}`);
         }
-        // A screen that draws can still be hollow: the judge looks at it now, not only at the end.
+        // A screen that draws can still be hollow: the judge looks at it now, not only at the end. After a
+        // retry for what it missed, it looks once more: in run 3609 all five looked-at screens were hollow on
+        // the first look, and "built" on the second try was taken on the Builder's word.
         let hollow: string[] = [];
-        if (attempt === 1 && files.length && !broke.length && !invalid.length && !crashed.length && this.docs && /^Screen: /.test(f.title)) hollow = await this.lookAtScreen(f);
+        if ((attempt === 1 || wasHollow) && files.length && !broke.length && !invalid.length && !crashed.length && this.docs && /^Screen: /.test(f.title)) hollow = await this.lookAtScreen(f, attempt);
+        if (attempt === 1) wasHollow = hollow.length > 0;
         f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length || invalid.length || deadLinks.length || hollow.length ? "broken" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, workbench: true }); }
         this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}), ...(invalid.length ? { invalid } : {}), ...(deadLinks.length ? { deadLinks } : {}), ...(hollow.length ? { hollow } : {}) });
@@ -1059,9 +1063,10 @@ class Run {
    */
   private evaluation: Evaluation | null = null;
   /** The judge's look at one screen just built: what of its design a person would not find. [] when it all shows or the look cannot run. */
-  private async lookAtScreen(f: Feature): Promise<string[]> {
+  private async lookAtScreen(f: Feature, attempt = 1): Promise<string[]> {
     const id = f.what.match(/^The view "([^"]+)"/)?.[1];
-    const docs = id && this.docs ? screenLookDocs(this.docs, id) : null;
+    const docs = id && this.docs ? screenLookDocs(this.docs, id, f.title.replace(/^Screen: /, "")) : null;
+    if (id && !docs) this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, attempt, skipped: "no designed screen matches this view" });
     if (!docs || this.o.maxUsd - this.spent < SCREEN_LOOK_USD * 2) return [];
     const shots = await this.f.readScreens(this.dir).catch(() => null);
     if (!shots?.length) return [];
@@ -1070,7 +1075,7 @@ class Run {
       const e = validateEvaluation(parseJsonBlock(await this.ask(this.one("evaluate"), screenLookPrompt(this.idea, docs, mine.length ? mine : shots), { round: 0 }, { capUsd: SCREEN_LOOK_USD })), docs);
       const req = (rid: string) => docs.requirements.find((r) => r.id === rid)?.text ?? rid;
       const out = e.requirements.filter((r) => !r.met).map((r) => `${req(r.id)} (the judge saw: ${r.evidence})`);
-      this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, seen: e.requirements.length - out.length, of: e.requirements.length, missing: out.slice(0, 20) });
+      this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, attempt, seen: e.requirements.length - out.length, of: e.requirements.length, missing: out.slice(0, 20) });
       return out.slice(0, 12);
     } catch (e) { if (e instanceof StopRun) throw e; return []; }
   }

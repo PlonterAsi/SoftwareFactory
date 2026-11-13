@@ -771,6 +771,44 @@ describe("the product judge: the running app is judged as a product", () => {
     expect(ask.req.prompt).toMatch(/=== Screen #\/dashboard ===/);
     expect(ask.req.prompt).not.toMatch(/=== Screen #\/home ===/);
     expect(events(log, "factory.retro").at(-1).bad.join("\n")).toMatch(/judge did not find on its screen/);
+    // After the retry the judge looks again, and this time it all shows.
+    const mine = looks.filter((l) => l.feature === looks[0].feature);
+    expect(mine.map((l) => [l.attempt, l.seen, l.of])).toEqual([[1, 1, 2], [2, 2, 2]]);
+    expect(events(log, "factory.retro").at(-1).good.join("\n")).toMatch(/every screen sent back had what was missing on the second look/);
+  });
+
+  it("a screen still hollow after its retry is not taken on the Builder's word (run 3609)", async () => {
+    const log = new EventLog();
+    const { rt: inner } = crewWith([{ r2: true }], (prompt) => lookAnswer(prompt, ["S1"]));
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => [{ route: "dashboard", text: "Progress", controls: [] }, ...screens];
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    const first = events(log, "factory.screen.look").find((l) => !l.skipped)!;
+    const feats = events(log, "factory.feature").filter((e) => e.id === first.feature && e.state !== "building");
+    expect(feats.map((e) => [e.attempt, e.state])).toEqual([[1, "broken"], [2, "broken"]]);
+    const retro = events(log, "factory.retro").at(-1);
+    expect(retro.bad.join("\n")).toMatch(/still missed designed items on the second look \(dashboard: 1 of 2/);
+  });
+
+  it("finds the designed screen for a view by its name when the Planner renamed its id (run 3609)", async () => {
+    const { designScreenFor } = await import("../src/factory/features.js");
+    const d = { ...docs, screens: [{ ...docs.screens[0], id: "progress", name: "My Games" }, docs.screens[1]] } as never;
+    expect(designScreenFor(d, "my-games", "My Games")?.id).toBe("progress");
+    expect(designScreenFor(d, "session_log", "Session Log")?.id).toBe("log");
+    expect(designScreenFor(d, "Log")?.id).toBe("log");
+    expect(designScreenFor(d, "practice", "Practice")).toBeUndefined();
+    expect(designScreenFor(d, "dashboard")?.id).toBe("progress");
   });
 
   it("a review that still says fix after its last round is recorded and goes first into the repair features (run 3185)", async () => {
