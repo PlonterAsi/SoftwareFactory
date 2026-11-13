@@ -753,7 +753,21 @@ class Run {
         // The Reviewer may run things but not change them: whatever it left in the folder goes.
         if (this.bench) { try { restoreFromHead(this.dir, changedFiles(this.dir)); } catch { /* nothing to put back */ } }
         let res: ReviewResult;
-        try { res = parseReview(text); } catch (e) { this.verdict(m, "review", false, round, (e as Error).message); throw e; }
+        try { res = parseReview(text); }
+        catch (e) {
+          // Run 2623: the Reviewer gave its verdict, then a background server it started timed out and its last
+          // message was only a note about that, so the verdict was lost. Ask once, in the same session, for the JSON.
+          let again: ReviewResult | null = null;
+          if (this.lastSession) {
+            try {
+              const t2 = await this.ask(m, "Your last message did not contain your JSON verdict. Reply now with only that JSON (verdict, findings, criteria), exactly as you reached it. Do not run anything.", { round }, { resume: this.lastSession, noTools: true });
+              again = parseReview(t2);
+              this.log.append("factory.continued", { run: this.id, station: "review", agent: m.id, round, attempt: 1, reason: "the review's last message had no verdict; asked for it again" });
+            } catch (e2) { if (e2 instanceof StopRun) throw e2; }
+          }
+          if (!again) { this.verdict(m, "review", false, round, (e as Error).message); throw e; }
+          res = again;
+        }
         this.verdict(m, "review", true, round);
         this.log.append("factory.review", { run: this.id, round, agent: m.id, ...res });
         return res;
@@ -913,7 +927,9 @@ class Run {
   }
 
   /** One agent call, inside both its own cap and what is left of the run's cap. */
-  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string } = {}): Promise<string> {
+  /** The CLI session of the last successful call, so a follow-up can continue it. */
+  private lastSession: string | undefined;
+  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean } = {}): Promise<string> {
     if (this.o.maxUsd - this.spent < 0.01) {
       // Council seats ask at the same time: one question, and the others see the answer.
       await this.gateTurn(async () => {
@@ -930,9 +946,9 @@ class Run {
     const cap = Math.max(0.01, Math.min(m.budgetUsd, this.o.maxUsd - this.spent));
     this.calls++;
     // The Builder and Fixer of a real crew work at the workbench: the project folder, file tools and a shell.
-    const bench = this.bench && (m.station === "build" || m.station === "fix") && !!this.dir && existsSync(this.dir);
+    const bench = !x.noTools && this.bench && (m.station === "build" || m.station === "fix") && !!this.dir && existsSync(this.dir);
     // The Reviewer verifies at the workbench too, but read and run only: no Edit or Write.
-    const verifier = this.bench && m.station === "review" && !!this.dir && existsSync(this.dir);
+    const verifier = !x.noTools && this.bench && m.station === "review" && !!this.dir && existsSync(this.dir);
     const kit = kitArgs(m);
     const r = await runAgent(this.log, this.runtime, m.id, {
       prompt, model: x.model ?? this.modelOf(m), systemPrompt: bench ? `${m.role}\n\n${this.benchContract()}` : m.role, budgetUsd: Number(cap.toFixed(4)),
@@ -941,7 +957,10 @@ class Run {
       ...(this.dir && existsSync(this.dir) && m.tools.some((t) => READ_TOOLS.includes(t)) ? { cwd: this.dir } : {}),
       ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000, noMemory: true } : {}),
       ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: WORKBENCH_COMMANDS, timeoutMs: 15 * 60_000, noMemory: true } : {}),
+      ...(x.resume ? { resume: x.resume } : {}),
+      ...(x.noTools ? { tools: [] } : {}),
     }, { factoryRun: this.id, station: m.station, agentVersion: m.version, ...meta, ...(bench ? { workbench: true } : {}) });
+    this.lastSession = r.result?.sessionId;
     // A call that failed was still paid for (run 2366: two opus calls died at the cap and were never counted).
     this.spent += r.result?.costUsd ?? r.costUsd ?? 0;
     if (r.error || !r.result) throw new Error(`${m.name} failed: ${r.error}`);
@@ -1057,6 +1076,7 @@ export function normIdea(idea: string): string {
 export const VERIFY_CONTRACT = [
   "You also verify the product, not only read it. You have a shell in the project folder (read and run only: do not change files).",
   "For EACH acceptance criterion below, check it by running code: call the functions with node (node --input-type=module -e \"import('./src/x.js').then(...)\"), and for the app start it with `node server.js` in the background on PORT=0, read the port from its \"Ready on\" line and fetch its pages and /api/_db with node, then stop it.",
+  "Stop every process you start (a server you ran in the background) before you answer, and make the JSON your very last message: only the last message is read.",
   "Add to your JSON a \"criteria\" list, one entry per criterion in order: {\"text\": \"the criterion\", \"pass\": true|false, \"evidence\": \"what you ran and what you saw, short\"}. pass is true only when you saw it work.",
 ].join("\n");
 

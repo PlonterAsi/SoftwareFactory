@@ -31,6 +31,7 @@ plan → locked tests → build ⟲ → core checks → fix ⟲ (ladder) → ver
 - **The done-claim check (H8).** At the workbench, the Reviewer also verifies each acceptance criterion by running the product: it calls functions with node, starts the server and fetches from it. It answers each criterion with pass or fail and evidence. A criterion the product does not meet goes back to the Fixer with that evidence, and the build gate names any criterion that still isn't met.
 
 - **A call that runs out of budget mid-work goes on by itself.** When a Builder or Fixer at the workbench hits its own cap with files already written, a fresh call reads what is there and finishes it (at most twice, while the run has budget left), instead of stopping for a person to press Retry (run 2623).
+- **A lost verdict is asked for again.** If the Reviewer's last message has no JSON verdict (run 2623: a background server it started timed out and its last word was a note about that), the core asks once more in the same session, with no tools, for the verdict it reached. The Reviewer is also told to stop any process it starts and to end with the JSON.
 - **Every call is paid for on the record.** A call that fails (for example at its budget cap) still costs money, and that cost now counts toward the run's spend and shows on the agent's failed run.
 
 ## Why run 2366 failed again on 2026-11-13

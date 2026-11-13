@@ -278,6 +278,27 @@ describe("a workbench call that runs out of budget mid-work", () => {
     expect(builds.every((b) => b.noMemory)).toBe(true);
   });
 
+  it("a review whose last message lost its verdict is asked for it again in the same session (run 2623)", async () => {
+    const log = new EventLog();
+    const mock = new MockRuntime({ plantBug: false });
+    const reviews: AgentRequest[] = [];
+    const crew: AgentRuntime = { name: "mock", run: async (req) => {
+      const r = await mock.run(req);
+      if (station(req) === "review") {
+        reviews.push(req);
+        if (reviews.length === 1) r.text = "The background server I started was stopped at its time limit, as expected. The review above stands.";
+      }
+      return { ...r, sessionId: `s${reviews.length}` };
+    } };
+    const f = new Factory(log, crew, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    expect(reviews[1].resume).toBe("s1");
+    expect(reviews[1].tools).toEqual([]);
+    expect(events(log, "factory.continued").some((c) => c.station === "review")).toBe(true);
+  });
+
   it("closes a file block on a bare >>> line", () => {
     const [f] = parseFileBlocks("<<<FILE test/a.test.js\nimport x from 'y';\n>>>\nthanks");
     expect(f.content).toBe("import x from 'y';\n");

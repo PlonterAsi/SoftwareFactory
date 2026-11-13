@@ -36,6 +36,8 @@ export interface AgentRequest {
   timeoutMs?: number;
   /** Run without any CLAUDE.md or memory, even when editing (a factory build folder has none of its own). */
   noMemory?: boolean;
+  /** Continue this CLI session instead of starting fresh: the agent still has everything it saw and said. */
+  resume?: string;
 }
 
 export interface AgentResult {
@@ -49,6 +51,8 @@ export interface AgentResult {
   /** Of those, read from the prompt cache (cheap) and written to it (SF-18). */
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** The CLI session, so a follow-up can continue the same conversation (--resume). */
+  sessionId?: string;
 }
 
 export interface AgentRuntime {
@@ -110,6 +114,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
    */
   buildArgs(req: AgentRequest): string[] {
     const args = ["-p", "--output-format", "json", "--model", req.model ?? this.opts.defaultModel];
+    if (req.resume) args.push("--resume", req.resume);
     if (req.budgetUsd !== undefined) args.push("--max-budget-usd", String(req.budgetUsd));
     if (req.systemPrompt && req.systemPrompt.length <= MAX_ARG_ROLE) args.push("--append-system-prompt", req.systemPrompt);
     for (const dir of req.pluginDirs ?? []) args.push("--plugin-dir", dir);
@@ -195,6 +200,7 @@ export function parseClaudeJson(raw: string, runtime: string, wallMs: number): A
     contextTokens: Number(u.cache_creation_input_tokens ?? 0) + Number(u.cache_read_input_tokens ?? 0) + Number(u.input_tokens ?? 0),
     cacheReadTokens: Number(u.cache_read_input_tokens ?? 0),
     cacheWriteTokens: Number(u.cache_creation_input_tokens ?? 0),
+    ...(j.session_id ? { sessionId: String(j.session_id) } : {}),
   };
 }
 
