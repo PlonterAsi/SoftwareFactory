@@ -89,6 +89,9 @@ export function screenProblem(dom: string, errors: string[]): string | null {
   const main = dom.match(/<main[^>]*class="kit-main"[^>]*>([\s\S]*?)<\/main>/)?.[1] ?? "x";
   if (!strip(main).trim()) return "the screen is blank";
   if (errors.length) return `uncaught error in the page: ${errors[0]}`;
+  // A value that was never there, printed as text (run 2898 shipped "nullnullnull" on three screens that "drew").
+  const leak = strip(main).match(/(?:^|[^A-Za-z])((?:null|undefined|NaN)+|\[object Object\])(?=$|[^A-Za-z])/);
+  if (leak) { const at = strip(main).indexOf(leak[1]); return `the screen shows a raw "${leak[1]}" where a value should be (near: "${strip(main).slice(Math.max(0, at - 40), at + leak[1].length + 20).trim()}"); show the value, or nothing when there is none`; }
   return null;
 }
 

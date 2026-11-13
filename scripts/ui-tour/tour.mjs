@@ -104,6 +104,18 @@ try {
     for (const h of panels.filter((h) => h.split("/").length === 4)) await visit(h, `${tag}-${h.split("/")[3]}`);
   }
   for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/bases", "bases"], ["#/bridge", "factory-bridge"], ["#/bridge/score", "factory-bridge-score"], ["#/bridge/quarter", "factory-bridge-quarter"], ["#/factory", "all-builds"], ["#/factory/bay", "agents"], ["#/factory/tickets", "tickets"], ["#/factory/order", "rules-and-ideas"], ["#/factory/improve", "improve"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
+  // A run's Engine tab: the factory's review of its own work (the shipped build has one).
+  current = "run-engine";
+  await page.goto(`${BRIDGE}/#/factory`);
+  await page.waitForTimeout(1000);
+  // The floor opens on the newest build (the one waiting); the review is on the one that shipped.
+  for (const sel of await page.locator("select").all()) {
+    const done = await sel.locator("option").evaluateAll((os) => os.find((o) => /shipped/.test(o.textContent ?? ""))?.value ?? null);
+    if (done) { await sel.selectOption(done); await page.waitForTimeout(600); break; }
+  }
+  const engineTab = page.getByRole("tab", { name: /^Engine/ }).first();
+  if (await engineTab.count()) { await engineTab.click(); await page.waitForTimeout(400); await page.screenshot({ path: join(out, "run-engine.png") }); shots.push("run-engine"); }
+  else problems.push("all-builds: the run deck has no Engine tab");
   // The Factory Bridge's Signal Loom: tapping the waiting lane opens its approval bar.
   current = "factory-bridge-gate";
   await page.goto(`${BRIDGE}/#/bridge`);

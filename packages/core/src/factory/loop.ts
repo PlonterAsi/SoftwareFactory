@@ -1,4 +1,5 @@
 import { failureLines } from "./trim.js";
+import { engineReview } from "./retro.js";
 import { SAME_TESTS_REASON, runMinutes, stopReason, type RoundRecord } from "./stoprules.js";
 import { PERSON_KINDS, recallBlock } from "../brain/recall.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -1319,6 +1320,11 @@ class Run {
     if (this.screen && outcome !== "shipped" && this.dir && existsSync(join(this.dir, ".git"))) {
       try { git(this.dir, "reset", "-q", "--hard", this.screen.baseSha); git(this.dir, "clean", "-fdq"); reason += ` The folder is back at ${this.screen.baseSha.slice(0, 7)}, as it shipped.`; } catch { /* leave it; the reason says what happened */ }
     }
+    // What this run says about the factory itself, from its own events (free, no agent call).
+    try {
+      const mine = this.log.list({ sinceId: this.id - 1, limit: 1e6 }).filter((e) => { const x = e.payload as { run?: number; factoryRun?: number }; return e.id === this.id || x.run === this.id || x.factoryRun === this.id; });
+      this.log.append("factory.retro", { run: this.id, ...engineReview(mine, { outcome, reason, spentUsd: this.spent, maxUsd: this.o.maxUsd }) });
+    } catch { /* a review that cannot be written never stops a run from ending */ }
     this.log.append("factory.run.finished", {
       run: this.id, outcome, reason, dir: this.dir || null, sha: sha ?? null, plan: this.plan?.name ?? null,
       totalUsd: Number(this.spent.toFixed(6)), agentCalls: this.calls, fixRounds: this.fixRounds,

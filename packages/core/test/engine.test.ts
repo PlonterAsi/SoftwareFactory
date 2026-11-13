@@ -876,4 +876,24 @@ describe("what run 2898 taught the engine", () => {
     expect(repairFeatures(e, docs, 1)).toHaveLength(1);
     expect(repairFeatures(e, docs, 0)).toEqual([]);
   });
+  it("fails a screen that prints a missing value as text, and passes ordinary words", async () => {
+    const { screenProblem } = await import("../src/factory/screencheck.js");
+    const page = (main: string) => `<div class="kit-app"><main class="kit-main">${main}</main></div>`;
+    expect(screenProblem(page("<h1>Library</h1><p>Rocket League</p><span>nullnullnull</span>"), [])).toMatch(/raw "nullnullnull" where a value should be \(near: ".*Rocket League/);
+    expect(screenProblem(page("<p>Win rate: NaN%</p>"), [])).toMatch(/raw "NaN"/);
+    expect(screenProblem(page("<p>Last session: undefined</p>"), [])).toMatch(/raw "undefined"/);
+    expect(screenProblem(page("<p>[object Object]</p>"), [])).toMatch(/object Object/);
+    expect(screenProblem(page("<p>Nullify the opponent's pressure. Annulled. Banana.</p>"), [])).toBeNull();
+  });
+
+  it("tells the first build session to write real sample content from the research, with only researched links", async () => {
+    const { featuresOf } = await import("../src/factory/features.js");
+    const { validateDocs } = await import("../src/factory/discovery.js");
+    const base = { brief: { who: "a player", promise: "p" }, journeys: [{ moment: "m", steps: ["s"] }], screens: [{ id: "a", name: "A" }, { id: "b", name: "B" }], requirements: ["r"] };
+    const plan = { name: "GM", slug: "gm", summary: "s", interface: "i", acceptance: ["a"], tasks: [], entities: [], views: [] } as never;
+    const sourced = featuresOf(plan, validateDocs({ ...base, research: [{ finding: "f", source: "https://example.com/guide" }] }))[0].what;
+    expect(sourced).toMatch(/real content, not filler[\s\S]*one of the pages listed in that research, copied exactly[\s\S]*Never write a web address from memory/);
+    expect(featuresOf(plan, validateDocs(base))[0].what).toMatch(/Leave every link field empty/);
+    expect(featuresOf(plan, null)[0].what).not.toMatch(/sample records are real content/);
+  });
 });

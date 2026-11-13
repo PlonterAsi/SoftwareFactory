@@ -82,6 +82,16 @@ Now, for a real crew on a product-sized run (`maxUsd` of $3 or more), the build 
 
 Whatever still fails at the end goes to the test and fix loop as before. Small runs (a ticket at $0.60) and the practice crew still build in one call. In the app: a Build tab on every run with a row per feature and the locked tests passing after it (`factory.feature`).
 
+## The engine review: every run ends by judging the factory (2026-11-13)
+
+A benchmark run is a test of the engine, not of the product it builds (Assaf, 2026-11-13). When a run ends, however it ends, the core writes a review of its own work from the run's events, with no agent call (`packages/core/src/factory/retro.ts`, event `factory.retro`, the run's **Engine** tab):
+
+- what the engine did badly, each line with its evidence: a design that never passed, research with no sources, screens the Planner dropped, a feature reported done while its screen did not draw, made-up links, fix rounds that changed nothing, a climb up the ladder, what the judge did not see, money left unspent when the run stopped;
+- what it did well: loops that converged, checks that caught something;
+- where the money and time went, by station and by agent, with each agent's verdicts.
+
+The "did badly" list is the work list for the next engine change. A cycle is: the same prompt, the same cap, one run, this review, engine changes, the next run.
+
 ## The product judge: the running app is judged as a product (2026-11-13)
 
 Passing tests prove the code matches the plan, not that the product does its job. Run 2623 passed 58 of 58 checks, drew all 13 screens, and scored 3 of 10 on what was asked for.

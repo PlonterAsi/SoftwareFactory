@@ -103,6 +103,8 @@ export interface FactoryRunView {
   reviews: ReviewView[];
   /** The product judge: each round's requirement checks and scores from the running app. */
   evaluations: EvaluationView[];
+  /** The engine review: what this run says about the factory itself (written when the run ends, from its own log). */
+  retro?: EngineReviewView;
   /** The engine's loop (H5, H6): every fix attempt, what it changed and what came of it, and each step up the ladder. */
   loop: LoopEventView[];
   finished?: { outcome: "shipped" | "stopped" | "failed"; reason: string; totalUsd: number | null; agentCalls?: number; sha?: string; resumable?: boolean };
@@ -111,6 +113,12 @@ export interface FactoryRunView {
 }
 
 export interface EvaluationView { round: number; pass: boolean; skipped?: string; bar: number; screens: number; requirements: { id: string; met: boolean; evidence: string }[]; scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] }
+export interface EngineReviewView {
+  outcome: string; reason: string; spentUsd: number; maxUsd: number; minutes: number;
+  stages: { station: string; calls: number; failedCalls: number; costUsd: number; seconds: number; rounds: number; state: string }[];
+  agents: { agent: string; calls: number; failedCalls: number; costUsd: number; passes: number; fails: number; lastNote?: string }[];
+  good: string[]; bad: string[];
+}
 export interface FeatureView { id: string; title: string; state: "building" | "built" | "empty" | "regressed" | "broken"; attempt: number; passed?: number; failed?: number; files?: string[]; broke?: string[]; crashed?: string[] }
 export interface ProductDocsView {
   brief: { who: string; problem: string; promise: string; notThis: string[] };
@@ -150,6 +158,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         break;
       case "factory.plan": r.plan = p.plan; r.dir = p.dir; break;
       case "factory.council": r.council.push({ round: p.round, seats: p.seats, brief: p.brief }); break;
+      case "factory.retro": r.retro = { outcome: p.outcome, reason: p.reason ?? "", spentUsd: p.spentUsd ?? 0, maxUsd: p.maxUsd ?? 0, minutes: p.minutes ?? 0, stages: p.stages ?? [], agents: p.agents ?? [], good: p.good ?? [], bad: p.bad ?? [] }; break;
       case "factory.evaluation": r.evaluations.push({ round: p.round, pass: !!p.pass, skipped: p.skipped, bar: p.bar ?? 4, screens: p.screens ?? 0, requirements: p.requirements ?? [], scores: p.scores ?? {}, problems: p.problems ?? [] }); break;
       case "factory.feature": {
         const f: FeatureView = { id: p.id, title: p.title, state: p.state, attempt: p.attempt ?? 1, passed: p.passed, failed: p.failed, files: p.files, broke: p.broke };
