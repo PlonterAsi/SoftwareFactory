@@ -59,9 +59,16 @@ export interface ProjectsState {
 
 const key = (kind: string, ref: string | number) => `${kind}:${ref}`;
 
-/** A readable name from a run's idea: its first line, cut at a word near 60 characters. */
+/**
+ * A readable name from a run's idea: the product's own name when the idea leads with one ("Build Game
+ * Mastery: a coach that..." is "Game Mastery", not "Build Game Mastery: a coach that curates what…"),
+ * otherwise its first line, cut at a word near 60 characters. The plan's name replaces it once there is one.
+ */
 export function nameFromIdea(idea: string): string {
   const line = idea.trim().split(/\r?\n/)[0].replace(/\s+/g, " ");
+  const head = line.match(/^(?:(?:please\s+)?(?:build|make|create|write|design)\s+(?:me\s+)?(?:(?:a|an|the)\s+)?)?([^:]{3,48}?)\s*:\s+\S/i)?.[1]?.trim();
+  // "idea: ..." and "bug: ..." are labels, not names.
+  if (head && !/[.!?]/.test(head) && !/^(idea|note|bug|todo|rule|fix|feature|project|ask|request|question)s?$/i.test(head)) return head[0].toUpperCase() + head.slice(1);
   if (line.length <= 60) return line || "Untitled project";
   const cut = line.slice(0, 60);
   const sp = cut.lastIndexOf(" ");

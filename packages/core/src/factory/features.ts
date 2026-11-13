@@ -43,6 +43,8 @@ export function featuresOf(plan: Plan, docs: ProductDocs | null): Feature[] {
       `src/schema.js with the app's name and every entity (${(plan.entities ?? []).map((e) => e.name).join(", ") || "none"}), its typed fields and 3 to 6 realistic sample records, plus the flows and features lists.`,
       "package.json, index.html, web/style.css, and web/app.js that starts the app and registers every view below as a placeholder (its label, and one sentence saying what it will show).",
       views.length ? `The views, in navigation order: ${views.map((v) => `${v.id} "${v.label}"`).join(", ")}.` : "",
+      // Content is part of the product: in run 2898 the seed held six invented video links and two thin records.
+      docs ? `The sample records are real content, not filler: write them from the research in docs/product/BRIEF.md and the examples the person named, enough of them to show each screen doing its job for every kind of thing the person named.${docs.research.some((r) => r.source) ? " A link in a sample record is one of the pages listed in that research, copied exactly; where the research has no page for it, leave the link empty." : " Leave every link field empty: no page was researched for them."} Never write a web address from memory.` : "",
     ].filter(Boolean).join("\n"),
     "`node -e \"import('./src/schema.js').then(m=>console.log(Object.keys(m)))\"` prints the exports, `node --check web/app.js` passes, and `node server.js` starts.");
   add("The domain logic",

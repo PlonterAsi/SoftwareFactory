@@ -84,7 +84,7 @@ Answer with ONE fenced json block and nothing else, shaped exactly like:
  "rules": [{"name": "Ranking", "rule": "how the product decides something, exact enough to test: the inputs, the order, the tie-break"}],
  "assumptions": ["what you assumed because the idea did not say"]}
 Write every rule the product decides by into "rules" (how it ranks, picks today's items, counts progress, removes or merges things), one rule each. Tables and per-kind differences go there too, written out in full for every kind the person named, not for the first one only.
-Size limits, so nothing you write is cut: at most 40 requirements of one or two sentences each (600 characters), 6 screens with up to 12 lines each, 14 steps a journey, 12 rules of up to 800 characters. Finish every sentence; say it shorter rather than run over.`,
+Size limits, so nothing you write is cut: at most 40 requirements of one or two sentences each (600 characters), 6 screens with up to 12 lines each, 14 steps a journey, 12 rules of up to 2,400 characters each (room for a table written out per kind). Finish every sentence; say it shorter rather than run over.`,
   critique: `Station contract: critique.
 You judge product documents before anything is built. You did not write them and you owe their author nothing: a weak design that passes you becomes a weak product that a person has to use. Read what the person asked for, then the documents, and score them.
 Check the person's words line by line against the requirements; walk each journey as that user and stop at the first step that has no screen or no action for it; ask of each screen what job it does that a plain list would not.

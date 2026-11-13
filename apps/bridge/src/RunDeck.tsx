@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Blueprint } from "./projects/mission/Blueprint";
 import type { FactoryRunView, LoopEventView, SeatView, Vote } from "./api";
 
-type Tab = "council" | "product" | "build" | "judge" | "plan" | "tests" | "loop" | "files" | "review" | "visuals";
+type Tab = "council" | "product" | "build" | "judge" | "plan" | "tests" | "loop" | "files" | "review" | "engine" | "visuals";
 
 /** What the selected run produced, drawn instead of listed: task graph, test grid, file heat map, visual checks. */
 export function RunDeck({ run }: { run?: FactoryRunView }) {
@@ -24,6 +24,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
     ["files", `Files${fileCount ? ` · ${fileCount}` : ""}`],
     ["review", `Review${lastReview ? ` · ${lastReview.findings.length}` : ""}`],
     ["judge", `Judge${lastEval ? (lastEval.skipped ? " · skipped" : lastEval.pass ? " · passed" : ` · ${lastEval.requirements.filter((q) => !q.met).length} open`) : ""}`],
+    ["engine", `Engine${run?.retro ? ` · ${run.retro.bad.length} to fix` : ""}`],
     ["visuals", `Visuals${run?.visuals.length ? (vFail ? ` · ${vFail} missing` : " · all") : ""}`],
   ];
   return (
@@ -45,6 +46,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
         {run && tab === "product" && <ProductView run={run} />}
         {run && tab === "build" && <BuildView run={run} />}
         {run && tab === "judge" && <JudgeView run={run} />}
+        {run && tab === "engine" && <EngineView run={run} />}
         {run && tab === "review" && <ReviewView run={run} />}
       </div>
     </section>
@@ -91,6 +93,11 @@ export function TaskGraph({ run }: { run: FactoryRunView }) {
         ); })}
       </svg>
       <ol className="acceptance">{plan.acceptance.map((a, i) => <li key={i}>{a}</li>)}</ol>
+      {(run.planGaps ?? []).map((g, i) => (
+        <div key={i} className="muted plan-gaps" title={g.missing.join("\n")}>
+          Gaps check: found {g.missing.length} thing{g.missing.length === 1 ? "" : "s"} missing from the first plan, {g.added ? "all added before this approval" : "NOT added, the Planner's second try failed"}: {g.missing.join("; ")}
+        </div>
+      ))}
     </div>
   );
 }
@@ -198,6 +205,31 @@ export function CouncilView({ run }: { run: FactoryRunView }) {
 }
 
 /** The product judge, drawn: a row per must-have requirement (seen working or not, with what the judge saw) and the scores. */
+/** The engine review, drawn: what the factory did well and badly on this run, and where the money and time went. */
+function EngineView({ run }: { run: FactoryRunView }) {
+  const r = run.retro;
+  if (!r) return <div className="empty">When the run ends, SoftwareFactory reviews its own work here: which stations, loops and agents did their job, which did not, and where the money and time went.</div>;
+  const top = Math.max(0.0001, ...r.stages.map((s) => s.costUsd));
+  const money = (n: number) => `$${n.toFixed(2)}`;
+  return (
+    <div className="product">
+      <div className="product-top">
+        <div className={`product-verdict ${r.outcome === "shipped" ? "ok" : "warn"}`}>{r.outcome} · {money(r.spentUsd)} of {money(r.maxUsd)} · {Math.round(r.minutes)} minutes</div>
+      </div>
+      <BriefList title="What the engine did badly (the work list)" cls="concerns" items={r.bad} />
+      <BriefList title="What the engine did well" cls="agreed" items={r.good} />
+      <div className="scores" role="img" aria-label={`Spend by station: ${r.stages.map((s) => `${s.station} ${money(s.costUsd)}`).join(", ")}`}>
+        {r.stages.filter((s) => s.calls).map((s) => (
+          <div key={s.station} className="score ok"><span className="score-k">{s.station}</span><span className="score-bar"><i style={{ width: `${(s.costUsd / top) * 100}%` }} /></span><span className="mono">{money(s.costUsd)} · {s.calls} call{s.calls === 1 ? "" : "s"} · {s.seconds}s</span></div>
+        ))}
+      </div>
+      <table className="product-reqs"><tbody>
+        {r.agents.map((a) => <tr key={a.agent} className={a.fails > a.passes || a.failedCalls ? "unmet" : ""}><td className="mono">{a.agent}</td><td>{a.calls} call{a.calls === 1 ? "" : "s"} · {money(a.costUsd)}</td><td>{a.passes} passed · {a.fails} not{a.failedCalls ? ` · ${a.failedCalls} failed calls` : ""}{a.lastNote ? ` · ${a.lastNote}` : ""}</td></tr>)}
+      </tbody></table>
+    </div>
+  );
+}
+
 export function JudgeView({ run }: { run: FactoryRunView }) {
   const [at, setAt] = useState<number | null>(null);
   if (!run.evaluations.length) return <div className="empty">{run.stations.evaluate?.state === "skipped" ? run.stations.evaluate.note ?? "The product was not judged on this run." : "After the review, a separate judge reads every screen of the running app and checks it against the product design: each requirement, then scores for function, design and content."}</div>;

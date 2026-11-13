@@ -324,6 +324,7 @@ describe("the plan keeps what the person asked for", () => {
     const run = f.start("Count words in my notes. Show a goal bar for each note. Keep a session log with date and minutes.", { autoApprove: true, autoRetries: 0 });
     await f.wait(run);
     expect(events(log, "factory.plan.gaps")[0].missing).toEqual(["a session log with date and minutes"]);
+    expect(events(log, "factory.plan.gaps")[0].added).toBe(true);
     expect(plans.length).toBeGreaterThanOrEqual(2);
     expect(plans[1].prompt).toMatch(/leaves out these things.*session log/s);
   });
@@ -757,6 +758,20 @@ describe("what run 2898 taught the engine", () => {
     expect(docs.rules).toHaveLength(2);
   });
 
+  it("keeps a rule with a table whole, and text over the limit ends at a whole sentence (run 3185)", async () => {
+    const { validateDocs, keepWhole, DOC_LIMITS } = await import("../src/factory/discovery.js");
+    const table = `Level bands. ${"Rocket League: Bronze to Gold is beginner, Platinum to Champion is intermediate. ".repeat(14)}If an item has no band, add the item to Needs a look.`;
+    expect(table.length).toBeGreaterThan(800);
+    const base = { brief: { who: "a player", promise: "p" }, journeys: [{ moment: "m", steps: ["s"] }], screens: [{ id: "a", name: "A" }, { id: "b", name: "B" }], requirements: ["r"] };
+    expect(validateDocs({ ...base, rules: [{ name: "Level bands", rule: table }] }).rules[0]!.rule).toBe(table);
+    const over = validateDocs({ ...base, rules: [{ name: "Ranking", rule: "Rank by fit to level, then by freshness. ".repeat(100) }] }).rules[0]!.rule;
+    expect(over.length).toBeLessThanOrEqual(DOC_LIMITS.ruleChars);
+    expect(over.endsWith("freshness.")).toBe(true);
+    expect(keepWhole("one two three four five six", 20)).toBe("one two three four");
+    const { CONTRACTS } = await import("../src/bay/builtin.js");
+    expect(CONTRACTS.design).toContain("2,400 characters");
+  });
+
   it("gives the Planner and the project the product's rules", async () => {
     const { validateDocs, docsForPlanner, docsFiles } = await import("../src/factory/discovery.js");
     const docs = validateDocs({
@@ -875,5 +890,25 @@ describe("what run 2898 taught the engine", () => {
     expect(all[2].what).toMatch(/\[today\] Lists 2 things, not 3 Fix: Show three/);
     expect(repairFeatures(e, docs, 1)).toHaveLength(1);
     expect(repairFeatures(e, docs, 0)).toEqual([]);
+  });
+  it("fails a screen that prints a missing value as text, and passes ordinary words", async () => {
+    const { screenProblem } = await import("../src/factory/screencheck.js");
+    const page = (main: string) => `<div class="kit-app"><main class="kit-main">${main}</main></div>`;
+    expect(screenProblem(page("<h1>Library</h1><p>Rocket League</p><span>nullnullnull</span>"), [])).toMatch(/raw "nullnullnull" where a value should be \(near: ".*Rocket League/);
+    expect(screenProblem(page("<p>Win rate: NaN%</p>"), [])).toMatch(/raw "NaN"/);
+    expect(screenProblem(page("<p>Last session: undefined</p>"), [])).toMatch(/raw "undefined"/);
+    expect(screenProblem(page("<p>[object Object]</p>"), [])).toMatch(/object Object/);
+    expect(screenProblem(page("<p>Nullify the opponent's pressure. Annulled. Banana.</p>"), [])).toBeNull();
+  });
+
+  it("tells the first build session to write real sample content from the research, with only researched links", async () => {
+    const { featuresOf } = await import("../src/factory/features.js");
+    const { validateDocs } = await import("../src/factory/discovery.js");
+    const base = { brief: { who: "a player", promise: "p" }, journeys: [{ moment: "m", steps: ["s"] }], screens: [{ id: "a", name: "A" }, { id: "b", name: "B" }], requirements: ["r"] };
+    const plan = { name: "GM", slug: "gm", summary: "s", interface: "i", acceptance: ["a"], tasks: [], entities: [], views: [] } as never;
+    const sourced = featuresOf(plan, validateDocs({ ...base, research: [{ finding: "f", source: "https://example.com/guide" }] }))[0].what;
+    expect(sourced).toMatch(/real content, not filler[\s\S]*one of the pages listed in that research, copied exactly[\s\S]*Never write a web address from memory/);
+    expect(featuresOf(plan, validateDocs(base))[0].what).toMatch(/Leave every link field empty/);
+    expect(featuresOf(plan, null)[0].what).not.toMatch(/sample records are real content/);
   });
 });

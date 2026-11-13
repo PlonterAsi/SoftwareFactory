@@ -89,7 +89,7 @@ export function Blueprint({ run, compact }: { run: FactoryRunView; compact?: boo
   const now = route.find((s) => s.feature?.state === "building");
   const started = run.features.length > 0;
   const screens = route.filter((s) => s.kind === "screen");
-  const gaps = run.planGaps ?? [];
+  const gaps = [...new Set((run.planGaps ?? []).flatMap((g) => g.missing.map(String)))];
   return (
     <div className={`bp${compact ? " compact" : ""}`}>
       <header className="bp-hero">
