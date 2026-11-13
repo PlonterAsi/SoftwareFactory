@@ -167,8 +167,12 @@ export class Factory {
     // marked resumable: resumeInterrupted() (or the Bridge's Resume) picks them up
     // again from the last station they completed.
     for (const id of unfinishedRuns(log)) {
-      log.append("factory.run.finished", { run: id, outcome: "stopped", reason: "The app closed while this run was in flight.", resumable: true, totalUsd: null });
-      this.interrupted.push(id);
+      // Run 3185: the app updated while the run waited at "Review failed. Retry it?", and the restart resumed it
+      // and paid for the retry nobody pressed. A run that was waiting for the person's answer stays stopped
+      // until they answer with Resume; it is not picked up by itself.
+      const asked = waitingEscalation(log, id);
+      log.append("factory.run.finished", { run: id, outcome: "stopped", reason: asked ? `The app closed while this run waited for your answer: ${asked.slice(0, 300)} Press Resume to go on, or leave it stopped.` : "The app closed while this run was in flight.", resumable: true, totalUsd: null, ...(asked ? { waitedFor: asked.slice(0, 300) } : {}) });
+      if (!asked) this.interrupted.push(id);
     }
   }
 
@@ -1550,6 +1554,12 @@ export interface RestoredState {
  * Where a run stands, from the event log alone (the source of truth): which
  * stations it completed, what it spent, its plan, repo and locked tests.
  */
+/** The question of an escalation (a Retry, more budget) a run was still waiting on, or null. */
+export function waitingEscalation(log: EventLog, run: number): string | null {
+  const g = log.list({ type: "factory.gate", sinceId: run - 1, limit: 1e6 }).map((e) => e.payload as { run: number; gate: string; state: string; question?: string }).filter((p) => p.run === run).at(-1);
+  return g && g.gate === "escalation" && g.state === "waiting" ? String(g.question ?? "a question") : null;
+}
+
 export function restoreState(log: EventLog, run: number): RestoredState {
   const evs = log.list({ sinceId: run - 1, limit: 1e7 }).filter((e) => { const p = e.payload as { run?: number; factoryRun?: number }; return p?.run === run || p?.factoryRun === run; });
   const of = (type: string) => evs.filter((e) => e.type === type).map((e) => e.payload as any);
