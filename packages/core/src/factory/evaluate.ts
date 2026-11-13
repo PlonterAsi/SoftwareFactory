@@ -95,6 +95,8 @@ export function evaluationFeedback(e: Evaluation, docs: ProductDocs): string {
 /** The share of the run's budget the judge's findings may spend in the build loop, and what one such feature is sized at. */
 export const REPAIR_BUDGET_SHARE = 0.25;
 export const REPAIR_FEATURE_USD = 0.4;
+/** Below this a repair call cannot do its work (run 3609: three calls at $0.15 and $0.11 each died at their cap). */
+export const REPAIR_FEATURE_MIN_USD = 0.3;
 const REPAIR_GROUP = 5;
 
 /**

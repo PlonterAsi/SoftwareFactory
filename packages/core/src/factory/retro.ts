@@ -157,6 +157,7 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
   } else if (of("factory.evaluation").length) bad.push(`Product judge: the product was not judged (${String(of("factory.evaluation")[0].skipped).slice(0, 160)}).`);
   const repairs = of("factory.repair");
   if (repairs.length) good.push(`Judge loop: the judge's findings went back to the build loop as ${plural(repairs.reduce((a, r) => a + (r.features ?? []).length, 0), "feature")}.`);
+  for (const s of of("factory.repair.stopped")) bad.push(`Repair: stopped before the build gate (${String(s.reason).slice(0, 160)}${s.skipped?.length ? `; not built: ${s.skipped.join(", ")}` : ""}).`);
 
   // Agent calls and the run as a whole.
   const retried = of("agent.run.retried").length;

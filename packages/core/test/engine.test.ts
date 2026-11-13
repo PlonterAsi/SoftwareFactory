@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ClaudeCodeRuntime, EventLog, Factory, MockRuntime, parseFileBlocks, runTests, git, type AgentRequest, type AgentRuntime } from "../src/index.js";
@@ -809,6 +809,61 @@ describe("the product judge: the running app is judged as a product", () => {
     expect(designScreenFor(d, "Log")?.id).toBe("log");
     expect(designScreenFor(d, "practice", "Practice")).toBeUndefined();
     expect(designScreenFor(d, "dashboard")?.id).toBe("progress");
+  });
+
+  it("a repair that cannot finish never fails the run: the build gate gets what is built (run 3609)", async () => {
+    const log = new EventLog();
+    const { rt: inner } = crewWith([{ r2: false }, { r2: false }]);
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      if (station(req) === "build" && /Your feature, J\d+/.test(req.prompt)) {
+        // The repair writes half a file and dies at its cap, every time.
+        if (req.cwd) writeFileSync(join(req.cwd, "web/half.js"), "export const half = ");
+        throw new Error("claude exited 1: error_max_budget_usd");
+      }
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run).catch(() => {});
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    const stopped = events(log, "factory.repair.stopped");
+    expect(stopped[0].reason).toMatch(/a repair call failed: .*error_max_budget_usd/);
+    const fin = events(log, "factory.run.finished").at(-1);
+    expect(existsSync(join(fin.dir, "web/half.js"))).toBe(false);
+    expect(events(log, "factory.retro").at(-1).bad.join("\n")).toMatch(/Repair: stopped/);
+  });
+
+  it("a repair the money left cannot fund does not start (run 3609)", async () => {
+    const log = new EventLog();
+    const { rt: inner, seen } = crewWith([{ r2: false }, { r2: false }]);
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+        // The first repair eats the whole repair pool.
+        if (/^J/.test(id)) r.costUsd = 5;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run).catch(() => {});
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    const repairs = seen.filter((x) => x.station === "build" && /Your feature, J\d+/.test(x.req.prompt));
+    expect(repairs).toHaveLength(1);
+    expect(events(log, "factory.repair.stopped")[0]).toMatchObject({ reason: expect.stringMatching(/left for repairs, under the \$0\.30 one needs/) });
   });
 
   it("a review that still says fix after its last round is recorded and goes first into the repair features (run 3185)", async () => {

@@ -15,7 +15,7 @@ import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
-import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
+import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
@@ -699,6 +699,16 @@ class Run {
     for (let i = 0; i < features.length; i++) {
       const f = features[i];
       if (f.state === "built") continue;
+      // A repair gets at least what that work needs, or it does not start (run 3609: J2 got $0.15, died at
+      // its cap three times and used up the run). What is built goes to the build gate as it is.
+      if (more.includes(f)) {
+        const room = Math.min((pool ?? Infinity) - (this.spent - buildStart), this.o.maxUsd - this.spent - 0.15);
+        if (room < REPAIR_FEATURE_MIN_USD) {
+          const skipped = features.slice(i).filter((x) => x.state !== "built").map((x) => x.id);
+          this.log.append("factory.repair.stopped", { run: this.id, reason: `$${Math.max(0, room).toFixed(2)} left for repairs, under the $${REPAIR_FEATURE_MIN_USD.toFixed(2)} one needs`, skipped, spentUsd: Number(this.spent.toFixed(4)) });
+          break;
+        }
+      }
       let retry = "";
       let wasHollow = false;
       for (let attempt = 1; attempt <= 2; attempt++) {
@@ -1125,9 +1135,20 @@ class Run {
       if (left && work.length) { work.unshift(left); if (work.length > most) work.pop(); }
       if (work.length) {
         this.log.append("factory.repair", { run: this.id, round, features: work.map((f) => ({ id: f.id, title: f.title })), poolUsd: Number(pool.toFixed(2)) });
-        await this.buildByFeature(work, pool);
+        // Repairs are extra work on a product that is already built: one that cannot finish never fails the
+        // run (run 3609 spent its last $0.42 on three dead calls of one repair and ended "failed" with
+        // nothing at the build gate). Its half-written files go back to the last built feature.
+        try { await this.buildByFeature(work, pool); }
+        catch (e) {
+          if (e instanceof StopRun) throw e;
+          try { git(this.dir, "checkout", "--", "."); git(this.dir, "clean", "-fdq", "src", "web"); } catch { /* the gate shows the folder as it is */ }
+          this.log.append("factory.repair.stopped", { run: this.id, round, reason: `a repair call failed: ${String((e as Error).message).slice(0, 200)}`, spentUsd: Number(this.spent.toFixed(4)) });
+        }
+        if (this.o.maxUsd - this.spent < 0.3) return;
         await this.testFixLoop("", true);
       } else await this.testFixLoop(evaluationFeedback(ev.e, docs), true);
+      // The judge's second look needs money too; without it the person decides on the first look.
+      if (this.o.maxUsd - this.spent < 0.15) return;
     }
   }
 
