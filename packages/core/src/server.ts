@@ -1,3 +1,4 @@
+import { engineCycles } from "./factory/cycles.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
@@ -170,6 +171,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         appVersion: appVersion ?? null, activeRuns: factory.activeCount(),
         clients: { origins: Object.fromEntries(clients.origins), streams: Object.fromEntries(clients.streams) },
       });
+      if (req.method === "GET" && url.pathname === "/api/factory/cycles") return json(res, 200, { cycles: log.view("engine-cycles", engineCycles) });
       if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeCount()));
       if (req.method === "POST" && url.pathname === "/api/updates") {
         const body = await readJson(req);

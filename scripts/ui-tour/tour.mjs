@@ -73,6 +73,10 @@ try {
   const shipped = (await api("/api/factory/runs", { idea: "A word counter app with history of past counts" })).run;
   await waitForGate(shipped, "gateA");
   await waitForGate(shipped, "gateB");
+  // The same idea built a second time: two engine cycles to lay side by side.
+  const again = (await api("/api/factory/runs", { idea: "A word counter app with history of past counts", again: true })).run;
+  await waitForGate(again, "gateA");
+  await waitForGate(again, "gateB");
   const waiting = (await api("/api/factory/runs", { idea: "Habit tracker with streaks and a weekly heatmap" })).run;
   await sleep(4000);
 
@@ -103,7 +107,7 @@ try {
     const panels = await page.$$eval('a[href^="#/p/"]', (as) => [...new Set(as.map((a) => a.getAttribute("href")))]);
     for (const h of panels.filter((h) => h.split("/").length === 4)) await visit(h, `${tag}-${h.split("/")[3]}`);
   }
-  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/bases", "bases"], ["#/bridge", "factory-bridge"], ["#/bridge/score", "factory-bridge-score"], ["#/bridge/quarter", "factory-bridge-quarter"], ["#/factory", "all-builds"], ["#/factory/bay", "agents"], ["#/factory/tickets", "tickets"], ["#/factory/order", "rules-and-ideas"], ["#/factory/improve", "improve"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
+  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/bases", "bases"], ["#/bridge", "factory-bridge"], ["#/bridge/score", "factory-bridge-score"], ["#/bridge/quarter", "factory-bridge-quarter"], ["#/factory", "all-builds"], ["#/factory/bay", "agents"], ["#/factory/tickets", "tickets"], ["#/factory/order", "rules-and-ideas"], ["#/factory/improve", "improve"], ["#/factory/cycles", "engine-cycles"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
   // A run's Engine tab: the factory's review of its own work (the shipped build has one).
   current = "run-engine";
   await page.goto(`${BRIDGE}/#/factory`);

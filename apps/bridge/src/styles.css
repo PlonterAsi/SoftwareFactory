@@ -1773,3 +1773,17 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .feat-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .feat-state { margin-left: auto; font-size: 12px; color: var(--muted); }
 .product-reqs tr.unmet td { color: var(--warn, #e6b450); }
+
+/* Engine cycles: the same prompt, one column per run. */
+.cycles .cycles-pick, .cycles .cycles-prompt { margin: 0 28px 12px; }
+.cycles-prompt summary { cursor: pointer; color: var(--ink-2); }
+.cycles-prompt pre { white-space: pre-wrap; max-height: 260px; overflow: auto; font-size: 12px; margin: 8px 0 0; }
+.cycles-grid { display: grid; gap: 16px; padding: 0 28px 28px; overflow-x: auto; align-items: start; }
+.cycle-col { border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.cycle-col > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.cycle-col h2 { font-size: 17px; font-weight: 600; margin: 0; }
+.cycle-h { font-size: 13px; font-weight: 600; margin: 14px 0 4px; }
+.cycle-h.bad { color: var(--warn, #e6b450); }
+.cycle-h.good { color: var(--ok, #4fd18b); }
+.cycle-list { margin: 0; padding-left: 18px; font-size: 13px; }
+.cycle-list li { margin: 3px 0; }
