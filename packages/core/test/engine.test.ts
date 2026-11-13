@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ClaudeCodeRuntime, EventLog, Factory, MockRuntime, parseFileBlocks, runTests, git, type AgentRequest, type AgentRuntime } from "../src/index.js";
 import { WORKBENCH_COMMANDS, restoreProtected, testDispute, changedFiles, hasWorkbench } from "../src/factory/workbench.js";
-import { strongerModel } from "../src/factory/loop.js";
+import { modelFloorUsd, strongerModel } from "../src/factory/loop.js";
+import { dryRunTests, lockedTestFaults, relativeImports } from "../src/factory/testcheck.js";
 import { initRepo, commitAll } from "../src/factory/workspace.js";
 import { probeStart } from "../src/factory/appkit.js";
-import { checkScreens, findBrowser, routesOf, screenCase, screenProblem, type ScreenCheck } from "../src/factory/screencheck.js";
+import { browserEnv, checkScreens, findBrowser, routesOf, screenCase, screenProblem, type ScreenCheck } from "../src/factory/screencheck.js";
 
 const tmp = (p: string) => mkdtempSync(join(tmpdir(), p));
 const events = (log: EventLog, type: string) => log.list({ limit: 1e6 }).filter((e) => e.type === type).map((e) => e.payload as any);
@@ -171,7 +172,7 @@ describe("attempt memory and the escalation ladder", () => {
     expect(gate.question).toMatch(/Tried so far/);
   });
 
-  it("a broken locked test is questioned, corrected by the Tester and locked again on the record, and the run ships", async () => {
+  it("a test file that breaks on its own lines is sent back to the Tester before it is locked (run 2366)", async () => {
     const log = new EventLog();
     const rt = new MockRuntime({ plantBug: false });
     let testsCalls = 0;
@@ -187,9 +188,92 @@ describe("attempt memory and the escalation ladder", () => {
     const fin = events(log, "factory.run.finished").at(-1);
     expect(fin.outcome).toBe("shipped");
     expect(testsCalls).toBe(2);
-    const relock = events(log, "factory.tests.locked").find((l) => l.relocked);
-    expect(relock.reason).toMatch(/game is not defined/);
+    expect(events(log, "factory.tests.dryrun")[0].problems[0]).toMatch(/game is not defined/);
+    // Caught before locking: no fix round was ever spent on it, and the suite was locked once.
+    expect(events(log, "factory.tests.locked")).toHaveLength(1);
+    expect(events(log, "factory.ladder")).toHaveLength(0);
     expect(readFileSync(join(fin.dir, "test", "count.test.js"), "utf8")).not.toContain("game;");
+  });
+
+  it("a Fixer's TEST_WRONG goes straight to the Tester, not to a stronger model; kept tests come back with the reason", async () => {
+    const log = new EventLog();
+    const rt = new MockRuntime();
+    let fixCalls = 0;
+    const prompts: AgentRequest[] = [];
+    const crew: AgentRuntime = { name: "mock", run: async (req) => {
+      const r = await rt.run(req);
+      if (station(req) === "fix") { prompts.push(req); if (++fixCalls === 1) r.text = "The code looks right.\nTEST_WRONG: test/count.test.js: the expected count looks off"; }
+      if (station(req) === "tests" && /Judge it/.test(req.prompt)) r.text = "KEEP: the count is right; a word is any run of letters.";
+      return r;
+    } };
+    const f = new Factory(log, crew, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    const ladder = events(log, "factory.ladder");
+    expect(ladder.map((l) => l.to)).toEqual(["dispute"]);
+    expect(ladder[0].triage).toBe(true);
+    expect(events(log, "factory.attempt").map((a) => a.model)).not.toContain("opus");
+    expect(prompts[1].prompt).toMatch(/the Tester kept it: .*a word is any run of letters/);
+  });
+
+  it("no stronger model without the money it needs: the deeper round keeps the model", async () => {
+    expect(modelFloorUsd("opus")).toBeGreaterThan(modelFloorUsd("sonnet"));
+    const log = new EventLog();
+    const rt = new MockRuntime();
+    const lazy: AgentRuntime = { name: "lazy", run: async (req) => {
+      const r = await rt.run(req);
+      if (req.systemPrompt?.includes("You are the Fixer")) r.text = "I can't see what fails.";
+      return r;
+    } };
+    const f = new Factory(log, lazy, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 0.3 });
+    await f.wait(run);
+    expect(events(log, "factory.attempt").map((a) => a.model)).toEqual(["sonnet", "sonnet"]);
+    expect(events(log, "factory.ladder").some((l) => /kept sonnet: .* below what opus needs/.test(l.reason))).toBe(true);
+  });
+
+  it("a failed agent call's cost counts toward the run's spend", async () => {
+    const log = new EventLog();
+    const rt = new MockRuntime();
+    let failed = false;
+    const crew: AgentRuntime = { name: "mock", run: async (req) => {
+      if (station(req) === "build" && !failed) { failed = true; throw Object.assign(new Error("error_max_budget_usd"), { costUsd: 0.25 }); }
+      return rt.run(req);
+    } };
+    const f = new Factory(log, crew, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 1 });
+    await f.wait(run);
+    expect(events(log, "agent.run.failed")[0].costUsd).toBe(0.25);
+    expect(events(log, "factory.run.finished").at(-1).totalUsd).toBeGreaterThanOrEqual(0.25);
+  });
+});
+
+describe("the tests are tried before they are locked", () => {
+  it("reads the names a test imports from each relative module", () => {
+    expect(relativeImports('import { a, b as c } from "../src/x.js";\nimport d from "../src/d.js";\nimport "./setup.js";\nconst { e } = await import("../src/e.js");')).toEqual([
+      { spec: "../src/x.js", names: ["a", "b"] }, { spec: "../src/d.js", names: [] }, { spec: "./setup.js", names: [] }, { spec: "../src/e.js", names: ["e"] },
+    ]);
+  });
+
+  it("passes sound tests against stubs and flags a file that breaks on its own", async () => {
+    const dir = tmp("sf-dry-");
+    mkdirSync(join(dir, "test"));
+    writeFileSync(join(dir, "package.json"), '{"type":"module"}');
+    writeFileSync(join(dir, "test", "good.test.js"), 'import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { score, Game } from "../src/game.js";\nconst g = new Game();\ntest("scores", () => { assert.equal(score(g), 3); });\n');
+    writeFileSync(join(dir, "test", "bad.test.js"), 'import { test } from "node:test";\nimport { score } from "../src/game.js";\ntest("scores", () => {});\ngame.start();\n');
+    const problems = await dryRunTests(dir, ["test/good.test.js", "test/bad.test.js"]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/^test\/bad\.test\.js: .*game is not defined/);
+  });
+
+  it("names a locked file that fails as a whole while tests in it passed", () => {
+    const run = { cases: [
+      { name: "counts", file: "test/a.test.js", pass: true, durationMs: 1 },
+      { name: "test/a.test.js", file: "test/a.test.js", pass: false, error: "test failed: ReferenceError: game is not defined", durationMs: 1 },
+      { name: "test/b.test.js", file: "test/b.test.js", pass: false, error: "Cannot find module ../src/b.js", durationMs: 1 },
+    ], passed: 1, failed: 2, exitCode: 1, timedOut: false, output: "" };
+    expect(lockedTestFaults(run, (p) => p.startsWith("test/")).map((c) => c.file)).toEqual(["test/a.test.js"]);
   });
 });
 
@@ -215,6 +299,12 @@ describe("every screen in a real browser", () => {
     expect(b.pass).toBe(false);
     expect(screenCase(b).error).toMatch(/#\/home: .*game is not defined/);
   }, 120_000);
+
+  it("starts the browser without the Windows app-health shim, and finds Edge where Windows puts it", () => {
+    const env = browserEnv({ PATH: "x", __COMPAT_LAYER: "DetectorsAppHealth" });
+    expect(env.PATH).toBe("x");
+    expect("__COMPAT_LAYER" in env).toBe(false);
+  });
 
   it("reads routes and problems from a dumped screen", () => {
     expect(routesOf('<nav class="kit-nav"><a href="#/home">O</a><a href="#/e/piece">P</a><a href="#/system">S</a></nav>')).toEqual(["home", "e/piece", "system"]);

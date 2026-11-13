@@ -141,7 +141,7 @@ export function commitAll(root: string, message: string): string | null {
 }
 
 export interface TestCase { name: string; file: string; pass: boolean; error?: string; durationMs: number }
-export interface TestRun { cases: TestCase[]; passed: number; failed: number; exitCode: number | null; timedOut: boolean; output: string }
+export interface TestRun { cases: TestCase[]; passed: number; failed: number; exitCode: number | null; timedOut: boolean; output: string; /** Node's notes that name a test file: errors no test owns. */ fileNotes?: { file: string; message: string }[] }
 
 /** node --test reporter: one JSON line per leaf test. Written to a temp file so it ships inside the compiled core. */
 const REPORTER_SRC = `// node --test reporter: one JSON line per leaf test, so the core can draw a pass and fail grid.
@@ -202,13 +202,14 @@ export function runTests(root: string, timeoutMs = 60_000): Promise<TestRun> {
       const cases: TestCase[] = [];
       const notes: string[] = [];
       const diags: string[] = [];
+      const fileNotes: { file: string; message: string }[] = [];
       for (const line of out.split("\n")) {
         if (!line.startsWith("{")) continue;
         try {
           const j = JSON.parse(line);
           if (j.kind === "case") cases.push({ name: j.name, file: j.file ? posixRel(root, j.file.startsWith("file:") ? fileURLToPath(j.file) : j.file) : "", pass: j.pass, error: j.error, durationMs: j.durationMs ?? 0 });
           else if (j.kind === "stderr" || j.kind === "stdout") notes.push(j.message);
-          else if (j.kind === "diag" && !DIAG_COUNT.test(j.message)) diags.push(j.message);
+          else if (j.kind === "diag" && !DIAG_COUNT.test(j.message)) { diags.push(j.message); if (j.file) fileNotes.push({ file: posixRel(root, String(j.file).startsWith("file:") ? fileURLToPath(j.file) : j.file), message: j.message }); }
         } catch { /* not ours */ }
       }
       // A whole file that failed says only "test failed": what actually broke is in Node's diagnostics (an error
@@ -218,7 +219,7 @@ export function runTests(root: string, timeoutMs = 60_000): Promise<TestRun> {
       const failed = cases.filter((c) => !c.pass).length;
       // A crash before any test ran (syntax error, missing module) still counts as a failure.
       if (!cases.length && code !== 0) cases.push({ name: "test suite loads", file: "", pass: false, error: (err + notes.join("\n")).slice(0, 2000) || `exit ${code}`, durationMs: 0 });
-      resolve({ cases, passed: cases.filter((c) => c.pass).length, failed: cases.filter((c) => !c.pass).length || failed, exitCode: code, timedOut, output: [...diags, ...notes, err].join("\n").trim().slice(0, 4000) });
+      resolve({ cases, passed: cases.filter((c) => c.pass).length, failed: cases.filter((c) => !c.pass).length || failed, exitCode: code, timedOut, output: [...diags, ...notes, err].join("\n").trim().slice(0, 4000), fileNotes });
     });
   });
 }

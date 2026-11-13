@@ -169,7 +169,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
         try {
           resolve(parseClaudeJson(out, this.name, Date.now() - started));
         } catch (e) {
-          reject(new Error(`claude exited ${code}: ${(e as Error).message}${err ? ` | ${err.slice(0, 300)}` : ""}`));
+          reject(Object.assign(new Error(`claude exited ${code}: ${(e as Error).message}${err ? ` | ${err.slice(0, 300)}` : ""}`), { costUsd: (e as { costUsd?: number }).costUsd ?? 0 }));
         }
       });
     });
@@ -179,7 +179,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
 /** Parse the JSON that `claude -p --output-format json` prints. */
 export function parseClaudeJson(raw: string, runtime: string, wallMs: number): AgentResult {
   const j = JSON.parse(raw.trim());
-  if (j.is_error) throw new Error(String(j.result ?? j.subtype ?? "agent error"));
+  // A call that failed still spent money (error_max_budget_usd spends the whole cap): say how much.
+  if (j.is_error) throw Object.assign(new Error(String(j.result ?? j.subtype ?? "agent error")), { costUsd: Number(j.total_cost_usd ?? 0) });
   const u = j.usage ?? {};
   return {
     text: String(j.result ?? ""),

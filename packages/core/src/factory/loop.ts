@@ -18,6 +18,7 @@ import { visualCheck } from "./visualize.js";
 import { checkUi, uiCase } from "./uicheck.js";
 import { appCase, checkAppLive, installKit, isKitFile } from "./appkit.js";
 import { checkScreens, screenCase, type ScreenCheck } from "./screencheck.js";
+import { dryRunTests, lockedTestFaults } from "./testcheck.js";
 import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, answerSummary, changedFiles, hasWorkbench, restoreFromHead, restoreProtected, testDispute, workbenchContract, writtenOnDisk } from "./workbench.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
@@ -477,12 +478,20 @@ class Run {
       tests = files.filter((f) => isLockedTest(f.path) && !(this.basePlan && existsSync(join(this.dir, f.path))));
       if (!tests.some((f) => f.path.endsWith(".js"))) throw new Error("The Tester returned no test/*.js files");
       res = writeFiles(this.dir, tests, { lockTests: false });
-      const broken = syntaxErrors(this.dir, res.written.map((w) => w.path).filter((p) => /\.[cm]?js$/.test(p)));
-      this.verdict(this.one("tests"), "tests", !broken.length, attempt, broken[0]);
-      if (!broken.length) break;
+      const jsTests = res.written.map((w) => w.path).filter((p) => /\.[cm]?js$/.test(p));
+      const broken = syntaxErrors(this.dir, jsTests);
+      // Parsing is not enough (run 2366): the tests are tried against stubs, and a file that breaks on its
+      // own lines goes back to the Tester before it is locked, not to a Fixer who can never make it pass.
+      const faulty = broken.length ? [] : await dryRunTests(this.dir, jsTests);
+      if (faulty.length) this.log.append("factory.tests.dryrun", { run: this.id, attempt, problems: faulty });
+      const bad = [...broken, ...faulty];
+      this.verdict(this.one("tests"), "tests", !bad.length, attempt, bad[0]);
+      if (!bad.length) break;
       git(this.dir, "clean", "-fdq", "test");
-      if (attempt >= 2) throw new Error(`The Tester's tests do not parse: ${broken.join("; ")}`);
-      feedback = `\n\nYour previous tests did not parse, so they were discarded:\n${broken.join("\n")}\nWrite them again, each file complete and valid.`;
+      if (attempt >= 2) throw new Error(broken.length ? `The Tester's tests do not parse: ${broken.join("; ")}` : `The Tester's tests break on their own lines: ${faulty.join("; ")}`);
+      feedback = broken.length
+        ? `\n\nYour previous tests did not parse, so they were discarded:\n${broken.join("\n")}\nWrite them again, each file complete and valid.`
+        : `\n\nYour previous tests were tried before locking, with every module they import stubbed out, and a file failed as a whole on its own lines (no code could ever make it pass), so they were discarded:\n${faulty.join("\n")}\nWrite them again. Every line must sit inside a test or be a valid import or helper; nothing may follow the last test.`;
     }
     for (const f of files.filter((x) => !tests.includes(x))) res.refused.push({ path: f.path, reason: "the Tester may only write under test/" });
     this.log.append("factory.files", { run: this.id, station: "tests", round: 1, ...res });
@@ -567,9 +576,15 @@ class Run {
       // A stall climbs the ladder before anyone is asked (H6): a deeper fix on a stronger model, then the locked
       // test itself is questioned. Each step once per stall; the wall clock is never waived.
       let climbed = false;
-      if (stop && !timeUp && run.failed > 0 && this.ladder !== "person") {
-        const next = this.ladder === "normal" ? "deeper" : this.ladder === "deeper" && !this.disputed ? "dispute" : "person";
-        this.log.append("factory.ladder", { run: this.id, from: this.ladder, to: next, reason: stop, round: this.fixRounds });
+      // Triage first: when the evidence points at a locked test (a Fixer's TEST_WRONG, or a test file that breaks
+      // on its own), the test is questioned now, not after a stronger model has burned the budget on code that
+      // was right (run 2366). Once per run.
+      const faults = this.disputed || timeUp || run.failed === 0 ? [] : lockedTestFaults(run, isLockedTest);
+      const fault = !this.disputed && !timeUp && run.failed > 0 && (!!this.lastDispute || faults.length > 0);
+      if (fault || (stop && !timeUp && run.failed > 0 && this.ladder !== "person")) {
+        const next = fault ? "dispute" : this.ladder === "normal" ? "deeper" : !this.disputed ? "dispute" : "person";
+        const why = fault ? (this.lastDispute ? `the Fixer says a locked test is wrong (${this.lastDispute.file})` : `a locked test file breaks on its own (${faults[0].file})`) : stop;
+        this.log.append("factory.ladder", { run: this.id, from: this.ladder, to: next, reason: why, round: this.fixRounds, ...(fault ? { triage: true } : {}) });
         this.ladder = next;
         if (next === "dispute") {
           this.mark("tests", "active", undefined, "a locked test is questioned");
@@ -579,9 +594,10 @@ class Run {
             run = await this.station("test", () => this.runSuite(this.fixRounds), this.fixRounds || undefined);
             if (run.failed === 0 && !feedback) break;
           }
-          // Corrected tests start the ladder over (no second dispute); tests that stand go to you.
-          this.ladder = relocked ? "normal" : "person";
-          climbed = relocked;
+          // Corrected tests start the ladder over (no second dispute). Tests that stand after a stall go to you;
+          // after triage, the fixing goes on with the Tester's reasons in hand.
+          this.ladder = relocked || fault ? "normal" : "person";
+          climbed = relocked || fault;
         } else if (next === "deeper") climbed = true;
         // A step up the ladder buys one more fix round, done the new way, before the stop rules look again.
         if (climbed) { history = [history[history.length - 1]]; budget = Math.max(budget, 1); }
@@ -615,7 +631,7 @@ class Run {
       }, round);
       files = this.lastFixFiles;
       before = this.lastFixBefore;
-      const attempt = { round, agent: fixer.id, model: this.ladder === "deeper" ? strongerModel(this.modelOf(fixer)) : this.modelOf(fixer), before: failingBefore, after: run.failed, files: Object.keys(files), said: this.lastFixSaid, ...(this.lastDispute ? { dispute: `${this.lastDispute.file}: ${this.lastDispute.evidence}` } : {}) };
+      const attempt = { round, agent: fixer.id, model: this.lastFixModel || this.modelOf(fixer), before: failingBefore, after: run.failed, files: Object.keys(files), said: this.lastFixSaid, ...(this.lastDispute ? { dispute: `${this.lastDispute.file}: ${this.lastDispute.evidence}` } : {}) };
       this.attempts.push(attempt);
       this.log.append("factory.attempt", { run: this.id, ...attempt, ladder: this.ladder });
       if (run.failed < failingBefore && this.ladder !== "person") this.ladder = "normal";
@@ -628,22 +644,28 @@ class Run {
   private async fix(run: TestRun, round: number, note: string): Promise<CrewMember> {
     const failures = run.cases.filter((c) => !c.pass).map((c) => `- ${c.name} (${c.file}): ${(c.error ?? "failed").slice(0, 1200)}`).join("\n");
     const deeper = this.ladder === "deeper";
+    const fixer = this.one("fix");
+    // A stronger model only with the money it needs to work: opus with $0.18 left died in 6 s, twice (run 2366).
+    const model = deeper ? this.deeperModel(fixer) : undefined;
+    const up = strongerModel(this.modelOf(fixer));
+    if (deeper && !model && up !== this.modelOf(fixer)) this.log.append("factory.ladder", { run: this.id, from: "deeper", to: "deeper", reason: `kept ${this.modelOf(fixer)}: $${(this.o.maxUsd - this.spent).toFixed(2)} left is below what ${up} needs ($${modelFloorUsd(up).toFixed(2)})`, round });
+    this.lastFixModel = model ?? this.modelOf(fixer);
     const prompt = [
       `Spec:\n${JSON.stringify(this.plan, null, 2)}`,
       // Only the lines that say what failed and where (SF-16), at most 100.
       failures ? `Failing tests (the core's own run):\n${failures}\n\nTest output (failure lines):\n${failureLines(run.output, 100, 2500) || "(none: run the failing file with node yourself to see the raw error)"}` : "All tests pass.",
       note ? `The reviewer of the build asked for: ${note}` : "",
       this.attemptsText(),
+      this.keptReason ? `A locked test was questioned and the Tester kept it: ${this.keptReason}` : "",
       deeper ? "The fixes so far did not move the failures. Step back before you edit: write down two or three different explanations of the root cause, check each one by running code (not by reading only), then fix the one the evidence supports. If the evidence says a locked test itself is wrong, say so with the TEST_WRONG line instead of working around it." : "",
       // At the workbench the agent reads what it needs; without it, it gets the whole project as text.
       this.bench ? `The project is the current folder: SPEC.md, the locked tests in test/, the code. Read what you need.` : `Locked tests (read only):\n${this.testsText()}`,
       this.bench ? "" : `Current code:\n${this.codeText()}`,
     ].filter(Boolean).join("\n\n");
-    const fixer = this.one("fix");
     // What each file held before this round, so the stop rules (SF-25) see a revert to the build's version.
     const hashes = () => Object.fromEntries(Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && !isKitFile(p)).map(([p, c]) => [p, createHash("sha256").update(c).digest("hex")]));
     const beforeAll = hashes();
-    const text = await this.ask(fixer, prompt, { round }, { model: deeper ? strongerModel(this.modelOf(fixer)) : undefined });
+    const text = await this.ask(fixer, prompt, { round }, { model });
     const res = this.takeWork(text);
     this.lastFixBefore = Object.fromEntries(res.written.map((w) => [w.path, beforeAll[w.path]]).filter(([, h]) => h));
     this.lastFixSaid = answerSummary(text);
@@ -663,6 +685,17 @@ class Run {
   /** The escalation ladder (H6): a normal fix, then a deeper one on a stronger model, then the locked test is questioned, then you. */
   private ladder: "normal" | "deeper" | "dispute" | "person" = "normal";
   private disputed = false;
+  private lastFixModel = "";
+  /** Why the Tester kept a questioned test: the Fixer works from it. */
+  private keptReason = "";
+
+  /** One step up in model for a deeper fix, if what is left of the run's budget can pay for it; else none. */
+  private deeperModel(m: CrewMember): string | undefined {
+    const cur = this.modelOf(m);
+    const up = strongerModel(cur);
+    if (up === cur) return undefined;
+    return this.o.maxUsd - this.spent >= modelFloorUsd(up) ? up : undefined;
+  }
 
   private attemptsText(): string {
     if (!this.attempts.length) return "";
@@ -680,7 +713,7 @@ class Run {
     this.disputed = true;
     // A file that failed as a whole although tests in it passed: what broke runs outside any test (run 2366).
     // A file with no passing test failed to load, which is as likely the code's fault: no evidence against the test.
-    const fileLevel = run.cases.filter((c) => !c.pass && isLockedTest(c.file) && c.name.replace(/\\/g, "/").endsWith(c.file) && run.cases.some((o) => o.pass && o.file === c.file));
+    const fileLevel = lockedTestFaults(run, isLockedTest);
     const claim = this.lastDispute ?? this.attempts.map((a) => a.dispute).filter(Boolean).map((d) => ({ file: d!.split(":")[0], evidence: d! })).at(-1) ?? null;
     if (!claim && !fileLevel.length) return false;
     const m = this.one("tests");
@@ -693,7 +726,8 @@ class Run {
       text = await this.ask(m, `Approved spec:\n${JSON.stringify(this.plan, null, 2)}\n\nThe locked acceptance tests:\n${this.testsText()}\n\n${evidence}\n\nJudge it. If a test file is truly broken or contradicts the spec, return the corrected file in full as a file block (keep every test that is right, same names; never weaken a correct assertion). If the tests are right and the code is wrong, answer only: KEEP: <why>.`);
     } catch (e) { if (e instanceof StopRun) throw e; return false; }
     const fixed = parseFileBlocks(text).filter((f) => isLockedTest(f.path) && existsSync(join(this.dir, f.path)) && readFileSync(join(this.dir, f.path), "utf8") !== f.content);
-    if (!fixed.length) { this.log.append("factory.tests.disputed", { run: this.id, kept: true, evidence: evidence.slice(0, 1500), said: answerSummary(text) }); return false; }
+    this.lastDispute = null;
+    if (!fixed.length) { this.keptReason = answerSummary(text, 3); this.log.append("factory.tests.disputed", { run: this.id, kept: true, evidence: evidence.slice(0, 1500), said: answerSummary(text) }); return false; }
     const res = writeFiles(this.dir, fixed, { lockTests: false });
     const broken = syntaxErrors(this.dir, res.written.map((w) => w.path).filter((p) => /\.[cm]?js$/.test(p)));
     if (broken.length) { restoreFromHead(this.dir, changedFiles(this.dir).filter(isLockedTest)); this.log.append("factory.tests.disputed", { run: this.id, kept: true, evidence: evidence.slice(0, 1500), said: `correction did not parse: ${broken[0]}` }); return false; }
@@ -881,7 +915,8 @@ class Run {
       ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000 } : {}),
       ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: WORKBENCH_COMMANDS, timeoutMs: 15 * 60_000 } : {}),
     }, { factoryRun: this.id, station: m.station, agentVersion: m.version, ...meta, ...(bench ? { workbench: true } : {}) });
-    this.spent += r.result?.costUsd ?? 0;
+    // A call that failed was still paid for (run 2366: two opus calls died at the cap and were never counted).
+    this.spent += r.result?.costUsd ?? r.costUsd ?? 0;
     if (r.error || !r.result) throw new Error(`${m.name} failed: ${r.error}`);
     return r.result.text;
   }
@@ -999,6 +1034,11 @@ export const VERIFY_CONTRACT = [
 ].join("\n");
 
 /** One step up the model ladder, for a fix round that has to think harder (H6). */
+/** The least a model needs left in the run's budget to do a real fix round. */
+export function modelFloorUsd(model: string): number {
+  return /opus/i.test(model) ? 0.4 : /sonnet/i.test(model) ? 0.15 : 0.02;
+}
+
 export function strongerModel(model: string): string {
   if (/haiku/i.test(model)) return "sonnet";
   if (/sonnet/i.test(model)) return "opus";
@@ -1115,7 +1155,7 @@ export function restoreState(log: EventLog, run: number): RestoredState {
   if (done.has("reviewed") && gateB.at(-1)?.state === "approved") done.add("accepted");
   const order: [string, StationId][] = [["intake", "intake"], ["council", "council"], ["planWritten", "plan"], ["plan", "gateA"], ["tests", "tests"], ["build", "build"], ["reviewed", "test"], ["accepted", "gateB"]];
   const from = order.find(([k]) => !done.has(k))?.[1] ?? "ship";
-  const completed = of("agent.run.completed");
+  const completed = [...of("agent.run.completed"), ...of("agent.run.failed")];
   const reviews = of("factory.review");
   const budget = of("factory.budget").at(-1);
   return {

@@ -66,7 +66,7 @@ export const agentRunsProjection: Projection = {
       db.prepare(`UPDATE agent_runs SET status = 'done', ended_at = ?, cost_usd = ?, duration_ms = ?, context_tokens = ?, models = ? WHERE id = ?`)
         .run(e.ts, num(p.costUsd) ?? 0, num(p.durationMs), num(p.contextTokens), JSON.stringify(p.models ?? []), Number(p.runId));
     } else if (e.type === "agent.run.failed") {
-      db.prepare(`UPDATE agent_runs SET status = 'failed', ended_at = ?, error = ? WHERE id = ?`).run(e.ts, str(p.error), Number(p.runId));
+      db.prepare(`UPDATE agent_runs SET status = 'failed', ended_at = ?, error = ?, cost_usd = ? WHERE id = ?`).run(e.ts, str(p.error), num(p.costUsd) ?? 0, Number(p.runId));
     }
   },
 };

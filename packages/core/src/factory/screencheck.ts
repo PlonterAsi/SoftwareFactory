@@ -22,7 +22,8 @@ export function findBrowser(env: NodeJS.ProcessEnv = process.env, platform = pro
   const c: string[] = [];
   if (env.SF_BROWSER) c.push(env.SF_BROWSER);
   if (platform === "win32") {
-    for (const base of [env["ProgramFiles(x86)"], env.ProgramFiles, env.LOCALAPPDATA].filter(Boolean) as string[]) {
+    // The usual folders too: a scrubbed environment may not name them.
+    for (const base of [...new Set([env["ProgramFiles(x86)"], env.ProgramFiles, env.LOCALAPPDATA, "C:\\Program Files (x86)", "C:\\Program Files"].filter(Boolean) as string[])]) {
       c.push(join(base, "Microsoft", "Edge", "Application", "msedge.exe"), join(base, "Google", "Chrome", "Application", "chrome.exe"));
     }
   } else if (platform === "darwin") {
@@ -39,13 +40,24 @@ export function findBrowser(env: NodeJS.ProcessEnv = process.env, platform = pro
   return c.find((p) => { try { return existsSync(p); } catch { return false; } }) ?? null;
 }
 
+/**
+ * The environment a browser is started with. Windows' app-health shim gives the SF app
+ * __COMPAT_LAYER=DetectorsAppHealth, every child inherits it, and with it Edge's --dump-dom exits at once
+ * with no output (found on Assaf's PC, 2026-11-13: the screen check was always skipped inside the app).
+ */
+export function browserEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out = { ...env };
+  for (const k of Object.keys(out)) if (k.toUpperCase() === "__COMPAT_LAYER") delete out[k];
+  return out;
+}
+
 /** One screen: the DOM after its scripts ran, and the console's uncaught errors. */
 export function dumpScreen(browser: string, url: string, timeoutMs = 20_000): Promise<{ dom: string; errors: string[]; timedOut: boolean }> {
   return new Promise((resolve) => {
     const profile = mkdtempSync(join(tmpdir(), "sf-screen-"));
     const headless = /headless[-_]shell/.test(browser) ? [] : ["--headless=new"];
     const child = spawn(browser, [...headless, "--disable-gpu", "--no-sandbox", "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--no-proxy-server",
-      `--user-data-dir=${profile}`, "--enable-logging=stderr", "--v=0", "--virtual-time-budget=4000", "--dump-dom", url], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      `--user-data-dir=${profile}`, "--enable-logging=stderr", "--v=0", "--virtual-time-budget=4000", "--dump-dom", url], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, env: browserEnv() });
     let dom = "";
     let err = "";
     let timedOut = false;
