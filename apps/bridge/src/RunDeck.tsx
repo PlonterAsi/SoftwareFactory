@@ -50,7 +50,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
   );
 }
 
-function TaskGraph({ run }: { run: FactoryRunView }) {
+export function TaskGraph({ run }: { run: FactoryRunView }) {
   const plan = run.plan;
   if (!plan) return <div className="empty">The Planner is writing the spec…</div>;
   // Columns by dependency depth.
@@ -94,25 +94,25 @@ function TaskGraph({ run }: { run: FactoryRunView }) {
   );
 }
 
-function TestGrid({ run }: { run: FactoryRunView }) {
+export function TestGrid({ run }: { run: FactoryRunView }) {
   if (!run.tests.length) return <div className="empty">{run.stations.tests ? "Tests are locked; waiting for the first build." : "The Tester writes acceptance tests after you approve the plan."}</div>;
   const names = [...new Set(run.tests.flatMap((t) => t.cases.map((c) => c.name)))];
   return (
     <div className="testgrid" style={{ gridTemplateColumns: `minmax(140px, max-content) repeat(${run.tests.length}, 26px)` }}>
       <span className="tg-h muted">test \ round</span>
-      {run.tests.map((t) => <span key={t.round} className="tg-h mono muted" title={`${t.passed} pass, ${t.failed} fail`}>{t.round === 0 ? "B" : t.round}</span>)}
+      {run.tests.map((t, i) => <span key={i} className="tg-h mono muted" title={`${t.passed} pass, ${t.failed} fail`}>{t.round === 0 ? "B" : t.round}</span>)}
       {names.map((n) => [
-        <span key={n} className="tg-name" title={n}>{n}</span>,
-        ...run.tests.map((t) => {
+        <span key={`${n}::name`} className="tg-name" title={n}>{n}</span>,
+        ...run.tests.map((t, i) => {
           const c = t.cases.find((x) => x.name === n);
-          return <span key={n + t.round} className={`cell ${c ? (c.pass ? "pass" : "fail") : "none"}`} title={c ? (c.pass ? "pass" : c.error ?? "fail") : "not run"} />;
+          return <span key={`${n}::${i}`} className={`cell ${c ? (c.pass ? "pass" : "fail") : "none"}`} title={c ? (c.pass ? "pass" : c.error ?? "fail") : "not run"} />;
         }),
       ])}
     </div>
   );
 }
 
-function HeatMap({ run }: { run: FactoryRunView }) {
+export function HeatMap({ run }: { run: FactoryRunView }) {
   const files = Object.entries(run.files).sort((a, b) => a[0].localeCompare(b[0]));
   if (!files.length) return <div className="empty">No files yet.</div>;
   const maxW = Math.max(...files.map(([, f]) => f.writes));
@@ -148,7 +148,7 @@ function Visuals({ run }: { run: FactoryRunView }) {
 const VOTE_LABEL: Record<Vote, string> = { build: "build", reshape: "reshape", drop: "drop" };
 
 /** The Council as a round table: three to six seats, each coloured by its vote; a line joins seats that agree on a point. */
-function CouncilView({ run }: { run: FactoryRunView }) {
+export function CouncilView({ run }: { run: FactoryRunView }) {
   const st = run.stations.council;
   const [round, setRound] = useState<number | null>(null);
   if (!run.council.length) return <div className="empty">{st?.state === "skipped" ? `The Council was skipped: ${st.note ?? "small job"}.` : st?.state === "active" ? "The Council is sitting…" : "The Council sits before the Planner for bigger ideas."}</div>;
@@ -197,7 +197,7 @@ function CouncilView({ run }: { run: FactoryRunView }) {
 }
 
 /** The product judge, drawn: a row per must-have requirement (seen working or not, with what the judge saw) and the scores. */
-function JudgeView({ run }: { run: FactoryRunView }) {
+export function JudgeView({ run }: { run: FactoryRunView }) {
   const [at, setAt] = useState<number | null>(null);
   if (!run.evaluations.length) return <div className="empty">{run.stations.evaluate?.state === "skipped" ? run.stations.evaluate.note ?? "The product was not judged on this run." : "After the review, a separate judge reads every screen of the running app and checks it against the product design: each requirement, then scores for function, design and content."}</div>;
   const i = at != null && at < run.evaluations.length ? at : run.evaluations.length - 1;
@@ -224,7 +224,7 @@ function JudgeView({ run }: { run: FactoryRunView }) {
 }
 
 /** The build loop, drawn: one row per feature, in build order, with the locked tests passing after it. */
-function BuildView({ run }: { run: FactoryRunView }) {
+export function BuildView({ run }: { run: FactoryRunView }) {
   if (!run.features.length) return <div className="empty">{run.stations.build?.state ? "This build was written in one call. Product-sized runs (from $3) are built one feature at a time, and each feature shows here." : "After the plan is approved, the app is built one feature at a time: the model and shell, the logic, then each screen."}</div>;
   const LABEL = { building: "building now", built: "built", empty: "nothing changed", regressed: "broke a passing test", broken: "a screen did not draw" } as const;
   return (
@@ -246,7 +246,7 @@ function BuildView({ run }: { run: FactoryRunView }) {
 }
 
 /** Discovery, drawn: the scores of each round as a bar per rubric line, then the documents the plan is built from. */
-function ProductView({ run }: { run: FactoryRunView }) {
+export function ProductView({ run }: { run: FactoryRunView }) {
   const [at, setAt] = useState<number | null>(null);
   if (!run.discovery.length) return <div className="empty">{run.stations.discover?.state === "skipped" ? run.stations.discover.note ?? "No product design on this run." : "The Designer is working out what this product is: who it is for, the journeys, the screens. The Critic then scores it."}</div>;
   const i = at != null && at < run.discovery.length ? at : run.discovery.length - 1;
@@ -314,7 +314,7 @@ function BriefList({ title, cls, items }: { title: string; cls: string; items: s
   return <div className={`brief-sec ${cls}`}><span className="kind">{title}</span><ul>{items.map((x, i) => <li key={i}>{x}</li>)}</ul></div>;
 }
 
-function ReviewView({ run }: { run: FactoryRunView }) {
+export function ReviewView({ run }: { run: FactoryRunView }) {
   const st = run.stations.review;
   if (!run.reviews.length) return <div className="empty">{st?.state === "skipped" ? "Review was turned off for this run." : st?.state === "active" ? "The Reviewer is reading the build…" : "After the tests pass, the Reviewer checks the build against the spec."}</div>;
   return (
@@ -335,7 +335,7 @@ function ReviewView({ run }: { run: FactoryRunView }) {
 const RUNG: Record<string, string> = { deeper: "Deeper fix on a stronger model", dispute: "Questioning a locked test", person: "Asking you", normal: "Back to normal fixes" };
 
 /** The engine's loop, drawn: each fix attempt (what it changed, failing before → after), each step up the ladder. */
-function LoopView({ run }: { run: FactoryRunView }) {
+export function LoopView({ run }: { run: FactoryRunView }) {
   if (!run.loop.length) return <div className="empty">{run.fixRounds ? "Loading the loop…" : "When a test fails, every fix attempt shows here: what it changed, what the agent said, and whether the failures went down. A stall climbs a ladder (a deeper fix on a stronger model, then questioning a locked test) before you are asked."}</div>;
   return (
     <ol className="loop-list">
