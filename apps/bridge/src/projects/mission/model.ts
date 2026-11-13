@@ -98,7 +98,7 @@ export function stopsFor(run?: FactoryRunView): Stop[] {
     {
       id: "build", label: "Build", state: by.build,
       sub: featTotal ? `${built}/${featTotal} features` : by.build === "live" ? "Builder at work" : "feature by feature",
-      beads: featTotal ? R!.features.map((f) => (f.state === "built" ? "done" : f.state === "building" ? "live" : f.state === "regressed" ? "fail" : "todo") as Bead)
+      beads: featTotal ? R!.features.map((f) => (f.state === "built" ? "done" : f.state === "building" ? "live" : f.state === "regressed" || f.state === "broken" ? "fail" : "todo") as Bead)
         .concat(Array<Bead>(Math.max(0, featTotal - R!.features.length)).fill("todo")) : undefined,
     },
     {
