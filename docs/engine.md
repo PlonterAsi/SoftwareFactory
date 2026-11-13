@@ -134,3 +134,8 @@ logged get theirs too. Read across the row to see whether an engine change helpe
   must be one the kit accepts, and every link the feature wrote is opened (the retry lists the addresses the
   research found). After a screen feature: an app that does not start now fails the screen check instead of
   counting as "nothing to check". One retry, then the check after the build takes over, as before.
+
+## What cycle 4 changed (run 3609)
+
+- **The judge looks again after the retry.** In run 3609 all five screens the judge looked at were hollow on the first look (Game Home showed 0 of 11 designed items). Each went back once and was then taken as built on the Builder's word. Now a second look decides, and a screen still missing items ends "broken". A view whose id the Planner renamed is matched to its designed screen by name.
+- **Journey tests through the app's own data layer.** Run 3609 had 8 locked test files and 186 passing tests, and the Reviewer still found 9 of 12 acceptance criteria unmet when it used the app ("Add game" failed for three games because their starter items broke the schema). The app kit now goes into the folder before the tests, and for an app the Tester also writes `test/journeys.test.js`: each action criterion as a journey from `seedDb(schema)` through the kit's `createRecord` and `updateRecord` (the same functions the server runs), plus a test that every sample record passes the kit's validation.

@@ -1107,3 +1107,19 @@ describe("what run 2898 taught the engine", () => {
     expect(featuresOf(plan, null)[0].what).not.toMatch(/sample records are real content/);
   });
 });
+
+describe("what run 3609 taught the engine", () => {
+  it("has the Tester write the person's journeys through the kit's data layer, which is in the folder before the tests", async () => {
+    const log = new EventLog();
+    const mock = new MockRuntime({ plantBug: false });
+    let prompt = "";
+    const dir = tmp("sf-proj-");
+    const rt: AgentRuntime = { name: "mock", run: async (req) => { if (station(req) === "tests") prompt = req.prompt; return mock.run(req); } };
+    const f = new Factory(log, rt, dir);
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0 });
+    await f.wait(run);
+    expect(prompt).toMatch(/test\/journeys\.test\.js[\s\S]*seedDb\(schema\)[\s\S]*createRecord[\s\S]*every sample record/);
+    const fin = events(log, "factory.run.finished").at(-1);
+    expect(git(fin.dir, "log", "--format=%s").split("\n").slice(-3)).toEqual(["Acceptance tests (locked)", "App kit", "Spec and plan: Word Counter"]);
+  });
+});

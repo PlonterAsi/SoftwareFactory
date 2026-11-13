@@ -601,12 +601,19 @@ class Run {
   private async writeTests() {
     // Tests are locked once written, so they must at least parse: one quiet retry with the error before escalating.
     let feedback = "";
+    // Run 3609: 8 locked files and 186 passing tests, and the Reviewer then found 9 of 12 acceptance criteria
+    // unmet when it used the app ("Add game" failed for three games: their starter items broke the schema).
+    // The tests checked the logic the Builder would write, never a person's action through the app's data.
+    // So the kit goes in first and the Tester also writes journeys through the kit's own data layer, the
+    // same create and update the app's server runs, with the app's real schema and sample records.
+    if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
+    const journeys = this.plan.app ? `\n\n${journeyTestRule(this.plan)}` : "";
     let files: ReturnType<typeof parseFileBlocks> = [];
     let tests: typeof files = [];
     let res!: ReturnType<typeof writeFiles>;
     for (let attempt = 1; ; attempt++) {
       const kept = this.basePlan ? this.testsText() : "";
-      const text = await this.ask(this.one("tests"), `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${kept ? `\n\nThis is the next version of a shipped app. Its locked tests stay as they are (read only):\n${kept}\n\nWrite NEW test files, with new names under test/, for the acceptance criteria above only.` : ""}${feedback}`);
+      const text = await this.ask(this.one("tests"), `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${journeys}${kept ? `\n\nThis is the next version of a shipped app. Its locked tests stay as they are (read only):\n${kept}\n\nWrite NEW test files, with new names under test/, for the acceptance criteria above only.` : ""}${feedback}`);
       files = parseFileBlocks(text);
       // Fixtures (test/fixtures/*.csv and the like) belong to the locked suite too.
       // A feature run never rewrites a locked test: a new file with an old name gets the version in its name.
@@ -1500,6 +1507,18 @@ export function withDesignedScreens(plan: Plan, docs: ProductDocs): { plan: Plan
  * snake_case (band_min), the kit refuses those, the app could not start, and every feature still "built". The
  * plan is put right once, here, so the Tester and the Builder never see a name the kit will refuse.
  */
+/** What the Tester is told for an app: journeys through the kit's data layer, one per action criterion. */
+export function journeyTestRule(plan: Plan): string {
+  const ents = (plan.entities ?? []).map((e) => e.name);
+  return [
+    "This is an app, so besides the logic tests write test/journeys.test.js: what a person does, through the app's own data layer, exactly as the running app does it.",
+    "- Import the app's model with `import * as schema from \"../src/schema.js\"` and the kit's data layer with `import { seedDb, createRecord, updateRecord, deleteRecord, query } from \"../web/kit/db.js\"` (it exists already; the server runs these same functions, and a record they refuse is refused in the app too).",
+    "- Start each journey from `seedDb(schema)`, the sample records the person sees on first open, and do the person's action with createRecord / updateRecord and the src/ functions the screens will call. Then assert what the person would see in the data afterwards.",
+    `- One journey per acceptance criterion that is about something the person does (adds, edits, refreshes, plans, picks, logs), named after the criterion.${ents.length ? ` The entities are ${ents.join(", ")}.` : ""}`,
+    "- Also one test that every sample record in seedDb(schema) passes the kit's validation (createRecord of a copy of it does not throw), and that every kind of thing the person named has sample records.",
+  ].join("\n");
+}
+
 export function kitName(x: unknown): string {
   const parts = String(x ?? "").trim().split(/[^A-Za-z0-9]+/).filter(Boolean);
   const s = parts.map((w, i) => (i ? w[0].toUpperCase() + w.slice(1) : w[0].toLowerCase() + w.slice(1))).join("").replace(/^[0-9]+/, "");
