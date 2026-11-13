@@ -20,6 +20,7 @@ import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
 import { projectOf } from "./projects/service.js";
+import { extraAllowance } from "./projects/budget.js";
 import { chatRoutes, projectHome } from "./chat/routes.js";
 import { RepoExplorer } from "./imports/explorer.js";
 import { importsRoute } from "./imports/routes.js";
@@ -87,6 +88,8 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   };
   const factory = new Factory(log, runtime, projectsDir, bay);
   factory.maxRunMinutes = settings.maxRunMinutes;
+  // A build's "add more" never goes past its project's budget.
+  factory.extraBudget = (run, want) => extraAllowance(log, run, want, (r) => projectOf(log, { kind: "factory_run", ref: r }));
   recordAppVersion(log, appVersion);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
   // The crew picks up ready bugs and tasks on its own, within your caps (docs/tickets.md, "The ready queue").

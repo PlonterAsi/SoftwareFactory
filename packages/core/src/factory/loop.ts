@@ -151,6 +151,11 @@ export class Factory {
 
   /** Wall-clock limit per run in minutes (the `maxRunMinutes` setting). */
   maxRunMinutes: number | undefined;
+  /**
+   * How much more a running build may be given when its own limit is spent: the project's budget may allow
+   * less than the "Add 50% more" asked for. The server wires it to the project budgets; by default no ceiling.
+   */
+  extraBudget: (run: number, wantUsd: number) => number = (_run, want) => want;
 
   constructor(private log: EventLog, private runtime: AgentRuntime, readonly projectsDir: string, readonly crew: CrewSource = builtinCrew) {
     // Agent calls cut off by the restart would otherwise pulse as "running" forever.
@@ -1249,9 +1254,15 @@ class Run {
       await this.gateTurn(async () => {
         if (this.o.maxUsd - this.spent >= 0.01) return;
         if (this.budgetRefused) throw new StopRun("Budget spent.");
-        const d = await this.gate("escalation", `The run's budget of $${this.o.maxUsd.toFixed(2)} is spent. Add 50% more?`, { neverAuto: true, action: "Add 50% more", kind: "budget" }, true);
+        // The project's own budget may allow less than half again, or nothing at all.
+        const want = this.o.maxUsd * 0.5;
+        const more = this.f.extraBudget(this.id, want);
+        if (more < 0.01 && more < want) { this.budgetRefused = true; throw new StopRun(`Budget spent: the run's $${this.o.maxUsd.toFixed(2)} is used and the project's budget has nothing left. Raise the project's total on its page to go on.`); }
+        const all = more < want - 0.005;
+        const d = await this.gate("escalation", `The run's budget of $${this.o.maxUsd.toFixed(2)} is spent. Add $${more.toFixed(2)} more${all ? " (all the project's budget has left)" : ""}?`, { neverAuto: true, action: `Add $${more.toFixed(2)}`, kind: "budget" }, true);
         if (!d.approve) { this.budgetRefused = true; throw new StopRun("Budget spent."); }
-        this.o.maxUsd *= 1.5;
+        // Asked again after the approval: another build of the project may have spent in the meantime.
+        this.o.maxUsd += this.f.extraBudget(this.id, more);
         this.log.append("factory.budget", { run: this.id, maxUsd: this.o.maxUsd });
       });
     }
