@@ -18,6 +18,7 @@ import { Home } from "./projects/Home";
 import { Workspace } from "./projects/Workspace";
 import { href, useRoute, type FactoryView } from "./projects/router";
 import "./projects/builtin";
+import "./projects/mission/Mission";
 import { Tickets, useTicketCounts } from "./Tickets";
 import "./TicketsPanel";
 import { ImproveDeck, useImprove } from "./ImproveDeck";

@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../ui";
-import { DuplicateNotice } from "../DuplicateNotice";
-import { duplicateOf, projectsApi, setupApi, type DuplicateRun, PROJECT_KINDS, PROJECT_STATUSES, type ProjectDetail, type ProjectSummary, type SfEvent } from "../api";
+import { projectsApi, setupApi, PROJECT_KINDS, PROJECT_STATUSES, type ProjectDetail, type ProjectSummary, type SfEvent } from "../api";
 import { href } from "./router";
 import { StarMap } from "../StarMap";
 import { OrderDeck } from "../OrderDeck";
 import { FactoryFloor } from "../FactoryFloor";
 import { RunDeck } from "../RunDeck";
 import { inProject, projectSets, registerProjectPanel, type PanelContext } from "./panels";
-import { AskBanner, TurnIntoTicket } from "../Intake";
+import { TurnIntoTicket } from "../Intake";
 
 const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 const usd = (n: number) => `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`;
@@ -20,92 +19,6 @@ export function ago(ts?: string) {
   const h = Math.round(m / 60);
   if (h < 36) return `${h} h ago`;
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-// ---- Overview ----
-function Overview({ project: p, events, go, showRun }: PanelContext) {
-  const [idea, setIdea] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [summary, setSummary] = useState<string | null>(null);
-  const r = p.rollup;
-  const sets = useMemo(() => projectSets(p), [p]);
-  const recent = useMemo(() => events.filter((e) => inProject(e, p, sets) && describe(e)).slice(-8).reverse(), [events, p, sets]);
-  const [dup, setDup] = useState<DuplicateRun | null>(null);
-  // A project with a shipped app grows it: the idea becomes its next version, unless you ask for a new app.
-  const hasApp = r.shipped > 0;
-  const [asNew, setAsNew] = useState(false);
-  const onTop = hasApp && !asNew;
-  async function build(e?: FormEvent, again = false) {
-    e?.preventDefault();
-    if (!idea.trim() || busy) return;
-    setBusy(true);
-    setDup(null);
-    try { const { run } = await projectsApi.build(p.id, idea.trim(), undefined, again, onTop); setIdea(""); setErr(null); showRun(run); }
-    catch (x) { const d = duplicateOf(x); if (d) setDup(d); else setErr((x as Error).message); }
-    finally { setBusy(false); }
-  }
-  const saveSummary = async () => {
-    if (summary == null || summary === p.summary) return setSummary(null);
-    try { await projectsApi.update(p.id, { summary }); setSummary(null); } catch (x) { setErr((x as Error).message); }
-  };
-  return (
-    <div className="pj-overview">
-      <AskBanner projectId={p.id} name={p.name} hasRuns={p.runIds.length > 0 || p.links.some((l) => l.kind === "self")} archived={p.status === "archived"} />
-      <section className="pj-brief">
-        {summary == null ? (
-          <p className={p.summary ? "pj-summary" : "pj-summary empty-line"} onClick={() => setSummary(p.summary)} title="Click to edit">
-            {p.summary || "No description yet. Click to say what this project is for."}
-          </p>
-        ) : (
-          <textarea className="pj-summary-edit" autoFocus value={summary} rows={3} onChange={(e) => setSummary(e.target.value)} onBlur={saveSummary}
-            onKeyDown={(e) => { if (e.key === "Escape") setSummary(null); if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) saveSummary(); }} aria-label="Project description" />
-        )}
-        <form className="pj-build" onSubmit={build}>
-          <input value={idea} onChange={(e) => setIdea(e.target.value)} placeholder={onTop ? `Add something to ${p.name}…` : `Build something in ${p.name}…`} aria-label="Idea to build in this project" />
-          <button type="submit" disabled={!idea.trim() || busy}>{busy ? "Starting…" : onTop ? "Add it" : "Build it"}</button>
-        </form>
-        {hasApp && (
-          <label className="pj-build-mode muted">
-            <input type="checkbox" checked={asNew} onChange={(e) => setAsNew(e.target.checked)} /> Build it as a new app instead of the next version of {p.name}
-          </label>
-        )}
-        {err && <p className="error" role="alert">{err}</p>}
-        {dup && <DuplicateNotice dup={dup} busy={busy} onShow={showRun} onDismiss={() => setDup(null)} onAgain={() => build(undefined, true)} />}
-      </section>
-      <section className="pj-gauges" aria-label="Project numbers">
-        <Gauge label="Builds" value={String(r.runs)} sub={r.running ? `${r.running} running` : r.runs ? `${r.shipped} shipped, ${r.failed} failed` : "none yet"} onClick={() => go("runs")} />
-        <Gauge label="Ideas and notes" value={String(r.fragments)} sub={`${r.important} important, ${r.nodes} nodes`} onClick={() => go("ideas")} />
-        <Gauge label="Conflicts" value={String(r.openConflicts)} sub={r.openConflicts ? "need your call" : "none open"} alert={r.openConflicts > 0} onClick={() => go("ideas")} />
-        <Gauge label="Spend" value={usd(r.spendUsd)} sub={`${r.agentCalls} agent calls`} onClick={() => go("agents")} />
-        {(() => {
-          const l = p.facets?.launch as { running?: number; folder?: string | null; lastStartedAt?: string | null } | undefined;
-          if (!l?.folder && !l?.running) return null;
-          return <Gauge label="Run it" value={l.running ? "Live" : "Ready"} sub={l.running ? `${l.running} running` : l.lastStartedAt ? `last started ${ago(l.lastStartedAt)}` : "start it from the app"} onClick={() => go("run")} />;
-        })()}
-        {Object.entries(r.linked).filter(([k]) => k !== "folder").map(([k, n]) => <Gauge key={k} label={cap(k.replace(/_/g, " ")) + "s"} value={String(n)} sub="linked" onClick={() => go(k === "ticket" ? "tickets" : k)} />)}
-      </section>
-      <section className="pj-recent">
-        <h3>Latest</h3>
-        {recent.length ? (
-          <ol className="pj-feed">
-            {recent.map((e) => <li key={e.id}><time>{ago(e.ts)}</time><span>{describe(e)}</span></li>)}
-          </ol>
-        ) : <p className="empty">Nothing has happened here yet. Build an idea above, or file notes with the Assistant.</p>}
-        <button className="ghost sm" onClick={() => go("history")}>Full history</button>
-      </section>
-    </div>
-  );
-}
-
-function Gauge({ label, value, sub, alert, onClick }: { label: string; value: string; sub: string; alert?: boolean; onClick?: () => void }) {
-  return (
-    <button className={alert ? "gauge alert" : "gauge"} onClick={onClick}>
-      <span className="g-value">{value}</span>
-      <span className="g-label">{label}</span>
-      <span className="g-sub">{sub}</span>
-    </button>
-  );
 }
 
 /** One line in plain words for an event, or null for the noisy ones. */
@@ -143,7 +56,7 @@ function Ideas({ order, factory }: PanelContext) {
 function Runs({ project, factory, pickedRun, showRun }: PanelContext) {
   const mine = useMemo(() => factory.factoryRuns.filter((r) => project.runIds.includes(r.run)), [factory.factoryRuns, project.runIds]);
   const selected = mine.find((r) => r.run === pickedRun) ?? mine.at(-1);
-  if (!mine.length) return <EmptyState title="No builds in this project yet">Use Build it on the Overview, or ask the Assistant while this project is open. Each build shows here, station by station.</EmptyState>;
+  if (!mine.length) return <EmptyState title="No builds in this project yet">Use Build it on the Mission tab, or ask the Assistant while this project is open. Each build shows here, station by station.</EmptyState>;
   return (
     <div className="pj-runs">
       <FactoryFloor runs={factory.runs} factoryRuns={mine} selected={selected} onSelect={showRun} mode={factory.mode} />
@@ -204,16 +117,18 @@ function History({ project, events, showRun }: PanelContext) {
 function Settings({ project: p }: PanelContext) {
   const [name, setName] = useState(p.name);
   const [kind, setKind] = useState(p.kind);
+  const [summary, setSummary] = useState(p.summary ?? "");
   const [msg, setMsg] = useState<string | null>(null);
   const act = (f: Promise<unknown>, ok: string) => f.then(() => setMsg(ok)).catch((x) => setMsg((x as Error).message));
   const kinds = PROJECT_KINDS.includes(p.kind) ? PROJECT_KINDS : [...PROJECT_KINDS, p.kind];
   return (
-    <form className="pj-settings" onSubmit={(e) => { e.preventDefault(); act(projectsApi.update(p.id, { name, kind }), "Saved."); }}>
+    <form className="pj-settings" onSubmit={(e) => { e.preventDefault(); act(projectsApi.update(p.id, { name, kind, summary }), "Saved."); }}>
       <label>Name <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></label>
+      <label>What it is for <textarea value={summary} rows={3} onChange={(e) => setSummary(e.target.value)} placeholder="One or two lines on what this project is for" /></label>
       <label>Kind
         <select value={kind} onChange={(e) => setKind(e.target.value)}>{kinds.map((k) => <option key={k}>{k}</option>)}</select>
       </label>
-      <div className="row"><button type="submit" disabled={!name.trim() || (name === p.name && kind === p.kind)}>Save changes</button></div>
+      <div className="row"><button type="submit" disabled={!name.trim() || (name === p.name && kind === p.kind && summary === (p.summary ?? ""))}>Save changes</button></div>
       <fieldset>
         <legend>Status</legend>
         <div className="row">
@@ -297,7 +212,6 @@ function MergeInto({ project: p }: { project: ProjectDetail }) {
   );
 }
 
-registerProjectPanel({ id: "overview", section: "brief", title: "Overview", order: 0, render: (c) => <Overview {...c} /> });
 registerProjectPanel({
   id: "ideas", section: "brief", title: "Ideas", order: 10, render: (c) => <Ideas {...c} />,
   badge: (c) => c.project.rollup.fragments || null, alert: (c) => c.project.rollup.openConflicts > 0,

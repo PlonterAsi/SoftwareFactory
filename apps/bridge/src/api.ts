@@ -111,7 +111,7 @@ export interface FactoryRunView {
 }
 
 export interface EvaluationView { round: number; pass: boolean; skipped?: string; bar: number; screens: number; requirements: { id: string; met: boolean; evidence: string }[]; scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] }
-export interface FeatureView { id: string; title: string; state: "building" | "built" | "empty" | "regressed"; attempt: number; passed?: number; failed?: number; files?: string[]; broke?: string[] }
+export interface FeatureView { id: string; title: string; state: "building" | "built" | "empty" | "regressed"; attempt: number; /** Its place in the build order and how many features the build has. */ index?: number; of?: number; passed?: number; failed?: number; files?: string[]; broke?: string[] }
 export interface ProductDocsView {
   brief: { who: string; problem: string; promise: string; notThis: string[] };
   research: { finding: string; source?: string }[];
@@ -151,7 +151,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
       case "factory.council": r.council.push({ round: p.round, seats: p.seats, brief: p.brief }); break;
       case "factory.evaluation": r.evaluations.push({ round: p.round, pass: !!p.pass, skipped: p.skipped, bar: p.bar ?? 4, screens: p.screens ?? 0, requirements: p.requirements ?? [], scores: p.scores ?? {}, problems: p.problems ?? [] }); break;
       case "factory.feature": {
-        const f: FeatureView = { id: p.id, title: p.title, state: p.state, attempt: p.attempt ?? 1, passed: p.passed, failed: p.failed, files: p.files, broke: p.broke };
+        const f: FeatureView = { id: p.id, title: p.title, state: p.state, attempt: p.attempt ?? 1, index: p.index, of: p.of, passed: p.passed, failed: p.failed, files: p.files, broke: p.broke };
         const at = r.features.findIndex((x) => x.id === p.id);
         if (at >= 0) r.features[at] = f; else r.features.push(f);
         break;

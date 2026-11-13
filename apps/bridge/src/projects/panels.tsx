@@ -45,7 +45,7 @@ export interface ProjectPanel {
   title: string;
   /** Which part of the project this tab belongs to. Optional; defaults to "know". */
   section?: Section;
-  /** Lower comes first. Built-ins use 0 (Overview), 10 (Ideas), 20 (Runs), 60 (Agents), 90 (History). */
+  /** Lower comes first. Built-ins use 0 (Mission), 5 (Product), 10 (Ideas), 20 (Runs), 60 (Agents), 90 (History). */
   order: number;
   appliesTo?: (p: ProjectSummary) => boolean;
   /** A small count next to the tab, or null. */
