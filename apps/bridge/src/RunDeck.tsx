@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FactoryRunView, LoopEventView, SeatView, Vote } from "./api";
 
-type Tab = "council" | "product" | "plan" | "tests" | "loop" | "files" | "review" | "visuals";
+type Tab = "council" | "product" | "build" | "plan" | "tests" | "loop" | "files" | "review" | "visuals";
 
 /** What the selected run produced, drawn instead of listed: task graph, test grid, file heat map, visual checks. */
 export function RunDeck({ run }: { run?: FactoryRunView }) {
@@ -17,6 +17,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
     ["product", `Product${lastDisc ? ` · ${lastDisc.pass ? "passed" : `round ${lastDisc.round}`}` : ""}`],
     ["plan", `Plan${run?.plan ? ` · ${run.plan.tasks.length}` : ""}`],
     ["tests", `Tests${last ? ` · ${last.passed}/${last.passed + last.failed}` : ""}`],
+    ["build", `Build${run?.features.length ? ` · ${run.features.filter((f) => f.state === "built").length}/${run.features.length}` : ""}`],
     ["loop", `Loop${run?.loop.length ? ` · ${run.loop.filter((l) => l.kind === "attempt").length}` : ""}`],
     ["files", `Files${fileCount ? ` · ${fileCount}` : ""}`],
     ["review", `Review${lastReview ? ` · ${lastReview.findings.length}` : ""}`],
@@ -39,6 +40,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
         {run && tab === "visuals" && <Visuals run={run} />}
         {run && tab === "council" && <CouncilView run={run} />}
         {run && tab === "product" && <ProductView run={run} />}
+        {run && tab === "build" && <BuildView run={run} />}
         {run && tab === "review" && <ReviewView run={run} />}
       </div>
     </section>
@@ -188,6 +190,27 @@ function CouncilView({ run }: { run: FactoryRunView }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/** The build loop, drawn: one row per feature, in build order, with the locked tests passing after it. */
+function BuildView({ run }: { run: FactoryRunView }) {
+  if (!run.features.length) return <div className="empty">{run.stations.build?.state ? "This build was written in one call. Product-sized runs (from $3) are built one feature at a time, and each feature shows here." : "After the plan is approved, the app is built one feature at a time: the model and shell, the logic, then each screen."}</div>;
+  const LABEL = { building: "building now", built: "built", empty: "nothing changed", regressed: "broke a passing test" } as const;
+  return (
+    <ol className="feat-list">
+      {run.features.map((f) => {
+        const total = (f.passed ?? 0) + (f.failed ?? 0);
+        return (
+          <li key={f.id} className={`feat ${f.state}`}>
+            <div className="feat-head"><span className="mono muted">{f.id}</span> <strong>{f.title}</strong> <span className="feat-state">{LABEL[f.state]}{f.attempt > 1 ? ` · try ${f.attempt}` : ""}</span></div>
+            {total > 0 && <div className="score"><span className="score-k">locked tests</span><span className="score-bar"><i style={{ width: `${((f.passed ?? 0) / total) * 100}%` }} /></span><span className="mono">{f.passed}/{total}</span></div>}
+            {!!f.files?.length && <div className="loop-files">{f.files.slice(0, 8).join(", ")}{f.files.length > 8 ? ` +${f.files.length - 8}` : ""}</div>}
+            {!!f.broke?.length && <div className="loop-dispute">Broke: {f.broke.slice(0, 3).map((x) => x.split("::")[1] ?? x).join("; ")}</div>}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

@@ -270,7 +270,7 @@ describe("a workbench call that runs out of budget mid-work", () => {
       return r;
     } };
     const f = new Factory(log, bench, tmp("sf-proj-"));
-    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 3 });
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 2.5 });
     await f.wait(run);
     expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
     expect(builds).toHaveLength(2);
@@ -502,5 +502,92 @@ describe("discovery: the idea becomes a designed product before any plan", () =>
     await f.wait(next);
     expect(seen.filter((x) => x.station === "design").length).toBe(before);
     expect(events(log, "factory.station").some((s) => s.run === next && s.station === "discover" && s.state === "skipped")).toBe(true);
+  });
+});
+
+describe("the build loop: one feature per fresh session", () => {
+  const write = (cwd: string, fs: { path: string; content: string }[]) => { for (const f of fs) { mkdirSync(dirname(join(cwd, f.path)), { recursive: true }); writeFileSync(join(cwd, f.path), f.content); } };
+  /** A fake real crew: each build call does its one feature at the workbench (writes files in the folder). */
+  function featureCrew(onFeature?: (id: string, nth: number, cwd: string, files: { path: string; content: string }[]) => boolean) {
+    const mock = new MockRuntime({ plantBug: false });
+    const builds: AgentRequest[] = [];
+    const seen: Record<string, number> = {};
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await mock.run(req);
+      if (station(req) !== "build") return r;
+      builds.push(req);
+      const files = parseFileBlocks(r.text);
+      const id = req.prompt.match(/Your feature, (F\d+)/)?.[1] ?? "";
+      seen[id] = (seen[id] ?? 0) + 1;
+      if (!onFeature?.(id, seen[id], req.cwd!, files)) {
+        if (id === "F1") write(req.cwd!, files.filter((f) => f.path !== "src/count.js"));
+        else if (id === "F2") write(req.cwd!, files.filter((f) => f.path === "src/count.js"));
+        else write(req.cwd!, [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((f) => f.path === "web/style.css")?.content ?? "") }]);
+      }
+      r.text = `Built ${id}.\nNext call: reuse countWords from src/count.js.`;
+      return r;
+    } };
+    return { rt, builds };
+  }
+
+  it("builds the plan as a list of features, each in its own call, with the list and the progress on disk", async () => {
+    const log = new EventLog();
+    const { rt, builds } = featureCrew();
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    const fin = events(log, "factory.run.finished").at(-1);
+    expect(fin.outcome).toBe("shipped");
+    // Foundation, logic, and one per view of the plan.
+    expect(builds.map((b) => b.prompt.match(/Your feature, (F\d+)/)?.[1])).toEqual(["F1", "F2", "F3"]);
+    // Each call gets its one feature and the pointers to the spine, not the whole spec and all the tests pasted in.
+    expect(builds[2].prompt).toMatch(/ONE feature \(F3, number 3 of 3\)/);
+    expect(builds[2].prompt).toMatch(/Screen: Progress/);
+    expect(builds[2].prompt).toMatch(/features\.json.*PROGRESS\.md/s);
+    expect(builds[2].prompt).not.toMatch(/Locked acceptance tests:/);
+    // Each call is capped at its share of the build budget, never above the Builder's own cap.
+    expect(builds.every((b) => (b.budgetUsd ?? 9) <= 0.6 && (b.budgetUsd ?? 0) >= 0.15)).toBe(true);
+    // The spine: the list (all built, with the tests passing after each) and what each session left for the next.
+    const list = JSON.parse(readFileSync(join(fin.dir, "features.json"), "utf8")).features;
+    expect(list.map((x: any) => x.state)).toEqual(["built", "built", "built"]);
+    expect(readFileSync(join(fin.dir, "PROGRESS.md"), "utf8")).toMatch(/## F2 The domain logic: built[\s\S]*reuse countWords/);
+    // A commit per feature.
+    expect(git(fin.dir, "log", "--format=%s")).toMatch(/Feature F3: Screen: Progress[\s\S]*Feature F2: The domain logic[\s\S]*Feature F1/);
+    // The logic feature is where the locked tests go green; the core saw it.
+    const built = events(log, "factory.feature").filter((e) => e.state === "built");
+    expect(built.map((e) => e.id)).toEqual(["F1", "F2", "F3"]);
+    expect(built[0].failed).toBeGreaterThan(0);
+    expect(built[1].failed).toBe(0);
+  });
+
+  it("a feature that breaks a test that passed before is sent back once with that evidence", async () => {
+    const log = new EventLog();
+    const { rt, builds } = featureCrew((id, nth, cwd) => {
+      // The screen feature's first attempt breaks the logic the tests check.
+      if (id !== "F3" || nth !== 1) return false;
+      write(cwd, [{ path: "src/count.js", content: "export function countWords() { return -1; }\nexport function progress() { return -1; }\n" }]);
+      return true;
+    });
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    const feats = events(log, "factory.feature").filter((e) => e.id === "F3" && e.state !== "building");
+    expect(feats.map((e) => e.state)).toEqual(["regressed", "regressed"]);
+    expect(feats[0].broke.length).toBeGreaterThan(0);
+    const f3 = builds.filter((b) => /Your feature, F3/.test(b.prompt));
+    expect(f3).toHaveLength(2);
+    expect(f3[1].prompt).toMatch(/passed before your call and fail after it/);
+    // Still broken after the second try: it goes on, and the test and fix loop takes it from there.
+    expect(events(log, "factory.station").some((s) => s.station === "fix")).toBe(true);
+  });
+
+  it("a small run still builds in one call", async () => {
+    const log = new EventLog();
+    const { rt, builds } = featureCrew((_id, _n, cwd, files) => { write(cwd, files); return true; });
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 0.6 });
+    await f.wait(run);
+    expect(builds).toHaveLength(1);
+    expect(events(log, "factory.feature")).toHaveLength(0);
   });
 });

@@ -56,7 +56,21 @@ Then the Planner plans from the documents (one view per screen, one flow per jou
 
 In the app: a "Product design" box on the factory floor, a Design station on the Bridge, and a Product tab on every run with each round's scores and documents.
 
-Next in the same direction: build one feature at a time from a list on disk with a fresh session each, and an evaluator that uses the running app and scores it as a product.
+## The build loop: one feature per fresh session (2026-11-13)
+
+One Builder call used to write the whole app. That is the first failure of every long-running harness: the call runs out half way and the conversation it carries grows with every file (run 2623: 407k tokens of context to write 3 files).
+
+Now, for a real crew on a product-sized run (`maxUsd` of $3 or more), the build is a loop (`packages/core/src/factory/features.ts`):
+
+1. The core turns the approved plan into a feature list, with no agent call: the model and shell, the domain logic the locked tests pin down, then one feature per screen (with that screen's purpose, contents and actions from the product documents).
+2. Each feature gets its own fresh Builder session. It is told its one feature and where the spine is (`SPEC.md`, `docs/product/`, `features.json`, `PROGRESS.md`); it reads only what it needs.
+3. After each session the core runs the locked tests for free. A test that passed before and fails now sends the feature back once, with that evidence.
+4. The core commits (`Feature F3: Screen: Today`), appends the session's closing note to `PROGRESS.md` for the next session, and updates `features.json`. Only the core writes those two files.
+5. Each session's cap is its share of 55% of the run's budget, never under $0.15 or over the Builder's own cap. A retried build picks up at the first feature not built.
+
+Whatever still fails at the end goes to the test and fix loop as before. Small runs (a ticket at $0.60) and the practice crew still build in one call. In the app: a Build tab on every run with a row per feature and the locked tests passing after it (`factory.feature`).
+
+Next in the same direction: an evaluator that uses the running app and scores it as a product.
 
 ## Where to see it
 
