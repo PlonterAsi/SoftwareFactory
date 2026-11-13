@@ -117,8 +117,9 @@
 .ms-verdict.warn { background: var(--gate-dim); } .ms-verdict.warn b { color: var(--gate); }
 .ms-verdict.live { background: var(--accent-dim); } .ms-verdict.live b { color: var(--accent); }
 .ms-probs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
-.ms-prob { border: 1px solid var(--line); border-left: 3px solid var(--gate); border-radius: 8px; padding: 10px 12px; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); background: var(--panel-2); }
+.ms-prob { border: 1px solid rgba(245, 177, 76, 0.28); border-radius: 8px; padding: 10px 12px; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); background: var(--panel-2); }
 .ms-prob .mono { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+.ms-prob .mono::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; background: var(--gate); transform: translateY(-1px) rotate(45deg); border-radius: 1px; }
 .ms-prob em { display: block; font-style: normal; color: var(--ink); margin-top: 6px; }
 
 /* screens strip */
