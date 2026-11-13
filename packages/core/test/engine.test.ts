@@ -324,6 +324,7 @@ describe("the plan keeps what the person asked for", () => {
     const run = f.start("Count words in my notes. Show a goal bar for each note. Keep a session log with date and minutes.", { autoApprove: true, autoRetries: 0 });
     await f.wait(run);
     expect(events(log, "factory.plan.gaps")[0].missing).toEqual(["a session log with date and minutes"]);
+    expect(events(log, "factory.plan.gaps")[0].added).toBe(true);
     expect(plans.length).toBeGreaterThanOrEqual(2);
     expect(plans[1].prompt).toMatch(/leaves out these things.*session log/s);
   });

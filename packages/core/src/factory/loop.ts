@@ -551,11 +551,13 @@ class Run {
         if (!this.basePlan && !feedback) {
           const missing = await this.planGaps(plan);
           if (missing.length) {
-            this.log.append("factory.plan.gaps", { run: this.id, missing });
+            let added = false;
             try {
               const t2 = await this.ask(this.one("plan"), `Idea: ${this.idea}\n\nYour plan:\n${JSON.stringify(plan, null, 2)}\n\nIt leaves out these things the person asked for:\n${missing.map((x) => `- ${x}`).join("\n")}\n\nReturn the whole plan again in the same JSON shape with each of them added: as acceptance criteria, and as the entities, views and flows they need. Keep everything else.`);
               plan = validatePlan(parseJsonBlock<Plan>(t2));
+              added = true;
             } catch (e) { if (e instanceof StopRun) throw e; /* the first plan stands; the gaps are on the record */ }
+            finally { this.log.append("factory.plan.gaps", { run: this.id, missing, added }); }
           }
         }
         if (this.docs && !this.basePlan) {

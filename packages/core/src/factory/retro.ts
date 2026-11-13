@@ -86,7 +86,7 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
   const gaps = of("factory.plan.gaps");
   const leftOut = gaps.filter((g) => !g.addedByCore).flatMap((g) => g.missing ?? []);
   const added = gaps.filter((g) => g.addedByCore).flatMap((g) => g.missing ?? []);
-  if (leftOut.length) bad.push(`Plan: the Planner's first plan left out ${plural(leftOut.length, "thing")} the design asked for (${leftOut.slice(0, 3).join("; ")}).`);
+  if (leftOut.length) bad.push(`Plan: the Planner's first plan left out ${plural(leftOut.length, "thing")} the design asked for (${leftOut.slice(0, 3).join("; ")}); ${gaps.some((g) => !g.addedByCore && g.added === false) ? "its second try failed, so they reached the approval missing" : "the gaps check caught them and a second Planner call added them"}.`);
   if (added.length) bad.push(`Plan: the Planner dropped ${plural(added.length, "designed screen")} and the core had to add ${added.length === 1 ? "it" : "them"} (${added.join(", ")}).`);
   if (of("factory.plan").length && !gaps.length) good.push("Plan: the plan covered the design on its first try.");
 

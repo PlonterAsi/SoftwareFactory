@@ -92,6 +92,11 @@ export function TaskGraph({ run }: { run: FactoryRunView }) {
         ); })}
       </svg>
       <ol className="acceptance">{plan.acceptance.map((a, i) => <li key={i}>{a}</li>)}</ol>
+      {(run.planGaps ?? []).map((g, i) => (
+        <div key={i} className="muted plan-gaps" title={g.missing.join("\n")}>
+          Gaps check: found {g.missing.length} thing{g.missing.length === 1 ? "" : "s"} missing from the first plan, {g.added ? "all added before this approval" : "NOT added, the Planner's second try failed"}: {g.missing.join("; ")}
+        </div>
+      ))}
     </div>
   );
 }

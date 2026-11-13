@@ -86,6 +86,8 @@ export interface FactoryRunView {
   maxFixRounds: number;
   stations: Record<string, { state: StationState; round?: number; note?: string }>;
   plan?: { name: string; summary: string; acceptance: string[]; tasks: { id: string; title: string; dependsOn: string[] }[] };
+  /** What the gaps check found missing from the plan, and whether it was added before the approval. */
+  planGaps?: { missing: string[]; added: boolean }[];
   dir?: string;
   tests: { round: number; passed: number; failed: number; cases: TestCaseView[] }[];
   files: Record<string, { lines: number; writes: number; last: string; locked: boolean }>;
@@ -157,6 +159,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         if (p.station === "fix" && p.round) r.fixRounds = Math.max(r.fixRounds, p.round);
         break;
       case "factory.plan": r.plan = p.plan; r.dir = p.dir; break;
+      case "factory.plan.gaps": (r.planGaps ??= []).push({ missing: p.missing ?? [], added: p.added !== false }); break;
       case "factory.council": r.council.push({ round: p.round, seats: p.seats, brief: p.brief }); break;
       case "factory.retro": r.retro = { outcome: p.outcome, reason: p.reason ?? "", spentUsd: p.spentUsd ?? 0, maxUsd: p.maxUsd ?? 0, minutes: p.minutes ?? 0, stages: p.stages ?? [], agents: p.agents ?? [], good: p.good ?? [], bad: p.bad ?? [] }; break;
       case "factory.evaluation": r.evaluations.push({ round: p.round, pass: !!p.pass, skipped: p.skipped, bar: p.bar ?? 4, screens: p.screens ?? 0, requirements: p.requirements ?? [], scores: p.scores ?? {}, problems: p.problems ?? [] }); break;
