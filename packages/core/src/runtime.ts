@@ -34,6 +34,10 @@ export interface AgentRequest {
   commands?: string[];
   /** A longer (or shorter) limit for this one call than the runtime's default, in ms. */
   timeoutMs?: number;
+  /** Run without any CLAUDE.md or memory, even when editing (a factory build folder has none of its own). */
+  noMemory?: boolean;
+  /** Continue this CLI session instead of starting fresh: the agent still has everything it saw and said. */
+  resume?: string;
 }
 
 export interface AgentResult {
@@ -47,6 +51,8 @@ export interface AgentResult {
   /** Of those, read from the prompt cache (cheap) and written to it (SF-18). */
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** The CLI session, so a follow-up can continue the same conversation (--resume). */
+  sessionId?: string;
 }
 
 export interface AgentRuntime {
@@ -108,6 +114,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
    */
   buildArgs(req: AgentRequest): string[] {
     const args = ["-p", "--output-format", "json", "--model", req.model ?? this.opts.defaultModel];
+    if (req.resume) args.push("--resume", req.resume);
     if (req.budgetUsd !== undefined) args.push("--max-budget-usd", String(req.budgetUsd));
     if (req.systemPrompt && req.systemPrompt.length <= MAX_ARG_ROLE) args.push("--append-system-prompt", req.systemPrompt);
     for (const dir of req.pluginDirs ?? []) args.push("--plugin-dir", dir);
@@ -147,7 +154,9 @@ export class ClaudeCodeRuntime implements AgentRuntime {
    */
   envFor(req: AgentRequest, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
     // An agent that only reads a project's files is still a station agent: its contract, not the person's memory.
-    return edits(req) ? base : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
+    // A factory build agent edits a folder SF made, which has no memory of its own: the person's CLAUDE.md is
+    // written for them, not for a station agent (run 2623's Builder ended with "Assaf, press Start").
+    return edits(req) && !req.noMemory ? base : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
   }
 
   run(req: AgentRequest): Promise<AgentResult> {
@@ -191,6 +200,7 @@ export function parseClaudeJson(raw: string, runtime: string, wallMs: number): A
     contextTokens: Number(u.cache_creation_input_tokens ?? 0) + Number(u.cache_read_input_tokens ?? 0) + Number(u.input_tokens ?? 0),
     cacheReadTokens: Number(u.cache_read_input_tokens ?? 0),
     cacheWriteTokens: Number(u.cache_creation_input_tokens ?? 0),
+    ...(j.session_id ? { sessionId: String(j.session_id) } : {}),
   };
 }
 

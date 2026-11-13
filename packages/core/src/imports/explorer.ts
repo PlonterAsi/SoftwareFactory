@@ -151,7 +151,7 @@ export class RepoExplorer {
       if (!existsSync(src.ref) || !statSync(src.ref).isDirectory()) throw new Error(`No folder at ${src.ref}`);
     }
     const name = (o.name ?? src.name).trim() || "Imported repo";
-    const projectId = createProject(this.log, { name, kind: "imported", summary: `Imported from ${src.ref}` });
+    const projectId = createProject(this.log, { name, kind: "imported", summary: `Imported from ${src.ref}`, onTaken: "version" });
     if (this.opts.createNode) linkToProject(this.log, projectId, "order_node", this.opts.createNode(name));
     linkToProject(this.log, projectId, "repo", src.ref);
     const dir = src.local ? src.ref : join(this.importsDir, `${slug(name)}-${projectId}`);

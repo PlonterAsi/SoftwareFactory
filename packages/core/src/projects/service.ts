@@ -1,5 +1,5 @@
 import type { EventLog } from "../events.js";
-import { PROJECT_STATUSES, type Project, type ProjectLink, type ProjectStatus } from "./model.js";
+import { PROJECT_STATUSES, nameKey, uniqueName, type Project, type ProjectLink, type ProjectStatus } from "./model.js";
 import "./tables.js";
 
 /**
@@ -182,16 +182,46 @@ function mustExist(log: EventLog, id: number) {
 
 const clean = (v: unknown, max: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 
-export function createProject(log: EventLog, input: { name: string; kind?: string; summary?: string }): number {
-  const name = clean(input.name, 80);
+/** The project already using this name (any case), other than `self`. */
+export function projectNamed(log: EventLog, name: string, self?: number): { id: number; name: string } | null {
+  const rows = log.db.prepare("SELECT id, name FROM projects").all() as Row[];
+  const hit = rows.find((r) => Number(r.id) !== self && nameKey(String(r.name)) === nameKey(name));
+  return hit ? { id: Number(hit.id), name: String(hit.name) } : null;
+}
+
+/** Thrown when a name is taken: the routes answer 409 with the project that has it. */
+export class NameTaken extends Error {
+  constructor(readonly existing: { id: number; name: string }, readonly suggestion: string) {
+    super(`A project named "${existing.name}" already exists (#${existing.id}). Pick another name, such as "${suggestion}".`);
+  }
+}
+
+/**
+ * Make a project. Two projects never share a name: by default a taken name is refused (NameTaken);
+ * `onTaken: "version"` gives it the next free version instead ("Name v2"), for names SF picks itself.
+ */
+export function createProject(log: EventLog, input: { name: string; kind?: string; summary?: string; onTaken?: "refuse" | "version" }): number {
+  let name = clean(input.name, 80);
   if (!name) throw new Error("A project needs a name");
+  const taken = projectNamed(log, name);
+  if (taken) {
+    const next = uniqueName(name, (k) => !!projectNamed(log, k));
+    if (input.onTaken !== "version") throw new NameTaken(taken, next);
+    name = next;
+  }
   return log.append("project.created", { name, kind: clean(input.kind, 24) || "general", summary: String(input.summary ?? "").trim().slice(0, 2000) }).id;
 }
 
 export function updateProject(log: EventLog, id: number, patch: { name?: string; kind?: string; summary?: string; status?: ProjectStatus }) {
   mustExist(log, id);
   const out: Record<string, unknown> = { projectId: id };
-  if (patch.name !== undefined) { const n = clean(patch.name, 80); if (!n) throw new Error("A project needs a name"); out.name = n; }
+  if (patch.name !== undefined) {
+    const n = clean(patch.name, 80);
+    if (!n) throw new Error("A project needs a name");
+    const taken = projectNamed(log, n, id);
+    if (taken) throw new NameTaken(taken, uniqueName(n, (k) => !!projectNamed(log, k, id)));
+    out.name = n;
+  }
   if (patch.kind !== undefined) out.kind = clean(patch.kind, 24) || "general";
   if (patch.summary !== undefined) out.summary = String(patch.summary).trim().slice(0, 2000);
   if (patch.status !== undefined) {

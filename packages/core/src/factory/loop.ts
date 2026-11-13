@@ -19,6 +19,7 @@ import { checkUi, uiCase } from "./uicheck.js";
 import { appCase, checkAppLive, installKit, isKitFile } from "./appkit.js";
 import { checkScreens, screenCase, type ScreenCheck } from "./screencheck.js";
 import { dryRunTests, lockedTestFaults } from "./testcheck.js";
+import { checkLinks, linkCase, linksIn } from "./linkcheck.js";
 import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, answerSummary, changedFiles, hasWorkbench, restoreFromHead, restoreProtected, testDispute, workbenchContract, writtenOnDisk } from "./workbench.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
@@ -443,7 +444,20 @@ class Run {
           ? `This app already shipped. Its approved plan:\n${JSON.stringify(this.basePlan, null, 2)}\n\nThe person now asks to add: ${this.idea}\n\nWrite the plan for its next version in the same JSON shape: keep the same name and slug, and every existing entity, field, view, flow and exported function (they still work and their tests stay locked); add what the ask needs. New fields on existing entities are optional, so records already saved still load. In "acceptance", list ONLY the new criteria: the old ones stay as they are.`
           : `Idea: ${this.idea}`;
         const text = await this.ask(this.one("plan"), `${onTop}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
-        const plan = validatePlan(parseJsonBlock<Plan>(text));
+        let plan = validatePlan(parseJsonBlock<Plan>(text));
+        // Nothing the person asked for may fall out of the plan (run 2623's plan dropped the skill tree, the
+        // practice plan, the session log and the genre shapes). A second agent lists what the plan misses; the
+        // Planner adds it once before you ever see the plan.
+        if (!this.basePlan && !feedback) {
+          const missing = await this.planGaps(plan);
+          if (missing.length) {
+            this.log.append("factory.plan.gaps", { run: this.id, missing });
+            try {
+              const t2 = await this.ask(this.one("plan"), `Idea: ${this.idea}\n\nYour plan:\n${JSON.stringify(plan, null, 2)}\n\nIt leaves out these things the person asked for:\n${missing.map((x) => `- ${x}`).join("\n")}\n\nReturn the whole plan again in the same JSON shape with each of them added: as acceptance criteria, and as the entities, views and flows they need. Keep everything else.`);
+              plan = validatePlan(parseJsonBlock<Plan>(t2));
+            } catch (e) { if (e instanceof StopRun) throw e; /* the first plan stands; the gaps are on the record */ }
+          }
+        }
         if (this.basePlan) { plan.slug = this.basePlan.slug; plan.app = true; }
         this.plan = plan;
         if (!this.basePlan) {
@@ -505,7 +519,7 @@ class Run {
     // The app kit goes in first, so the Builder writes the model and views on top of it.
     if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
     this.builder = this.one("build");
-    const text = await this.ask(this.builder, this.screen?.kind === "feature"
+    const text = await this.askBench(this.builder, this.screen?.kind === "feature"
       ? [
         `This app already shipped and its locked acceptance tests pass. Build its next version on top of the existing code: add what the spec adds (new entities, fields, views and logic) and keep everything that works.`,
         `Keep every existing export, entity, view and file working; records the person already saved must still load, so new fields are optional. All locked tests, old and new, must pass. Return only the files you add or change, each in full.`,
@@ -665,7 +679,7 @@ class Run {
     // What each file held before this round, so the stop rules (SF-25) see a revert to the build's version.
     const hashes = () => Object.fromEntries(Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && !isKitFile(p)).map(([p, c]) => [p, createHash("sha256").update(c).digest("hex")]));
     const beforeAll = hashes();
-    const text = await this.ask(fixer, prompt, { round }, { model });
+    const text = await this.askBench(fixer, prompt, { round }, { model });
     const res = this.takeWork(text);
     this.lastFixBefore = Object.fromEntries(res.written.map((w) => [w.path, beforeAll[w.path]]).filter(([, h]) => h));
     this.lastFixSaid = answerSummary(text);
@@ -740,6 +754,22 @@ class Run {
     return true;
   }
 
+  /** What the person asked for that the plan leaves out, as short phrases; [] when it covers everything or the check fails. */
+  private async planGaps(plan: Plan): Promise<string[]> {
+    if (this.idea.trim().split(/[.!?\n]+/).filter((x) => x.trim().length > 12).length < 3) return [];
+    try {
+      const text = await this.ask(this.one("tests"), [
+        "You check a plan against what the person asked for. Do not write tests or files.",
+        `What the person asked for:\n${this.idea}`,
+        `The plan:\n${JSON.stringify(plan, null, 2)}`,
+        "List every distinct requirement in what the person asked for (a feature, screen, kind of data, behaviour or example they named). For each, decide whether the plan covers it in its acceptance criteria, entities, views or flows.",
+        'Answer only JSON: {"missing": ["short phrase for each requirement the plan does not cover"]}. An empty list when it covers everything.',
+      ].join("\n\n"));
+      const j = parseJsonBlock<{ missing?: unknown }>(text);
+      return Array.isArray(j?.missing) ? j.missing.map((x) => String(x).trim()).filter(Boolean).slice(0, 15) : [];
+    } catch (e) { if (e instanceof StopRun) throw e; return []; }
+  }
+
   /** The Reviewer reads the green build against the spec. High findings go to the Fixer once; the rest ride to the build gate. */
   private reviewNotes: ReviewResult | null = null;
   private async reviewLoop() {
@@ -753,7 +783,21 @@ class Run {
         // The Reviewer may run things but not change them: whatever it left in the folder goes.
         if (this.bench) { try { restoreFromHead(this.dir, changedFiles(this.dir)); } catch { /* nothing to put back */ } }
         let res: ReviewResult;
-        try { res = parseReview(text); } catch (e) { this.verdict(m, "review", false, round, (e as Error).message); throw e; }
+        try { res = parseReview(text); }
+        catch (e) {
+          // Run 2623: the Reviewer gave its verdict, then a background server it started timed out and its last
+          // message was only a note about that, so the verdict was lost. Ask once, in the same session, for the JSON.
+          let again: ReviewResult | null = null;
+          if (this.lastSession) {
+            try {
+              const t2 = await this.ask(m, "Your last message did not contain your JSON verdict. Reply now with only that JSON (verdict, findings, criteria), exactly as you reached it. Do not run anything.", { round }, { resume: this.lastSession, noTools: true });
+              again = parseReview(t2);
+              this.log.append("factory.continued", { run: this.id, station: "review", agent: m.id, round, attempt: 1, reason: "the review's last message had no verdict; asked for it again" });
+            } catch (e2) { if (e2 instanceof StopRun) throw e2; }
+          }
+          if (!again) { this.verdict(m, "review", false, round, (e as Error).message); throw e; }
+          res = again;
+        }
         this.verdict(m, "review", true, round);
         this.log.append("factory.review", { run: this.id, round, agent: m.id, ...res });
         return res;
@@ -818,6 +862,17 @@ class Run {
       r.cases.push(appCase(app));
       if (!app.pass) { r.failed++; r.output = `App check:\n${app.problems.join("\n")}\n\n${r.output}`.slice(0, 4000); }
       else r.passed++;
+      // Every link the app ships, opened for real (run 2623 shipped 14 made-up YouTube links).
+      if (process.env.SF_LINK_CHECK !== "off") {
+        const links = await checkLinks(linksIn(this.dir, (p) => isLockedTest(p) || isKitFile(p)));
+        this.log.append("factory.links", { run: this.id, round, pass: links.pass, checked: links.checked, unknown: links.unknown, dead: links.dead.slice(0, 30), ...(links.skipped ? { skipped: links.skipped } : {}) });
+        if (!links.skipped && links.checked) {
+          const c = linkCase(links);
+          r.cases.push(c);
+          if (!c.pass) { r.failed++; r.output = `Links:\n${c.error}\n\n${r.output}`.slice(0, 4000); }
+          else r.passed++;
+        }
+      }
       const sc = screens as ScreenCheck | null;
       if (sc) {
         this.log.append("factory.screens", { run: this.id, round, ...sc });
@@ -885,8 +940,37 @@ class Run {
     this.log.append("agent.verdict", { agent: m.id, version: m.version, station, run: this.id, round, pass, note: note?.slice(0, 300) });
   }
 
+  /**
+   * A workbench call that may run out of its own budget mid-work (run 2623: the Builder died at its $0.60 cap
+   * after 3 minutes with half the app written, and only a person's Retry finished it). When the call hit its
+   * cap and left files in the folder, the work goes on by itself: a fresh call reads what is there and finishes
+   * it, at most twice, while the run's own budget allows. Anything else fails as before.
+   */
+  private async askBench(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string } = {}): Promise<string> {
+    try { return await this.ask(m, prompt, meta, x); }
+    catch (e) {
+      if (!this.bench || !/max_budget/i.test(String((e as Error).message))) throw e;
+      let last = e;
+      for (let n = 1; n <= 2; n++) {
+        const landed = changedFiles(this.dir).filter((p) => !isLockedTest(p) && !isKitFile(p));
+        if (!landed.length || this.o.maxUsd - this.spent < 0.05) throw last;
+        this.log.append("factory.continued", { run: this.id, station: m.station, agent: m.id, round: meta.round, attempt: n, files: landed.slice(0, 40), reason: "the call ran out of its budget with work in progress" });
+        try {
+          return await this.ask(m, [
+            `Your previous call on this task ran out of its budget before it finished. What it wrote is in the folder (${landed.length} file${landed.length === 1 ? "" : "s"} changed: ${landed.slice(0, 20).join(", ")}).`,
+            "Do not start over. Read what is there, write only what is still missing or broken, run the tests, and finish. Keep each step small so you finish within this call.",
+            `The task, as it was given:\n${prompt}`,
+          ].join("\n\n"), meta, x);
+        } catch (e2) { if (!/max_budget/i.test(String((e2 as Error).message))) throw e2; last = e2; }
+      }
+      throw last;
+    }
+  }
+
   /** One agent call, inside both its own cap and what is left of the run's cap. */
-  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string } = {}): Promise<string> {
+  /** The CLI session of the last successful call, so a follow-up can continue it. */
+  private lastSession: string | undefined;
+  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean } = {}): Promise<string> {
     if (this.o.maxUsd - this.spent < 0.01) {
       // Council seats ask at the same time: one question, and the others see the answer.
       await this.gateTurn(async () => {
@@ -903,18 +987,21 @@ class Run {
     const cap = Math.max(0.01, Math.min(m.budgetUsd, this.o.maxUsd - this.spent));
     this.calls++;
     // The Builder and Fixer of a real crew work at the workbench: the project folder, file tools and a shell.
-    const bench = this.bench && (m.station === "build" || m.station === "fix") && !!this.dir && existsSync(this.dir);
+    const bench = !x.noTools && this.bench && (m.station === "build" || m.station === "fix") && !!this.dir && existsSync(this.dir);
     // The Reviewer verifies at the workbench too, but read and run only: no Edit or Write.
-    const verifier = this.bench && m.station === "review" && !!this.dir && existsSync(this.dir);
+    const verifier = !x.noTools && this.bench && m.station === "review" && !!this.dir && existsSync(this.dir);
     const kit = kitArgs(m);
     const r = await runAgent(this.log, this.runtime, m.id, {
       prompt, model: x.model ?? this.modelOf(m), systemPrompt: bench ? `${m.role}\n\n${this.benchContract()}` : m.role, budgetUsd: Number(cap.toFixed(4)),
       ...kit,
       // An agent that reads files reads this project's folder, once there is one.
       ...(this.dir && existsSync(this.dir) && m.tools.some((t) => READ_TOOLS.includes(t)) ? { cwd: this.dir } : {}),
-      ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000 } : {}),
-      ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: WORKBENCH_COMMANDS, timeoutMs: 15 * 60_000 } : {}),
+      ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000, noMemory: true } : {}),
+      ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: WORKBENCH_COMMANDS, timeoutMs: 15 * 60_000, noMemory: true } : {}),
+      ...(x.resume ? { resume: x.resume } : {}),
+      ...(x.noTools ? { tools: [] } : {}),
     }, { factoryRun: this.id, station: m.station, agentVersion: m.version, ...meta, ...(bench ? { workbench: true } : {}) });
+    this.lastSession = r.result?.sessionId;
     // A call that failed was still paid for (run 2366: two opus calls died at the cap and were never counted).
     this.spent += r.result?.costUsd ?? r.costUsd ?? 0;
     if (r.error || !r.result) throw new Error(`${m.name} failed: ${r.error}`);
@@ -1030,6 +1117,7 @@ export function normIdea(idea: string): string {
 export const VERIFY_CONTRACT = [
   "You also verify the product, not only read it. You have a shell in the project folder (read and run only: do not change files).",
   "For EACH acceptance criterion below, check it by running code: call the functions with node (node --input-type=module -e \"import('./src/x.js').then(...)\"), and for the app start it with `node server.js` in the background on PORT=0, read the port from its \"Ready on\" line and fetch its pages and /api/_db with node, then stop it.",
+  "Stop every process you start (a server you ran in the background) before you answer, and make the JSON your very last message: only the last message is read.",
   "Add to your JSON a \"criteria\" list, one entry per criterion in order: {\"text\": \"the criterion\", \"pass\": true|false, \"evidence\": \"what you ran and what you saw, short\"}. pass is true only when you saw it work.",
 ].join("\n");
 

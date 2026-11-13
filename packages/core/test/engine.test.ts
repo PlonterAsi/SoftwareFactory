@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { ClaudeCodeRuntime, EventLog, Factory, MockRuntime, parseFileBlocks, runTests, git, type AgentRequest, type AgentRuntime } from "../src/index.js";
 import { WORKBENCH_COMMANDS, restoreProtected, testDispute, changedFiles, hasWorkbench } from "../src/factory/workbench.js";
 import { modelFloorUsd, strongerModel } from "../src/factory/loop.js";
+import { checkLinks, linksIn } from "../src/factory/linkcheck.js";
 import { dryRunTests, lockedTestFaults, relativeImports } from "../src/factory/testcheck.js";
 import { initRepo, commitAll } from "../src/factory/workspace.js";
 import { probeStart } from "../src/factory/appkit.js";
@@ -246,6 +247,100 @@ describe("attempt memory and the escalation ladder", () => {
     await f.wait(run);
     expect(events(log, "agent.run.failed")[0].costUsd).toBe(0.25);
     expect(events(log, "factory.run.finished").at(-1).totalUsd).toBeGreaterThanOrEqual(0.25);
+  });
+});
+
+describe("a workbench call that runs out of budget mid-work", () => {
+  it("goes on by itself from the files it left, without asking anyone (run 2623)", async () => {
+    const log = new EventLog();
+    const mock = new MockRuntime({ plantBug: false });
+    const builds: AgentRequest[] = [];
+    const bench: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await mock.run(req);
+      if (station(req) === "build") {
+        builds.push(req);
+        const files = parseFileBlocks(r.text);
+        const write = (fs: typeof files) => { for (const f of fs) { mkdirSync(dirname(join(req.cwd!, f.path)), { recursive: true }); writeFileSync(join(req.cwd!, f.path), f.content); } };
+        // The first call writes half the app, then dies at its cap.
+        if (builds.length === 1) { write(files.slice(0, 1)); throw Object.assign(new Error("claude exited 1: error_max_budget_usd"), { costUsd: 0.6 }); }
+        write(files);
+        r.text = "Finished the rest.";
+      }
+      return r;
+    } };
+    const f = new Factory(log, bench, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 3 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    expect(builds).toHaveLength(2);
+    expect(builds[1].prompt).toMatch(/ran out of its budget.*Do not start over/s);
+    expect(events(log, "factory.continued")).toHaveLength(1);
+    expect(events(log, "factory.gate").some((g) => g.gate === "escalation")).toBe(false);
+    expect(builds.every((b) => b.noMemory)).toBe(true);
+  });
+
+  it("a review whose last message lost its verdict is asked for it again in the same session (run 2623)", async () => {
+    const log = new EventLog();
+    const mock = new MockRuntime({ plantBug: false });
+    const reviews: AgentRequest[] = [];
+    const crew: AgentRuntime = { name: "mock", run: async (req) => {
+      const r = await mock.run(req);
+      if (station(req) === "review") {
+        reviews.push(req);
+        if (reviews.length === 1) r.text = "The background server I started was stopped at its time limit, as expected. The review above stands.";
+      }
+      return { ...r, sessionId: `s${reviews.length}` };
+    } };
+    const f = new Factory(log, crew, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    expect(reviews[1].resume).toBe("s1");
+    expect(reviews[1].tools).toEqual([]);
+    expect(events(log, "factory.continued").some((c) => c.station === "review")).toBe(true);
+  });
+
+  it("closes a file block on a bare >>> line", () => {
+    const [f] = parseFileBlocks("<<<FILE test/a.test.js\nimport x from 'y';\n>>>\nthanks");
+    expect(f.content).toBe("import x from 'y';\n");
+  });
+});
+
+describe("the plan keeps what the person asked for", () => {
+  it("a requirement the plan drops goes back to the Planner before the plan gate (run 2623)", async () => {
+    const log = new EventLog();
+    const rt = new MockRuntime();
+    const plans: AgentRequest[] = [];
+    const crew: AgentRuntime = { name: "mock", run: async (req) => {
+      const r = await rt.run(req);
+      if (station(req) === "plan") plans.push(req);
+      if (station(req) === "tests" && /You check a plan/.test(req.prompt)) r.text = '{"missing": ["a session log with date and minutes"]}';
+      return r;
+    } };
+    const f = new Factory(log, crew, tmp("sf-proj-"));
+    const run = f.start("Count words in my notes. Show a goal bar for each note. Keep a session log with date and minutes.", { autoApprove: true, autoRetries: 0 });
+    await f.wait(run);
+    expect(events(log, "factory.plan.gaps")[0].missing).toEqual(["a session log with date and minutes"]);
+    expect(plans.length).toBeGreaterThanOrEqual(2);
+    expect(plans[1].prompt).toMatch(/leaves out these things.*session log/s);
+  });
+});
+
+describe("every link in the app opens", () => {
+  it("finds the app's own links and names the made-up ones", async () => {
+    const dir = tmp("sf-links-");
+    mkdirSync(join(dir, "src"));
+    mkdirSync(join(dir, "test"));
+    writeFileSync(join(dir, "src", "seed.js"), 'export const tips = [{ video: "https://www.youtube.com/watch?v=rlAirD0001d" }, { guide: "https://liquipedia.net/rocketleague/Air_Dribble" }, { src: "https://www.reddit.com/r/RocketLeague/" }, { local: "http://localhost:3000/x" }];');
+    writeFileSync(join(dir, "test", "a.test.js"), '"https://made.up/in/tests"');
+    const urls = linksIn(dir, (p) => p.startsWith("test/"));
+    expect(urls.sort()).toEqual(["https://liquipedia.net/rocketleague/Air_Dribble", "https://www.reddit.com/r/RocketLeague/", "https://www.youtube.com/watch?v=rlAirD0001d"]);
+    const fake = (async (u: string) => ({ ok: !/oembed/.test(u) && !/reddit/.test(u), status: /oembed/.test(u) ? 400 : /reddit/.test(u) ? 403 : 200, body: null })) as unknown as typeof fetch;
+    const c = await checkLinks(urls, { fetcher: fake });
+    expect(c.pass).toBe(false);
+    expect(c.dead.map((d) => d.url)).toEqual(["https://www.youtube.com/watch?v=rlAirD0001d"]);
+    expect(c.dead[0].note).toMatch(/no such YouTube video/);
+    expect(c.unknown).toBe(1);
   });
 });
 
