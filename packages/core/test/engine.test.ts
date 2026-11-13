@@ -735,6 +735,61 @@ describe("the product judge: the running app is judged as a product", () => {
     expect(events(log, "factory.feature").filter((e) => e.id === "J1" && e.state === "built")).toHaveLength(1);
   });
 
+  it("a review that still says fix after its last round is recorded and goes first into the repair features (run 3185)", async () => {
+    const log = new EventLog();
+    const { rt: inner, seen } = crewWith([{ r2: false }, { r2: true }]);
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      if (station(req) === "review") r.text = block({ verdict: "fix", findings: [{ severity: "high", text: "Needs a look matches are never saved" }], criteria: [{ text: "Research merges keep every item", pass: false, evidence: "merge dropped 3 of 5 items" }] });
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    expect(events(log, "factory.review.open")).toMatchObject([{ round: 2, failing: ["Research merges keep every item"], findings: ["Needs a look matches are never saved"] }]);
+    expect(events(log, "factory.station").filter((s) => s.station === "review").at(-1).note).toMatch(/still "fix" after 2 reviews: 1 criteria failing/);
+    const repair = events(log, "factory.repair")[0];
+    expect(repair.features.map((x: any) => x.title)).toEqual(["Judge: what the Reviewer proved still broken", expect.stringMatching(/^Judge: requirements R2/), "Judge: what a user would notice"]);
+    const j0 = seen.find((x) => x.station === "build" && /Your feature, J0/.test(x.req.prompt))!;
+    expect(j0.req.prompt).toMatch(/Research merges keep every item[\s\S]*merge dropped 3 of 5[\s\S]*Needs a look matches are never saved/);
+  });
+
+  it("a run resumed after its build still turns the judge's findings into repair features (run 3185)", async () => {
+    const log = new EventLog();
+    const dir = tmp("sf-proj-");
+    const { rt: inner } = crewWith([{ r2: false }, { r2: true }]);
+    let hang = true;
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      if (hang && station(req) === "review") return new Promise(() => {});
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const first = new Factory(log, rt, dir);
+    const run = first.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    for (let i = 0; i < 1000 && !events(log, "agent.run.started").some((a) => a.station === "review"); i++) await new Promise((r) => setTimeout(r, 10));
+    // The app restarts during the review: a new core on the same database picks the run up.
+    hang = false;
+    const second = new Factory(log, rt, dir);
+    second.readScreens = async () => screens;
+    expect(second.resumeInterrupted()).toEqual([run]);
+    await second.wait(run);
+    expect(events(log, "factory.evaluation").map((e) => e.pass)).toEqual([false, true]);
+    expect(events(log, "factory.repair")).toHaveLength(1);
+  });
+
   it("an unmet requirement goes back to the fix loop as work, and the app is judged again", async () => {
     const log = new EventLog();
     const { rt, seen } = crewWith([{ r2: false }, { r2: true }]);

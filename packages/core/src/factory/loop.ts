@@ -1033,7 +1033,16 @@ class Run {
         return res;
       }, round);
       this.reviewNotes = r;
-      if (r.verdict === "pass" || round === 2) return;
+      if (r.verdict === "pass") return;
+      if (round === 2) {
+        // Run 3185: the second review still said "fix" with 5 criteria failing, and the run went on as if it had
+        // passed. What is still open is recorded, shown on the review station, and handed to the repair loop.
+        const failing = (r.criteria ?? []).filter((c) => !c.pass);
+        const open = r.findings.filter((f) => f.severity === "high" && !/^Acceptance criterion not met/.test(f.text));
+        this.log.append("factory.review.open", { run: this.id, round, failing: failing.map((c) => c.text).slice(0, 20), findings: open.map((f) => f.text).slice(0, 20) });
+        this.mark("review", "pass", round, `still "fix" after ${round} reviews: ${failing.length} criteria failing, ${open.length} serious findings, handed to the repair loop`);
+        return;
+      }
       const high = r.findings.filter((f) => f.severity === "high").map((f) => `- ${f.text}`).join("\n");
       await this.testFixLoop(`The Reviewer found these problems; fix them without breaking the tests:\n${high}`, true);
     }
@@ -1073,7 +1082,14 @@ class Run {
       // What the judge found goes back to the build loop as features, each in a fresh session (run 2898: one
       // fix round was handed 25 unmet requirements at once). A small run keeps the single fix round.
       const pool = Math.min(this.o.maxUsd * REPAIR_BUDGET_SHARE, this.o.maxUsd - this.spent - 0.4);
-      const work = this.bench && this.builder && this.o.maxUsd >= FEATURE_LOOP_MIN_USD && existsSync(join(this.dir, "features.json")) ? repairFeatures(ev.e, docs, Math.floor(pool / REPAIR_FEATURE_USD)) : [];
+      const most = Math.floor(pool / REPAIR_FEATURE_USD);
+      // Run 3185 was resumed after the build (the app restarted), so the Builder was never picked in this
+      // process and the judge's findings silently skipped the repair features. Pick it here when needed.
+      this.builder ??= this.one("build");
+      const work: Feature[] = this.bench && this.o.maxUsd >= FEATURE_LOOP_MIN_USD && existsSync(join(this.dir, "features.json")) ? repairFeatures(ev.e, docs, most) : [];
+      // What the Reviewer proved still broken (by running it) goes first: the judge only sees screens.
+      const left = round === 1 && this.reviewNotes?.verdict === "fix" ? reviewRepair(this.reviewNotes) : null;
+      if (left && work.length) { work.unshift(left); if (work.length > most) work.pop(); }
       if (work.length) {
         this.log.append("factory.repair", { run: this.id, round, features: work.map((f) => ({ id: f.id, title: f.title })), poolUsd: Number(pool.toFixed(2)) });
         await this.buildByFeature(work, pool);
@@ -1554,6 +1570,21 @@ export interface RestoredState {
  * Where a run stands, from the event log alone (the source of truth): which
  * stations it completed, what it spent, its plan, repo and locked tests.
  */
+/** What the Reviewer left failing, as one repair feature: the criteria it ran and saw fail, and its serious findings. */
+export function reviewRepair(r: ReviewResult): Feature | null {
+  const failing = (r.criteria ?? []).filter((c) => !c.pass);
+  // A failing criterion is also listed as a finding (parseReview); it is said once.
+  const high = r.findings.filter((f) => f.severity === "high" && !/^Acceptance criterion not met/.test(f.text));
+  if (!failing.length && !high.length) return null;
+  return {
+    id: "J0", title: "Judge: what the Reviewer proved still broken", state: "todo",
+    what: ["The Reviewer ran the code and these still fail. Fix each one in src/ and on the screen that shows it:",
+      ...failing.map((c) => `- Criterion: ${c.text}${c.evidence ? `\n  What it saw: ${c.evidence}` : ""}`),
+      ...high.map((f) => `- ${f.text}`)].join("\n"),
+    done: "Each criterion above passes when run, each finding is gone, and every test still passes.",
+  };
+}
+
 /** The question of an escalation (a Retry, more budget) a run was still waiting on, or null. */
 export function waitingEscalation(log: EventLog, run: number): string | null {
   const g = log.list({ type: "factory.gate", sinceId: run - 1, limit: 1e6 }).map((e) => e.payload as { run: number; gate: string; state: string; question?: string }).filter((p) => p.run === run).at(-1);

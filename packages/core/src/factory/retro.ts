@@ -82,6 +82,9 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
     else bad.push(`Research: the Designer was allowed ${plural(r.searches, "search", "searches")} and came back with no sourced finding${r.error ? ` (${String(r.error).slice(0, 120)})` : ""}. The product was designed from memory.`);
   }
 
+  // The review loop.
+  for (const o of of("factory.review.open")) bad.push(`Review loop: still "fix" after ${o.round} reviews, ${plural((o.failing ?? []).length, "criterion", "criteria")} failing when run${(o.failing ?? []).length ? ` (${String(o.failing[0]).slice(0, 120)})` : ""}; the run went on to the judge with them open.`);
+
   // The plan.
   const gaps = of("factory.plan.gaps");
   const leftOut = gaps.filter((g) => !g.addedByCore).flatMap((g) => g.missing ?? []);
