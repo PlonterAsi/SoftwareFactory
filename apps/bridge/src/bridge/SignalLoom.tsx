@@ -11,10 +11,10 @@ import type { CrewIndex } from "../FactoryFloor";
  */
 export const LOOM_STATIONS: [string, string][] = [
   ["intake", "Idea"], ["council", "Council"], ["discover", "Design"], ["plan", "Plan"], ["gateA", "Your OK"], ["tests", "Write tests"], ["build", "Build"],
-  ["test", "Run tests"], ["review", "Review"], ["fix", "Fix"], ["gateB", "Your OK"], ["ship", "Ship"],
+  ["test", "Run tests"], ["review", "Review"], ["evaluate", "Judge"], ["fix", "Fix"], ["gateB", "Your OK"], ["ship", "Ship"],
 ];
 const IDX: Record<string, number> = Object.fromEntries(LOOM_STATIONS.map(([id], i) => [id, i]));
-const LABEL: Record<string, string> = { intake: "Idea", council: "Council", discover: "Product design", plan: "Plan", gateA: "Your OK: plan", tests: "Write tests", build: "Build", test: "Run tests", review: "Review", fix: "Fix", gateB: "Your OK: build", ship: "Ship" };
+const LABEL: Record<string, string> = { intake: "Idea", council: "Council", discover: "Product design", plan: "Plan", gateA: "Your OK: plan", tests: "Write tests", build: "Build", test: "Run tests", review: "Review", evaluate: "Product judge", fix: "Fix", gateB: "Your OK: build", ship: "Ship" };
 
 const isWaiting = (r: FactoryRunView) => !!r.waiting && !r.finished;
 const runName = (r: FactoryRunView) => r.plan?.name ?? (r.idea.length > 38 ? r.idea.slice(0, 36) + "…" : r.idea);

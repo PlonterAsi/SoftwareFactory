@@ -5,6 +5,7 @@ import { runAgent } from "../agents.js";
 import { bind, kitOf, type CrewMember, type CrewSource } from "../factory/crew.js";
 import { parseSeatTake } from "../factory/council.js";
 import { RUBRIC, validateDocs } from "../factory/discovery.js";
+import { PRODUCT_RUBRIC } from "../factory/evaluate.js";
 import { parseFileBlocks, parseJsonBlock, isLockedTest } from "../factory/workspace.js";
 import { validatePlan, parseReview, type Plan } from "../factory/loop.js";
 import { archivistPrompt, parseArchivistPlan } from "../order/archivist.js";
@@ -363,6 +364,7 @@ export function verify(station: HomeStation, text: string): { label: string; pas
   switch (station) {
     case "council": return [check("a seat take with a vote (council format)", () => !!parseSeatTake(text))];
     case "design": return [check("product documents: a brief, journeys, screens and requirements", () => !!validateDocs(parseJsonBlock(text)))];
+    case "evaluate": return [check("a verdict per requirement and a score for every rubric line", () => { const c = parseJsonBlock<{ scores?: Record<string, unknown>; requirements?: unknown }>(text); return Array.isArray(c?.requirements) && PRODUCT_RUBRIC.every((k) => Number.isFinite(Number(c?.scores?.[k]))); })];
     case "critique": return [check("a score for every rubric line", () => { const c = parseJsonBlock<{ scores?: Record<string, unknown> }>(text); return RUBRIC.every((k) => Number.isFinite(Number(c?.scores?.[k]))); })];
     case "plan": return [check("a spec with acceptance criteria and a task graph", () => !!validatePlan(parseJsonBlock<Plan>(text)))];
     case "tests": return [check("test/*.js files in file blocks", () => parseFileBlocks(text).some((f) => isLockedTest(f.path) && f.path.endsWith(".js")))];

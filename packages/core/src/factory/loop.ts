@@ -14,12 +14,13 @@ import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, revisePrompt, validateCritique, validateDocs, type Critique, type ProductDocs } from "./discovery.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
+import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
 import { checkUi, uiCase } from "./uicheck.js";
-import { appCase, checkAppLive, installKit, isKitFile } from "./appkit.js";
-import { checkScreens, screenCase, type ScreenCheck } from "./screencheck.js";
+import { appCase, checkAppLive, installKit, isKitFile, probeStart } from "./appkit.js";
+import { checkScreens, readScreens, screenCase, type ScreenCheck } from "./screencheck.js";
 import { dryRunTests, lockedTestFaults } from "./testcheck.js";
 import { checkLinks, linkCase, linksIn } from "./linkcheck.js";
 import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, answerSummary, changedFiles, hasWorkbench, restoreFromHead, restoreProtected, testDispute, workbenchContract, writtenOnDisk } from "./workbench.js";
@@ -41,7 +42,7 @@ import {
  * station may pass. All state is written to the event log; the Bridge draws
  * from it.
  */
-export type StationId = "intake" | "council" | "discover" | "plan" | "gateA" | "tests" | "build" | "test" | "fix" | "review" | "gateB" | "ship";
+export type StationId = "intake" | "council" | "discover" | "plan" | "gateA" | "tests" | "build" | "test" | "fix" | "review" | "evaluate" | "gateB" | "ship";
 export type GateId = "gateA" | "gateB" | "escalation";
 
 export interface Plan {
@@ -124,6 +125,17 @@ export class Factory {
 
   /** Runs this core found in flight when it started (closed as stopped, resumable). */
   readonly interrupted: number[] = [];
+
+  /**
+   * What each screen of a built app shows, for the product judge: the core starts the app and reads its
+   * screens in a real browser. null when that cannot be done here (no browser, or the screen check is off).
+   */
+  readScreens: (dir: string) => Promise<ScreenText[] | null> = async (dir) => {
+    if (process.env.SF_SCREEN_CHECK === "off") return null;
+    let out: ScreenText[] | null = null;
+    await probeStart(dir, 15_000, async (url) => { out = await readScreens(url); return []; });
+    return out;
+  };
 
   /** Wall-clock limit per run in minutes (the `maxRunMinutes` setting). */
   maxRunMinutes: number | undefined;
@@ -373,6 +385,7 @@ class Run {
       if (!done.has("reviewed")) {
         await this.testFixLoop("", !!from && from.done.has("build"));
         await this.reviewLoop();
+        await this.evaluateLoop();
       } else if (!done.has("accepted")) await this.testFixLoop("", true);
       if (!done.has("accepted")) await this.acceptLoop();
       const sha = await this.station("ship", () => this.ship());
@@ -926,10 +939,47 @@ class Run {
     }
   }
 
+  /**
+   * The product judge (evaluate.ts): a separate agent reads what every screen of the running app shows and
+   * judges it against the product documents. The core decides from its answers. What fails goes to the fix
+   * loop as work and is judged once more; what is still open then is shown at the build gate.
+   */
+  private evaluation: Evaluation | null = null;
+  private async evaluateLoop() {
+    const skip = (why: string) => { this.mark("evaluate", "skipped", undefined, why); };
+    if (!this.docs || !this.plan.app || this.screen) return skip("No product design to judge this build against");
+    for (let round = 1; round <= MAX_EVALUATION_ROUNDS; round++) {
+      const screens = await this.f.readScreens(this.dir).catch(() => null);
+      if (!screens?.length) {
+        this.log.append("factory.evaluation", { run: this.id, round, pass: false, skipped: "the app's screens could not be read in a browser on this computer" });
+        return skip("The app's screens could not be read in a browser here, so the product was not judged");
+      }
+      const docs = this.docs;
+      const ev = await this.station("evaluate", async () => {
+        const judge = this.one("evaluate");
+        let e: Evaluation;
+        try { e = validateEvaluation(parseJsonBlock(await this.ask(judge, evaluationPrompt(this.idea, docs, screens, round), { round }, { capUsd: Math.max(0.1, this.o.maxUsd * 0.08) })), docs); }
+        catch (err) { if (!(err instanceof StopRun)) this.verdict(judge, "evaluate", false, round, (err as Error).message); throw err; }
+        const pass = evaluationPasses(e);
+        this.verdict(judge, "evaluate", true, round);
+        if (this.builder) this.verdict(this.builder, "product", pass, round, pass ? undefined : e.requirements.find((r) => !r.met)?.evidence ?? e.problems[0]?.problem);
+        this.log.append("factory.evaluation", { run: this.id, round, pass, bar: PRODUCT_PASS_SCORE, screens: screens.length, ...e });
+        return { e, pass };
+      }, round);
+      this.evaluation = ev.e;
+      if (ev.pass || round === MAX_EVALUATION_ROUNDS) return;
+      // Not worth starting a fix it cannot finish: the person sees what is open at the build gate.
+      if (this.o.maxUsd - this.spent < 0.3) return;
+      await this.testFixLoop(evaluationFeedback(ev.e, docs), true);
+    }
+  }
+
   private async acceptLoop() {
     for (;;) {
       const unmet = this.reviewNotes?.criteria?.filter((c) => !c.pass).length ?? 0;
-      const notes = unmet ? ` (${unmet} acceptance criteri${unmet > 1 ? "a" : "on"} not seen working; read the review first)`
+      const open = this.evaluation ? this.evaluation.requirements.filter((r) => !r.met).length : 0;
+      const judged = this.evaluation && !evaluationPasses(this.evaluation) ? ` (the product judge: ${open ? `${open} of ${this.evaluation.requirements.length} requirements not seen working` : "scores under the bar"}; read the Judge tab first)` : "";
+      const notes = judged ? judged : unmet ? ` (${unmet} acceptance criteri${unmet > 1 ? "a" : "on"} not seen working; read the review first)`
         : this.reviewNotes?.findings.length ? ` (the Reviewer left ${this.reviewNotes.findings.length} note${this.reviewNotes.findings.length > 1 ? "s" : ""})` : "";
       const d = await this.gate("gateB", `Accept the build${notes}`);
       if (d.approve) return;
@@ -1254,7 +1304,7 @@ export function strongerModel(model: string): string {
 }
 
 function stationName(id: StationId) {
-  return ({ intake: "Intake", council: "Council", discover: "Discovery", plan: "Plan", gateA: "Plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", review: "Review", gateB: "Build gate", ship: "Ship" } as const)[id];
+  return ({ intake: "Intake", council: "Council", discover: "Discovery", plan: "Plan", gateA: "Plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", review: "Review", evaluate: "Product judge", gateB: "Build gate", ship: "Ship" } as const)[id];
 }
 
 export function validatePlan(p: Plan): Plan {
