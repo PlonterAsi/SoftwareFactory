@@ -32,6 +32,12 @@ export interface AgentRequest {
    * as command prefixes ("node", "npm test"). Only with a folder; without it the shell is not offered.
    */
   commands?: string[];
+  /**
+   * True for a session in a folder the factory made itself: it gets its own kit only, not the skills and
+   * plugins installed on the PC. (Run 3185: each Builder and Fixer turn carried the person's 119 skills.)
+   * Work in the person's own repository leaves it off and keeps their setup.
+   */
+  ownKitOnly?: boolean;
   /** A longer (or shorter) limit for this one call than the runtime's default, in ms. */
   timeoutMs?: number;
   /** Run without any CLAUDE.md or memory, even when editing (a factory build folder has none of its own). */
@@ -124,7 +130,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", builtin.join(","));
     // Without this a station agent with the Skill tool sees every skill and plugin the person installed
     // (130+ on Assaf's PC), not just its own kit. An agent that edits a working copy keeps the person's settings.
-    if (this.opts.profile === "lean" && !edits(req)) args.push("--setting-sources", "project,local");
+    if (this.opts.profile === "lean" && (!edits(req) || req.ownKitOnly)) args.push("--setting-sources", "project,local");
     else if (builtin.length) args.push("--tools", builtin.join(","));
     if (req.mcpConfig) args.push("--mcp-config", req.mcpConfig);
     // Headless edits in a working copy: accept file edits there, nothing else is allowed to prompt.

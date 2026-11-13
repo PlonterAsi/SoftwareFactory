@@ -1258,7 +1258,7 @@ class Run {
       ...kit,
       // An agent that reads files reads this project's folder, once there is one.
       ...(this.dir && existsSync(this.dir) && m.tools.some((t) => READ_TOOLS.includes(t)) ? { cwd: this.dir } : {}),
-      ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000, noMemory: true } : {}),
+      ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000, noMemory: true, ownKitOnly: true } : {}),
       ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: WORKBENCH_COMMANDS, timeoutMs: 15 * 60_000, noMemory: true } : {}),
       ...(x.resume ? { resume: x.resume } : {}),
       ...(x.noTools ? { tools: [] } : {}),
