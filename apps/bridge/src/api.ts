@@ -98,6 +98,8 @@ export interface FactoryRunView {
   council: { round: number; seats: SeatView[]; brief: CouncilBriefView }[];
   /** Discovery: each round's product documents and the Critic's scores; the last entry is what the plan is built from. */
   discovery: DiscoveryRoundView[];
+  /** The build loop: the app as a list of features, built one per session (empty when the build was one call). */
+  features: FeatureView[];
   reviews: ReviewView[];
   /** The engine's loop (H5, H6): every fix attempt, what it changed and what came of it, and each step up the ladder. */
   loop: LoopEventView[];
@@ -106,6 +108,7 @@ export interface FactoryRunView {
   resumed?: { from: string; auto: boolean; count: number; at: string };
 }
 
+export interface FeatureView { id: string; title: string; state: "building" | "built" | "empty" | "regressed"; attempt: number; passed?: number; failed?: number; files?: string[]; broke?: string[] }
 export interface ProductDocsView {
   brief: { who: string; problem: string; promise: string; notThis: string[] };
   research: { finding: string; source?: string }[];
@@ -128,7 +131,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
   for (const e of events) {
     const p = e.payload ?? {};
     if (e.type === "factory.run.started") {
-      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], discovery: [], reviews: [], loop: [] });
+      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], discovery: [], features: [], reviews: [], loop: [] });
       continue;
     }
     const r = runs.get(p.run ?? p.factoryRun);
@@ -143,6 +146,12 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         break;
       case "factory.plan": r.plan = p.plan; r.dir = p.dir; break;
       case "factory.council": r.council.push({ round: p.round, seats: p.seats, brief: p.brief }); break;
+      case "factory.feature": {
+        const f: FeatureView = { id: p.id, title: p.title, state: p.state, attempt: p.attempt ?? 1, passed: p.passed, failed: p.failed, files: p.files, broke: p.broke };
+        const at = r.features.findIndex((x) => x.id === p.id);
+        if (at >= 0) r.features[at] = f; else r.features.push(f);
+        break;
+      }
       case "factory.discovery": r.discovery.push({ round: p.round, docs: p.docs, critique: p.critique ?? null, pass: !!p.pass, bar: p.bar ?? 4, settled: p.settled }); break;
       case "factory.review": r.reviews.push({ round: p.round, agent: p.agent, verdict: p.verdict, findings: p.findings, criteria: p.criteria }); break;
       case "factory.attempt": r.loop.push({ kind: "attempt", at: e.ts, round: p.round, agent: p.agent, model: p.model, before: p.before, after: p.after, files: p.files ?? [], said: p.said ?? "", dispute: p.dispute, ladder: p.ladder }); break;

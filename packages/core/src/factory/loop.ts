@@ -1,7 +1,7 @@
 import { failureLines } from "./trim.js";
 import { SAME_TESTS_REASON, stopReason, type RoundRecord } from "./stoprules.js";
 import { PERSON_KINDS, recallBlock } from "../brain/recall.js";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
 import { fastGates } from "../safety/gates.js";
@@ -13,6 +13,7 @@ import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, revisePrompt, validateCritique, validateDocs, type Critique, type ProductDocs } from "./discovery.js";
+import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
@@ -574,6 +575,8 @@ class Run {
     // The app kit goes in first, so the Builder writes the model and views on top of it.
     if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
     this.builder = this.one("build");
+    // A real crew with a product-sized budget builds one feature per fresh session (features.ts).
+    if (this.bench && this.plan.app && !this.screen && this.o.maxUsd >= FEATURE_LOOP_MIN_USD) return this.buildByFeature();
     const text = await this.askBench(this.builder, this.screen?.kind === "feature"
       ? [
         `This app already shipped and its locked acceptance tests pass. Build its next version on top of the existing code: add what the spec adds (new entities, fields, views and logic) and keep everything that works.`,
@@ -595,6 +598,61 @@ class Run {
     if (!res.written.length) throw new Error("The Builder returned no files");
     this.log.append("factory.files", { run: this.id, station: "build", round: 1, ...res, ...(this.bench ? { workbench: true } : {}) });
     commitAll(this.dir, `Build: ${this.plan.name}`);
+  }
+
+  /**
+   * The build loop: the plan as a list of features on disk, one fresh session per feature. After each, the
+   * core runs the locked tests (free): a test that passed before and fails now sends the feature back once
+   * with that evidence. Then it commits, notes the progress for the next session, and goes on. Whatever is
+   * still failing at the end goes to the test and fix loop as before. A retried build picks up at the first
+   * feature not built yet.
+   */
+  private async buildByFeature() {
+    const builder = this.builder!;
+    const path = join(this.dir, "features.json");
+    let features = featuresOf(this.plan, this.docs);
+    try {
+      // Picked up again after a failed call: what is built stays built.
+      const kept = (JSON.parse(readFileSync(path, "utf8")).features ?? []) as { id: string; state: string }[];
+      for (const f of features) if (kept.find((k) => k.id === f.id)?.state === "built") f.state = "built";
+    } catch { /* first time */ }
+    const progress = join(this.dir, "PROGRESS.md");
+    if (!existsSync(progress)) writeFileSync(progress, `# Progress\n\nOne entry per feature, written by SoftwareFactory after each build session.\n\n`);
+    const buildStart = this.spent;
+    let passing = new Set<string>();
+    let wroteAny = features.some((f) => f.state === "built");
+    for (let i = 0; i < features.length; i++) {
+      const f = features[i];
+      if (f.state === "built") continue;
+      let retry = "";
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        writeFileSync(path, featuresFile(features, f.id));
+        const left = features.filter((x) => x.state !== "built").length;
+        const cap = Math.min(builder.budgetUsd, Math.max(FEATURE_MIN_USD, (this.o.maxUsd * BUILD_BUDGET_SHARE - (this.spent - buildStart)) / left));
+        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: "building", attempt, capUsd: Number(cap.toFixed(3)) });
+        const text = await this.askBench(builder, featurePrompt(this.plan, features, f, !!this.docs, retry), { round: i + 1 }, { capUsd: cap });
+        const res = this.takeWork(text);
+        const files = res.written.map((w) => w.path).filter((p) => p !== "features.json" && p !== "PROGRESS.md");
+        const t = await runTests(this.dir);
+        const now = new Set(t.cases.filter((c) => c.pass).map((c) => `${c.file}::${c.name}`));
+        const broke = [...passing].filter((k) => !now.has(k));
+        f.passed = t.passed; f.total = t.passed + t.failed;
+        f.state = !files.length ? "empty" : broke.length ? "regressed" : "built";
+        if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, workbench: true }); }
+        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}) });
+        if (f.state === "regressed" && attempt === 1) {
+          retry = `These tests passed before your call and fail after it:\n${broke.slice(0, 10).map((k) => `- ${k.replace("::", ": ")}`).join("\n")}\n\n${t.output.slice(0, 1500)}`;
+          continue;
+        }
+        // Whatever happened, the next feature is judged against where the tests stand now.
+        passing = now;
+        writeFileSync(progress, readFileSync(progress, "utf8") + progressEntry(f, text, files));
+        writeFileSync(path, featuresFile(features));
+        commitAll(this.dir, `Feature ${f.id}: ${f.title}${f.state === "built" ? "" : ` (${f.state})`}`);
+        break;
+      }
+    }
+    if (!wroteAny) throw new Error("The Builder returned no files");
   }
 
   /** A real crew works at the workbench (factory/workbench.ts): it runs the tests itself and fixes until they pass. */
@@ -1008,7 +1066,7 @@ class Run {
    * cap and left files in the folder, the work goes on by itself: a fresh call reads what is there and finishes
    * it, at most twice, while the run's own budget allows. Anything else fails as before.
    */
-  private async askBench(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string } = {}): Promise<string> {
+  private async askBench(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; capUsd?: number } = {}): Promise<string> {
     try { return await this.ask(m, prompt, meta, x); }
     catch (e) {
       if (!this.bench || !/max_budget/i.test(String((e as Error).message))) throw e;
