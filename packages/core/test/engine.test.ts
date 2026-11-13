@@ -757,6 +757,20 @@ describe("what run 2898 taught the engine", () => {
     expect(docs.rules).toHaveLength(2);
   });
 
+  it("keeps a rule with a table whole, and text over the limit ends at a whole sentence (run 3185)", async () => {
+    const { validateDocs, keepWhole, DOC_LIMITS } = await import("../src/factory/discovery.js");
+    const table = `Level bands. ${"Rocket League: Bronze to Gold is beginner, Platinum to Champion is intermediate. ".repeat(14)}If an item has no band, add the item to Needs a look.`;
+    expect(table.length).toBeGreaterThan(800);
+    const base = { brief: { who: "a player", promise: "p" }, journeys: [{ moment: "m", steps: ["s"] }], screens: [{ id: "a", name: "A" }, { id: "b", name: "B" }], requirements: ["r"] };
+    expect(validateDocs({ ...base, rules: [{ name: "Level bands", rule: table }] }).rules[0]!.rule).toBe(table);
+    const over = validateDocs({ ...base, rules: [{ name: "Ranking", rule: "Rank by fit to level, then by freshness. ".repeat(100) }] }).rules[0]!.rule;
+    expect(over.length).toBeLessThanOrEqual(DOC_LIMITS.ruleChars);
+    expect(over.endsWith("freshness.")).toBe(true);
+    expect(keepWhole("one two three four five six", 20)).toBe("one two three four");
+    const { CONTRACTS } = await import("../src/bay/builtin.js");
+    expect(CONTRACTS.design).toContain("2,400 characters");
+  });
+
   it("gives the Planner and the project the product's rules", async () => {
     const { validateDocs, docsForPlanner, docsFiles } = await import("../src/factory/discovery.js");
     const docs = validateDocs({
