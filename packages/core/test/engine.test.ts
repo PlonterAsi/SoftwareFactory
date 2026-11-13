@@ -809,4 +809,16 @@ describe("what run 2898 taught the engine", () => {
     expect(asked[1]).toMatch(/an answer from memory is not research/);
     expect(asked[2]).toMatch(/Research done for this design[\s\S]*https:\/\/example\.com\/air-dribble[\s\S]*Do not search the web on this call/);
   });
+  it("checks the links in the app's code, not in its seeded data store, and says which file each is in", async () => {
+    const { linkFiles, linkCase } = await import("../src/factory/linkcheck.js");
+    const dir = tmp("sf-links-");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    mkdirSync(join(dir, "data"), { recursive: true });
+    writeFileSync(join(dir, "src/schema.js"), 'export const seed = [{ video: "https://www.youtube.com/watch?v=real123" }];');
+    writeFileSync(join(dir, "data/db.json"), '{"items":[{"video":"https://www.youtube.com/watch?v=example1"}]}');
+    const where = linkFiles(dir, () => false);
+    expect(where).toEqual({ "https://www.youtube.com/watch?v=real123": "src/schema.js" });
+    const c = linkCase({ pass: false, checked: 1, unknown: 0, dead: [{ url: "https://www.youtube.com/watch?v=real123", ok: false, note: "no such YouTube video", file: "src/schema.js" }] });
+    expect(c.error).toContain("(in src/schema.js)");
+  });
 });

@@ -22,7 +22,7 @@ import { checkUi, uiCase } from "./uicheck.js";
 import { appCase, checkAppLive, installKit, isKitFile, probeStart } from "./appkit.js";
 import { checkScreens, readScreens, screenCase, type ScreenCheck } from "./screencheck.js";
 import { dryRunTests, lockedTestFaults } from "./testcheck.js";
-import { checkLinks, linkCase, linksIn } from "./linkcheck.js";
+import { checkLinks, linkCase, linkFiles } from "./linkcheck.js";
 import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, answerSummary, changedFiles, hasWorkbench, restoreFromHead, restoreProtected, testDispute, workbenchContract, writtenOnDisk } from "./workbench.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
@@ -1077,7 +1077,9 @@ class Run {
       else r.passed++;
       // Every link the app ships, opened for real (run 2623 shipped 14 made-up YouTube links).
       if (process.env.SF_LINK_CHECK !== "off") {
-        const links = await checkLinks(linksIn(this.dir, (p) => isLockedTest(p) || isKitFile(p)));
+        const where = linkFiles(this.dir, (p) => isLockedTest(p) || isKitFile(p));
+        const links = await checkLinks(Object.keys(where));
+        links.dead = links.dead.map((d) => ({ ...d, file: where[d.url] }));
         this.log.append("factory.links", { run: this.id, round, pass: links.pass, checked: links.checked, unknown: links.unknown, dead: links.dead.slice(0, 30), ...(links.skipped ? { skipped: links.skipped } : {}) });
         if (!links.skipped && links.checked) {
           const c = linkCase(links);

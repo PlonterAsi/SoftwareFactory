@@ -64,6 +64,7 @@ In the app: a "Product design" box on the factory floor, a Design station on the
 - **Every designed screen is a view of the plan.** The plan kept only 4 views; it now keeps 6, and the core adds any designed screen the Planner left out (`withDesignedScreens`).
 - **A sign-in failure at start is retried once** (`agent.run.retried`): six CLIs starting together tripped three Council seats.
 - **A screen feature is built when its screen draws.** Six build sessions reported 82 of 82 tests and the home screen threw in the browser. After each screen feature the core opens the app in a real browser; a screen that does not draw goes back to the session that wrote it, once (feature state `broken`).
+- **The link check reads the code, not the data store.** `data/` is seeded on first start and never committed; stale copies of removed links there cost two fix rounds and a climb to a stronger model. Each dead link now reaches the Fixer with the file it is in, and the Fixer is told to search for the real page before it may remove one.
 
 ## The build loop: one feature per fresh session (2026-11-13)
 
