@@ -115,3 +115,12 @@ On the Bridge, in the Run deck:
 ## Safety
 
 The shell is an allowlist. Any other command is refused, because the agent runs headless with no one to approve it. `node` runs the project's own code, which the core already does on every test round, so it adds no new kind of risk. Agents may not install packages, change git, or reach the network through the shell. The core reverts locked files after every call, whatever the agent did.
+
+## Engine cycles: the same prompt, side by side
+
+A benchmark run tests the engine, not the product. When the same prompt has been built more than once, the
+**Engine cycles** page (sidebar, `#/factory/cycles`, `GET /api/factory/cycles`) puts the runs in columns: the app
+version that built each, the design loop's best scores, the product judge's last look, money, minutes, and the
+engine review (what the engine did badly and well, and each agent's record). It is worked out from the log
+(`packages/core/src/factory/cycles.ts`) with no agent call and nothing written, so runs from before reviews were
+logged get theirs too. Read across the row to see whether an engine change helped.

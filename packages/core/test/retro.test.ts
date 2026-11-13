@@ -75,3 +75,32 @@ describe("the engine review: what a run says about the factory itself", () => {
     expect(retro[0].id).toBeLessThan(log.list({ type: "factory.run.finished" })[0].id);
   });
 });
+
+describe("engine cycles: the same prompt built again, side by side", () => {
+  it("lines up runs that share a prompt, each with its engine version, scores and review", async () => {
+    const { engineCycles } = await import("../src/factory/cycles.js");
+    n = 0;
+    const prompt = "Build Game Mastery: a coach that curates community knowledge for each game.";
+    const events: SfEvent[] = [ev("app.updated", { from: null, to: "0.2.210" }, 0)];
+    const c1 = ev("factory.run.started", { idea: prompt, maxUsd: 10 }, 1); events.push(c1);
+    events.push(
+      ev("factory.discovery", { run: c1.id, round: 1, pass: false, critique: { scores: { coverage: 4, buildable: 3 } } }, 2),
+      ev("agent.run.completed", { factoryRun: c1.id, agent: "builder", station: "build", costUsd: 2.5, durationMs: 60_000 }, 10),
+      ev("factory.evaluation", { run: c1.id, round: 1, pass: false, scores: { function: 2, design: 2, content: 2 }, requirements: [{ met: true }, { met: false }] }, 20),
+      ev("factory.run.finished", { run: c1.id, outcome: "stopped", reason: "The run took longer than 30 minutes.\nmore", totalUsd: 2.5 }, 33),
+      ev("factory.run.started", { idea: "Something else entirely, built once", maxUsd: 2 }, 40),
+      ev("app.updated", { from: "0.2.210", to: "0.2.219" }, 50),
+    );
+    const c2 = ev("factory.run.started", { idea: `  ${prompt}\n`, maxUsd: 10 }, 60); events.push(c2);
+    events.push(ev("factory.discovery", { run: c2.id, round: 1, pass: true, critique: { scores: { coverage: 4, buildable: 4 } } }, 62));
+    const [g, ...rest] = engineCycles(events);
+    expect(rest).toHaveLength(0);
+    expect(g.name).toBe("Game Mastery");
+    expect(g.runs.map((r) => [r.cycle, r.run, r.appVersion, r.outcome])).toEqual([[1, c1.id, "0.2.210", "stopped"], [2, c2.id, "0.2.219", "running"]]);
+    // A run that ended before reviews were logged still gets one, worked out from its events.
+    expect(g.runs[0]).toMatchObject({ spentUsd: 2.5, reason: "The run took longer than 30 minutes.", design: { rounds: 1, passed: false }, judge: { met: 1, of: 2, passed: false } });
+    expect(g.runs[0].review!.bad.join("\n")).toMatch(/Product judge: did not pass/);
+    expect(g.runs[1].review).toBeNull();
+    expect(g.runs[1].design).toMatchObject({ passed: true, scores: { buildable: 4 } });
+  });
+});

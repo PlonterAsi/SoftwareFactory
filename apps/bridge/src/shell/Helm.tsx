@@ -19,6 +19,7 @@ const PAGES: { label: string; to: Route; words: string }[] = [
   { label: "All builds", to: { page: "factory", view: "factory" }, words: "floor runs builds whole factory" },
   { label: "Rules and ideas", to: { page: "factory", view: "order" }, words: "order canon unsorted conflicts rules" },
   { label: "Improve", to: { page: "factory", view: "improve" }, words: "council improvements proposals" },
+  { label: "Engine cycles", to: { page: "factory", view: "cycles" }, words: "benchmark same prompt engine review compare runs" },
   { label: "Data vault", to: { page: "factory", view: "data" }, words: "database store tables" },
   { label: "Finished apps", to: { page: "features" }, words: "features integrate" },
   { label: "Add-ons", to: { page: "plugins" }, words: "plugins extensions game" },
