@@ -15,7 +15,7 @@ import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
-import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
+import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
@@ -730,14 +730,18 @@ class Run {
           const sc = await this.f.checkScreens(this.dir).catch(() => null);
           if (sc && !sc.skipped) crashed = sc.screens.filter((x) => !x.ok).map((x) => `#/${x.route}: ${x.problem}`);
         }
-        f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length || invalid.length || deadLinks.length ? "broken" : "built";
+        // A screen that draws can still be hollow: the judge looks at it now, not only at the end.
+        let hollow: string[] = [];
+        if (attempt === 1 && files.length && !broke.length && !invalid.length && !crashed.length && this.docs && /^Screen: /.test(f.title)) hollow = await this.lookAtScreen(f);
+        f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length || invalid.length || deadLinks.length || hollow.length ? "broken" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, workbench: true }); }
-        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}), ...(invalid.length ? { invalid } : {}), ...(deadLinks.length ? { deadLinks } : {}) });
+        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}), ...(invalid.length ? { invalid } : {}), ...(deadLinks.length ? { deadLinks } : {}), ...(hollow.length ? { hollow } : {}) });
         if (f.state === "broken" && attempt === 1) {
           const sources = [...new Set((this.docs?.research ?? []).map((r) => r.source).filter((u): u is string => !!u))].slice(0, 12);
           retry = [
             invalid.length ? `The app kit refuses the schema you left, so the app cannot start:\n${invalid.join("\n")}\n\nFix src/schema.js: every field needs a lowerCamelCase "name" (letters and digits only, like "bandOverride"), a known type, and options for a choice.` : "",
             deadLinks.length ? `The core opened every link you wrote and these do not exist:\n${deadLinks.join("\n")}\n\n${sources.length ? `Addresses the research found, which do exist:\n${sources.join("\n")}\n\n` : ""}Never write a link from memory. Use only addresses listed in docs/product/BRIEF.md (the research), or search the web for the real page and use the address the search returned. If you cannot find the real one, leave the link empty: an empty link is right, a made-up one is a defect.` : "",
+            hollow.length ? `A product judge opened the running app after your call and did not find these on the screen you built:\n${hollow.map((h) => `- ${h}`).join("\n")}\n\nMake each one real on that screen: shown with sample records from the seed, and every action a control that changes the data through the store.` : "",
             crashed.length ? `The core opened the app in a real browser after your call, and these screens did not draw:\n${crashed.slice(0, 10).join("\n").slice(0, 1500)}\n\nFix the cause in the page code (a value read before it exists, a wrong import, a missing record) and make sure every screen draws with the sample records and with none.` : "",
           ].filter(Boolean).join("\n\n");
           continue;
@@ -1054,6 +1058,23 @@ class Run {
    * loop as work and is judged once more; what is still open then is shown at the build gate.
    */
   private evaluation: Evaluation | null = null;
+  /** The judge's look at one screen just built: what of its design a person would not find. [] when it all shows or the look cannot run. */
+  private async lookAtScreen(f: Feature): Promise<string[]> {
+    const id = f.what.match(/^The view "([^"]+)"/)?.[1];
+    const docs = id && this.docs ? screenLookDocs(this.docs, id) : null;
+    if (!docs || this.o.maxUsd - this.spent < SCREEN_LOOK_USD * 2) return [];
+    const shots = await this.f.readScreens(this.dir).catch(() => null);
+    if (!shots?.length) return [];
+    const mine = shots.filter((s) => s.route === id || s.route.startsWith(`${id}/`));
+    try {
+      const e = validateEvaluation(parseJsonBlock(await this.ask(this.one("evaluate"), screenLookPrompt(this.idea, docs, mine.length ? mine : shots), { round: 0 }, { capUsd: SCREEN_LOOK_USD })), docs);
+      const req = (rid: string) => docs.requirements.find((r) => r.id === rid)?.text ?? rid;
+      const out = e.requirements.filter((r) => !r.met).map((r) => `${req(r.id)} (the judge saw: ${r.evidence})`);
+      this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, seen: e.requirements.length - out.length, of: e.requirements.length, missing: out.slice(0, 20) });
+      return out.slice(0, 12);
+    } catch (e) { if (e instanceof StopRun) throw e; return []; }
+  }
+
   private async evaluateLoop() {
     const skip = (why: string) => { this.mark("evaluate", "skipped", undefined, why); };
     if (!this.docs || !this.plan.app || this.screen) return skip("No product design to judge this build against");

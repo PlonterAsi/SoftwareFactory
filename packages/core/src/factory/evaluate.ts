@@ -46,6 +46,28 @@ export function validateEvaluation(j: unknown, docs: ProductDocs): Evaluation {
   return { requirements, scores, problems };
 }
 
+/**
+ * A look at ONE screen, right after the feature that built it (run 3185: every feature passed its own checks
+ * and the judge, at the very end, found the tabs empty with the money gone). The screen's designed contents
+ * and actions become the requirements the judge checks, so the session that built the screen hears at once
+ * what a person would not find on it.
+ */
+export const SCREEN_LOOK_USD = 0.15;
+export function screenLookDocs(docs: ProductDocs, screenId: string): ProductDocs | null {
+  const s = docs.screens.find((x) => x.id === screenId);
+  if (!s || !(s.shows.length + s.actions.length)) return null;
+  const requirements = [
+    ...s.shows.map((t, i) => ({ id: `S${i + 1}`, text: `The ${s.name} screen shows ${t}, with real sample content`, from: "design" as const, must: true })),
+    ...s.actions.map((t, i) => ({ id: `A${i + 1}`, text: `On the ${s.name} screen the person can ${t}, with a real control`, from: "design" as const, must: true })),
+  ];
+  return { ...docs, screens: [s], requirements };
+}
+export function screenLookPrompt(idea: string, docs: ProductDocs, screens: ScreenText[]): string {
+  return `${evaluationPrompt(idea, docs, screens, 1)}
+
+This is a look at ONE screen, ${docs.screens[0]?.name}, just after it was built. Judge only the requirements above, all about this screen; the rest of the app is still being built.`;
+}
+
 export const evaluationPasses = (e: Evaluation) => e.requirements.every((r) => r.met) && PRODUCT_RUBRIC.every((k) => e.scores[k] >= PRODUCT_PASS_SCORE);
 
 export function evaluationPrompt(idea: string, docs: ProductDocs, screens: ScreenText[], round: number): string {

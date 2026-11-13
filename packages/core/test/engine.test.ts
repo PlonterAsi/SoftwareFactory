@@ -688,15 +688,19 @@ describe("the product judge: the running app is judged as a product", () => {
     screens: [{ id: "dashboard", name: "Progress", purpose: "Each piece against its goal.", shows: ["a bar per piece"], actions: ["add a piece"] }, { id: "log", name: "Session log", purpose: "What I wrote when.", shows: ["sessions"], actions: ["log a session"] }],
     requirements: [{ id: "R1", text: "A bar per piece against its goal", from: "person", must: true }, { id: "R2", text: "A session log with date and minutes", from: "person", must: true }, { id: "R3", text: "Confetti", from: "design", must: false }],
   };
-  function crewWith(verdicts: { r2: boolean }[]) {
+  /** The judge's look at one screen just built: every S/A item of it met, unless `missing` names it. */
+  const lookAnswer = (prompt: string, missing: string[] = []) => block({ requirements: [...prompt.matchAll(/^- ([SA]\d+): /gm)].map((m) => ({ id: m[1], met: !missing.includes(m[1]), evidence: missing.includes(m[1]) ? "The screen shows only a heading" : "Shown with sample pieces" })), scores: { function: 4, design: 4, content: 4 }, problems: [] });
+  function crewWith(verdicts: { r2: boolean }[], look?: (prompt: string, nth: number) => string) {
     const mock = new MockRuntime({ plantBug: false });
     const seen: { station: string; req: AgentRequest }[] = [];
     let n = 0;
+    let looks = 0;
     const rt: AgentRuntime = { name: "mock", run: async (req) => {
       const r = await mock.run(req);
       const st = station(req);
       seen.push({ station: st, req });
       if (st === "design") r.text = block(docs);
+      if (st === "evaluate" && /This is a look at ONE screen/.test(req.prompt)) { r.text = look ? look(req.prompt, ++looks) : lookAnswer(req.prompt); return r; }
       if (st === "evaluate") {
         const v = verdicts[Math.min(n++, verdicts.length - 1)];
         r.text = block({ requirements: [{ id: "R1", met: true, evidence: "Progress shows 3 bars" }, { id: "R2", met: v.r2, evidence: v.r2 ? "Session log lists 2 sessions" : "There is no session log screen" }], scores: { function: v.r2 ? 4 : 2, design: 4, content: 4 }, problems: v.r2 ? [] : [{ where: "navigation", problem: "The Session log screen is missing.", fix: "Add the log view." }] });
@@ -733,6 +737,40 @@ describe("the product judge: the running app is judged as a product", () => {
     expect(j1).toHaveLength(1);
     expect(j1[0].req.prompt).toMatch(/R2: A session log with date and minutes[\s\S]*There is no session log screen/);
     expect(events(log, "factory.feature").filter((e) => e.id === "J1" && e.state === "built")).toHaveLength(1);
+  });
+
+  it("looks at each screen just after it is built and hands what is missing back to the same builder (cycle 4)", async () => {
+    const log = new EventLog();
+    // The first look at a screen finds its first shown item missing; every later look finds it all.
+    const { rt: inner, seen } = crewWith([{ r2: true }], (prompt, nth) => lookAnswer(prompt, nth === 1 ? ["S1"] : []));
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => [{ route: "dashboard", text: "Progress", controls: [] }, ...screens];
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    const looks = events(log, "factory.screen.look");
+    expect(looks.length).toBeGreaterThanOrEqual(1);
+    expect(looks[0]).toMatchObject({ screen: "dashboard", seen: 1, of: 2 });
+    expect(looks[0].missing[0]).toMatch(/Progress screen shows a bar per piece[\s\S]*only a heading/);
+    const feats = events(log, "factory.feature").filter((e) => e.id === looks[0].feature && e.state !== "building");
+    expect(feats.map((e) => e.state)).toEqual(["broken", "built"]);
+    expect(feats[0].hollow[0]).toMatch(/bar per piece/);
+    const again = seen.filter((x) => x.station === "build" && x.req.prompt.includes(`Your feature, ${looks[0].feature}`))[1];
+    expect(again.req.prompt).toMatch(/product judge opened the running app[\s\S]*bar per piece/);
+    // The judge reads only that screen, at a small cap.
+    const ask = seen.find((x) => x.station === "evaluate" && /look at ONE screen/.test(x.req.prompt))!;
+    expect(ask.req.prompt).toMatch(/=== Screen #\/dashboard ===/);
+    expect(ask.req.prompt).not.toMatch(/=== Screen #\/home ===/);
+    expect(events(log, "factory.retro").at(-1).bad.join("\n")).toMatch(/judge did not find on its screen/);
   });
 
   it("a review that still says fix after its last round is recorded and goes first into the repair features (run 3185)", async () => {
