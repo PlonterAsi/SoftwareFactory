@@ -38,7 +38,7 @@ Never write or change the kit files. You write:
 - src/schema.js: the app's model. Pure data and pure functions (it runs in the browser and in Node: no node: imports, no process).
   export const app = { name: "Human name", slug: "kebab-name", tagline: "short", summary: "one sentence" };
   export const entities = [{ name: "task" (lowerCamelCase), label: "Tasks", singular: "Task", description: "one line", title: "the field that names a record",
-    fields: [{ name, label?, type, required?, options? (for choice), to? (for ref: an entity name), min?, max?, help?, default? }],
+    fields: [{ name (lowerCamelCase too, letters and digits only: "bandMin", never "band_min"; the kit refuses any other name and the app will not start), label?, type, required?, options? (for choice), to? (for ref: an entity name), min?, max?, help?, default? }],
     computed: [{ name, label, value: (record, db) => number or string }] (optional: derived values, shown in the list and on the record),
     seed: [3 to 6 realistic sample records; a ref field points at another entity's seed as "@project:0" (its first seed)] }];
   Field types: text, longtext, number, bool, date (YYYY-MM-DD), choice, tags, ref, email, url, color.
@@ -112,6 +112,7 @@ Every feature the idea names is in the plan, each in its smallest useful form; t
 Size it to the idea: 1 to 6 entities, 2 to 6 views of its own, at most 6 source files besides src/schema.js and the page files (index.html, web/app.js, web/style.css), at most 12 acceptance criteria. Acceptance criteria are about the src/ logic; the app's screens are checked separately.
 "ui" describes the app in two or three sentences: the person's main journey, its views in navigation order, and what the person does first.
 "cli" is "" unless the idea explicitly asks for a command line; "examples" are then ready-to-run CLI inputs (at most 3), otherwise [].
+Entity names and field names are lowerCamelCase, letters and digits only ("bandMin", never "band_min" or "Band Min"): the app kit refuses any other name. Use the same spelling everywhere a record's field is named (the interface, the flows, the acceptance criteria).
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"name": "Human name", "slug": "kebab-case-name", "summary": "one sentence",
  "interface": "exact exported functions of the src/ logic with signatures and behaviour; src/schema.js exports app, entities, flows, features",

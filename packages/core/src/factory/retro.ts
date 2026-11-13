@@ -97,7 +97,7 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
     const first = ids.filter((id) => { const mine = feats.filter((f) => f.id === id); return mine.length === 1 && mine[0].state === "built"; });
     const notBuilt = ids.filter((id) => feats.filter((f) => f.id === id).at(-1)!.state !== "built");
     (first.length === ids.length ? good : bad).push(`Build loop: ${first.length} of ${plural(ids.length, "feature")} built on the first try, each in its own session.`);
-    for (const f of feats.filter((x) => x.state === "broken")) bad.push(`Build loop: ${f.id} (${f.title}) reported done while a screen did not draw: ${String(f.crashed?.[0] ?? "").slice(0, 160)}`);
+    for (const f of feats.filter((x) => x.state === "broken")) bad.push(`Build loop: ${f.id} (${f.title}) reported done while ${f.invalid?.length ? `the app could not start: ${String(f.invalid[0]).slice(0, 160)}` : f.deadLinks?.length ? `it held ${plural(f.deadLinks.length, "made-up link")}: ${String(f.deadLinks[0]).slice(0, 120)}` : `a screen did not draw: ${String(f.crashed?.[0] ?? "").slice(0, 160)}`}`);
     for (const f of feats.filter((x) => x.state === "regressed")) bad.push(`Build loop: ${f.id} (${f.title}) broke ${plural((f.broke ?? []).length, "test")} that passed before it.`);
     if (notBuilt.length) bad.push(`Build loop: ${notBuilt.join(", ")} did not end built.`);
   }
