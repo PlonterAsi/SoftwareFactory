@@ -303,6 +303,31 @@ describe("a workbench call that runs out of budget mid-work", () => {
     expect(events(log, "factory.continued").some((c) => c.station === "review")).toBe(true);
   });
 
+  it("a Reviewer that runs out of budget at the workbench reviews by reading instead of stopping the run (run 3185)", async () => {
+    const { reviewCapUsd } = await import("../src/factory/loop.js");
+    expect([reviewCapUsd(0.2, 1.5), reviewCapUsd(0.2, 10), reviewCapUsd(0.2, 50)]).toEqual([0.2, 1, 1]);
+    const log = new EventLog();
+    const mock = new MockRuntime({ plantBug: false });
+    const reviews: AgentRequest[] = [];
+    const crew: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      if (station(req) === "review") {
+        reviews.push(req);
+        if (reviews.length === 1) throw new Error("claude exited 1: error_max_budget_usd");
+      }
+      return mock.run(req);
+    } };
+    const f = new Factory(log, crew, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    expect(events(log, "factory.gate").some((g) => g.gate === "escalation")).toBe(false);
+    // The first call may spend five times the Reviewer's own $0.20 on a $10 run; the second runs nothing.
+    expect(reviews[0].budgetUsd).toBe(1);
+    expect(reviews[1].tools).toEqual([]);
+    expect(reviews[1].prompt).toMatch(/do not run anything: review by reading/);
+    expect(events(log, "factory.continued").some((c) => c.station === "review" && /reviews by reading/.test(c.reason))).toBe(true);
+  });
+
   it("closes a file block on a bare >>> line", () => {
     const [f] = parseFileBlocks("<<<FILE test/a.test.js\nimport x from 'y';\n>>>\nthanks");
     expect(f.content).toBe("import x from 'y';\n");
@@ -551,6 +576,45 @@ describe("the build loop: one feature per fresh session", () => {
     expect(f3[1].prompt).toMatch(/real browser[\s\S]*reading 'game'/);
     // The model and logic features have no screen of their own to open.
     expect(checks).toBe(3);
+  });
+
+  it("hands a schema the app cannot start on, and a made-up link, back to the session that wrote them (run 3185)", async () => {
+    const log = new EventLog();
+    const { rt, builds } = featureCrew((id, nth, cwd, files) => {
+      if (id !== "F2") return false;
+      // The first try leaves a field the app kit refuses and a video link from memory; the second puts the schema right.
+      write(cwd, files.filter((f) => f.path === "src/count.js" || f.path === "src/schema.js").map((f) => f.path !== "src/schema.js" || nth > 1 ? f : { path: f.path, content: f.content.replace(/name: "(\w+)"/, 'name: "band override", link: "https://www.youtube.com/watch?v=rl-wave-dash", was: "$1"') }));
+      return true;
+    });
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    const asked: string[][] = [];
+    f.checkLinks = async (urls) => { asked.push(urls); const dead = urls.filter((u) => /rl-wave-dash/.test(u)).map((url) => ({ url, ok: false as const, status: 404 })); return { pass: !dead.length, checked: urls.length, dead, unknown: 0 }; };
+    const old = process.env.SF_LINK_CHECK;
+    process.env.SF_LINK_CHECK = "on";
+    try {
+      const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+      await f.wait(run);
+    } finally { process.env.SF_LINK_CHECK = old; }
+    const f1 = events(log, "factory.feature").filter((e) => e.id === "F2" && e.state !== "building");
+    expect(f1.map((e) => e.state)).toEqual(["broken", "built"]);
+    expect(f1[0].invalid.join("\n")).toMatch(/src\/schema\.js: an entity has no valid name/);
+    expect(f1[0].deadLinks[0]).toMatch(/rl-wave-dash \(in src\/schema\.js\)/);
+    const again = builds.filter((b) => /Your feature, F2/.test(b.prompt))[1];
+    expect(again.prompt).toMatch(/app kit refuses the schema[\s\S]*Never write a link from memory/);
+    expect(asked.flat().filter((u) => /rl-wave-dash/.test(u))).toHaveLength(1);
+    const retro = events(log, "factory.retro").at(-1);
+    expect(retro.bad.join("\n")).toMatch(/F2 .* reported done while the app could not start/);
+  });
+
+  it("puts the plan's entity and field names into the spelling the app kit accepts (run 3185)", async () => {
+    const { kitName, validatePlan } = await import("../src/factory/loop.js");
+    expect([kitName("band_min"), kitName("Band Override"), kitName("rankScale"), kitName("2nd-best_video"), kitName("")]).toEqual(["bandMin", "bandOverride", "rankScale", "ndBestVideo", "field"]);
+    const plan = validatePlan({ name: "Game Mastery", slug: "game-mastery", summary: "s", interface: "i", acceptance: ["a"], tasks: [{ id: "T1", title: "t", dependsOn: [] }],
+      entities: [{ name: "plan_block", fields: [{ name: "band_min", type: "number" }, { name: "game_ref", type: "ref", to: "Game" }] }, { name: "Game", fields: [{ name: "title", type: "text" }] }] } as never);
+    expect(plan.entities!.map((e) => [e.name, ...e.fields.map((f) => f.name)])).toEqual([["planBlock", "bandMin", "gameRef"], ["game", "title"]]);
+    expect(plan.entities![0].fields[1].to).toBe("game");
+    const { CONTRACTS } = await import("../src/bay/builtin.js");
+    expect(CONTRACTS.plan).toMatch(/lowerCamelCase.*never "band_min"/);
   });
 
   it("builds the plan as a list of features, each in its own call, with the list and the progress on disk", async () => {

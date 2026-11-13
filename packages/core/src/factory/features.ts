@@ -89,6 +89,8 @@ export function featurePrompt(plan: Plan, features: Feature[], f: Feature, hasDo
       "- Build only this feature, completely. Do not start the others; leave their placeholders as they are.",
       "- Keep everything that already works working. Tests for features nobody built yet may fail; no test that passed before your call may fail after it.",
       "- Do not edit features.json or PROGRESS.md: the core keeps them.",
+      // Run 3185: a feature took 14 turns and every turn re-read the whole growing context (0.9M tokens a feature).
+      "- Work in few steps, because every step re-sends everything you have read so far: read the files you need in one command, write each file whole in one go, and run the tests once at the end (once more after a fix), not after every edit. Keep command output short (tail it).",
       "- End your answer with two or three lines for the next call: what you built, and anything it must know (a helper to reuse, a decision you made).",
     ].join("\n"),
     retry ? `Your last attempt at this feature was not accepted:\n${retry}\nFix that first.` : "",

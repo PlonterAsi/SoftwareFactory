@@ -124,3 +124,13 @@ version that built each, the design loop's best scores, the product judge's last
 engine review (what the engine did badly and well, and each agent's record). It is worked out from the log
 (`packages/core/src/factory/cycles.ts`) with no agent call and nothing written, so runs from before reviews were
 logged get theirs too. Read across the row to see whether an engine change helped.
+
+## What cycle 3 changed (run 3185)
+
+- **Names the app kit accepts.** The Planner named fields in snake_case, the kit refuses those, the app could not
+  start, and all eight features still reported "built". The core now puts the plan's entity and field names into
+  lowerCamelCase (`kitName`), and the Planner and the Builder are told the rule.
+- **Each feature is checked for what broke run 3185, by the session that wrote it.** After any feature: the schema
+  must be one the kit accepts, and every link the feature wrote is opened (the retry lists the addresses the
+  research found). After a screen feature: an app that does not start now fails the screen check instead of
+  counting as "nothing to check". One retry, then the check after the build takes over, as before.

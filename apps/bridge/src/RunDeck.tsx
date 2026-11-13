@@ -270,7 +270,7 @@ export function BuildView({ run }: { run: FactoryRunView }) {
             {total > 0 && <div className="score"><span className="score-k">locked tests</span><span className="score-bar"><i style={{ width: `${((f.passed ?? 0) / total) * 100}%` }} /></span><span className="mono">{f.passed}/{total}</span></div>}
             {!!f.files?.length && <div className="loop-files">{f.files.slice(0, 8).join(", ")}{f.files.length > 8 ? ` +${f.files.length - 8}` : ""}</div>}
             {!!f.broke?.length && <div className="loop-dispute">Broke: {f.broke.slice(0, 3).map((x) => x.split("::")[1] ?? x).join("; ")}</div>}
-            {!!f.crashed?.length && <div className="loop-dispute">Did not draw: {f.crashed.slice(0, 3).join("; ")}</div>}
+            {!!f.crashed?.length && <div className="loop-dispute">Caught by the check: {f.crashed.slice(0, 3).join("; ")}</div>}
           </li>
         );
       })}

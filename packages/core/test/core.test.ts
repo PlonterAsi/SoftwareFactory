@@ -63,6 +63,10 @@ describe("agent runtime", () => {
     // A station agent sees only its own kit, not the person's installed plugins and skills; repo work keeps them.
     expect(inDir[inDir.indexOf("--setting-sources") + 1]).toBe("project,local");
     expect(rt.buildArgs({ prompt: "hi", tools: ["Read", "Edit"], cwd: "/proj" })).not.toContain("--setting-sources");
+    // The factory's own project folder is not the person's repo: its Builder and Fixer get their kit only (run 3185).
+    const own = rt.buildArgs({ prompt: "hi", tools: ["Read", "Edit"], cwd: "/proj", ownKitOnly: true });
+    expect(own[own.indexOf("--setting-sources") + 1]).toBe("project,local");
+    expect(own).toContain("--permission-mode");
   });
 
   it("lets the web tools run headless without a permission prompt, and nothing else", () => {

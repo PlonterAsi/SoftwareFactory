@@ -20,10 +20,10 @@ import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseS
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
 import { checkUi, uiCase } from "./uicheck.js";
-import { appCase, checkAppLive, installKit, isKitFile, probeStart } from "./appkit.js";
+import { appCase, checkApp, checkAppLive, installKit, isKitFile, probeStart } from "./appkit.js";
 import { checkScreens, readScreens, screenCase, type ScreenCheck } from "./screencheck.js";
 import { dryRunTests, lockedTestFaults } from "./testcheck.js";
-import { checkLinks, linkCase, linkFiles } from "./linkcheck.js";
+import { checkLinks, linkCase, linkFiles, type LinkCheck } from "./linkcheck.js";
 import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, answerSummary, changedFiles, hasWorkbench, restoreFromHead, restoreProtected, testDispute, workbenchContract, writtenOnDisk } from "./workbench.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
@@ -132,10 +132,14 @@ export class Factory {
    * screens in a real browser. null when that cannot be done here (no browser, or the screen check is off).
    */
   /** Open every screen of the app in `dir` in a real browser. Null when the check is off. Tests replace it. */
+  /** Open links for real. Tests replace it. */
+  checkLinks: (urls: string[]) => Promise<LinkCheck> = (urls) => checkLinks(urls);
   checkScreens: (dir: string) => Promise<ScreenCheck | null> = async (dir) => {
     if (process.env.SF_SCREEN_CHECK === "off") return null;
     let out: ScreenCheck | null = null;
-    await probeStart(dir, 15_000, async (url) => { out = await checkScreens(url); return []; });
+    const problems = await probeStart(dir, 15_000, async (url) => { out = await checkScreens(url); return []; });
+    // An app that does not start has no screen that draws (run 3185: this used to count as "nothing to check").
+    if (!out && problems.length) return { pass: false, screens: [{ route: "", ok: false, problem: `the app did not start: ${problems[0].slice(0, 300)}` }] };
     return out;
   };
   readScreens: (dir: string) => Promise<ScreenText[] | null> = async (dir) => {
@@ -360,6 +364,8 @@ class Run {
   private lockedSha = "";
   private lockedCases: number | undefined;
   private fixRounds = 0;
+  /** Links a feature session wrote that already opened: each is fetched once during the build. */
+  private linksSeen = new Set<string>();
   private brief: CouncilBrief | null = null;
   /** The product documents discovery settled on, and the Critic's last word on them. */
   private docs: ProductDocs | null = null;
@@ -693,15 +699,38 @@ class Run {
         // A screen is built when it draws, not when the unit tests pass: in run 2898 six sessions reported
         // 82 of 82 tests and the home screen threw in the browser. The session that wrote the screen fixes it.
         let crashed: string[] = [];
-        if (files.length && !broke.length && /^(Screen|Judge): /.test(f.title)) {
+        // Run 3185: all eight features reported "built" on a schema the app kit refuses (a field with no valid
+        // name), so no screen could be opened at all, and the seed carried made-up video links although the
+        // research was there. Both are checked the moment a feature is written, by the session that wrote it.
+        // (A schema that imports logic a later feature writes is not a fault yet; the check after the build has it.)
+        let invalid: string[] = [];
+        let deadLinks: string[] = [];
+        if (files.length && !broke.length && this.plan.app && existsSync(join(this.dir, "src/schema.js"))) {
+          try { invalid = checkApp(this.dir).problems.filter((x) => /^src\/schema\.js/.test(x) && !/imports .* which does not exist|does not load in Node/.test(x)); } catch { /* the check after the build still runs */ }
+          invalid = [...new Set(invalid)].slice(0, 10);
+          if (process.env.SF_LINK_CHECK !== "off") {
+            const where = linkFiles(this.dir, (x) => isLockedTest(x) || isKitFile(x));
+            const mine = Object.keys(where).filter((u) => files.includes(where[u]) && !this.linksSeen.has(u));
+            const links = await this.f.checkLinks(mine).catch(() => null);
+            for (const u of mine) this.linksSeen.add(u);
+            if (links && !links.skipped) deadLinks = links.dead.map((d) => `${d.url} (in ${where[d.url]})`).slice(0, 20);
+            for (const d of links?.dead ?? []) this.linksSeen.delete(d.url);
+          }
+        }
+        if (files.length && !broke.length && !invalid.length && /^(Screen|Judge): /.test(f.title)) {
           const sc = await this.f.checkScreens(this.dir).catch(() => null);
           if (sc && !sc.skipped) crashed = sc.screens.filter((x) => !x.ok).map((x) => `#/${x.route}: ${x.problem}`);
         }
-        f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length ? "broken" : "built";
+        f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length || invalid.length || deadLinks.length ? "broken" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, workbench: true }); }
-        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}) });
+        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}), ...(invalid.length ? { invalid } : {}), ...(deadLinks.length ? { deadLinks } : {}) });
         if (f.state === "broken" && attempt === 1) {
-          retry = `The core opened the app in a real browser after your call, and these screens did not draw:\n${crashed.slice(0, 10).join("\n").slice(0, 1500)}\n\nFix the cause in the page code (a value read before it exists, a wrong import, a missing record) and make sure every screen draws with the sample records and with none.`;
+          const sources = [...new Set((this.docs?.research ?? []).map((r) => r.source).filter((u): u is string => !!u))].slice(0, 12);
+          retry = [
+            invalid.length ? `The app kit refuses the schema you left, so the app cannot start:\n${invalid.join("\n")}\n\nFix src/schema.js: every field needs a lowerCamelCase "name" (letters and digits only, like "bandOverride"), a known type, and options for a choice.` : "",
+            deadLinks.length ? `The core opened every link you wrote and these do not exist:\n${deadLinks.join("\n")}\n\n${sources.length ? `Addresses the research found, which do exist:\n${sources.join("\n")}\n\n` : ""}Never write a link from memory. Use only addresses listed in docs/product/BRIEF.md (the research), or search the web for the real page and use the address the search returned. If you cannot find the real one, leave the link empty: an empty link is right, a made-up one is a defect.` : "",
+            crashed.length ? `The core opened the app in a real browser after your call, and these screens did not draw:\n${crashed.slice(0, 10).join("\n").slice(0, 1500)}\n\nFix the cause in the page code (a value read before it exists, a wrong import, a missing record) and make sure every screen draws with the sample records and with none.` : "",
+          ].filter(Boolean).join("\n\n");
           continue;
         }
         if (f.state === "regressed" && attempt === 1) {
@@ -960,7 +989,18 @@ class Run {
         const m = this.one("review");
         const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md" && !isKitFile(p) && !p.startsWith("data/")).map(([p, c]) => `<<<FILE ${p}\n${c.length > 12000 ? c.slice(0, 12000) + "\n...(cut: file continues)\n" : c}FILE>>>`).join("\n");
         const verify = this.bench ? `\n\n${VERIFY_CONTRACT}\nThe acceptance criteria:\n${this.plan.acceptance.map((a, i) => `${i + 1}. ${a}`).join("\n")}` : "";
-        const text = await this.ask(m, `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 48000)}${verify}`, { round });
+        const reviewPrompt = `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 48000)}`;
+        // Run 3185: verifying 12 criteria of a $10 product at the workbench ran past the Reviewer's fixed $0.20 and
+        // the run stopped with no verdict. The cap grows with the run, and a Reviewer that still runs out gives its
+        // verdict from reading the code instead of leaving the person a Retry that would die the same way.
+        let text: string;
+        try { text = await this.ask(m, reviewPrompt + verify, { round }, this.bench ? { capUsd: reviewCapUsd(m.budgetUsd, this.o.maxUsd), raiseCap: true } : {}); }
+        catch (e) {
+          if (!this.bench || !/max_budget/i.test(String((e as Error).message)) || this.o.maxUsd - this.spent < 0.05) throw e;
+          this.log.append("factory.continued", { run: this.id, station: "review", agent: m.id, round, attempt: 1, files: [], reason: "the Reviewer ran out of its budget while running the criteria; it reviews by reading instead" });
+          try { restoreFromHead(this.dir, changedFiles(this.dir)); } catch { /* nothing to put back */ }
+          text = await this.ask(m, `${reviewPrompt}\n\nYour first call ran out of its budget while running the acceptance criteria one by one. This time do not run anything: review by reading the code above, and in "criteria" mark each acceptance criterion you could not confirm by reading as not verified.\nThe acceptance criteria:\n${this.plan.acceptance.map((a, i) => `${i + 1}. ${a}`).join("\n")}`, { round }, { noTools: true });
+        }
         // The Reviewer may run things but not change them: whatever it left in the folder goes.
         if (this.bench) { try { restoreFromHead(this.dir, changedFiles(this.dir)); } catch { /* nothing to put back */ } }
         let res: ReviewResult;
@@ -1203,7 +1243,7 @@ class Run {
   private lastSession: string | undefined;
   /** Time this run spent waiting at gates for the person. */
   private waitedMs = 0;
-  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number } = {}): Promise<string> {
+  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number; /** The cap may go above the agent's own per-call budget (it stays inside the run's). */ raiseCap?: boolean } = {}): Promise<string> {
     if (this.o.maxUsd - this.spent < 0.01) {
       // Council seats ask at the same time: one question, and the others see the answer.
       await this.gateTurn(async () => {
@@ -1217,7 +1257,7 @@ class Run {
     }
     // A hint you gave with Retry reaches the next agent call of that station.
     if (this.hint) prompt += `\n\nThe person retried this step after it failed (${this.hint.error.slice(0, 300)}) and said: ${this.hint.note}`;
-    const cap = Math.max(0.01, Math.min(x.capUsd ?? m.budgetUsd, m.budgetUsd, this.o.maxUsd - this.spent));
+    const cap = Math.max(0.01, Math.min(x.capUsd ?? m.budgetUsd, x.raiseCap ? Infinity : m.budgetUsd, this.o.maxUsd - this.spent));
     this.calls++;
     // The Builder and Fixer of a real crew work at the workbench: the project folder, file tools and a shell.
     const bench = !x.noTools && this.bench && (m.station === "build" || m.station === "fix") && !!this.dir && existsSync(this.dir);
@@ -1229,7 +1269,7 @@ class Run {
       ...kit,
       // An agent that reads files reads this project's folder, once there is one.
       ...(this.dir && existsSync(this.dir) && m.tools.some((t) => READ_TOOLS.includes(t)) ? { cwd: this.dir } : {}),
-      ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000, noMemory: true } : {}),
+      ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000, noMemory: true, ownKitOnly: true } : {}),
       ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: WORKBENCH_COMMANDS, timeoutMs: 15 * 60_000, noMemory: true } : {}),
       ...(x.resume ? { resume: x.resume } : {}),
       ...(x.noTools ? { tools: [] } : {}),
@@ -1398,6 +1438,22 @@ export function withDesignedScreens(plan: Plan, docs: ProductDocs): { plan: Plan
   return { plan: added.length ? { ...plan, views } : plan, added };
 }
 
+/**
+ * A name the app kit accepts: lowerCamelCase, letters and digits. Run 3185: the Planner named fields in
+ * snake_case (band_min), the kit refuses those, the app could not start, and every feature still "built". The
+ * plan is put right once, here, so the Tester and the Builder never see a name the kit will refuse.
+ */
+export function kitName(x: unknown): string {
+  const parts = String(x ?? "").trim().split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const s = parts.map((w, i) => (i ? w[0].toUpperCase() + w.slice(1) : w[0].toLowerCase() + w.slice(1))).join("").replace(/^[0-9]+/, "");
+  return s || "field";
+}
+
+/** What one Reviewer call may spend: its own budget on a small run, up to five times that on a product run. */
+export function reviewCapUsd(agentUsd: number, runUsd: number): number {
+  return Number((agentUsd * Math.min(5, Math.max(1, runUsd / 2))).toFixed(3));
+}
+
 export function validatePlan(p: Plan): Plan {
   if (!p || typeof p !== "object") throw new Error("The plan is not an object");
   for (const k of ["name", "slug", "summary", "interface"] as const) if (typeof p[k] !== "string" || !p[k].trim()) throw new Error(`The plan is missing "${k}"`);
@@ -1416,8 +1472,8 @@ export function validatePlan(p: Plan): Plan {
     // Every new plan is a real program on the app kit (the Brain's "real-programs").
     app: true,
     entities: (Array.isArray(p.entities) ? p.entities : []).filter((e: any) => e && typeof e.name === "string").slice(0, 8).map((e: any) => ({
-      name: String(e.name), ...(e.label ? { label: String(e.label) } : {}),
-      fields: (Array.isArray(e.fields) ? e.fields : []).filter((f: any) => f && typeof f.name === "string").map((f: any) => ({ name: String(f.name), type: String(f.type ?? "text"), ...(f.required ? { required: true } : {}), ...(Array.isArray(f.options) ? { options: f.options.map(String) } : {}), ...(f.to ? { to: String(f.to) } : {}) })),
+      name: kitName(e.name), ...(e.label ? { label: String(e.label) } : {}),
+      fields: (Array.isArray(e.fields) ? e.fields : []).filter((f: any) => f && typeof f.name === "string").map((f: any) => ({ name: kitName(f.name), type: String(f.type ?? "text"), ...(f.required ? { required: true } : {}), ...(Array.isArray(f.options) ? { options: f.options.map(String) } : {}), ...(f.to ? { to: kitName(f.to) } : {}) })),
       ...(e.seed ? { seed: String(e.seed).slice(0, 300) } : {}),
     })),
     flows: (Array.isArray(p.flows) ? p.flows : []).filter((x: any) => x && x.name).slice(0, 6).map((x: any) => ({ name: String(x.name), steps: (Array.isArray(x.steps) ? x.steps : []).map(String).slice(0, 10) })),
