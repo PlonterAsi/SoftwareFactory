@@ -8,7 +8,7 @@ import { modelFloorUsd, strongerModel } from "../src/factory/loop.js";
 import { dryRunTests, lockedTestFaults, relativeImports } from "../src/factory/testcheck.js";
 import { initRepo, commitAll } from "../src/factory/workspace.js";
 import { probeStart } from "../src/factory/appkit.js";
-import { checkScreens, findBrowser, routesOf, screenCase, screenProblem, type ScreenCheck } from "../src/factory/screencheck.js";
+import { browserEnv, checkScreens, findBrowser, routesOf, screenCase, screenProblem, type ScreenCheck } from "../src/factory/screencheck.js";
 
 const tmp = (p: string) => mkdtempSync(join(tmpdir(), p));
 const events = (log: EventLog, type: string) => log.list({ limit: 1e6 }).filter((e) => e.type === type).map((e) => e.payload as any);
@@ -299,6 +299,12 @@ describe("every screen in a real browser", () => {
     expect(b.pass).toBe(false);
     expect(screenCase(b).error).toMatch(/#\/home: .*game is not defined/);
   }, 120_000);
+
+  it("starts the browser without the Windows app-health shim, and finds Edge where Windows puts it", () => {
+    const env = browserEnv({ PATH: "x", __COMPAT_LAYER: "DetectorsAppHealth" });
+    expect(env.PATH).toBe("x");
+    expect("__COMPAT_LAYER" in env).toBe(false);
+  });
 
   it("reads routes and problems from a dumped screen", () => {
     expect(routesOf('<nav class="kit-nav"><a href="#/home">O</a><a href="#/e/piece">P</a><a href="#/system">S</a></nav>')).toEqual(["home", "e/piece", "system"]);
