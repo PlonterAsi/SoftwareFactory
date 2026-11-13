@@ -89,7 +89,10 @@ export function Blueprint({ run, compact }: { run: FactoryRunView; compact?: boo
   const now = route.find((s) => s.feature?.state === "building");
   const started = run.features.length > 0;
   const screens = route.filter((s) => s.kind === "screen");
-  const gaps = [...new Set((run.planGaps ?? []).flatMap((g) => g.missing.map(String)))];
+  // The plan check's finds: the Planner adds them before your OK, so only the ones it could not add stay open.
+  const found = (run.planGaps ?? []).flatMap((g) => g.missing.map((m) => ({ text: String(m), added: g.added })));
+  const gaps = found.filter((g, i) => found.findIndex((x) => x.text === g.text) === i);
+  const openGaps = gaps.filter((g) => !g.added);
   return (
     <div className={`bp${compact ? " compact" : ""}`}>
       <header className="bp-hero">
@@ -103,7 +106,7 @@ export function Blueprint({ run, compact }: { run: FactoryRunView; compact?: boo
           <Stat n={plan.entities?.length ?? 0} l="kinds of data" />
           <Stat n={plan.flows?.length ?? 0} l="ways it's used" />
           <Stat n={plan.acceptance.length} l="checks for done" />
-          {gaps.length > 0 && <Stat n={gaps.length} l="gaps found" warn />}
+          {openGaps.length > 0 ? <Stat n={openGaps.length} l="gaps still open" warn /> : gaps.length > 0 ? <Stat n={gaps.length} l="gaps caught and added" /> : null}
         </div>
       </header>
 
@@ -186,8 +189,8 @@ export function Blueprint({ run, compact }: { run: FactoryRunView; compact?: boo
 
       {gaps.length > 0 && (
         <section className="bp-sec">
-          <div className="bp-sec-h"><h3>Gaps the plan check found</h3><p>Asked for in the design but not covered by the plan. Worth a look before you approve.</p></div>
-          <ul className="bp-gaps">{gaps.map((g) => { const [h, b] = headed(g); return <li key={g}>{h && <b>{h}</b>}<span>{b}</span></li>; })}</ul>
+          <div className="bp-sec-h"><h3>What the plan check caught</h3><p>{openGaps.length ? "Asked for in the design but still missing from the plan. Worth a look before you approve." : "The first plan left these out; the Planner added them before it reached you."}</p></div>
+          <ul className="bp-gaps">{gaps.map((g) => { const [h, b] = headed(g.text); return <li key={g.text} className={g.added ? "added" : ""}><span className="bp-gap-tag">{g.added ? "added to the plan" : "still missing"}</span>{h && <b>{h}</b>}<span>{b}</span></li>; })}</ul>
         </section>
       )}
 
