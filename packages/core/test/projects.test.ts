@@ -162,6 +162,10 @@ describe("projects", () => {
 
   it("names projects from ideas at a word boundary", () => {
     expect(nameFromIdea("short idea")).toBe("short idea");
+    // An idea that leads with the product's name is named by it, not by its first 60 characters.
+    expect(nameFromIdea("Build Game Mastery: a coach that curates what the community knows about each game I play")).toBe("Game Mastery");
+    expect(nameFromIdea("Make me a habit tracker: streaks and a weekly heatmap")).toBe("Habit tracker");
+    expect(nameFromIdea("idea: a star map of every project and how they connect to each other over time")).not.toBe("Idea");
     const long = nameFromIdea("a very long idea about a tool that renames photos by date and place and more");
     expect(long.length).toBeLessThanOrEqual(61);
     expect(long.endsWith("…")).toBe(true);

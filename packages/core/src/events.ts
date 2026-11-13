@@ -49,6 +49,7 @@ export type EventType =
   | "factory.discovery"
   | "factory.research"
   | "factory.repair"
+  | "factory.retro"
   | "factory.feature"
   | "factory.evaluation"
   | "factory.budget"

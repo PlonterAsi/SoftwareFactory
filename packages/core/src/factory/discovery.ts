@@ -55,10 +55,26 @@ export interface Critique {
  * How much of each part is kept. The limits are generous on purpose and the Designer is told them (the design
  * contract): in run 2898 requirements were cut at 300 characters, and the Critic failed the design two rounds
  * running for requirements that were "cut off mid-sentence". The engine must never damage what the Critic judges.
+ * Rules hold tables written out per kind (rank bands per game), so they get the most room.
  */
-export const DOC_LIMITS = { requirements: 40, requirementChars: 600, steps: 14, lineChars: 500, perScreen: 12, research: 12, rules: 12, ruleChars: 800 } as const;
+export const DOC_LIMITS = { requirements: 40, requirementChars: 600, steps: 14, lineChars: 500, perScreen: 12, research: 12, rules: 12, ruleChars: 2400 } as const;
 
-const str = (x: unknown, max = 600) => String(x ?? "").trim().slice(0, max);
+/**
+ * Text kept to a size, never cut mid-sentence. Run 3185: rules were sliced at 800 characters ("add the item to
+ * Needs a lo") and the Critic held `buildable` at 3 for three rounds over text the engine had damaged. Text over
+ * the limit now ends at its last whole sentence (or, with no sentence end in reach, its last whole word).
+ */
+export function keepWhole(x: unknown, max = 600): string {
+  const s = String(x ?? "").trim();
+  if (s.length <= max) return s;
+  const head = s.slice(0, max);
+  const ends = [...head.matchAll(/[.!?;](?=\s|$)|\n/g)];
+  const end = ends.length ? ends[ends.length - 1].index! + 1 : 0;
+  if (end >= max * 0.5) return head.slice(0, end).trim();
+  const word = head.lastIndexOf(" ");
+  return (word > max * 0.5 ? head.slice(0, word) : head).trim();
+}
+const str = keepWhole;
 const list = (x: unknown, max: number, each = 300) => (Array.isArray(x) ? x : []).map((v) => str(v, each)).filter(Boolean).slice(0, max);
 const slug = (x: unknown) => str(x, 40).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
