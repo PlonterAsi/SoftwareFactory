@@ -56,6 +56,18 @@ Then the Planner plans from the documents (one view per screen, one flow per jou
 
 In the app: a "Product design" box on the factory floor, a Design station on the Bridge, and a Product tab on every run with each round's scores and documents.
 
+### What the first real run changed (run 2898, 2026-11-13)
+
+- **Research is a call of its own.** Offered six searches, the Designer answered in one turn with none. With a real crew the Designer now makes a research-only call first (`factory.research`); the core counts findings that carry a web address and asks once more when there are none. The design call gets the findings and may not search.
+- **The core never cuts what the Critic judges.** Requirements were cut at 300 characters and the Critic failed the design for text "cut off mid-sentence". The limits are generous, named (`DOC_LIMITS`) and written into the design contract.
+- **Documents have `rules`**: how the product ranks, picks, counts and removes, each exact enough to test.
+- **Every designed screen is a view of the plan.** The plan kept only 4 views; it now keeps 6, and the core adds any designed screen the Planner left out (`withDesignedScreens`).
+- **A sign-in failure at start is retried once** (`agent.run.retried`): six CLIs starting together tripped three Council seats.
+- **A screen feature is built when its screen draws.** Six build sessions reported 82 of 82 tests and the home screen threw in the browser. After each screen feature the core opens the app in a real browser; a screen that does not draw goes back to the session that wrote it, once (feature state `broken`).
+- **The link check reads the code, not the data store.** `data/` is seeded on first start and never committed; stale copies of removed links there cost two fix rounds and a climb to a stronger model. Each dead link now reaches the Fixer with the file it is in, and the Fixer is told to search for the real page before it may remove one.
+- **The judge's findings are built as features.** One fix round was handed 25 unmet requirements at once. With a real crew and a product budget, unmet requirements go back to the build loop in groups of five, each in a fresh session (`repairFeatures`, features `J1`, `J2`..., event `factory.repair`), inside a quarter of the run's budget; then the checks run and the judge looks again.
+- **The time limit grows with the budget.** The 30-minute setting is for a run of up to $2; a $10 run gets 150 minutes (`runMinutes`), and time spent waiting for the person at a gate no longer counts. Run 2898 was stopped by the clock with $5.33 unspent.
+
 ## The build loop: one feature per fresh session (2026-11-13)
 
 One Builder call used to write the whole app. That is the first failure of every long-running harness: the call runs out half way and the conversation it carries grows with every file (run 2623: 407k tokens of context to write 3 files).

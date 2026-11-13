@@ -127,10 +127,13 @@ export function setupReport(runtime: AgentRuntime, fresh = false): SetupReport {
  * Turn a raw agent failure into something a person can act on. The raw text
  * stays in the log; this is what the Bridge shows first.
  */
+/** The failure that means the CLI could not prove it is signed in. */
+export const isSignInError = (raw: string) => /invalid api key|please run \/login|not logged in|authentication|unauthorized|oauth/.test(raw.toLowerCase());
+
 export function explainAgentError(raw: string): string {
   const t = raw.toLowerCase();
   if (/enoent|not recognized|command not found|spawn .*claude/.test(t)) return "Claude Code was not found on this computer. Install it and sign in, or switch to the practice crew.";
-  if (/invalid api key|please run \/login|not logged in|authentication|unauthorized|oauth/.test(t)) return "Claude Code is installed but not signed in. Open a terminal, run `claude`, sign in, then try again.";
+  if (isSignInError(raw)) return "Claude Code is installed but not signed in. Open a terminal, run `claude`, sign in, then try again.";
   if (/max-budget|budget/.test(t) && /exceed|reached|spent/.test(t)) return "This call hit its spend cap and was stopped. Raise the agent's cap in the Agent Bay if this keeps happening.";
   if (/timed out/.test(t)) return "The agent took too long and was stopped. Try again, or pick a faster model for that agent.";
   if (/rate limit|overloaded|529|429/.test(t)) return "Claude is busy right now (rate limit). Wait a minute and try again.";

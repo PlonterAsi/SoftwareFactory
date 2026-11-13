@@ -22,7 +22,7 @@ export interface Feature {
   what: string;
   /** How the agent and the core know it is done. */
   done: string;
-  state: "todo" | "built" | "empty" | "regressed";
+  state: "todo" | "built" | "empty" | "regressed" | "broken";
   /** Locked tests passing after this feature, out of all. */
   passed?: number;
   total?: number;

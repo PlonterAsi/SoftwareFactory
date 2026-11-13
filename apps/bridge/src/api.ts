@@ -111,13 +111,14 @@ export interface FactoryRunView {
 }
 
 export interface EvaluationView { round: number; pass: boolean; skipped?: string; bar: number; screens: number; requirements: { id: string; met: boolean; evidence: string }[]; scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] }
-export interface FeatureView { id: string; title: string; state: "building" | "built" | "empty" | "regressed"; attempt: number; passed?: number; failed?: number; files?: string[]; broke?: string[] }
+export interface FeatureView { id: string; title: string; state: "building" | "built" | "empty" | "regressed" | "broken"; attempt: number; passed?: number; failed?: number; files?: string[]; broke?: string[]; crashed?: string[] }
 export interface ProductDocsView {
   brief: { who: string; problem: string; promise: string; notThis: string[] };
   research: { finding: string; source?: string }[];
   journeys: { moment: string; goal: string; steps: string[] }[];
   screens: { id: string; name: string; purpose: string; shows: string[]; actions: string[] }[];
   requirements: { id: string; text: string; from: "person" | "design"; must: boolean }[];
+  rules?: { name: string; rule: string }[];
   assumptions: string[];
 }
 export interface DiscoveryRoundView { round: number; docs: ProductDocsView; critique: { scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] } | null; pass: boolean; bar: number; settled?: string }
