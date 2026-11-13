@@ -38,7 +38,7 @@ export const RUBRIC_TEXT: Record<RubricKey, string> = {
   journey: "there is one clear main loop the person comes back for, and each journey can be walked step by step with no gap",
   screens: "each screen serves a moment in a journey and is built for that job; the home screen is where the main loop starts; it is not a set of record lists",
   originality: "the design fits this idea and this kind of user; it would not fit any other idea with the nouns swapped",
-  buildable: "one small team could build it as a local app: no step depends on something that cannot exist or be tested, and every rule the product decides by (how it ranks, picks, counts or removes) is stated in \"rules\"; data shapes and code structure are the Planner's job, not a gap here",
+  buildable: "one small team could build it as a local app: no step depends on something that cannot exist or be tested, every value a screen shows has an origin that can really supply it (the person, the research, what an AI agent's web search can return, or a stated rule; never counts, votes, timestamps or dates nothing provides), and every rule the product decides by (how it ranks, picks, counts or removes) is stated in \"rules\"; data shapes and code structure are the Planner's job, not a gap here",
 };
 /** Every score must reach this (1 to 5) for the documents to pass. */
 export const PASS_SCORE = 4;
