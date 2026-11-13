@@ -7,11 +7,13 @@ export interface AgentRun {
   agent: string;
   result?: AgentResult;
   error?: string;
+  /** What a failed call still cost (a call stopped at its spend cap spent it). */
+  costUsd?: number;
 }
 
 /** Run one agent call and record start, result and cost in the event log. */
 export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: string, req: AgentRequest, meta: { factoryRun?: number; projectId?: number; station?: string; agentVersion?: number; seat?: number; round?: number; bayTest?: boolean; workbench?: boolean } = {}): Promise<AgentRun> {
-  const start = log.append("agent.run.started", { agent, runtime: runtime.name, model: req.model ?? null, prompt: req.prompt.slice(0, 4000), budgetUsd: req.budgetUsd ?? null, ...meta });
+  const start = log.append("agent.run.started", { agent, runtime: runtime.name, model: req.model ?? null, prompt: req.prompt.slice(0, 4000), budgetUsd: req.budgetUsd ?? null, ...(req.tools?.length ? { tools: req.tools } : {}), ...(req.commands?.length ? { commands: req.commands } : {}), ...(req.cwd ? { cwd: req.cwd } : {}), ...meta });
   try {
     const result = await runtime.run(req);
     log.append("agent.run.completed", { runId: start.id, agent, ...meta, ...result });
@@ -20,8 +22,9 @@ export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: stri
     // Say what to do first; keep the raw message for the log.
     const raw = (e as Error).message;
     const error = explainAgentError(raw);
-    log.append("agent.run.failed", { runId: start.id, agent, ...meta, error, ...(error !== raw ? { raw: raw.slice(0, 2000) } : {}) });
-    return { runId: start.id, agent, error };
+    const costUsd = Number((e as { costUsd?: number }).costUsd ?? 0);
+    log.append("agent.run.failed", { runId: start.id, agent, ...meta, error, costUsd, raw: raw.slice(0, 2000) });
+    return { runId: start.id, agent, error, costUsd };
   }
 }
 
