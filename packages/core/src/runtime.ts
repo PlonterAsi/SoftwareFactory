@@ -34,6 +34,8 @@ export interface AgentRequest {
   commands?: string[];
   /** A longer (or shorter) limit for this one call than the runtime's default, in ms. */
   timeoutMs?: number;
+  /** Run without any CLAUDE.md or memory, even when editing (a factory build folder has none of its own). */
+  noMemory?: boolean;
 }
 
 export interface AgentResult {
@@ -147,7 +149,9 @@ export class ClaudeCodeRuntime implements AgentRuntime {
    */
   envFor(req: AgentRequest, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
     // An agent that only reads a project's files is still a station agent: its contract, not the person's memory.
-    return edits(req) ? base : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
+    // A factory build agent edits a folder SF made, which has no memory of its own: the person's CLAUDE.md is
+    // written for them, not for a station agent (run 2623's Builder ended with "Assaf, press Start").
+    return edits(req) && !req.noMemory ? base : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
   }
 
   run(req: AgentRequest): Promise<AgentResult> {

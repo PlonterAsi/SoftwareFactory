@@ -20,7 +20,8 @@ export interface FileBlock { path: string; content: string }
 export function parseFileBlocks(text: string): FileBlock[] {
   const out: FileBlock[] = [];
   const OPEN = /^\s*<<<\s*FILE[ \t]+(.+?)\s*$/;
-  const CLOSE = /^\s*(?:<\/)?(?:>>>|<<<)?\s*\/?FILE\s*(?:>>>|>)?\s*$/;
+  // A bare ">>>" or "<<<" line closes it too (run 2623: the Tester's file ended in ">>>", which does not parse).
+  const CLOSE = /^\s*(?:(?:<\/)?(?:>>>|<<<)?\s*\/?FILE\s*(?:>>>|>)?|>>>|<<<)\s*$/;
   let cur: { path: string; lines: string[] } | null = null;
   const flush = () => {
     if (!cur) return;

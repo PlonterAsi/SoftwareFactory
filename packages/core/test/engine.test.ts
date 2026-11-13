@@ -249,6 +249,41 @@ describe("attempt memory and the escalation ladder", () => {
   });
 });
 
+describe("a workbench call that runs out of budget mid-work", () => {
+  it("goes on by itself from the files it left, without asking anyone (run 2623)", async () => {
+    const log = new EventLog();
+    const mock = new MockRuntime({ plantBug: false });
+    const builds: AgentRequest[] = [];
+    const bench: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await mock.run(req);
+      if (station(req) === "build") {
+        builds.push(req);
+        const files = parseFileBlocks(r.text);
+        const write = (fs: typeof files) => { for (const f of fs) { mkdirSync(dirname(join(req.cwd!, f.path)), { recursive: true }); writeFileSync(join(req.cwd!, f.path), f.content); } };
+        // The first call writes half the app, then dies at its cap.
+        if (builds.length === 1) { write(files.slice(0, 1)); throw Object.assign(new Error("claude exited 1: error_max_budget_usd"), { costUsd: 0.6 }); }
+        write(files);
+        r.text = "Finished the rest.";
+      }
+      return r;
+    } };
+    const f = new Factory(log, bench, tmp("sf-proj-"));
+    const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 3 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    expect(builds).toHaveLength(2);
+    expect(builds[1].prompt).toMatch(/ran out of its budget.*Do not start over/s);
+    expect(events(log, "factory.continued")).toHaveLength(1);
+    expect(events(log, "factory.gate").some((g) => g.gate === "escalation")).toBe(false);
+    expect(builds.every((b) => b.noMemory)).toBe(true);
+  });
+
+  it("closes a file block on a bare >>> line", () => {
+    const [f] = parseFileBlocks("<<<FILE test/a.test.js\nimport x from 'y';\n>>>\nthanks");
+    expect(f.content).toBe("import x from 'y';\n");
+  });
+});
+
 describe("the tests are tried before they are locked", () => {
   it("reads the names a test imports from each relative module", () => {
     expect(relativeImports('import { a, b as c } from "../src/x.js";\nimport d from "../src/d.js";\nimport "./setup.js";\nconst { e } = await import("../src/e.js");')).toEqual([

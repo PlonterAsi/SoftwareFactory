@@ -42,6 +42,7 @@ export type EventType =
   | "factory.ladder"
   | "factory.tests.disputed"
   | "factory.tests.dryrun"
+  | "factory.continued"
   | "factory.budget"
   | "order.node"
   | "order.fragment"

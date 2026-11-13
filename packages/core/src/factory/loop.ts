@@ -505,7 +505,7 @@ class Run {
     // The app kit goes in first, so the Builder writes the model and views on top of it.
     if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
     this.builder = this.one("build");
-    const text = await this.ask(this.builder, this.screen?.kind === "feature"
+    const text = await this.askBench(this.builder, this.screen?.kind === "feature"
       ? [
         `This app already shipped and its locked acceptance tests pass. Build its next version on top of the existing code: add what the spec adds (new entities, fields, views and logic) and keep everything that works.`,
         `Keep every existing export, entity, view and file working; records the person already saved must still load, so new fields are optional. All locked tests, old and new, must pass. Return only the files you add or change, each in full.`,
@@ -665,7 +665,7 @@ class Run {
     // What each file held before this round, so the stop rules (SF-25) see a revert to the build's version.
     const hashes = () => Object.fromEntries(Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && !isKitFile(p)).map(([p, c]) => [p, createHash("sha256").update(c).digest("hex")]));
     const beforeAll = hashes();
-    const text = await this.ask(fixer, prompt, { round }, { model });
+    const text = await this.askBench(fixer, prompt, { round }, { model });
     const res = this.takeWork(text);
     this.lastFixBefore = Object.fromEntries(res.written.map((w) => [w.path, beforeAll[w.path]]).filter(([, h]) => h));
     this.lastFixSaid = answerSummary(text);
@@ -885,6 +885,33 @@ class Run {
     this.log.append("agent.verdict", { agent: m.id, version: m.version, station, run: this.id, round, pass, note: note?.slice(0, 300) });
   }
 
+  /**
+   * A workbench call that may run out of its own budget mid-work (run 2623: the Builder died at its $0.60 cap
+   * after 3 minutes with half the app written, and only a person's Retry finished it). When the call hit its
+   * cap and left files in the folder, the work goes on by itself: a fresh call reads what is there and finishes
+   * it, at most twice, while the run's own budget allows. Anything else fails as before.
+   */
+  private async askBench(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string } = {}): Promise<string> {
+    try { return await this.ask(m, prompt, meta, x); }
+    catch (e) {
+      if (!this.bench || !/max_budget/i.test(String((e as Error).message))) throw e;
+      let last = e;
+      for (let n = 1; n <= 2; n++) {
+        const landed = changedFiles(this.dir).filter((p) => !isLockedTest(p) && !isKitFile(p));
+        if (!landed.length || this.o.maxUsd - this.spent < 0.05) throw last;
+        this.log.append("factory.continued", { run: this.id, station: m.station, agent: m.id, round: meta.round, attempt: n, files: landed.slice(0, 40), reason: "the call ran out of its budget with work in progress" });
+        try {
+          return await this.ask(m, [
+            `Your previous call on this task ran out of its budget before it finished. What it wrote is in the folder (${landed.length} file${landed.length === 1 ? "" : "s"} changed: ${landed.slice(0, 20).join(", ")}).`,
+            "Do not start over. Read what is there, write only what is still missing or broken, run the tests, and finish. Keep each step small so you finish within this call.",
+            `The task, as it was given:\n${prompt}`,
+          ].join("\n\n"), meta, x);
+        } catch (e2) { if (!/max_budget/i.test(String((e2 as Error).message))) throw e2; last = e2; }
+      }
+      throw last;
+    }
+  }
+
   /** One agent call, inside both its own cap and what is left of the run's cap. */
   private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string } = {}): Promise<string> {
     if (this.o.maxUsd - this.spent < 0.01) {
@@ -912,8 +939,8 @@ class Run {
       ...kit,
       // An agent that reads files reads this project's folder, once there is one.
       ...(this.dir && existsSync(this.dir) && m.tools.some((t) => READ_TOOLS.includes(t)) ? { cwd: this.dir } : {}),
-      ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000 } : {}),
-      ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: WORKBENCH_COMMANDS, timeoutMs: 15 * 60_000 } : {}),
+      ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000, noMemory: true } : {}),
+      ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: WORKBENCH_COMMANDS, timeoutMs: 15 * 60_000, noMemory: true } : {}),
     }, { factoryRun: this.id, station: m.station, agentVersion: m.version, ...meta, ...(bench ? { workbench: true } : {}) });
     // A call that failed was still paid for (run 2366: two opus calls died at the cap and were never counted).
     this.spent += r.result?.costUsd ?? r.costUsd ?? 0;
