@@ -294,6 +294,7 @@ function ProductView({ run }: { run: FactoryRunView }) {
         {d.requirements.map((q) => <tr key={q.id}><td className="mono muted">{q.id}</td><td>{q.text}</td><td className="muted">{q.from === "person" ? "you asked" : "design"}</td><td className="muted">{q.must ? "must" : "nice to have"}</td></tr>)}
       </tbody></table>
       {!!d.research.length && <><h4>Research</h4><ul className="product-research">{d.research.map((x, k) => <li key={k}>{x.finding}{x.source && <> <span className="mono muted">{x.source}</span></>}</li>)}</ul></>}
+      {!!d.rules?.length && <BriefList title="Rules the product decides by" cls="props" items={d.rules.map((r) => (r.name ? `${r.name}: ${r.rule}` : r.rule))} />}
       {!!d.assumptions.length && <BriefList title="Assumptions" cls="props" items={d.assumptions} />}
     </div>
   );

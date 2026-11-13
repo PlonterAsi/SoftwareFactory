@@ -1,6 +1,6 @@
 import type { EventLog } from "./events.js";
 import type { AgentRequest, AgentResult, AgentRuntime } from "./runtime.js";
-import { explainAgentError } from "./setup.js";
+import { explainAgentError, isSignInError } from "./setup.js";
 
 export interface AgentRun {
   runId: number;
@@ -15,7 +15,17 @@ export interface AgentRun {
 export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: string, req: AgentRequest, meta: { factoryRun?: number; projectId?: number; station?: string; agentVersion?: number; seat?: number; round?: number; bayTest?: boolean; workbench?: boolean } = {}): Promise<AgentRun> {
   const start = log.append("agent.run.started", { agent, runtime: runtime.name, model: req.model ?? null, prompt: req.prompt.slice(0, 4000), budgetUsd: req.budgetUsd ?? null, ...(req.tools?.length ? { tools: req.tools } : {}), ...(req.commands?.length ? { commands: req.commands } : {}), ...(req.cwd ? { cwd: req.cwd } : {}), ...meta });
   try {
-    const result = await runtime.run(req);
+    let result: AgentResult;
+    try { result = await runtime.run(req); }
+    catch (e) {
+      // Several CLIs starting in the same second can trip over the shared sign-in file: in run 2898 three of six
+      // Council seats failed at once with "not signed in" and the next round was fine. A call that failed that
+      // way and cost nothing is tried once more after a short wait, before anyone is told to sign in.
+      if (!isSignInError((e as Error).message) || Number((e as { costUsd?: number }).costUsd ?? 0) > 0) throw e;
+      log.append("agent.run.retried", { runId: start.id, agent, ...meta, reason: "sign-in check failed at start", raw: (e as Error).message.slice(0, 500) });
+      await new Promise((r) => setTimeout(r, Number(process.env.SF_SIGNIN_RETRY_MS ?? 1500) * (0.5 + Math.random())));
+      result = await runtime.run(req);
+    }
     log.append("agent.run.completed", { runId: start.id, agent, ...meta, ...result });
     return { runId: start.id, agent, result };
   } catch (e) {

@@ -118,6 +118,7 @@ export interface ProductDocsView {
   journeys: { moment: string; goal: string; steps: string[] }[];
   screens: { id: string; name: string; purpose: string; shows: string[]; actions: string[] }[];
   requirements: { id: string; text: string; from: "person" | "design"; must: boolean }[];
+  rules?: { name: string; rule: string }[];
   assumptions: string[];
 }
 export interface DiscoveryRoundView { round: number; docs: ProductDocsView; critique: { scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] } | null; pass: boolean; bar: number; settled?: string }

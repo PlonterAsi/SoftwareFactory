@@ -26,6 +26,7 @@ export type EventType =
   | "agent.run.started"
   | "agent.run.completed"
   | "agent.run.failed"
+  | "agent.run.retried"
   | "factory.run.started"
   | "factory.run.finished"
   | "factory.run.resumed"

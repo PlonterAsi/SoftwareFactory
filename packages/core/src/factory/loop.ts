@@ -526,6 +526,10 @@ class Run {
             } catch (e) { if (e instanceof StopRun) throw e; /* the first plan stands; the gaps are on the record */ }
           }
         }
+        if (this.docs && !this.basePlan) {
+          const fixed = withDesignedScreens(plan, this.docs);
+          if (fixed.added.length) { plan = fixed.plan; this.log.append("factory.plan.gaps", { run: this.id, missing: fixed.added.map((n) => `screen: ${n}`), addedByCore: true }); }
+        }
         if (this.basePlan) { plan.slug = this.basePlan.slug; plan.app = true; }
         this.plan = plan;
         if (!this.basePlan) {
@@ -1307,6 +1311,26 @@ function stationName(id: StationId) {
   return ({ intake: "Intake", council: "Council", discover: "Discovery", plan: "Plan", gateA: "Plan gate", tests: "Acceptance tests", build: "Build", test: "Test", fix: "Fix", review: "Review", evaluate: "Product judge", gateB: "Build gate", ship: "Ship" } as const)[id];
 }
 
+/** A plan may have as many views as a design may have screens (it was 4: run 2898's plan lost two of six designed screens to the cut). */
+export const MAX_VIEWS = 6;
+
+/**
+ * Every designed screen is a view of the plan. The core checks this itself and adds what the Planner left
+ * out: a screen the person saw in the design must not depend on an agent remembering it.
+ */
+export function withDesignedScreens(plan: Plan, docs: ProductDocs): { plan: Plan; added: string[] } {
+  const key = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const views = [...(plan.views ?? [])];
+  const added: string[] = [];
+  docs.screens.forEach((s, i) => {
+    const has = views.some((v) => key(v.id) === key(s.id) || key(v.label) === key(s.name) || (i === 0 && v.id === "dashboard"));
+    if (has || views.length >= MAX_VIEWS) return;
+    views.splice(Math.min(i, views.length), 0, { id: i === 0 ? "dashboard" : s.id, label: s.name, shows: [s.purpose, s.shows.length ? `Shows: ${s.shows.join("; ")}.` : "", s.actions.length ? `Actions: ${s.actions.join("; ")}.` : ""].filter(Boolean).join(" ") });
+    added.push(s.name);
+  });
+  return { plan: added.length ? { ...plan, views } : plan, added };
+}
+
 export function validatePlan(p: Plan): Plan {
   if (!p || typeof p !== "object") throw new Error("The plan is not an object");
   for (const k of ["name", "slug", "summary", "interface"] as const) if (typeof p[k] !== "string" || !p[k].trim()) throw new Error(`The plan is missing "${k}"`);
@@ -1330,7 +1354,7 @@ export function validatePlan(p: Plan): Plan {
       ...(e.seed ? { seed: String(e.seed).slice(0, 300) } : {}),
     })),
     flows: (Array.isArray(p.flows) ? p.flows : []).filter((x: any) => x && x.name).slice(0, 6).map((x: any) => ({ name: String(x.name), steps: (Array.isArray(x.steps) ? x.steps : []).map(String).slice(0, 10) })),
-    views: (Array.isArray(p.views) ? p.views : []).filter((x: any) => x && (x.id || x.label)).slice(0, 4).map((x: any) => ({ id: String(x.id ?? x.label).toLowerCase().replace(/[^a-z0-9-]+/g, "-"), label: String(x.label ?? x.id), shows: String(x.shows ?? "") })),
+    views: (Array.isArray(p.views) ? p.views : []).filter((x: any) => x && (x.id || x.label)).slice(0, MAX_VIEWS).map((x: any) => ({ id: String(x.id ?? x.label).toLowerCase().replace(/[^a-z0-9-]+/g, "-"), label: String(x.label ?? x.id), shows: String(x.shows ?? "") })),
     tasks: p.tasks.map((t) => ({ id: String(t.id), title: String(t.title ?? t.id), dependsOn: (Array.isArray(t.dependsOn) ? t.dependsOn : []).map(String).filter((d) => ids.has(d)) })),
   };
 }

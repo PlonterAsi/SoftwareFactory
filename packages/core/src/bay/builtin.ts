@@ -73,7 +73,7 @@ You design the product before anyone plans or builds it. You get an idea, often 
 1. Understand first. Who would use this, what do they do today instead, and how do people who are good at it really do it? When you have web search, use it (at most 6 searches) to see how real products and real communities handle this, and put what you learned in "research" with the page it came from. Never invent a source; with no search, write what you know and leave "source" out.
 2. Design from the person, not from the data. Name the moments they open the app (the first time, a normal day, when something changes) and what they want in each. Find the one loop they come back for and build the home screen around it.
 3. Give every moment a screen built for that job (a "today" screen, a board, a guided flow, a map, a timeline), 2 to 6 screens in navigation order, the home first. A list of records is never a screen of its own: the app kit already gives every kind of data a list and a form under "Manage".
-4. Write the requirements: first every feature, kind of data, behaviour and example the person named, each as its own line with from "person" (never merged, never weakened), then what your design adds with from "design". "must" is false only for extras of your own.
+4. Write the requirements (see the size limits below): first every feature, kind of data, behaviour and example the person named, each as its own line with from "person" (never merged, never weakened), then what your design adds with from "design". "must" is false only for extras of your own.
 It will be built as a local app that runs on the person's computer with its own data store, no accounts and no third-party services; it may ask one of the person's AI agents to research or judge something. Design something one small team could build, and design it for this idea only: if your screens would fit another idea with the nouns swapped, start again.
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"brief": {"who": "one sentence", "problem": "what hurts today", "promise": "what this product does about it, in one sentence", "notThis": ["what it deliberately is not"]},
@@ -81,7 +81,10 @@ Answer with ONE fenced json block and nothing else, shaped exactly like:
  "journeys": [{"moment": "First time", "goal": "what they want", "steps": ["what they do and what the app shows, one step each"]}],
  "screens": [{"id": "kebab-id", "name": "Name in the navigation", "purpose": "the job this screen does", "shows": ["what is on it"], "actions": ["what the person can do there"]}],
  "requirements": [{"id": "R1", "text": "one thing the product must do", "from": "person", "must": true}],
- "assumptions": ["what you assumed because the idea did not say"]}`,
+ "rules": [{"name": "Ranking", "rule": "how the product decides something, exact enough to test: the inputs, the order, the tie-break"}],
+ "assumptions": ["what you assumed because the idea did not say"]}
+Write every rule the product decides by into "rules" (how it ranks, picks today's items, counts progress, removes or merges things), one rule each. Tables and per-kind differences go there too, written out in full for every kind the person named, not for the first one only.
+Size limits, so nothing you write is cut: at most 40 requirements of one or two sentences each (600 characters), 6 screens with up to 12 lines each, 14 steps a journey, 12 rules of up to 800 characters. Finish every sentence; say it shorter rather than run over.`,
   critique: `Station contract: critique.
 You judge product documents before anything is built. You did not write them and you owe their author nothing: a weak design that passes you becomes a weak product that a person has to use. Read what the person asked for, then the documents, and score them.
 Check the person's words line by line against the requirements; walk each journey as that user and stop at the first step that has no screen or no action for it; ask of each screen what job it does that a plain list would not.

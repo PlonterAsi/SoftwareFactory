@@ -251,6 +251,7 @@ const MOCK = {
     journeys: [{ moment: "First time", goal: "See it work", steps: ["Open the app", "Look at the home screen", "Add a record"] }],
     screens: [{ id: "dashboard", name: "Home", purpose: "Shows what the logic works out.", shows: ["the result"], actions: ["add a record"] }, { id: "history", name: "History", purpose: "Shows what was done before.", shows: ["past records"], actions: ["open one"] }],
     requirements: [{ id: "R1", text: "It does what the idea says.", from: "person", must: true }],
+    rules: [{ name: "Order", rule: "Items are listed newest first; ties keep the order they were added in." }],
     assumptions: ["Practice crew: nothing was researched."],
   }) + "\n```",
   evaluate: "```json\n" + JSON.stringify({ requirements: [{ id: "R1", met: true, evidence: "Practice crew: the home screen shows it." }], scores: { function: 4, design: 4, content: 4 }, problems: [] }) + "\n```",
