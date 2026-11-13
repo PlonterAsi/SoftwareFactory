@@ -2,7 +2,7 @@ import type { IncomingMessage } from "node:http";
 import type { EventLog } from "../events.js";
 import { duplicateReply, type Factory } from "../factory/loop.js";
 import type { OrderEngine } from "../order/engine.js";
-import { createProject, linkToProject, listProjects, mergeProject, projectDetail, projectOf, unlinkFromProject, updateProject } from "./service.js";
+import { NameTaken, createProject, linkToProject, listProjects, mergeProject, projectDetail, projectOf, unlinkFromProject, updateProject } from "./service.js";
 
 /**
  * The projects API. Every write is an event, so the Bridge sees it on the stream.
@@ -33,7 +33,9 @@ export async function projectsRoute(
   }
   if (req.method === "POST" && path === "/api/projects") {
     const body = await ctx.readJson(req);
-    const id = createProject(log, { name: String(body.name ?? ""), kind: body.kind ? String(body.kind) : undefined, summary: body.summary ? String(body.summary) : undefined });
+    let id: number;
+    try { id = createProject(log, { name: String(body.name ?? ""), kind: body.kind ? String(body.kind) : undefined, summary: body.summary ? String(body.summary) : undefined }); }
+    catch (e) { if (e instanceof NameTaken) return [409, { error: e.message, existing: e.existing, suggestion: e.suggestion }]; throw e; }
     // Its own root in the Order Engine, so the Archivist can file ideas into it.
     const node = ctx.order.createNode("project", String(body.name));
     linkToProject(log, id, "order_node", node);
@@ -49,12 +51,12 @@ export async function projectsRoute(
   if (req.method !== "POST") return null;
   const body = await ctx.readJson(req);
   if (!m[2]) {
-    updateProject(log, id, {
+    try { updateProject(log, id, {
       name: body.name !== undefined ? String(body.name) : undefined,
       kind: body.kind !== undefined ? String(body.kind) : undefined,
       summary: body.summary !== undefined ? String(body.summary) : undefined,
       status: body.status !== undefined ? (String(body.status) as any) : undefined,
-    });
+    }); } catch (e) { if (e instanceof NameTaken) return [409, { error: e.message, existing: e.existing, suggestion: e.suggestion }]; throw e; }
     return [200, projectDetail(log, id)];
   }
   if (m[2] === "links") { linkToProject(log, id, String(body.kind ?? ""), String(body.ref ?? "")); return [200, projectDetail(log, id)]; }

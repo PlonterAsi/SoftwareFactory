@@ -27,7 +27,7 @@ const SELF_SUMMARY = "SoftwareFactory itself: asks, bugs and ideas about this ap
 export function ensureSelfProject(log: EventLog, node?: (name: string) => number): number {
   const have = selfProject(log);
   if (have != null) return have;
-  const id = createProject(log, { name: "SoftwareFactory", kind: "app", summary: SELF_SUMMARY });
+  const id = createProject(log, { name: "SoftwareFactory", kind: "app", summary: SELF_SUMMARY, onTaken: "version" });
   linkToProject(log, id, SELF.kind, SELF.ref);
   if (node) linkToProject(log, id, "order_node", node("SoftwareFactory"));
   return id;

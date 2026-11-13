@@ -68,11 +68,28 @@ export function nameFromIdea(idea: string): string {
   return (sp > 30 ? cut.slice(0, sp) : cut) + "…";
 }
 
+/** Names compare without case or extra spaces: "Game Mastery" and "game  mastery" are the same name. */
+export const nameKey = (name: string) => name.replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * No two projects share a name (Assaf, 2026-11-13: several builds were all called "Game Mastery"). The first keeps
+ * it; a later one gets the next free version: "Game Mastery v2", "Game Mastery v3". `taken` says whether a name
+ * is in use by another project.
+ */
+export function uniqueName(name: string, taken: (key: string) => boolean): string {
+  if (!taken(nameKey(name))) return name;
+  const base = name.replace(/\s+v\d+$/i, "");
+  for (let n = 2; ; n++) { const c = `${base} v${n}`; if (!taken(nameKey(c))) return c; }
+}
+
 export function foldProjects(events: SfEvent[], order?: Pick<OrderState, "nodes">): ProjectsState {
   const projects = new Map<number, Project>();
   const owner = new Map<string, ProjectLink>();
   const signals = new Map<number, { source: string; text: string; projectId?: number }>();
   const runs: { id: number; idea: string; nodeTaken: boolean }[] = [];
+  /** Builds whose name still comes from their idea, so the plan's name may replace it. */
+  const autoNamed = new Set<number>();
+  const free = (name: string, self: number) => uniqueName(name, (k) => [...projects.values()].some((x) => x.id !== self && nameKey(x.name) === k));
 
   const linksOf = (pid: number) => [...owner.values()].filter((l) => l.projectId === pid);
   const dropIfEmpty = (pid: number) => {
@@ -88,7 +105,7 @@ export function foldProjects(events: SfEvent[], order?: Pick<OrderState, "nodes"
     if (prev && prev.projectId !== pid) dropIfEmpty(prev.projectId);
   };
   const adopt = (id: number, name: string, kind: string, origin: Project["origin"], ts: string) => {
-    projects.set(id, { id, name, kind, status: "active", summary: "", origin, createdAt: ts, updatedAt: ts });
+    projects.set(id, { id, name: free(name, id), kind, status: "active", summary: "", origin, createdAt: ts, updatedAt: ts });
   };
 
   for (const e of events) {
@@ -99,14 +116,14 @@ export function foldProjects(events: SfEvent[], order?: Pick<OrderState, "nodes"
         break;
       case "project.created":
         projects.set(e.id, {
-          id: e.id, name: String(p.name ?? "Untitled project"), kind: String(p.kind ?? "general"), status: "active",
+          id: e.id, name: free(String(p.name ?? "Untitled project"), e.id), kind: String(p.kind ?? "general"), status: "active",
           summary: String(p.summary ?? ""), origin: "you", createdAt: e.ts, updatedAt: e.ts,
         });
         break;
       case "project.updated": {
         const x = projects.get(Number(p.projectId));
         if (!x) break;
-        if (typeof p.name === "string" && p.name.trim()) x.name = p.name.trim();
+        if (typeof p.name === "string" && p.name.trim()) { x.name = free(p.name.trim(), x.id); autoNamed.delete(x.id); }
         if (typeof p.kind === "string" && p.kind.trim()) x.kind = p.kind.trim();
         if (typeof p.summary === "string") x.summary = p.summary;
         if (PROJECT_STATUSES.includes(p.status)) x.status = p.status;
@@ -141,6 +158,7 @@ export function foldProjects(events: SfEvent[], order?: Pick<OrderState, "nodes"
         if (p.projectId != null && projects.has(pid)) setOwner(pid, "factory_run", String(e.id), e.ts);
         else {
           adopt(e.id, nameFromIdea(idea), "app", "factory", e.ts);
+          autoNamed.add(e.id);
           setOwner(e.id, "factory_run", String(e.id), e.ts);
         }
         break;
@@ -152,8 +170,9 @@ export function foldProjects(events: SfEvent[], order?: Pick<OrderState, "nodes"
         const x = projects.get(run);
         const plan = (p.plan ?? {}) as { name?: unknown; summary?: unknown };
         const idea = runs.find((r) => r.id === run)?.idea;
-        if (!x || x.origin !== "factory" || p.kept != null || idea == null || x.name !== nameFromIdea(idea)) break;
-        if (typeof plan.name === "string" && plan.name.trim()) x.name = plan.name.trim().slice(0, 80);
+        if (!x || x.origin !== "factory" || p.kept != null || idea == null || !autoNamed.has(run)) break;
+        autoNamed.delete(run);
+        if (typeof plan.name === "string" && plan.name.trim()) x.name = free(plan.name.trim().slice(0, 80), run);
         if (!x.summary && typeof plan.summary === "string") x.summary = plan.summary.trim().slice(0, 2000);
         break;
       }

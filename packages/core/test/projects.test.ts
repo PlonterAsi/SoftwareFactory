@@ -17,6 +17,35 @@ function engine(log: EventLog) {
   return order;
 }
 
+describe("project names are unique", () => {
+  it("refuses a taken name (any case), versions names SF picks, and versions old duplicates once", () => {
+    const log = new EventLog();
+    const a = createProject(log, { name: "Game Mastery" });
+    expect(() => createProject(log, { name: "game  mastery" })).toThrow(/already exists.*mastery v2/i);
+    const b = createProject(log, { name: "Other" });
+    expect(() => updateProject(log, b, { name: "GAME MASTERY" })).toThrow(/already exists/);
+    updateProject(log, a, { name: "Game Mastery" }); // its own name is fine
+    const c = createProject(log, { name: "Game Mastery", onTaken: "version" });
+    expect(projectDetail(log, c)!.name).toBe("Game Mastery v2");
+    // Duplicates from before the rule (raw events): the first keeps the name, later ones get the next version.
+    log.append("project.created", { name: "Plan Diagram View", kind: "app", summary: "" });
+    log.append("project.created", { name: "Plan Diagram View", kind: "app", summary: "" });
+    const names = listProjects(log).map((p) => p.name).sort();
+    expect(names).toContain("Plan Diagram View");
+    expect(names).toContain("Plan Diagram View v2");
+    expect(new Set(names.map((n) => n.toLowerCase())).size).toBe(names.length);
+  });
+
+  it("builds of the same idea get their own version numbers", async () => {
+    const log = new EventLog();
+    const f = new Factory(log, new MockRuntime({ delayMs: 0 }), tmp());
+    await f.wait(f.start("a CLI that counts words", { autoApprove: true }));
+    await f.wait(f.start("a CLI that counts words", { autoApprove: true, again: true } as any));
+    const names = listProjects(log).filter((p) => p.origin === "factory").map((p) => p.name).sort();
+    expect(names).toEqual(["Word Counter", "Word Counter v2"]);
+  });
+});
+
 describe("projects", () => {
   it("adopts existing Order Engine projects and factory runs without migrating anything", async () => {
     const dir = tmp();
