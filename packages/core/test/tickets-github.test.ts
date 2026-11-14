@@ -62,6 +62,11 @@ describe("tickets: the crew opens a PR", () => {
     const everything = JSON.stringify(log.db.prepare("SELECT * FROM events").all());
     expect(everything).not.toContain(TOKEN);
     expect(t.notes(a.id).at(-1)!.text).toMatch(/draft PR #7/);
+    // The harness steps of that pass are on the ticket, each settled.
+    const steps = t.detail(a.id)!.steps;
+    expect(steps.length).toBeGreaterThan(1);
+    expect(steps.every((x) => x.state !== "running")).toBe(true);
+    expect(new Set(steps.map((x) => x.step)).size).toBe(steps.length);
   }, 30_000);
 
   it("moves the ticket on when its PR merges, and reopens it when the PR is closed unmerged", async () => {

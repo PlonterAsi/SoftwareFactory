@@ -25,6 +25,7 @@ interface Detail {
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
   repo: { source: string; dir: string; branch: string | null; github?: { owner: string; name: string } } | null;
   working: boolean;
+  steps?: { step: string; state: "running" | "passed" | "failed" | "skipped"; note: string; at: string }[];
   queue: { position: number | null; why: string | null } | null;
 }
 interface AutoWork { on: boolean; maxUsd: number; dailyUsd: number; wip: number }
@@ -381,6 +382,12 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
             {STATION_ORDER.map((s, i) => <span key={s} title={s} className={`tk-st ${d.run!.outcome === "shipped" || i < stationAt ? "done" : i === stationAt ? `now ${d.run!.state ?? ""}` : ""}`} />)}
           </div>
           <span className="muted mono">{d.run.outcome ?? `${d.run.station ?? "starting"} ${d.run.state ?? ""}`}{d.run.spentUsd != null ? ` · $${Number(d.run.spentUsd).toFixed(4)}` : ""}</span>
+        </div>
+      )}
+      {!!d.steps?.length && (
+        <div className="tk-runstrip tk-steps" aria-label="Harness steps of the latest pass">
+          <span className="muted">Steps</span>
+          {d.steps.map((x) => <span key={x.step} className={`tk-step s-${x.state}`} title={x.note || x.state}>{x.state === "passed" ? "✓" : x.state === "failed" ? "✕" : x.state === "skipped" ? "–" : "●"} {x.step}</span>)}
         </div>
       )}
       {t.pr && (

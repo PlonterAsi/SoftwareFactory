@@ -1781,3 +1781,20 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 
 /* A ticket's "link a pull request" strip: one quiet line, the input takes the room that is left. */
 .tk-prlink input { flex: 1; min-width: 120px; padding: 4px 8px; font-size: 12px; }
+
+/* The Loop tab's fast checks row: one chip per gate. */
+.loop-item.gates.ok { border-left-color: var(--line-3); }
+.loop-item.gates.bad { border-left-color: var(--bad); }
+.loop-gates { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 4px; font-size: 13px; }
+.loop-gate.g-pass, .loop-gate.g-passed { color: var(--good); }
+.loop-gate.g-skipped { color: var(--muted); }
+.loop-gate.g-fail, .loop-gate.g-failed { color: var(--bad); }
+.loop-gate-out { margin: 6px 0 0; font: 12.5px var(--mono); white-space: pre-wrap; color: var(--ink-2); }
+
+/* A ticket's harness steps: one chip per step of the crew's latest pass in the repo. */
+.tk-steps { flex-wrap: wrap; gap: 6px 14px; }
+.tk-step { font-size: 12.5px; white-space: nowrap; }
+.tk-step.s-passed { color: var(--good); }
+.tk-step.s-failed { color: var(--bad); }
+.tk-step.s-skipped { color: var(--muted); }
+.tk-step.s-running { color: var(--accent); }

@@ -146,7 +146,9 @@ export type LoopEventView =
   | { kind: "attempt"; at: string; round: number; agent: string; model: string; before: number; after: number; files: string[]; said: string; dispute?: string; ladder: string }
   | { kind: "ladder"; at: string; from: string; to: string; reason: string; round: number }
   | { kind: "relocked"; at: string; files: string[]; reason: string }
-  | { kind: "kept"; at: string; evidence: string; said: string };
+  | { kind: "kept"; at: string; evidence: string; said: string }
+  /** The harness's fast checks after a build or a fix (secrets, lint, types): free, run in code, no agent. */
+  | { kind: "gates"; at: string; round: number; gates: { gate: string; state: "pass" | "fail" | "skipped" | string; note?: string; messages: string[] }[] };
 
 /** Fold factory events into one view per run. */
 export function foldRuns(events: SfEvent[]): FactoryRunView[] {
@@ -181,6 +183,14 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
       case "factory.discovery": r.discovery.push({ round: p.round, docs: p.docs, critique: p.critique ?? null, pass: !!p.pass, bar: p.bar ?? 4, settled: p.settled }); break;
       case "factory.review": r.reviews.push({ round: p.round, agent: p.agent, verdict: p.verdict, findings: p.findings, criteria: p.criteria }); break;
       case "factory.attempt": r.loop.push({ kind: "attempt", at: e.ts, round: p.round, agent: p.agent, model: p.model, before: p.before, after: p.after, files: p.files ?? [], said: p.said ?? "", dispute: p.dispute, ladder: p.ladder }); break;
+      case "factory.fastgate": {
+        // One row per round: the gates of one pass arrive as separate events, one after the other.
+        const g = { gate: String(p.gate), state: String(p.state), note: p.note ? String(p.note) : undefined, messages: (p.messages ?? []).map(String) };
+        const prev = r.loop.at(-1);
+        if (prev?.kind === "gates" && prev.round === p.round && !prev.gates.some((x) => x.gate === g.gate)) prev.gates.push(g);
+        else r.loop.push({ kind: "gates", at: e.ts, round: Number(p.round ?? 0), gates: [g] });
+        break;
+      }
       case "factory.ladder": r.loop.push({ kind: "ladder", at: e.ts, from: p.from, to: p.to, reason: p.reason, round: p.round }); break;
       case "factory.tests.locked": if (p.relocked) r.loop.push({ kind: "relocked", at: e.ts, files: p.files ?? [], reason: p.reason ?? "" }); break;
       case "factory.tests.disputed": r.loop.push({ kind: "kept", at: e.ts, evidence: p.evidence ?? "", said: p.said ?? "" }); break;
