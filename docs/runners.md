@@ -86,3 +86,7 @@ Answered by the app itself, before a base's own routes.
 - Linux runners inside WSL.
 - Keeping the build's `target` folder between runs (each run restores GitHub's cache instead).
 - A tray icon and starting with Windows: today builds wait while SoftwareFactory is closed.
+
+## Seeing what a job is doing
+
+While a runner works on a job, its page shows a **Running now** box above everything else: the job, the run it belongs to, how long it has been on this PC, a progress bar, and every step of the job with the running one marked, the time each finished step took, and the steps still to come. SoftwareFactory asks GitHub for the steps every 8 seconds while a job runs (every 20 seconds otherwise). The Live log tab shows what the runner program itself prints.

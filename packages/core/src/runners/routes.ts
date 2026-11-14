@@ -5,7 +5,7 @@ import type { RunnerManager } from "./manager.js";
  * The build runners API. It belongs to the app, not to a base, so it is answered before a
  * request reaches the open base's core.
  *
- *   GET  /api/runners                     the runners on this PC, the jobs they ran, how many run now
+ *   GET  /api/runners                     the runners on this PC, the jobs they ran, how many run now, how busy the PC is
  *   GET  /api/runners/suggest?repo=       a name, labels and folder for a repository's runner
  *   POST /api/runners                     { repo, name?, labels?, dir? }  add one: download, register, start
  *   GET  /api/runners/github?repo=        what GitHub says: its runners, where builds are sent, the latest runs and the machine of each job
@@ -34,7 +34,7 @@ export async function runnersRoute(m: RunnerManager, req: IncomingMessage, res: 
 
 async function route(m: RunnerManager, req: IncomingMessage, url: URL): Promise<[number, unknown]> {
   const path = url.pathname;
-  const report = () => ({ runners: m.list(), jobs: m.recentJobs(), busy: m.busyCount() });
+  const report = () => ({ runners: m.list(), jobs: m.recentJobs(), busy: m.busyCount(), pc: m.pcLoad() });
   if (req.method === "GET") {
     if (path === "/api/runners") return [200, report()];
     if (path === "/api/runners/suggest") return [200, m.suggest(url.searchParams.get("repo") ?? "")];

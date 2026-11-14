@@ -9,8 +9,10 @@ export interface RunnerView {
   job: string | null; version: string | null; registered: boolean; runsOn: string[]; log: string; lines: number;
 }
 interface LocalJob { runner: string; repo: string; name: string; startedAt: string; endedAt: string | null; result: string | null }
-interface Report { runners: RunnerView[]; jobs: LocalJob[]; busy: number }
-interface GhJob { name: string; status: string; conclusion: string | null; runner: string | null; here: boolean | null; startedAt: string | null; endedAt: string | null }
+interface PcLoad { cpuBusy: number | null; cores: number; memFreeGb: number; memTotalGb: number }
+interface Report { runners: RunnerView[]; jobs: LocalJob[]; busy: number; pc?: PcLoad }
+interface GhStep { number: number; name: string; status: string; conclusion: string | null; startedAt: string | null; endedAt: string | null }
+interface GhJob { name: string; status: string; conclusion: string | null; runner: string | null; here: boolean | null; startedAt: string | null; endedAt: string | null; url?: string | null; steps?: GhStep[] }
 interface GhRun { id: number; name: string; title: string; event: string; branch: string | null; status: string; conclusion: string | null; createdAt: string; url: string; jobs: GhJob[] }
 interface GitHubSide { repo: string; private: boolean | null; runners: { name: string; status: string; busy: boolean; labels: string[] }[]; route: { variable: string; value: string | null; isolatedVariable: string; isolated: string | null; sandbox: boolean }; runs: GhRun[] }
 interface Line { n: number; ts: string; text: string }
@@ -83,7 +85,7 @@ export function RunnersPage() {
                 </button>
               ))}
             </div>
-            {cur && <RunnerDetail key={cur.id} r={cur} jobs={(rep.jobs ?? []).filter((j) => j.runner === cur.name && j.repo === cur.repo)} act={act} onRemoved={() => setSel(null)} />}
+            {cur && <RunnerDetail key={cur.id} r={cur} jobs={(rep.jobs ?? []).filter((j) => j.runner === cur.name && j.repo === cur.repo)} act={act} pc={rep.pc} onRemoved={() => setSel(null)} />}
           </div>
         )}
       {adding && <AddRunner onClose={() => setAdding(false)} onAdded={(id) => { setAdding(false); setSel(id); refresh(); }} />}
@@ -91,7 +93,7 @@ export function RunnersPage() {
   );
 }
 
-function RunnerDetail({ r, jobs, act, onRemoved }: { r: RunnerView; jobs: LocalJob[]; act: (f: () => Promise<unknown>) => Promise<void>; onRemoved: () => void }) {
+function RunnerDetail({ r, jobs, act, pc, onRemoved }: { r: RunnerView; jobs: LocalJob[]; pc?: PcLoad; act: (f: () => Promise<unknown>) => Promise<void>; onRemoved: () => void }) {
   const [tab, setTab] = useState<"jobs" | "log">("jobs");
   const [confirm, setConfirm] = useState<"stop" | "remove" | null>(null);
   const [removed, setRemoved] = useState<string | null>(null);
@@ -100,7 +102,9 @@ function RunnerDetail({ r, jobs, act, onRemoved }: { r: RunnerView; jobs: LocalJ
   const [routeNote, setRouteNote] = useState<string | null>(null);
   const loadGh = () => call<GitHubSide>("GET", `/github?repo=${encodeURIComponent(r.repo)}`).then((g) => { setGh(g); setGhErr(null); }).catch((e) => setGhErr((e as Error).message));
   // GitHub's side changes slower than the runner itself, and each look costs API calls: every 20 s, and when the runner's state changes.
-  useEffect(() => { loadGh(); const t = setInterval(loadGh, 20_000); return () => clearInterval(t); }, [r.repo, r.state]); // eslint-disable-line react-hooks/exhaustive-deps
+  // While a job runs here GitHub is asked often, so the steps move as the job moves.
+  const working = r.state === "busy";
+  useEffect(() => { loadGh(); const t = setInterval(loadGh, working ? 8000 : 20_000); return () => clearInterval(t); }, [r.repo, r.state, r.job]); // eslint-disable-line react-hooks/exhaustive-deps
   const live = r.state === "idle" || r.state === "busy" || r.state === "starting";
   const here = !!gh?.route.value;
   const st = STATE[r.state];
@@ -140,6 +144,7 @@ function RunnerDetail({ r, jobs, act, onRemoved }: { r: RunnerView; jobs: LocalJ
       )}
       {removed && <p className="rn-note warn">{removed}</p>}
 
+      <Now r={r} gh={gh} pc={pc} />
       <div className="rn-route">
         <div>
           <b>Where {r.repo}'s builds run</b>
@@ -161,6 +166,70 @@ function RunnerDetail({ r, jobs, act, onRemoved }: { r: RunnerView; jobs: LocalJ
         <button role="tab" aria-selected={tab === "log"} className={tab === "log" ? "on" : ""} onClick={() => setTab("log")}>Live log</button>
       </div>
       {tab === "jobs" ? <Jobs gh={gh} local={jobs} ghErr={ghErr} /> : <LogView id={r.id} file={r.log} />}
+    </div>
+  );
+}
+
+/** What a step is called for a person: "Run npm test" is "npm test", an action is its short name. */
+function stepName(n: string): string {
+  const x = n.replace(/^Run /, "").replace(/^npx tauri build\b.*$/, "Build the app (the long Rust compile)");
+  const known: Record<string, string> = { checkout: "Get the code", "setup-node": "Set up Node", "rust-toolchain": "Set up Rust", "rust-cache": "Bring back the Rust cache", "upload-artifact": "Upload the result", "download-artifact": "Fetch the build" };
+  const a = x.match(/^(Post )?[\w.-]+\/([\w.-]+)@\S+$/);
+  return a ? `${a[1] ? "Clean up after " : ""}${known[a[2]] ?? a[2]}` : x.replace(/^Post Run [\w.-]+\/([\w.-]+)@\S+$/, "Clean up after $1");
+}
+
+/**
+ * The job this runner is working on right now, step by step: which step runs, for how long,
+ * what is done and what is still to come. Nothing to guess.
+ */
+function Now({ r, gh, pc }: { r: RunnerView; gh: GitHubSide | null; pc?: PcLoad }) {
+  const [, tick] = useState(0);
+  const [open, setOpen] = useState(true);
+  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, []);
+  const found = (gh?.runs ?? []).flatMap((x) => x.jobs.filter((j) => j.status === "in_progress" && j.runner === r.name).map((j) => ({ run: x, job: j })))[0];
+  if (!found) {
+    if (r.state !== "busy") return null;
+    return <div className="rn-now"><div className="rn-now-top"><span className="rn-dot work" aria-hidden /><b>Working on {r.job ?? "a job"}</b><span className="muted">Asking GitHub for its steps…</span></div></div>;
+  }
+  const { run, job } = found;
+  const steps = (job.steps ?? []).filter((s) => !/^Post /.test(s.name) && s.name !== "Complete job");
+  const done = steps.filter((s) => s.status === "completed").length;
+  const cur = steps.find((s) => s.status === "in_progress");
+  const failed = steps.find((s) => s.conclusion === "failure");
+  const pct = steps.length ? Math.round(((done + (cur ? 0.5 : 0)) / steps.length) * 100) : 0;
+  return (
+    <div className="rn-now">
+      <div className="rn-now-top">
+        <span className="rn-dot work" aria-hidden />
+        <b>Running now: {job.name}</b>
+        <span className="muted">{run.title || run.name}{run.branch ? ` on ${run.branch}` : ""} · on this PC for {took(job.startedAt ?? run.createdAt, null)}</span>
+        <span className="rn-now-end">
+          {job.url && <a href={job.url} target="_blank" rel="noreferrer">Open on GitHub</a>}
+          <button className="ghost" onClick={() => setOpen(!open)}>{open ? "Hide steps" : "Show steps"}</button>
+        </span>
+      </div>
+      <div className="rn-prog" role="progressbar" aria-valuemin={0} aria-valuemax={steps.length} aria-valuenow={done}><div className="rn-prog-fill" style={{ width: `${pct}%` }} /></div>
+      <p className="rn-now-line">
+        {steps.length ? <>Step <b>{Math.min(done + 1, steps.length)}</b> of <b>{steps.length}</b>{cur ? <>: <b>{stepName(cur.name)}</b>, for {took(cur.startedAt ?? job.startedAt ?? run.createdAt, null)}</> : done === steps.length ? ": finishing up" : ": starting the next step"}</> : "GitHub has not listed the steps yet."}
+        {failed && <span className="rn-bad"> A step failed: {stepName(failed.name)}.</span>}
+      </p>
+      {pc && pc.cpuBusy != null && (
+        <p className={`rn-pc${pc.cpuBusy >= 90 ? " hot" : ""}`}>
+          This PC: processor {pc.cpuBusy}% busy ({pc.cores} cores), {pc.memFreeGb} of {pc.memTotalGb} GB memory free.
+          {pc.cpuBusy >= 90 && " The processor is full. That is normal while a build compiles, but if other heavy programs run at the same time they share it and the build takes longer."}
+        </p>
+      )}
+      {open && steps.length > 0 && (
+        <ol className="rn-steps">
+          {steps.map((s) => (
+            <li key={s.number} className={s.status === "in_progress" ? "cur" : s.status === "completed" ? (s.conclusion === "failure" ? "bad" : s.conclusion === "skipped" ? "skip" : "done") : "todo"}>
+              <span className="rn-step-mark" aria-hidden>{s.status === "in_progress" ? "▶" : s.status === "completed" ? (s.conclusion === "failure" ? "✕" : s.conclusion === "skipped" ? "–" : "✓") : "○"}</span>
+              <span className="rn-step-name">{stepName(s.name)}</span>
+              <span className="muted">{s.status === "in_progress" ? `running, ${took(s.startedAt ?? job.startedAt ?? run.createdAt, null)}` : s.status === "completed" ? (s.conclusion === "skipped" ? "skipped" : s.conclusion === "failure" ? `failed after ${took(s.startedAt ?? "", s.endedAt)}` : took(s.startedAt ?? "", s.endedAt)) : "to come"}</span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
