@@ -136,6 +136,9 @@ export function shaFromRelease(body: string, asset: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
+/** One step of a job as GitHub reports it. */
+export interface RunnerJobStep { number: number; name: string; status: string; conclusion: string | null; startedAt: string | null; endedAt: string | null }
+
 /** What a runner said, read for the jobs it takes: "Running job: build", "Job build completed with result: Succeeded". */
 export function readRunnerLine(text: string): { kind: "listening" } | { kind: "job-start"; name: string } | { kind: "job-end"; name: string; result: string } | { kind: "version"; version: string } | null {
   let m = text.match(/Running job: (.+)$/);
@@ -191,6 +194,7 @@ function gitBashDir(): string | null {
 export class RunnerManager {
   private live = new Map<string, Live>();
   private jobs: RunnerJob[] = [];
+  private doneJobs = new Map<string, { jobs?: any[] }>();
   private readonly dir: string;
   private readonly platform: NodeJS.Platform;
   private readonly backoff: { first: number; max: number; settled: number };
@@ -627,7 +631,7 @@ export class RunnerManager {
     repo: string; private: boolean | null;
     runners: { name: string; status: string; busy: boolean; labels: string[] }[];
     route: { variable: string; value: string | null; isolatedVariable: string; isolated: string | null; sandbox: boolean };
-    runs: { id: number; name: string; title: string; event: string; branch: string | null; status: string; conclusion: string | null; createdAt: string; url: string; jobs: { name: string; status: string; conclusion: string | null; runner: string | null; here: boolean | null; startedAt: string | null; endedAt: string | null }[] }[];
+    runs: { id: number; name: string; title: string; event: string; branch: string | null; status: string; conclusion: string | null; createdAt: string; url: string; jobs: { name: string; status: string; conclusion: string | null; runner: string | null; here: boolean | null; startedAt: string | null; endedAt: string | null; url: string | null; steps: RunnerJobStep[] }[] }[];
   }> {
     const g = parseGitHubRepo(repo);
     if (!g) throw Object.assign(new Error("Give the repository as owner/name."), { status: 400 });
@@ -642,7 +646,15 @@ export class RunnerManager {
     ]);
     const mine = new Set((rs.runners ?? []).map((r) => String(r.name)));
     const list = runs.workflow_runs ?? [];
-    const jobs = await Promise.all(list.map((r) => this.gh<{ jobs?: any[] }>("GET", `${base}/actions/runs/${r.id}/jobs?per_page=30`).catch(() => ({ jobs: [] as any[] }))));
+    // A finished run's jobs never change, so GitHub is asked for them once.
+    const jobs = await Promise.all(list.map(async (r) => {
+      const key = `${base}/${r.id}/${r.run_attempt ?? 1}`;
+      const kept = this.doneJobs.get(key);
+      if (kept) return kept;
+      const got = await this.gh<{ jobs?: any[] }>("GET", `${base}/actions/runs/${r.id}/jobs?per_page=30`).catch(() => ({ jobs: [] as any[] }));
+      if (r.status === "completed" && got.jobs?.length) { this.doneJobs.set(key, got); if (this.doneJobs.size > 60) this.doneJobs.delete(this.doneJobs.keys().next().value as string); }
+      return got;
+    }));
     return {
       repo: `${g.owner}/${g.name}`, private: info.private ?? null,
       runners: (rs.runners ?? []).map((r) => ({ name: String(r.name), status: String(r.status), busy: !!r.busy, labels: (r.labels ?? []).map((x: any) => String(x.name)) })),
@@ -654,7 +666,9 @@ export class RunnerManager {
           name: String(j.name), status: String(j.status), conclusion: j.conclusion ?? null, runner: j.runner_name ?? null,
           // A job that has a machine ran here when that machine is one of the repository's own runners.
           here: j.runner_name ? mine.has(String(j.runner_name)) : null,
-          startedAt: j.started_at ?? null, endedAt: j.completed_at ?? null,
+          startedAt: j.started_at ?? null, endedAt: j.completed_at ?? null, url: j.html_url ?? null,
+          // The steps of the job in order, so a running job says where it stands.
+          steps: (j.steps ?? []).map((s: any) => ({ number: Number(s.number), name: String(s.name), status: String(s.status), conclusion: s.conclusion ?? null, startedAt: s.started_at ?? null, endedAt: s.completed_at ?? null })),
         })),
       })),
     };
