@@ -1,16 +1,22 @@
 {
   "id": "game-sector",
   "name": "Game: Sector",
-  "version": "0.2.0",
-  "description": "A real-time base builder over your factory. The Command Center is SoftwareFactory; build a Refinery, Barracks and Apps around it, connect them, train agents, approve plans and hold off bug waves. Missions, ranks and unlocks. Practice data for now: it writes nothing and spends nothing.",
-  "permissions": [],
+  "version": "0.4.0",
+  "description": "A real-time base builder over your factory. The Command Center is SoftwareFactory; build a Refinery, Barracks and Apps around it, connect them, train agents, approve plans and hold off bug waves. Apps are your real projects and loose ideas are your open tickets. Give an App an order and it opens a real ticket there. Nothing else is written and nothing is spent.",
+  "permissions": [
+    "records:read",
+    "actions"
+  ],
   "panels": [
     {
       "id": "play",
-      "title": "Sector (practice)",
+      "title": "Sector",
       "entry": "ui/index.html",
       "where": "page",
       "order": 61
     }
+  ],
+  "actions": [
+    "ticket.open"
   ]
 }

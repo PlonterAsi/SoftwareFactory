@@ -174,7 +174,7 @@ button { font: inherit; color: inherit; }
     <div class="stage" id="stage">
       <canvas id="cv" aria-label="Base map"></canvas>
       <canvas id="mini" width="200" height="136" aria-label="Minimap"></canvas>
-      <div class="practice">Practice data · writes nothing · spends nothing</div>
+      <div class="practice" id="dataNote">Practice data · writes nothing · spends nothing</div>
       <div class="hint" id="hint" hidden></div>
       <div class="toasts" id="toasts"></div>
       <div class="gate" id="gate" hidden>
@@ -215,7 +215,8 @@ button { font: inherit; color: inherit; }
           <label class="dis"><input type="radio" name="nbStart" disabled> From a git repo <small>arrives as a fogged ruin; comes with real data</small></label>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ok" id="startBtn">Start new base</button><button class="btn" id="resumeBtn" hidden>Continue</button></div>
-        <p style="font-size:13px;color:var(--muted)">Practice run: nothing is written to SoftwareFactory and no money is spent. A base here is only in this page. In the real app each base will be its own factory folder with its own projects, agents and plugins.</p>
+        <p style="font-size:13px;color:var(--ink-2,#c4c9d1)" id="intel">Looking for your factory…</p>
+        <p style="font-size:13px;color:var(--muted)">The only thing written to SoftwareFactory is a ticket when you give an order, and no money is spent. A base here is only in this page. In the real app each base will be its own factory folder with its own projects, agents and plugins.</p>
       </div>
       <div style="display:grid;gap:10px;align-content:start">
         <h2>How to play</h2>
@@ -236,6 +237,20 @@ button { font: inherit; color: inherit; }
   </div>
 </div>
 
+<div class="ov" id="order" hidden>
+  <div class="card" style="width:min(520px,100%)">
+    <h1 style="font-size:22px">Order for <span id="orderFor"></span></h1>
+    <p>This opens a real ticket in SoftwareFactory, in this project. It costs nothing: nobody works it until you say so there.</p>
+    <label class="field">What should be done<input id="orderText" maxlength="200" placeholder="One line, in your words"></label>
+    <div class="radios" id="orderKind">
+      <label><input type="radio" name="orderKind" value="request" checked> A request <small>something new or better</small></label>
+      <label><input type="radio" name="orderKind" value="bug"> A bug <small>something is wrong</small></label>
+      <label><input type="radio" name="orderKind" value="task"> A task <small>a small job</small></label>
+    </div>
+    <p id="orderMsg" style="color:var(--muted);font-size:13px"></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ok" id="orderSend">Open the ticket</button><button class="btn" id="orderCancel">Cancel</button></div>
+  </div>
+</div>
 <div class="ov" id="end" hidden>
   <div class="card" style="width:min(560px,100%)">
     <h1 id="endTitle">Sector secured</h1>
@@ -246,6 +261,7 @@ button { font: inherit; color: inherit; }
   </div>
 </div>
 
+<script src="/plugins/_sdk/sf.js"></script>
 <script>
 'use strict';
 /* ============================================================
@@ -287,14 +303,14 @@ const RANKS = [
   { n: 'Commander', at: 220, unlock: 'Plugin Dock, Command Center level 2 (+2 slots)' },
   { n: 'Admiral', at: 360, unlock: 'Nothing new: a title for a well-run factory' },
 ];
-const APPS = [
+let APPS = [
   { n: 'Recipe Box', plan: 'Three screens: recipes, one recipe, shopping list. Saves on this computer. Add, edit and delete everything from the app.' },
   { n: 'Habit Tracker', plan: 'A week grid with a tick per habit, streak view and reminders. Saves locally. Full add, edit and delete.' },
   { n: 'Word Counter', plan: 'Paste or open a file, see words, reading time and top words. History of past counts with delete.' },
   { n: 'Trip Planner', plan: 'Days, places and a packing list. Map preview. Export to PDF.' },
   { n: 'Budget Book', plan: 'Monthly categories, entries and a chart. Import a bank CSV.' },
 ];
-const IDEAS = ['Dark mode for Recipe Box', 'Export habits to CSV', 'Shopping list sharing', 'Faster app start', 'Undo for deletes', 'Weekly summary email', 'Tags on recipes', 'Keyboard shortcuts', 'Print a recipe card', 'Reminder at 9pm', 'Count words in PDFs', 'Bigger text option', 'Backup to a folder', 'Search everything', 'Ask before closing unsaved', 'Photo per recipe', 'Streak freeze day', 'Sort by most used', 'Import from old app', 'Show reading time'];
+let IDEAS = ['Dark mode for Recipe Box', 'Export habits to CSV', 'Shopping list sharing', 'Faster app start', 'Undo for deletes', 'Weekly summary email', 'Tags on recipes', 'Keyboard shortcuts', 'Print a recipe card', 'Reminder at 9pm', 'Count words in PDFs', 'Bigger text option', 'Backup to a folder', 'Search everything', 'Ask before closing unsaved', 'Photo per recipe', 'Streak freeze day', 'Sort by most used', 'Import from old app', 'Show reading time'];
 const RIFTS = [
   ['Always ask before spending', 'Retry failed builds on its own'],
   ['Tests must pass before review', 'Review first, test after'],
@@ -351,7 +367,7 @@ function addStruct(kind, gx, gy) {
   const k = KINDS[kind];
   const s = { id: S.nextId++, kind, gx, gy, size: k.size, x: (gx + k.size / 2) * CELL, y: (gy + k.size / 2) * CELL, r: k.size * CELL / 2,
     state: 'building', prog: 0, integ: 100, linked: false, online: false, name: k.name, flash: 0, cool: 0, aim: 0, workers: 0 };
-  if (kind === 'app') { const a = APPS[S.appIdx++ % APPS.length]; s.name = a.n; s.plan = a.plan; s.phase = 'spec'; s.dataT = 0; s.spawnT = rnd(28, 40); }
+  if (kind === 'app') { const a = APPS[S.appIdx++ % APPS.length]; s.name = a.n; s.plan = a.plan; s.real = a.real || null; s.phase = 'spec'; s.dataT = 0; s.spawnT = rnd(28, 40); }
   if (kind === 'feature') { s.phase = 'build'; s.name = 'Feature'; }
   if (kind === 'refinery') { s.queue = 0; s.work = 0; }
   for (let y = gy; y < gy + k.size; y++) for (let x = gx; x < gx + k.size; x++) occ[y * COLS + x] = s.id;
@@ -1035,6 +1051,7 @@ function order(w) {
 
 window.addEventListener('keydown', (e) => {
   if (!$('#menu').hidden || !$('#end').hidden) return;
+  if (!$('#order').hidden) { if (e.key === 'Escape') closeOrder(); if (e.key === 'Enter') sendOrder(); return; }
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input') { if (e.key === 'Enter') { const b = currentBeacon(); if (b && b.type === 'plan') decide(b, 'back', e.target.value.trim()); e.target.blur(); } if (e.key === 'Escape') e.target.blur(); return; }
   const k = e.key.toLowerCase();
@@ -1391,6 +1408,7 @@ function renderSel() {
       if (o.kind === 'app') state = ({ spec: 'Writing the spec', gate: 'Plan ready: needs your OK', build: 'Building', test: 'Testing', wave: 'Release wave', repairs: 'Breached during release: repair to ship', shipped: o.state === 'breached' ? 'Shipped, now breached' : 'Shipped' }[o.phase]) + (['spec', 'build', 'test'].includes(o.phase) ? ' ' + Math.round(o.prog * 100) + '%' : '') + (!o.linked ? ' · not connected' : '');
       h += '<div class="st">' + esc(o.name) + (o.kind === 'app' ? ' · App' : '') + '</div><div class="sf"><b>In SoftwareFactory:</b> ' + k.sf + '</div><dl class="kv"><dt>State</dt><dd>' + esc(state) + '</dd><dt>Integrity</dt><dd>' + Math.round(o.integ) + '%</dd><dt>Links</dt><dd>' + S.conduits.filter((c) => c.a === o.id || c.b === o.id).length + ' conduits</dd>';
       if (o.kind === 'refinery') h += '<dt>Queue</dt><dd>' + o.queue + ' ideas</dd>';
+      if (o.kind === 'app' && o.real) h += '<dt>Real project</dt><dd>' + esc(o.real.status) + '</dd><dt>Open tickets</dt><dd>' + o.real.open + (o.real.bugs ? ' · ' + o.real.bugs + ' bug' + (o.real.bugs > 1 ? 's' : '') : '') + '</dd><dt>For your look</dt><dd>' + o.real.look + '</dd>';
       if (o.kind === 'app' && o.workers) h += '<dt>Crew</dt><dd>' + o.workers + ' Constructor' + (o.workers > 1 ? 's' : '') + '</dd>';
       h += '</dl><div class="acts">';
       if (o.kind === 'barracks') h += TRAIN_ORDER.filter((t) => S.rankI >= UNITS[t].rank).map((t) => '<button class="btn" data-train="' + t + '">Train ' + UNITS[t].name + '</button>').join('');
@@ -1399,6 +1417,7 @@ function renderSel() {
         else if (S.researching) h += '<span class="empty">Researching ' + RESEARCH[S.researching.id].name + ' ' + Math.round(S.researching.t * 10) + '%</span>';
         else h += Object.entries(RESEARCH).filter(([id]) => !S.research[id]).map(([id, r]) => '<button class="btn" data-research="' + id + '" title="' + r.d + '"' + (S.data < r.cost || !o.online ? ' disabled' : '') + '>' + r.name + ' · ' + r.cost + ' data</button>').join('') || '<span class="empty">All research done.</span>';
       }
+      if (o.kind === 'app' && o.real && CAN_ORDER) h += '<button class="btn" data-order="1" title="Opens a real ticket in this project. Free.">Give an order</button>';
       if (o.state === 'breached') h += '<button class="btn" data-send="repair">Send nearest Warden</button>';
       if (o.phase === 'gate') h += '<button class="btn" data-gate="1">Review the plan</button>';
       if (!o.linked && o.kind !== 'hq') h += '<button class="btn" data-connect="1">Connect it</button>';
@@ -1417,6 +1436,7 @@ function renderSel() {
     if (!w) { toast('No Warden yet: train one (V)', 'bad'); return; }
     w.order = b.dataset.send === 'repair' ? { type: 'repair', id: o.id } : { type: 'attack', id: o.id }; w.holdT = 0;
   }));
+  box.querySelectorAll('[data-order]').forEach((b) => b.addEventListener('click', () => openOrder(sel[0])));
   box.querySelectorAll('[data-gate]').forEach((b) => b.addEventListener('click', () => { const i = S.beacons.findIndex((x) => x.sid === sel[0].id); if (i >= 0) { gateIdx = i; gateDirty = true; } }));
   box.querySelectorAll('[data-connect]').forEach((b) => b.addEventListener('click', () => { const o = sel[0]; setMode('connect'); connectFrom = o; updateHint(); }));
 }
@@ -1465,7 +1485,7 @@ function showEnd() {
   $('#endSub').textContent = 'Two apps shipped and both release waves held, in about ' + m + ' minute' + (m === 1 ? '' : 's') + ' of play. Rank: ' + RANKS[S.rankI].n + ', ' + S.renown + ' renown.';
   const rows = [
     ['Projects created', S.stats.projects], ['Loose ideas sorted into tickets', S.stats.refined], ['Apps shipped', S.stats.shipped], ['Plans you approved', S.approvals], ['Plans you sent back', S.sendBacks],
-    ['Bugs fixed', S.stats.bugs], ['Breaches repaired', S.stats.repairs], ['Agents set up', Object.values(S.stats.trained).reduce((a, b) => a + b, 0) + 1], ['Agent runs paid for', S.runs], ['Practice budget spent', money(S.spent)],
+    ['Bugs fixed', S.stats.bugs], ['Breaches repaired', S.stats.repairs], ['Agents set up', Object.values(S.stats.trained).reduce((a, b) => a + b, 0) + 1], ['Agent runs paid for', S.runs], ['Real tickets opened', S.orders || 0], ['Practice budget spent', money(S.spent)],
   ];
   $('#rcpt').innerHTML = rows.map(([a, b]) => '<dt>' + a + '</dt><dd>' + b + '</dd>').join('');
   $('#end').hidden = false; S.paused = true;
@@ -1518,12 +1538,64 @@ $('#keepBtn').addEventListener('click', () => { $('#end').hidden = true; S.pause
 $('#againBtn').addEventListener('click', () => { $('#end').hidden = true; renderBases(); $('#menu').hidden = false; });
 $('#nbName').addEventListener('input', (e) => { $('#nbFolder').value = 'C:\\Factories\\' + (e.target.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'base'); });
 
+/* ---------------- the real factory ----------------
+   With records:read the map is named after what is really there: each App you place is one of
+   your projects (most open work first), and the loose ideas Scouts carry are your open tickets.
+   It only reads. Without the permission, or outside SoftwareFactory, the practice data stays. */
+let REAL = null;
+/* Orders from the map: with the `actions` permission and ticket.open, an App that stands for a real
+   project can be given an order. It opens a ticket there and nothing else; working it stays a choice
+   made in SoftwareFactory, so an order never spends. Every order lands in the feed and the receipt. */
+let CAN_ORDER = false, orderApp = null, orderBusy = false, wasPaused = false;
+function openOrder(app) {
+  if (!app || !app.real) return;
+  orderApp = app; wasPaused = S.paused; S.paused = true;
+  $('#orderFor').textContent = app.real.name; $('#orderText').value = ''; $('#orderMsg').textContent = '';
+  $('#order').hidden = false; $('#orderText').focus();
+}
+function closeOrder() { $('#order').hidden = true; if (S) S.paused = wasPaused; orderApp = null; }
+function sendOrder() {
+  const title = $('#orderText').value.trim();
+  if (orderBusy || !orderApp) return;
+  if (title.length < 3) { $('#orderMsg').textContent = 'Say what should be done first.'; return; }
+  const kind = (document.querySelector('input[name=orderKind]:checked') || {}).value || 'request';
+  const app = orderApp; orderBusy = true; $('#orderMsg').textContent = 'Sending…';
+  sf.act('ticket.open', { title: title, kind: kind, project: app.real.id }).then((t) => {
+    orderBusy = false; app.real.open++; if (kind === 'bug') app.real.bugs++;
+    S.orders = (S.orders || 0) + 1;
+    log('Order sent: ' + (t && t.key ? t.key + ' ' : '') + '"' + title + '" is now a real ticket in ' + app.real.name + '.', 'g');
+    floatText(app.x, app.y - app.r - 10, (t && t.key) || 'ticket', COL.teal);
+    closeOrder(); selDirty = true;
+  }, (e) => { orderBusy = false; $('#orderMsg').textContent = 'Not sent: ' + String(e && e.message || e).slice(0, 160); });
+}
+$('#orderSend').addEventListener('click', sendOrder);
+$('#orderCancel').addEventListener('click', closeOrder);
+function loadReal() {
+  const note = (t) => { $('#intel').textContent = t; };
+  if (!window.sf || !sf.records) { note('Practice run: this page is not connected to a factory, so the names are made up.'); return; }
+  Promise.all([sf.records('projects', { limit: 200 }), sf.records('tickets', { limit: 2000 }), sf.records('agents', { limit: 200 })]).then(([projects, tickets, agents]) => {
+    const open = tickets.filter((t) => t.status !== 'closed' && t.status !== 'rejected');
+    const rows = projects.filter((p) => p.status !== 'archived').map((p) => {
+      const mine = open.filter((t) => t.project === p.id);
+      return { id: p.id, name: p.name, summary: p.summary || '', status: p.status, open: mine.length, bugs: mine.filter((t) => t.kind === 'bug').length, look: mine.filter((t) => t.status === 'built').length };
+    }).sort((a, b) => b.open - a.open);
+    REAL = { projects: rows, tickets: open, agents: agents.filter((a) => !a.retired) };
+    if (rows.length) APPS = rows.map((r) => ({ n: r.name, plan: (r.summary || 'A project in your factory.').slice(0, 220) + (r.open ? ' Open work: ' + r.open + ' ticket' + (r.open > 1 ? 's' : '') + '.' : ''), real: r }));
+    const ideas = open.filter((t) => t.status === 'open' && t.level !== 'epic').map((t) => (t.key + ' ' + t.title).slice(0, 60));
+    if (ideas.length >= 3) IDEAS = ideas;
+    note('Reading your factory: ' + rows.length + ' project' + (rows.length === 1 ? '' : 's') + ', ' + open.length + ' open ticket' + (open.length === 1 ? '' : 's') + ', ' + REAL.agents.length + ' agents. Apps you place are your projects and loose ideas are your open tickets. Select an App and press Give an order to open a real ticket in it.');
+    CAN_ORDER = !!sf.act;
+    $('#dataNote').textContent = 'Your real projects and tickets · orders open real tickets · spends nothing';
+  }).catch((e) => { note('Practice run: could not read your factory (' + String(e && e.message || e).slice(0, 80) + '), so the names are made up.'); });
+}
+loadReal();
+
 FONT = getComputedStyle(document.body).fontFamily;
 buildTerrain(); resize(); renderBuildBar(); renderTrainBar(); renderBases();
 requestAnimationFrame(frame);
 
 // test hooks for play-tests (no effect on play)
-window.__sector = { get S() { return S; }, update, place, connect, train, decide, byId, newGame, canPlace, setSpeed };
+window.__sector = { get S() { return S; }, openOrder, sendOrder, get REAL() { return REAL; }, get APPS() { return APPS; }, get IDEAS() { return IDEAS; }, update, place, connect, train, decide, byId, newGame, canPlace, setSpeed };
 </script>
 </body>
 </html>

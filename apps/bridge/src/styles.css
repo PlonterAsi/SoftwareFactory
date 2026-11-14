@@ -2021,3 +2021,11 @@ button.fm-wire-node .muted { font: 12px/1.2 var(--mono); white-space: nowrap; }
 .repo-strip-err { flex-basis: 100%; color: var(--bad); }
 /* The route a ticket takes in a repo, said before the work starts. */
 .tk-queue.tk-route { border-style: solid; color: var(--ink-2); }
+
+/* A plugin's own page comes first and gets the room; what it may do folds away under it. */
+.pl-page { min-height: min(720px, calc(100vh - 230px)); }
+.pl-page .pl-tabs { display: flex; gap: 8px; align-items: center; }
+.pl-page .pl-full { margin-left: auto; }
+.pl-page.full { position: fixed; inset: 0; z-index: 60; background: var(--bg); padding: 8px 10px; min-height: 0; }
+.pl-about > summary { cursor: pointer; color: var(--ink-2); font: 500 13.5px var(--body); padding: 6px 2px; }
+.pl-about[open] { display: flex; flex-direction: column; gap: 12px; }

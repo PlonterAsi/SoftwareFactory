@@ -235,6 +235,8 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
   const tabs = m.panels.filter((x) => x.where === "project");
   const page = pages.find((x) => x.id === panelId) ?? pages[0];
   const acts = m.actions ?? [];
+  const [full, setFull] = useState(false);
+  const showPage = !!page && p.status === "enabled";
   const newAsks: string[] = [...m.permissions.filter((x) => !p.granted.includes(x)), ...acts.filter((a) => !p.granted.includes(`act:${a}`)).map((a) => `act:${a}`)];
   return (
     <div className="pl-detail">
@@ -251,6 +253,18 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
         </div>
       </header>
 
+      {showPage && (
+        <section className={`pl-page${full ? " full" : ""}`}>
+          <nav className="pl-tabs">
+            {pages.length > 1 && pages.map((x) => <a key={x.id} href={`#/plugins/${p.id}/${x.id}`} className={x.id === page!.id ? "on" : undefined}>{x.title}</a>)}
+            <button className="ghost tiny pl-full" onClick={() => setFull(!full)} title={full ? "Back to the plugin's details" : "Give this page the whole window"}>{full ? "Leave full view" : "Full view"}</button>
+          </nav>
+          <PluginFrame plugin={p} panel={page!} project={null} events={events} />
+        </section>
+      )}
+
+      <details className="pl-about" open={!showPage || newAsks.length > 0 || !!p.error}>
+      <summary>{showPage ? "What it may do, what it adds and its log" : "About this plugin"}</summary>
       <ol className="ig-strip pl-strip" aria-label="Its state">
         <li className="ig-step s-pass"><b>Installed</b><span className="muted">{new Date(p.installedAt).toLocaleString()}</span></li>
         <li className={`ig-step s-${p.status === "enabled" ? "pass" : "waiting"}`}><span className="cm-arrow" aria-hidden>▸</span><b>Your approval</b><span className="muted">{p.status === "enabled" ? "given" : "turn it on below the list of what it may do"}</span></li>
@@ -277,7 +291,7 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
           <h4>What it adds</h4>
           <ul className="pl-perms">
             {tabs.map((t) => <li key={t.id}><b>Tab "{t.title}"</b><span className="muted">in every project</span></li>)}
-            {pages.map((t) => <li key={t.id}><b>Page "{t.title}"</b><span className="muted">here, below</span></li>)}
+            {pages.map((t) => <li key={t.id}><b>Page "{t.title}"</b><span className="muted">here, above</span></li>)}
             {m.main && <li><b>A backend</b><span className="muted mono">{m.main}{m.subscribe.length ? ` · hears ${m.subscribe.join(", ")}` : ""}</span></li>}
             {m.agents.map((a) => <li key={a}><b>Agent</b><span className="muted mono">{a} · in Agents while on</span></li>)}
           </ul>
@@ -285,19 +299,13 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
         </div>
       </section>
 
-      {page && p.status === "enabled" && (
-        <section className="pl-page">
-          {pages.length > 1 && <nav className="pl-tabs">{pages.map((x) => <a key={x.id} href={`#/plugins/${p.id}/${x.id}`} className={x.id === page.id ? "on" : undefined}>{x.title}</a>)}</nav>}
-          <PluginFrame plugin={p} panel={page} project={null} events={events} />
-        </section>
-      )}
-
       <section className="pl-log" aria-label="Log">
         <h4>Log</h4>
         {log.length ? (
           <ol className="mono">{log.slice(-60).map((l) => <li key={l.id} className={`lv-${l.level}`}><span className="muted">{new Date(l.ts).toLocaleTimeString()}</span> {l.text}</li>)}</ol>
         ) : <p className="muted">Nothing yet.</p>}
       </section>
+      </details>
     </div>
   );
 }
