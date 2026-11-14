@@ -1,0 +1,15 @@
+{
+  "version": "0.2.251",
+  "notes": "Build of main at ec24d70: Build gate: a send-back survives a restart and carries what the judge found (#84)",
+  "pub_date": "2026-11-14T07:52:06Z",
+  "platforms": {
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGNzR1ExbzVncDR6ZUg0dit4bHp0K2J5RXc0dXlYUlZaVzd3bHNQS01KTEZPZWtjbHZGTDUxWnhNbjk5N1E4ZEVVVWJReXFaZmhLOEk0dFp2bktXUjVSYXovVW9EcWdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjQyNDc3CWZpbGU6U29mdHdhcmVGYWN0b3J5XzAuMi4yNTFfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMi4yNTEKZHJMYjFQSU5mbVZqMW9Rc3p6SUl3UHQ1UGlpRnNJOTVxTS90SURVeTFwSjJWalBXbWdYQnJSQkphOERiU3pYUWx0SmFwUUdMOFJlMHg2RXF2cUdrQ2c9PQo=",
+      "url": "https://api.github.com/repos/PlonterAsi/SoftwareFactory/releases/assets/746745926"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGNzR1ExbzVncDR6ZUg0dit4bHp0K2J5RXc0dXlYUlZaVzd3bHNQS01KTEZPZWtjbHZGTDUxWnhNbjk5N1E4ZEVVVWJReXFaZmhLOEk0dFp2bktXUjVSYXovVW9EcWdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjQyNDc3CWZpbGU6U29mdHdhcmVGYWN0b3J5XzAuMi4yNTFfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMi4yNTEKZHJMYjFQSU5mbVZqMW9Rc3p6SUl3UHQ1UGlpRnNJOTVxTS90SURVeTFwSjJWalBXbWdYQnJSQkphOERiU3pYUWx0SmFwUUdMOFJlMHg2RXF2cUdrQ2c9PQo=",
+      "url": "https://api.github.com/repos/PlonterAsi/SoftwareFactory/releases/assets/746745926"
+    }
+  }
+}
