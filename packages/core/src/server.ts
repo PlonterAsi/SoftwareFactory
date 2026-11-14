@@ -585,6 +585,9 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
       return [200, tickets.link(id, to, String(body.relation ?? "related") as Relation, "you", body.removed === true)];
     }
     case "line": return [200, tickets.moveLine(id, body.dir === "up" ? "up" : "down")];
+    // A pull request opened outside SoftwareFactory: link it, and its merge moves this ticket.
+    case "pr":
+      try { return [200, await tickets.linkPr(id, String(body.pr ?? body.number ?? ""))]; } catch (e) { return [400, { error: (e as Error).message }]; }
     case "spawn": return [201, tickets.spawn(id, { ...(body as object), by: "you" } as any)];
     case "work":
       if (!gitReady()) return [409, { error: "Git is not installed, so the crew has nowhere to keep what it builds. Install Git for Windows (git-scm.com/download/win), then press Work it again." }];
@@ -721,7 +724,8 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
   // SoftwareFactory's own tickets are worked in its own repo, as PRs (Assaf, 11 Nov 2026: the crew may open PRs, never push to main).
   linkSelfRepo(log, core.ensureSelf(), process.env.SF_SELF_REPO ?? "PlonterAsi/SoftwareFactory");
   // Follow the crew's open PRs: a merge moves the ticket on. At start, then every 5 minutes.
-  const follow = () => core.tickets.followPrs().catch((e) => console.error("following PRs failed:", e));
+  // Work merged without the crew's own PR (a thread's PR that names SF-13) moves its ticket too.
+  const follow = () => core.tickets.followPrs().then(() => core.tickets.followMerges()).catch((e) => console.error("following PRs failed:", e));
   follow();
   timers.push(setInterval(follow, 5 * 60_000).unref());
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.

@@ -8,7 +8,7 @@ import "./tables.js";
 import { projectOf, registerProjectFacet } from "../projects/service.js";
 import { EDITABLE } from "./tables.js";
 import { branchFor, harnessChecks, repoOfProject, workInRepo, type RepoRef } from "./repowork.js";
-import { hideTokens, type GitHub } from "./github.js";
+import { hideTokens, parseGitHubRepo, type GitHub, type MergedPr } from "./github.js";
 import { selfProject } from "./intake.js";
 import {
   FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS,
@@ -141,6 +141,17 @@ export interface QueueSpot {
  * ticket to the crew. Every write is one event; the `tickets` projection keeps
  * the tables. Agents and the factory write back onto the ticket by themselves.
  */
+/** Ticket numbers a line of text names for one key: "SF-13", "SF-16, 17, 18", "sf/SF-24-h3-guard". */
+export function ticketNumbersIn(text: string, key: string): number[] {
+  const out = new Set<number>();
+  const re = new RegExp(`(?<![A-Za-z0-9])${key}-(\\d+)((?:\\s*(?:,|and|&)\\s*(?:${key}-)?\\d+(?![\\d.]))*)`, "gi");
+  for (const m of String(text ?? "").matchAll(re)) {
+    out.add(Number(m[1]));
+    for (const n of m[2].matchAll(/\d+/g)) out.add(Number(n[0]));
+  }
+  return [...out];
+}
+
 export class Tickets {
   /** Ticket ids being asked of an agent right now (one call at a time per ticket). */
   private asking = new Set<number>();
@@ -622,6 +633,64 @@ export class Tickets {
       } catch (e) { console.error("tickets: following PR", row.pr_number, "failed:", hideTokens((e as Error).message)); }
     }
     return moved;
+  }
+
+  /**
+   * Work merged outside the ticket's own PR still moves its ticket: a merged pull
+   * request whose title or branch names a ticket ("SF-13", "SF-16, 17, 18",
+   * "sf/SF-24-...") is linked to it, and the ticket moves on as if the crew's PR
+   * had merged. Each PR counts once per ticket, so a ticket you reopen stays open.
+   */
+  async followMerges(): Promise<number> {
+    const gh = this.opts.github;
+    if (!gh) return 0;
+    const has = (t: string) => !!this.log.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
+    if (!has("project_links")) return 0;
+    const projects = this.log.db.prepare("SELECT k.project, k.key, l.ref FROM ticket_keys k JOIN project_links l ON l.project_id = k.project AND l.kind = 'github' GROUP BY k.project").all() as { project: number; key: string; ref: string }[];
+    const seen = this.log.db.prepare("SELECT 1 FROM events WHERE type = 'ticket.pr' AND json_extract(payload, '$.id') = ? AND json_extract(payload, '$.number') = ? AND json_extract(payload, '$.state') = 'merged' LIMIT 1");
+    let moved = 0;
+    for (const p of projects) {
+      const repo = parseGitHubRepo(p.ref);
+      if (!repo) continue;
+      let prs: MergedPr[];
+      try { prs = await gh.mergedPrs(repo); } catch (e) { console.error("tickets: reading merged PRs of", p.ref, "failed:", hideTokens((e as Error).message)); continue; }
+      // Oldest first, so a ticket named by several PRs ends on the newest.
+      for (const pr of prs.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt))) {
+        for (const number of ticketNumbersIn(`${pr.title}\n${pr.branch}`, p.key)) {
+          const t = this.byKey(`${p.key}-${number}`);
+          if (!t || seen.get(t.id, pr.number)) continue;
+          // A ticket opened after the merge only mentions old work; it is not done by it.
+          if (t.createdAt > pr.mergedAt) continue;
+          this.log.append("ticket.pr", { id: t.id, by: "github", repo: `${repo.owner}/${repo.name}`, number: pr.number, url: pr.url, state: "merged", sha: pr.mergeSha });
+          moved++;
+          if (isClosed(t.status)) continue;
+          const done = !TASTE_KINDS.includes(t.kind);
+          this.log.append("ticket.noted", { id: t.id, by: "github", status: done ? "closed" : t.status === "built" ? undefined : "built", text: `PR #${pr.number} "${pr.title.slice(0, 120)}" names this ticket and was merged.${done ? " Closed: it is in the app." : " It is in the app; take a look and close it."}` });
+        }
+      }
+    }
+    return moved;
+  }
+
+  /**
+   * Link a ticket to a pull request that was opened outside SoftwareFactory (a thread's PR, your own).
+   * From then on it is followed like the crew's own: already merged moves the ticket now, open waits for the merge.
+   */
+  async linkPr(id: number, ref: string | number, by = "you"): Promise<TicketView> {
+    const t = this.must(id);
+    const gh = this.opts.github;
+    const repo = repoOfProject(this.log, t.project)?.github;
+    if (!gh || !repo) throw new Error("This ticket's project has no GitHub repo, so there is no pull request to link.");
+    const m = String(ref ?? "").trim().match(/(?:^#?|\/pull\/)(\d+)\/?$/);
+    if (!m) throw new Error("Give the pull request's number (84) or its GitHub address.");
+    const pr = await gh.pr(repo, Number(m[1]));
+    const state = pr.merged ? "merged" : pr.state;
+    this.log.append("ticket.pr", { id, by, repo: `${repo.owner}/${repo.name}`, number: pr.number, url: pr.url, state, sha: pr.mergeSha });
+    if (pr.merged && !isClosed(t.status)) {
+      const done = !TASTE_KINDS.includes(t.kind);
+      this.log.append("ticket.noted", { id, by: "github", status: done ? "closed" : t.status === "built" ? undefined : "built", text: `PR #${pr.number} "${pr.title.slice(0, 120)}" was linked and is already merged.${done ? " Closed: it is in the app." : " It is in the app; take a look and close it."}` });
+    }
+    return this.get(id)!;
   }
 
   /** Wait for a ticket's repo work to finish (tests, the CLI). */
