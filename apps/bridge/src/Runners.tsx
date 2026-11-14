@@ -12,7 +12,7 @@ interface LocalJob { runner: string; repo: string; name: string; startedAt: stri
 interface Report { runners: RunnerView[]; jobs: LocalJob[]; busy: number }
 interface GhJob { name: string; status: string; conclusion: string | null; runner: string | null; here: boolean | null; startedAt: string | null; endedAt: string | null }
 interface GhRun { id: number; name: string; title: string; event: string; branch: string | null; status: string; conclusion: string | null; createdAt: string; url: string; jobs: GhJob[] }
-interface GitHubSide { repo: string; private: boolean | null; runners: { name: string; status: string; busy: boolean; labels: string[] }[]; route: { variable: string; value: string | null }; runs: GhRun[] }
+interface GitHubSide { repo: string; private: boolean | null; runners: { name: string; status: string; busy: boolean; labels: string[] }[]; route: { variable: string; value: string | null; isolatedVariable: string; isolated: string | null; sandbox: boolean }; runs: GhRun[] }
 interface Line { n: number; ts: string; text: string }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -146,11 +146,11 @@ function RunnerDetail({ r, jobs, act, onRemoved }: { r: RunnerView; jobs: LocalJ
           {ghErr ? <p className="rn-note warn">{ghErr}</p>
             : !gh ? <p className="muted">Asking GitHub…</p>
             : <p className="muted">{here
-              ? <>On <b>this PC</b>. Workflows that read the repository variable <code>{gh.route.variable}</code> land on this runner. {onGitHub ? `GitHub sees it ${onGitHub.status}${onGitHub.busy ? ", busy" : ""}.` : "GitHub does not list this runner yet."}{!live && " The runner is off, so builds wait until you start it."}</>
+              ? <>On <b>this PC</b>. Workflows that read the repository variable <code>{gh.route.variable}</code> land on this runner. {onGitHub ? `GitHub sees it ${onGitHub.status}${onGitHub.busy ? ", busy" : ""}.` : "GitHub does not list this runner yet."}{!live && " The runner is off, so builds wait until you start it."}{" "}{gh.route.isolated ? "The smoke test runs here too, inside a Windows Sandbox that opens on your desktop and closes by itself." : gh.route.sandbox ? "The smoke test still runs on GitHub's machines." : "The smoke test stays on GitHub's machines, because Windows Sandbox is not turned on on this PC."}</>
               : <>On <b>GitHub's machines</b>. Send them here and workflows that read the repository variable <code>{gh.route.variable}</code> run on this PC instead.</>}</p>}
         </div>
         {gh && (here
-          ? <button className="ghost" onClick={() => act(async () => { await call("POST", `/${r.id}/route`, { on: false }); setRouteNote(null); await loadGh(); })}>Send builds back to GitHub</button>
+          ? <span className="rn-actions">{!gh.route.isolated && gh.route.sandbox && <button onClick={() => act(async () => { const x = await call<{ route: { note?: string | null } }>("POST", `/${r.id}/route`, { on: true }); setRouteNote(x.route.note ?? null); await loadGh(); })}>Send the smoke test here too</button>}<button className="ghost" onClick={() => act(async () => { await call("POST", `/${r.id}/route`, { on: false }); setRouteNote(null); await loadGh(); })}>Send builds back to GitHub</button></span>
           : <button disabled={!r.registered} title={r.registered ? "" : "Set the runner up first"} onClick={() => act(async () => { const x = await call<{ route: { note?: string | null } }>("POST", `/${r.id}/route`, { on: true }); setRouteNote(x.route.note ?? null); await loadGh(); })}>Send builds to this PC</button>)}
       </div>
 

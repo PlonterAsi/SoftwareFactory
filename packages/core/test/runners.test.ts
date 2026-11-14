@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { RunnerManager, readRunnerLine, runnerPlatform, runnerProblems, shaFromRelease, runnersRoute, ROUTE_VARIABLE } from "../src/index.js";
+import { RunnerManager, readRunnerLine, runnerPlatform, runnerProblems, shaFromRelease, runnersRoute, ROUTE_VARIABLE, ISOLATED_VARIABLE } from "../src/index.js";
 
 const tmp = (p = "sf-runners-") => mkdtempSync(join(tmpdir(), p));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -44,7 +44,7 @@ if (a[0] === "remove") unlinkSync(".runner"); else writeFileSync(".runner", JSON
 interface Call { method: string; path: string; body: any; auth: string | null }
 function fakeGitHub(o: { archive?: Buffer; sha?: string; variable?: string | null } = {}) {
   const calls: Call[] = [];
-  const state = { variable: o.variable ?? null as string | null };
+  const state = { variable: o.variable ?? null as string | null, isolated: null as string | null };
   const { asset, ext } = runnerPlatform();
   const name = `actions-runner-${asset}-2.999.0.${ext}`;
   const f = (async (input: any, init: any = {}) => {
@@ -62,7 +62,12 @@ function fakeGitHub(o: { archive?: Buffer; sha?: string; variable?: string | nul
       if (method === "PATCH") { if (state.variable == null) return ok({ message: "Not Found" }, 404); state.variable = body.value; return ok({}, 204); }
       if (method === "DELETE") { state.variable = null; return ok({}, 204); }
     }
-    if (u.pathname.endsWith("/actions/variables") && method === "POST") { state.variable = body.value; return ok({}, 201); }
+    if (u.pathname.endsWith(`/actions/variables/${ISOLATED_VARIABLE}`)) {
+      if (method === "GET") return state.isolated == null ? ok({ message: "Not Found" }, 404) : ok({ name: ISOLATED_VARIABLE, value: state.isolated });
+      if (method === "PATCH") { if (state.isolated == null) return ok({ message: "Not Found" }, 404); state.isolated = body.value; return ok({}, 204); }
+      if (method === "DELETE") { state.isolated = null; return ok({}, 204); }
+    }
+    if (u.pathname.endsWith("/actions/variables") && method === "POST") { if (body.name === ISOLATED_VARIABLE) state.isolated = body.value; else state.variable = body.value; return ok({}, 201); }
     if (u.pathname.endsWith("/actions/runners")) return ok({ runners: [{ name: "sf-app", status: "online", busy: false, labels: [{ name: "self-hosted" }, { name: "sf-build" }] }] });
     if (u.pathname.endsWith("/actions/runs")) return ok({ workflow_runs: [{ id: 7, name: "Windows build", display_title: "A change", event: "push", head_branch: "main", status: "completed", conclusion: "success", created_at: "2026-11-14T12:00:00Z", html_url: "https://github.com/o/app/actions/runs/7" }] });
     if (u.pathname.endsWith("/actions/runs/7/jobs")) return ok({ jobs: [{ name: "build", status: "completed", conclusion: "success", runner_name: "sf-app" }, { name: "publish", status: "completed", conclusion: "success", runner_name: "GitHub Actions 12" }] });
@@ -74,13 +79,13 @@ function fakeGitHub(o: { archive?: Buffer; sha?: string; variable?: string | nul
 }
 
 const made: RunnerManager[] = [];
-function manager(o: { gh?: ReturnType<typeof fakeGitHub>; home?: string; token?: string | null } = {}) {
+function manager(o: { gh?: ReturnType<typeof fakeGitHub>; home?: string; token?: string | null; sandbox?: boolean } = {}) {
   const home = o.home ?? tmp();
   const m = new RunnerManager({
     home, fetch: (o.gh ?? fakeGitHub()).fetch, token: () => (o.token === undefined ? "ghp_abcdefghijklmnopqrstuvwxyz0123" : o.token),
     runCommand: () => ({ cmd: process.execPath, args: ["fake-runner.mjs"] }),
     configCommand: (_d, args) => ({ cmd: process.execPath, args: ["fake-config.mjs", ...args] }),
-    backoff: { first: 60, max: 240, settled: 60_000 },
+    backoff: { first: 60, max: 240, settled: 60_000 }, sandbox: () => o.sandbox ?? false,
   });
   made.push(m);
   return { m, home };
@@ -306,6 +311,25 @@ describe("build runners: GitHub's side and the API", () => {
     expect((await m.github("o/app")).route.value).toBe(on.value);
     expect((await m.route("sf-app", false)).value).toBeNull();
     expect(gh.state.variable).toBeNull();
+  });
+
+  it("sends jobs that need an isolated Windows here only when this PC has Windows Sandbox", async () => {
+    const without = fakeGitHub();
+    const a = manager({ gh: without, sandbox: false }).m;
+    a.add({ repo: "o/app", name: "sf-app", dir: runnerDir(true) });
+    const off = await a.route("sf-app", true);
+    expect(without.state.variable).toBeTruthy();
+    expect(without.state.isolated).toBeNull();
+    expect(off.note).toMatch(/Windows Sandbox is not turned on/);
+
+    const withIt = fakeGitHub();
+    const b = manager({ gh: withIt, sandbox: true }).m;
+    b.add({ repo: "o/app", name: "sf-app", dir: runnerDir(true) });
+    const on = await b.route("sf-app", true);
+    expect(withIt.state.isolated).toBe(on.value);
+    expect((await b.github("o/app")).route).toMatchObject({ isolated: on.value, sandbox: true });
+    await b.route("sf-app", false);
+    expect(withIt.state).toMatchObject({ variable: null, isolated: null });
   });
 
   it("does not send builds to a runner that is not set up", async () => {
