@@ -167,15 +167,31 @@ export function detectProfiles(dir: string): Detection {
   }
 
   // ---- Python ----
-  const pyCmd = process.platform === "win32" ? "python" : "python3";
+  // A project with a requirements.txt runs in its own environment (.venv in its folder), so its packages
+  // never mix with the PC's Python. Until that exists, Install packages comes first.
+  const win = process.platform === "win32";
+  const sysPy = win ? "python" : "python3";
+  const venvPy = win ? ".venv\\Scripts\\python.exe" : ".venv/bin/python";
+  const hasReqs = isFile(join(dir, "requirements.txt"));
+  // Ready only when the install finished: it leaves a stamp, so a half-made .venv does not count.
+  const hasVenv = isFile(join(dir, venvPy)) && isFile(join(dir, ".venv", "sf-installed"));
+  const pyCmd = hasVenv ? venvPy : sysPy;
+  const pyFile = hasVenv ? join(dir, venvPy) : sysPy;
+  let pyNote: string | undefined;
+  if (hasReqs) {
+    const install = `${sysPy} -m venv .venv && ${venvPy} -m pip install -r requirements.txt && ${venvPy} -c "open('.venv/sf-installed','w').close()"`;
+    if (!hasVenv) pyNote = "It uses packages that are not installed yet: run Install packages first.";
+    add({ id: "py:install", kind: "program", label: hasVenv ? "Install packages again" : "Install packages", command: install, exec: { shell: install }, args: false, utility: true,
+      note: "Makes a .venv folder inside this project and installs what requirements.txt lists. Needs Python (python.org) and the internet." });
+  }
   for (const f of ["main.py", "app.py", "server.py", "manage.py", "run.py"]) {
     if (!isFile(join(dir, f))) continue;
     stack.add("python");
     const src = readText(join(dir, f));
-    if (f === "manage.py") { add({ id: "py:django", kind: "web", label: "Django server", command: `${pyCmd} manage.py runserver`, exec: { file: pyCmd, args: ["manage.py", "runserver"] }, args: false }); continue; }
-    if (/\bstreamlit\b/.test(src)) { add({ id: `py:${f}`, kind: "web", label: `streamlit run ${f}`, command: `streamlit run ${f}`, exec: { shell: `streamlit run ${f} --server.headless true` }, args: false }); continue; }
+    if (f === "manage.py") { add({ id: "py:django", kind: "web", label: "Django server", command: `${pyCmd} manage.py runserver`, exec: { file: pyFile, args: ["manage.py", "runserver"] }, args: false, note: pyNote }); continue; }
+    if (/\bstreamlit\b/.test(src)) { add({ id: `py:${f}`, kind: "web", label: `streamlit run ${f}`, command: `streamlit run ${f}`, exec: { shell: hasVenv ? `${venvPy} -m streamlit run ${f} --server.headless true` : `streamlit run ${f} --server.headless true` }, args: false, note: pyNote }); continue; }
     const web = PY_WEB.test(src);
-    add({ id: `py:${f}`, kind: web ? "web" : "program", label: `${pyCmd} ${f}`, command: `${pyCmd} ${f}`, exec: { file: pyCmd, args: ["-u", f] }, args: !web });
+    add({ id: `py:${f}`, kind: web ? "web" : "program", label: `python ${f}`, command: `${pyCmd} ${f}`, exec: { file: pyFile, args: ["-u", f] }, args: !web, note: pyNote });
   }
   if (isFile(join(dir, "pyproject.toml")) || isFile(join(dir, "requirements.txt"))) stack.add("python");
 

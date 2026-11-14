@@ -78,10 +78,10 @@ export function RunnersPage() {
           <div className="rn-body">
             <div className="rn-list" role="list">
               {runners.map((r) => (
-                <button key={r.id} role="listitem" className={`rn-row${cur?.id === r.id ? " on" : ""}`} onClick={() => setSel(r.id)} aria-current={cur?.id === r.id}>
+                <button key={r.id} role="listitem" className={`rnr-row${cur?.id === r.id ? " on" : ""}`} onClick={() => setSel(r.id)} aria-current={cur?.id === r.id}>
                   <span className={`rn-dot ${STATE[r.state].tone}`} aria-hidden />
-                  <span className="rn-row-main"><b>{r.name}</b><span className="muted">{r.repo}</span></span>
-                  <span className="rn-row-state">{r.state === "busy" && r.job ? `Running: ${r.job}` : STATE[r.state].label}</span>
+                  <span className="rnr-row-main"><b>{r.name}</b><span className="muted">{r.repo}</span></span>
+                  <span className="rnr-row-state">{r.state === "busy" && r.job ? `Running: ${r.job}` : STATE[r.state].label}</span>
                 </button>
               ))}
             </div>

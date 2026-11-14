@@ -216,7 +216,7 @@
 @media (prefers-reduced-motion: reduce) { .mt-road.live, .mt-pulse, .mt-bead.live, .ms-main { animation: none; } .ms-scr, .ms-fuel .bar i, .ms-xpbar i { transition: none; } }
 
 /* A repo-worked project's first tab: four lanes of tickets. */
-.rw-lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; align-items: start; }
+.rw-lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; align-items: start; }
 .rw-lane h4 i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-3); flex: none; }
 .rw-lane.tone-gate h4 i { background: var(--gate); }
 .rw-lane.tone-work h4 i { background: var(--accent); }
@@ -229,3 +229,17 @@
 .rw-lane li button:hover { color: var(--accent); }
 .rw-lane li button .mono { color: var(--muted); font-size: 12.5px; margin-right: 4px; }
 .rw-more { display: inline-block; margin-top: 10px; font-size: 13px; color: var(--muted); }
+
+/* An imported repo's first tab: the ask box and three facts above the lanes. */
+.rw-ask textarea { width: 100%; resize: vertical; min-height: 76px; margin-top: 10px; }
+.rw-kinds { display: flex; gap: 8px; flex-wrap: wrap; }
+.rw-kinds button { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 5px 14px; font-size: 13.5px; }
+.rw-kinds button.on { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.rw-ask-foot { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 10px; }
+.rw-ask-foot .rw-hint { margin: 0; flex: 1; min-width: 220px; }
+.rw-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.rw-fact { display: block; text-decoration: none; color: inherit; }
+.rw-fact:hover { border-color: var(--accent); }
+.rw-fact p { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
+.rw-fact p em { font-style: normal; color: var(--ink); font-weight: 600; }
+.rw-go { font-size: 13px; color: var(--accent); }

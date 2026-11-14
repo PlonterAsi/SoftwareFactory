@@ -78,6 +78,8 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
   useEffect(() => {
     if (!info || !info.exists || !info.dir || busy) return;
     if (autoTried.current.has(info.dir)) return;
+    // Its packages come first: starting without them only shows a crash. It starts by itself once they are in.
+    if (needsInstall(info.profiles)) return;
     autoTried.current.add(info.dir);
     const mainP = info.profiles.filter((p) => !p.utility);
     const best = mainP.find((p) => p.recommended) ?? mainP[0];
@@ -163,6 +165,7 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
         {main.length > 0 && (() => {
           const best = main.find((p) => p.recommended) ?? main[0];
           const s = liveByProfile.get(best.id);
+          const install = needsInstall(info.profiles);
           return (
             <section className="rn-hero">
               {s ? (
@@ -172,6 +175,11 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
                   </button>
                   <button className="stop" onClick={() => stop(s.id)}>Stop</button>
                 </div>
+              ) : install ? (
+                <button className="rn-go" onClick={() => go(install)} disabled={busy != null || liveByProfile.has(install.id)}>
+                  <span aria-hidden>▶</span> {liveByProfile.has(install.id) ? "Installing…" : "Install packages"}
+                  <span className="rn-go-sub">then {best.label} starts by itself</span>
+                </button>
               ) : (
                 <button className="rn-go" onClick={() => go(best)} disabled={busy != null}>
                   <span aria-hidden>▶</span> {busy === best.id || busy === "go" ? "Starting…" : best.kind === "static" ? "Open it" : "Start"}
@@ -217,7 +225,7 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
           </section>
         )}
       </aside>
-      <Stage id={picked} padOpen={padOpen} onTogglePad={() => setPadPick(!padOpen)} onStop={stop} recommended={main.find((p) => p.recommended) ?? main[0] ?? null} onStart={(p) => go(p)} />
+      <Stage id={picked} padOpen={padOpen} onTogglePad={() => setPadPick(!padOpen)} onStop={stop} recommended={main.find((p) => p.recommended) ?? main[0] ?? null} install={needsInstall(info.profiles)} onStart={(p) => go(p)} />
     </div>
   );
 }
@@ -259,7 +267,11 @@ function ProfileCard({ p, s, args, setArgs, busy, onStart, onStop, onShow, picke
   );
 }
 
-function Stage({ id, padOpen, onTogglePad, onStop, recommended, onStart }: { id: number | null; padOpen: boolean; onTogglePad: () => void; onStop: (id: number) => void; recommended: RunProfileView | null; onStart: (p: RunProfileView) => void }) {
+/** The Install packages step, while the project still needs it (no node_modules, or no .venv for a requirements.txt). */
+const needsInstall = (profiles: RunProfileView[]): RunProfileView | null =>
+  profiles.find((p) => p.utility && (p.id === "install" || p.id === "py:install") && p.label === "Install packages") ?? null;
+
+function Stage({ id, padOpen, onTogglePad, onStop, recommended, install, onStart }: { id: number | null; padOpen: boolean; onTogglePad: () => void; onStop: (id: number) => void; recommended: RunProfileView | null; install?: RunProfileView | null; onStart: (p: RunProfileView) => void }) {
   const { session: s, lines } = useSession(id);
   const [, tick] = useState(0);
   const [frameKey, setFrameKey] = useState(0);
@@ -279,8 +291,10 @@ function Stage({ id, padOpen, onTogglePad, onStop, recommended, onStart }: { id:
       <section className="rn-stage idle" aria-label="Launch stage">
         <div className="rn-idle">
           <div className="rn-ring" aria-hidden><span>▶</span></div>
-          <p>{id != null ? "Connecting…" : recommended ? `Ready to start ${recommended.label}.` : "Nothing is running."}</p>
-          {id == null && recommended && <button onClick={() => onStart(recommended)}>{recommended.kind === "static" ? "Open" : "Start"} {recommended.label}</button>}
+          <p>{id != null ? "Connecting…" : install ? "This app needs its packages before it can start." : recommended ? `Ready to start ${recommended.label}.` : "Nothing is running."}</p>
+          {id == null && install && <button onClick={() => onStart(install)}>Install packages</button>}
+          {id == null && install && <p className="muted">They go into a folder inside this project only. {recommended ? `${recommended.label} starts by itself when they are in.` : ""}</p>}
+          {id == null && !install && recommended && <button onClick={() => onStart(recommended)}>{recommended.kind === "static" ? "Open" : "Start"} {recommended.label}</button>}
           {id == null && recommended?.kind === "cli" && <p className="muted">It runs on sample data from the project, made for it if there is none. Change the data under Data on the left.</p>}
           <p className="muted">Its output shows here, and anything that serves pages opens right inside the app.</p>
         </div>
