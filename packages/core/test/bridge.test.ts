@@ -190,6 +190,24 @@ describe("in-app updates", () => {
       expect(off.auto).toBe(false);
       expect(readSettings(log).autoUpdate).toBe(false);
       expect((await fetch(`${base}/api/updates`, { method: "POST", body: JSON.stringify({ auto: "yes" }) })).status).toBe(400);
+
+      // Before it installs, the Bridge tells the core, which writes down who started it and what was in flight.
+      const idle = await fetch(`${base}/api/updates/install`, { method: "POST", body: JSON.stringify({ by: "auto", version: "0.3.0" }) });
+      expect(idle.status).toBe(200);
+      expect(log.list({ type: "app.update.started" }).at(-1)!.payload).toMatchObject({ by: "auto", version: "0.3.0", from: "0.2.5", activeRuns: 0, agentCalls: 0 });
+      // A build waiting at its plan gate: an install that starts by itself is refused; the person's own goes on.
+      const run = core.factory.start("count words", { autoRetries: 0 });
+      for (let i = 0; i < 400 && core.factory.waitingGate(run) !== "gateA"; i++) await new Promise((r) => setTimeout(r, 25));
+      expect(core.factory.waitingGate(run)).toBe("gateA");
+      const held = await fetch(`${base}/api/updates/install`, { method: "POST", body: JSON.stringify({ by: "auto", version: "0.3.0" }) });
+      expect(held.status).toBe(409);
+      expect(log.list({ type: "app.update.held" }).at(-1)!.payload).toMatchObject({ by: "auto", activeRuns: 1, runs: [{ run, gate: "gateA" }] });
+      expect(log.list({ type: "app.update.started" })).toHaveLength(1);
+      const mine = await fetch(`${base}/api/updates/install`, { method: "POST", body: JSON.stringify({ by: "person", version: "0.3.0" }) });
+      expect(mine.status).toBe(200);
+      expect(log.list({ type: "app.update.started" }).at(-1)!.payload).toMatchObject({ by: "person", activeRuns: 1, runs: [{ run, gate: "gateA" }] });
+      core.factory.decide(run, "gateA", { approve: false });
+      await core.factory.wait(run);
     } finally { server.close(); }
   });
 

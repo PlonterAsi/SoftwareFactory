@@ -190,6 +190,21 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         log.append("settings.changed", { key: "autoUpdate", value: body.auto });
         return json(res, 200, updatesReport(log, appVersion, factory.activeCount(), agentCalls.size));
       }
+      if (req.method === "POST" && url.pathname === "/api/updates/install") {
+        // The Bridge says so before it installs. An install that starts by itself is refused while anything is
+        // working (a build, also one waiting at a gate, or an agent call); the person may still install then.
+        // Either way the log says who started it and what was in flight.
+        const body = await readJson(req);
+        const by = body.by === "person" ? "person" : "auto";
+        const runs = factory.activeRuns();
+        const payload = { by, version: typeof body.version === "string" ? body.version.slice(0, 40) : null, from: appVersion ?? null, activeRuns: runs.length, agentCalls: agentCalls.size, runs: runs.slice(0, 10) };
+        if (by === "auto" && (runs.length || agentCalls.size)) {
+          log.append("app.update.held", payload);
+          return json(res, 409, { ok: false, activeRuns: runs.length, agentCalls: agentCalls.size, error: "Work is in flight, so the update waits." });
+        }
+        log.append("app.update.started", payload);
+        return json(res, 200, { ok: true, activeRuns: runs.length, agentCalls: agentCalls.size });
+      }
       if (req.method === "GET" && url.pathname === "/api/setup") {
         const fresh = url.searchParams.get("fresh") === "1";
         if (fresh) gitOk.at = 0;

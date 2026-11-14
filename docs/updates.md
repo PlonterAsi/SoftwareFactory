@@ -14,6 +14,8 @@ The installed app updates itself. Nobody downloads a new setup.exe after the fir
 2. With the automatic setting on and nothing working, it counts down 15 seconds and installs. *Not now* skips that version until the next launch. When the countdown ends the app asks the core once more; it installs only if the core answers that nothing is working.
 3. "Working" means a build in flight (one waiting for your answer at a gate counts) or any agent call in flight: a ticket's crew, a Council session, an import, a chat answer. While something is working, the update waits. *Install now* is still there: a build is cut and resumes from its last finished station when the new version starts.
 4. With the setting off, nothing installs until you press Install.
+5. While something is working, *Install now* takes two presses: the first arms the button for six seconds, the second installs. One stray click next to a gate button cannot close the app under a build.
+6. Every install is written down before it starts: `app.update.started` says who started it (`by`: `person` or `auto`), the version, and what was in flight (each build and the gate it waited at, and the agent calls). An install that starts by itself is also refused by the core while anything is working (`app.update.held`), whatever the window believes.
 
 ## The handover
 
