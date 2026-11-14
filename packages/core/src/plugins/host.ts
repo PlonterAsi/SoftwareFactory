@@ -8,7 +8,8 @@ import type { EventLog, SfEvent } from "../events.js";
 import type { AgentBay } from "../bay/bay.js";
 import { parseAgentFile } from "../bay/agentfile.js";
 import { projectDetail } from "../projects/service.js";
-import { matchesType, readManifest, type PluginManifest, type PluginPermission } from "./manifest.js";
+import { asksOf, matchesType, readManifest, PLUGIN_RECORDS, type PluginAction, type PluginManifest, type PluginPermission, type PluginRecordKind } from "./manifest.js";
+import type { PluginDoor } from "./door.js";
 import { RUNNER_SOURCE } from "./runner.js";
 import "./tables.js";
 
@@ -32,7 +33,8 @@ export interface PluginView {
   source: string | null;
   status: PluginStatus;
   manifest: PluginManifest;
-  granted: PluginPermission[];
+  /** What you allowed when you turned it on: its permissions, and one `act:<verb>` per action. */
+  granted: string[];
   error: string | null;
   crashes: number;
   installedAt: string;
@@ -50,7 +52,10 @@ type Row = Record<string, any>;
 export const EXAMPLES_DIR = fileURLToPath(new URL("../../plugin-examples/", import.meta.url));
 
 const MAX_CRASHES = 3;
-const LIMITS = { dataBytes: 64_000, logChars: 2000, perMinute: { set: 300, emit: 60, log: 200 } };
+const LIMITS = { dataBytes: 64_000, logChars: 2000, perMinute: { set: 300, emit: 60, log: 200, act: 60 } };
+
+/** What an action made, short enough for the log: ids and names only. */
+const summary = (r: unknown) => (r && typeof r === "object" ? Object.fromEntries(Object.entries(r as Record<string, unknown>).filter(([k]) => ["id", "key", "name", "title", "status"].includes(k))) : null);
 
 /** Does an event belong to a project? The core's twin of the Bridge's inProject. */
 export function eventInProject(e: SfEvent, d: { id: number; runIds: number[]; nodeIds: number[] }): boolean {
@@ -79,10 +84,11 @@ export class PluginHost {
   private running = new Map<string, Running>();
   private nextRid = 1;
   private restartTimers = new Map<string, NodeJS.Timeout>();
+  private actRate = new Map<string, { minute: number; n: number }>();
   private listening = false;
   readonly runnerPath: string;
 
-  constructor(private log: EventLog, readonly root: string, private opts: { bay?: AgentBay; examplesDir?: string; node?: string } = {}) {
+  constructor(private log: EventLog, readonly root: string, private opts: { bay?: AgentBay; examplesDir?: string; node?: string; door?: PluginDoor } = {}) {
     this.runnerPath = join(root, ".runtime", "runner.mjs");
   }
 
@@ -133,12 +139,15 @@ export class PluginHost {
 
   /** The plugin's recent log lines and crashes, newest last. */
   logOf(id: string, limit = 100): { id: number; ts: string; level: string; text: string }[] {
-    const rows = this.log.db.prepare(`SELECT id, ts, type, payload FROM events WHERE type IN ('plugin.log', 'plugin.failed', 'plugin.enabled', 'plugin.disabled', 'plugin.installed')
+    const rows = this.log.db.prepare(`SELECT id, ts, type, payload FROM events WHERE type IN ('plugin.log', 'plugin.failed', 'plugin.enabled', 'plugin.disabled', 'plugin.installed', 'plugin.acted')
       AND json_extract(payload, '$.id') = ? ORDER BY id DESC LIMIT ?`).all(id, limit) as Row[];
     return rows.reverse().map((r) => {
       const p = JSON.parse(r.payload);
       const line = r.type === "plugin.log" ? { level: p.level, text: p.text }
         : r.type === "plugin.failed" ? { level: "error", text: `Crashed: ${p.error}` }
+        : r.type === "plugin.acted" ? (p.ok
+          ? { level: "info", text: `Did ${p.verb}${p.result?.key ? `: ${p.result.key}` : p.result?.name ? `: ${p.result.name}` : ""}` }
+          : { level: "warn", text: `Tried ${p.verb}, refused: ${p.error}` })
         : r.type === "plugin.enabled" ? { level: "info", text: `Turned on by ${p.by}` }
         : r.type === "plugin.disabled" ? { level: "warn", text: `Turned off by ${p.by}${p.reason ? `: ${p.reason}` : ""}` }
         : { level: "info", text: `Installed version ${p.version}` };
@@ -160,6 +169,41 @@ export class PluginHost {
       list = list.filter((e) => eventInProject(e, d));
     }
     return list.slice(-limit);
+  }
+
+  /** Real records a plugin may read: projects, tickets, agents. Needs records:read. */
+  records(id: string, kind: string, opts: { projectId?: number | null; limit?: number } = {}): unknown[] {
+    const v = this.get(id);
+    if (!v || v.status !== "enabled") throw new Error(`Plugin ${id} is not turned on`);
+    if (!v.granted.includes("records:read")) throw new Error(`Plugin ${id} may not read records (it did not ask for records:read)`);
+    if (!this.opts.door) throw new Error("Records are not available here");
+    if (!(PLUGIN_RECORDS as readonly string[]).includes(kind)) throw new Error(`Unknown records "${kind}"; known: ${PLUGIN_RECORDS.join(", ")}`);
+    return this.opts.door.records(kind as PluginRecordKind, opts);
+  }
+
+  /**
+   * Take one action for a plugin: a verb its manifest lists, granted when it was turned on.
+   * Every try is logged as plugin.acted (who, what, did it work), at most 60 a minute per plugin.
+   */
+  act(id: string, verb: string, args: Record<string, unknown> = {}): unknown {
+    const v = this.get(id);
+    if (!v || v.status !== "enabled") throw new Error(`Plugin ${id} is not turned on`);
+    if (!v.granted.includes("actions")) throw new Error(`Plugin ${id} may not take actions (it did not ask for the actions permission)`);
+    if (!(v.manifest.actions ?? []).includes(verb as PluginAction) || !v.granted.includes(`act:${verb}`)) throw new Error(`Plugin ${id} was not given "${verb}" when it was turned on, so it may not do that`);
+    if (!this.opts.door) throw new Error("Actions are not available here");
+    const minute = Math.floor(Date.now() / 60_000);
+    const cur = this.actRate.get(id);
+    if (!cur || cur.minute !== minute) this.actRate.set(id, { minute, n: 1 });
+    else if (++cur.n > LIMITS.perMinute.act) throw new Error(`Plugin ${id} is acting too fast (more than ${LIMITS.perMinute.act} actions a minute); wait a minute`);
+    const projectId = args.project == null ? null : Number(args.project);
+    try {
+      const result = this.opts.door.act(verb as PluginAction, args, `plugin:${id}`);
+      this.log.append("plugin.acted", { id, verb, ok: true, projectId, result: summary(result) });
+      return result;
+    } catch (e) {
+      this.log.append("plugin.acted", { id, verb, ok: false, projectId, error: (e as Error).message.slice(0, 300) });
+      throw e;
+    }
   }
 
   // ---- installing and switching ---------------------------------------------------------
@@ -189,7 +233,7 @@ export class PluginHost {
     const v = this.get(id);
     if (!v) throw new Error(`No plugin ${id}`);
     if (!existsSync(v.dir)) throw new Error(`Its folder ${v.dir} is missing; install it again`);
-    this.log.append("plugin.enabled", { id, permissions: v.manifest.permissions, by: opts.by ?? "you" });
+    this.log.append("plugin.enabled", { id, permissions: asksOf(v.manifest), by: opts.by ?? "you" });
     const on = this.get(id)!;
     this.syncAgents(on, true);
     this.start(id);

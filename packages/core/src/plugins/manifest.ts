@@ -21,14 +21,34 @@ import { join, normalize, isAbsolute, sep } from "node:path";
  * Every plugin may keep its own small data (key → JSON value) and log lines; nothing else is
  * open to it unless its permissions say so.
  */
-export const PLUGIN_PERMISSIONS = ["events:read", "events:write", "agents"] as const;
+export const PLUGIN_PERMISSIONS = ["events:read", "events:write", "agents", "records:read", "actions"] as const;
 export type PluginPermission = (typeof PLUGIN_PERMISSIONS)[number];
 
 export const PERMISSION_TEXT: Record<PluginPermission, string> = {
   "events:read": "See what happens in the factory (runs, ideas, agents) and read project timelines",
   "events:write": "Post its own entries to the timeline",
   agents: "Add its agents to the Agent Bay, where the loops can pick them as workers",
+  "records:read": "Read your projects, tickets and agents (names, states, counts and spend; no file contents)",
+  actions: "Do the things its manifest lists for you (each one is named when you turn it on, and logged)",
 };
+
+/**
+ * What a plugin may do with the `actions` permission. Each is the same core command the app's own
+ * screens call, so a plugin cannot do anything the screens cannot. None of these spends money.
+ */
+export const PLUGIN_ACTIONS = {
+  "project.create": "Create a project",
+  "ticket.open": "Open a ticket",
+  "ticket.note": "Add a note to a ticket",
+} as const;
+export type PluginAction = keyof typeof PLUGIN_ACTIONS;
+
+/** Everything a manifest asks for, as it is granted: its permissions, plus one `act:<verb>` per action, so a new verb is a new ask. */
+export const asksOf = (m: { permissions?: string[]; actions?: string[] }): string[] => [...(m.permissions ?? []), ...(m.actions ?? []).map((a) => `act:${a}`)];
+
+/** What a plugin may read with `records:read`. */
+export const PLUGIN_RECORDS = ["projects", "tickets", "agents"] as const;
+export type PluginRecordKind = (typeof PLUGIN_RECORDS)[number];
 
 export interface PluginPanel {
   id: string;
@@ -50,6 +70,8 @@ export interface PluginManifest {
   subscribe: string[];
   panels: PluginPanel[];
   agents: string[];
+  /** The actions it may take (needs the actions permission); see PLUGIN_ACTIONS. */
+  actions: PluginAction[];
 }
 
 export class ManifestError extends Error {}
@@ -102,10 +124,15 @@ export function readManifest(dir: string): PluginManifest {
   });
   const agents = (Array.isArray(raw.agents) ? raw.agents : []).slice(0, 20).map((a: unknown, i: number) => inside(dir, a, `Agent file ${i + 1}`));
   if (agents.length && !permissions.includes("agents")) throw new ManifestError('"agents" needs the agents permission');
+  const actions = [...new Set((Array.isArray(raw.actions) ? raw.actions : []).map(String))] as string[];
+  const unknownActions = actions.filter((a) => !(a in PLUGIN_ACTIONS));
+  if (unknownActions.length) throw new ManifestError(`Unknown action ${unknownActions.join(", ")}; known: ${Object.keys(PLUGIN_ACTIONS).join(", ")}`);
+  if (actions.length && !permissions.includes("actions")) throw new ManifestError('"actions" needs the actions permission');
+  if (permissions.includes("actions") && !actions.length) throw new ManifestError(`The actions permission needs an "actions" list (any of ${Object.keys(PLUGIN_ACTIONS).join(", ")})`);
   if (!main && !panels.length && !agents.length) throw new ManifestError("The plugin adds nothing: give it a main, panels or agents");
   return {
     id, name, version: String(raw.version ?? "0.0.0").slice(0, 20), description: String(raw.description ?? "").slice(0, 300),
-    permissions: permissions as PluginPermission[], main, subscribe, panels, agents,
+    permissions: permissions as PluginPermission[], main, subscribe, panels, agents, actions: actions as PluginAction[],
   };
 }
 

@@ -37,6 +37,32 @@ The full example is in `packages/core/plugin-examples/run-stats/` and ships with
 | `events:read` | hear the events it subscribes to, and read the events of a project (or the whole factory, on a page) |
 | `events:write` | post its own timeline entries (`plugin.emitted`) |
 | `agents` | add its agents to the Agent Bay (ids prefixed with the plugin id; retired when it is off) |
+| `records:read` | read your real projects, tickets and agents: names, states, counts and spend, never file contents |
+| `actions` | do the things its manifest lists under `"actions"`, and nothing else |
+
+### Actions: a plugin that does real work
+
+With `actions`, a plugin's page can do real things in SoftwareFactory. This is what a second way into the app (the game door, [game-door.md](game-door.md)) is built on.
+
+```json
+{ "permissions": ["records:read", "actions"], "actions": ["ticket.open", "ticket.note"] }
+```
+
+| Action | What it does | Arguments |
+|---|---|---|
+| `project.create` | creates a project | `name`, `kind?`, `summary?` |
+| `ticket.open` | opens a ticket | `title`, `kind?` (bug, task, request, idea, question), `body?`, `project?` |
+| `ticket.note` | adds a note to a ticket | `id`, `text` |
+
+The rules:
+
+- **Named, one by one.** The manifest must list each action. The Plugins page shows every one in plain words above the Turn on button, and turning it on grants exactly those. An update that adds an action waits until you turn it on again.
+- **The same commands the screens use.** An action calls the core command the app's own screens call, so a plugin can do nothing the screens cannot.
+- **Marked and logged.** What it makes is marked `plugin:<id>` (a ticket's "opened by"), and every try, allowed or refused, is a `plugin.acted` event and a line in the plugin's log.
+- **Nothing that spends money yet.** No action starts a build or a crew run. Those come later, each with its price shown and a hold to confirm.
+- **At most 60 actions a minute** per plugin.
+
+The example `field-desk` (Plugins page, Examples, Add) is the smallest plugin that reads real records and acts on them.
 
 Turning a plugin on is the one approval: the Plugins page shows what it may do right above the button. A reinstall that asks for nothing new stays on; one that asks for more waits until you turn it on again.
 
@@ -74,6 +100,8 @@ Served at `/plugins/<id>/<path>` (only while the plugin is on; the backend's own
   sf.onEvent((e) => …);                 // new events as they happen (this project's only, in a tab)
   await sf.call("totals", {});          // its backend
   await sf.data();                      // its stored data
+  await sf.records("tickets");          // real projects | tickets | agents (records:read)
+  await sf.act("ticket.open", { title: "…", kind: "task" });  // a listed action (actions); in a project tab it lands in that project
 </script>
 ```
 
@@ -96,6 +124,7 @@ plugin.removed   { id, by }
 plugin.data      { id, key, value }
 plugin.log       { id, level, text }
 plugin.emitted   { id, name, payload, projectId? }
+plugin.acted     { id, verb, ok, projectId?, result? | error? }
 ```
 
 Installed copies live in `<data>/plugins/<id>/`.
@@ -110,6 +139,8 @@ POST /api/plugins/:id/enable | disable | remove
 GET  /api/plugins/:id/log | data
 GET  /api/plugins/:id/events?projectId=&types=a,b&limit=
 POST /api/plugins/:id/call           { method, args }
+GET  /api/plugins/:id/records?kind=projects|tickets|agents&projectId=&limit=
+POST /api/plugins/:id/act            { verb, args }
 GET  /plugins/:id/<path>             an enabled plugin's page files
 GET  /plugins/_sdk/sf.js | sf.css
 ```
@@ -117,5 +148,6 @@ GET  /plugins/_sdk/sf.js | sf.css
 ## Not yet
 
 - Page network access and a backend network switch: Node 22's permission model does not limit the network, so a backend can still make web requests. Pages cannot.
+- Actions that spend money (work a ticket, start a build), each with its price and a hold to confirm, and the Sector game reading real records and giving orders from its map.
 - Plugins calling agents directly (with a spend cap) and adding factory stations of their own.
 - A shared plugin catalog; for now a plugin comes from a folder, an example, or a finished project.

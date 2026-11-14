@@ -1,4 +1,5 @@
 import { registerProjection, type Projection } from "../store/projections.js";
+import { asksOf } from "./manifest.js";
 
 /**
  * Plugins, derived from the log:
@@ -54,7 +55,7 @@ export const pluginsProjection: Projection = {
       case "plugin.installed": {
         // A reinstall keeps the plugin on if it was on and asks for nothing new; otherwise it waits to be turned on again.
         const prev = db.prepare("SELECT status, granted FROM plugins WHERE id = ?").get(id) as P | undefined;
-        const wanted: string[] = Array.isArray(p.manifest?.permissions) ? p.manifest.permissions : [];
+        const wanted: string[] = asksOf({ permissions: Array.isArray(p.manifest?.permissions) ? p.manifest.permissions : [], actions: Array.isArray(p.manifest?.actions) ? p.manifest.actions : [] });
         const granted: string[] = prev ? JSON.parse(prev.granted) : [];
         const keepOn = prev?.status === "enabled" && wanted.every((x) => granted.includes(x));
         db.prepare(`INSERT INTO plugins (id, name, version, dir, manifest, source, status, granted, installed_at, event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

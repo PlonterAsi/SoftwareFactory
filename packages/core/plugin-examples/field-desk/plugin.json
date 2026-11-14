@@ -1,0 +1,11 @@
+{
+  "id": "field-desk",
+  "name": "Field desk",
+  "version": "1.0.0",
+  "description": "Your real projects and tickets on one page, with a box to open a ticket or add a note. The smallest example of a plugin that reads real records and takes real actions.",
+  "permissions": ["records:read", "actions"],
+  "actions": ["ticket.open", "ticket.note"],
+  "panels": [
+    { "id": "desk", "title": "Field desk", "entry": "ui/index.html", "where": "page", "order": 60 }
+  ]
+}

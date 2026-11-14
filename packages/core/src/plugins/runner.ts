@@ -108,6 +108,10 @@ export const FRAME_SDK_SOURCE = String.raw`// SoftwareFactory plugin page helper
     events: function (opts) { return ask("events", opts); },
     /** Call the plugin's backend: sf.handle(method, fn) there. */
     call: function (method, args) { return ask("call", { method: method, args: args }); },
+    /** Real records: sf.records("projects" | "tickets" | "agents", { limit? }). In a project tab, tickets are that project's. Needs records:read. */
+    records: function (kind, opts) { return ask("records", Object.assign({ kind: kind }, opts || {})); },
+    /** Take one of the actions the manifest lists: sf.act("ticket.open", { title, kind, project }). Needs actions. */
+    act: function (verb, args) { return ask("act", { verb: verb, args: args || {} }); },
     /** The plugin's own stored data. */
     data: function () { return ask("data"); },
     /** New events as they happen (same filter as events). Needs events:read. */
