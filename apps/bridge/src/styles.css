@@ -1811,3 +1811,6 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .pj-money .money-head b.warn { color: var(--warn, #e6b450); }
 .pj-money .money-meter { flex: 1 1 200px; height: 8px; border-radius: 4px; background: color-mix(in srgb, currentColor 12%, transparent); overflow: hidden; align-self: center; }
 .pj-money .money-meter i { display: block; height: 100%; background: var(--accent, #4f8cff); }
+
+/* A ticket's "link a pull request" strip: one quiet line, the input takes the room that is left. */
+.tk-prlink input { flex: 1; min-width: 120px; padding: 4px 8px; font-size: 12px; }

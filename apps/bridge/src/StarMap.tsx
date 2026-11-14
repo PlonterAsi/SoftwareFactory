@@ -35,11 +35,15 @@ function layout(o: OrderState, now: number): Map<number, Body> {
       if (sub.length) place(b, sub, Math.min(7, rx * 0.3), Math.min(7, ry * 0.35), depth + 1);
     });
   };
+  // Many systems on one line run into each other's orbits and names: past five they alternate
+  // between two columns, so neighbours in a column are two bands apart.
+  const two = projects.length > 5;
   projects.forEach((p, i) => {
-    const b: Body = { node: p, x: W / 2, y: 14 + band * (i + 0.5), r: size(p, 4), count: count.get(p.id) ?? 0, glow: glow.has(p.id), stale: stale(p), depth: 0 };
+    const x = two ? (i % 2 ? 73 : 27) : W / 2;
+    const b: Body = { node: p, x, y: 14 + band * (i + 0.5), r: size(p, two ? 3.2 : 4), count: count.get(p.id) ?? 0, glow: glow.has(p.id), stale: stale(p), depth: 0 };
     bodies.set(p.id, b);
     const kids = live.filter((n) => n.parentId === p.id);
-    place(b, kids, 33, Math.min(band * 0.38, 30), 1);
+    place(b, kids, two ? 17 : 33, Math.min(band * (two ? 0.7 : 0.38), 30), 1);
   });
   return bodies;
 }

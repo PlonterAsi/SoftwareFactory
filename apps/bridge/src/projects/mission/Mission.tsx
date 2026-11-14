@@ -8,6 +8,7 @@ import { inProject, projectSets, registerProjectPanel, type PanelContext } from 
 import { MissionTrack } from "./MissionTrack";
 import { currentStop, designRounds, headline, ORDER, stopsFor, type StopId } from "./model";
 import { ProductDocs, StageView } from "./stages";
+import { RepoWork, workedRepo } from "./RepoWork";
 import "./mission.css";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
@@ -21,6 +22,12 @@ function minutes(from: string, to?: string) {
  * the sentence above it says what is happening now, and the stop you pick opens below.
  */
 function Mission(ctx: PanelContext) {
+  // A project that lives in its own repo and has no builds is worked by tickets and pull requests, not on the idea track.
+  const repo = ctx.project.runIds.length === 0 ? workedRepo(ctx.project) : null;
+  return repo ? <RepoWork ctx={ctx} repo={repo} /> : <BuildMission {...ctx} />;
+}
+
+function BuildMission(ctx: PanelContext) {
   const { project: p, factory, events } = ctx;
   const mine = useMemo(() => factory.factoryRuns.filter((r) => p.runIds.includes(r.run)), [factory.factoryRuns, p.runIds]);
   const [runId, setRunId] = useState<number | null>(ctx.pickedRun);

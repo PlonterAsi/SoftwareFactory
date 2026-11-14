@@ -18,7 +18,9 @@ import { git } from "../factory/workspace.js";
  */
 
 export interface GitHubRepo { owner: string; name: string }
-export interface PullRequest { number: number; url: string; state: "open" | "closed"; merged: boolean; draft: boolean; mergeSha: string | null }
+export interface PullRequest { number: number; url: string; state: "open" | "closed"; merged: boolean; draft: boolean; mergeSha: string | null; title: string }
+/** A merged pull request, with the words that may name tickets (its title and branch). */
+export interface MergedPr extends PullRequest { branch: string; mergedAt: string }
 
 const TOKEN_FILE = "github-token";
 const TOKEN_RE = /^(gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}$/;
@@ -81,11 +83,11 @@ export class GitHub {
     try { chmodSync(this.file, 0o600); } catch { /* Windows keeps it in the user's own data folder */ }
   }
 
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async call<T>(method: string, path: string, body?: unknown, o: { anonymous?: boolean } = {}): Promise<T> {
     const token = this.token();
-    if (!token) throw new Error("No GitHub access yet: add a token in Systems, GitHub access.");
+    if (!token && !o.anonymous) throw new Error("No GitHub access yet: add a token in Systems, GitHub access.");
     const r = await this.http(`${this.api}${path}`, {
-      method, headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "content-type": "application/json", "user-agent": "SoftwareFactory" },
+      method, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "content-type": "application/json", "user-agent": "SoftwareFactory" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const j = await r.json().catch(() => ({})) as any;
@@ -118,11 +120,20 @@ export class GitHub {
     return toPr(await this.call<any>("POST", `/repos/${o.repo.owner}/${o.repo.name}/pulls`, { title: o.title, head: o.branch, base: o.base, body: o.body, draft: true }));
   }
 
+  /**
+   * The repo's merged pull requests, most recently touched first (one page of 100).
+   * A read: it uses the token when there is one, and works without it on a public repo.
+   */
+  async mergedPrs(repo: GitHubRepo): Promise<MergedPr[]> {
+    const rows = await this.call<any[]>("GET", `/repos/${repo.owner}/${repo.name}/pulls?state=closed&sort=updated&direction=desc&per_page=100`, undefined, { anonymous: true });
+    return (Array.isArray(rows) ? rows : []).filter((j) => j?.merged_at).map((j) => ({ ...toPr(j), branch: String(j.head?.ref ?? ""), mergedAt: String(j.merged_at) }));
+  }
+
   async pr(repo: GitHubRepo, number: number): Promise<PullRequest> {
-    return toPr(await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}/pulls/${number}`));
+    return toPr(await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}/pulls/${number}`, undefined, { anonymous: true }));
   }
 }
 
 const toPr = (j: any): PullRequest => ({
-  number: Number(j.number), url: String(j.html_url), state: j.state === "closed" ? "closed" : "open", merged: !!j.merged || !!j.merged_at, draft: !!j.draft, mergeSha: j.merge_commit_sha ?? null,
+  number: Number(j.number), url: String(j.html_url), state: j.state === "closed" ? "closed" : "open", merged: !!j.merged || !!j.merged_at, draft: !!j.draft, mergeSha: j.merge_commit_sha ?? null, title: String(j.title ?? ""),
 });

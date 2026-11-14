@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventLog, MockRuntime, Tickets, GitHub, createProject, git, parseGitHubRepo, hideTokens } from "../src/index.js";
+import { ticketNumbersIn } from "../src/tickets/tickets.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-gh-"));
 const TOKEN = "github_pat_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6";
@@ -16,12 +17,13 @@ function fakeGitHub(cli?: () => string | null) {
   const bare = join(tmp(), "app.git");
   git(tmp(), "clone", "-q", "--bare", src, bare);
   const calls: { method: string; path: string; body?: any; auth?: string }[] = [];
-  const state = { merged: false, closed: false };
+  const state = { merged: false, closed: false, mergedList: [] as any[] };
   const fake = (async (url: string, init: any) => {
     const path = url.replace("https://api.github.com", "");
     calls.push({ method: init.method, path, body: init.body ? JSON.parse(init.body) : undefined, auth: init.headers.authorization });
     const ok = (j: unknown) => new Response(JSON.stringify(j), { status: 200, headers: { "content-type": "application/json" } });
     if (path === "/repos/acme/app") return ok({ permissions: { push: true } });
+    if (path.startsWith("/repos/acme/app/pulls?state=closed")) return ok(state.mergedList);
     if (path.startsWith("/repos/acme/app/pulls?")) return ok([]);
     if (path === "/repos/acme/app/pulls" && init.method === "POST") return ok({ number: 7, html_url: "https://github.com/acme/app/pull/7", state: "open", draft: true });
     if (path === "/repos/acme/app/pulls/7") return ok({ number: 7, html_url: "https://github.com/acme/app/pull/7", state: state.merged || state.closed ? "closed" : "open", merged: state.merged, merge_commit_sha: state.merged ? "abc123" : null });
@@ -126,5 +128,67 @@ describe("tickets: the crew uses this PC's GitHub CLI login", () => {
     expect(fakeGitHub(() => "not a token").gh.hasToken()).toBe(false);
     expect(fakeGitHub(() => { throw new Error("gh is not installed"); }).gh.tokenSource()).toBe(null);
     expect(fakeGitHub().gh.hasToken()).toBe(false);
+  });
+});
+
+describe("tickets: work merged outside the crew's own PR", () => {
+  const merged = (number: number, title: string, branch = "claude/some-thread", at = "2099-01-01T00:00:00Z") => ({ number, title, html_url: `https://github.com/acme/app/pull/${number}`, state: "closed", merged_at: at, merge_commit_sha: `sha${number}`, head: { ref: branch } });
+
+  it("reads the ticket numbers a title or branch names", () => {
+    expect(ticketNumbersIn("Each agent loads only its own skills (SF-13)", "SF")).toEqual([13]);
+    expect(ticketNumbersIn("Apply the adopt-now set (SF-16, 17, 18, 20, 21, 22) (#61)", "SF")).toEqual([16, 17, 18, 20, 21, 22]);
+    expect(ticketNumbersIn("fix\nsf/SF-24-h3-test-integrity-guard", "SF")).toEqual([24]);
+    expect(ticketNumbersIn("SF-3 and SF-4: seat a drafted agent", "SF")).toEqual([3, 4]);
+    expect(ticketNumbersIn("Update to v0.2.13, WSF-9, SF-x", "SF")).toEqual([]);
+  });
+
+  it("links a merged PR that names a ticket, closes work kinds, leaves taste kinds for your look, without a token", async () => {
+    const { state, calls, proj, t } = setup();
+    const task = t.open({ kind: "task", title: "Trim test output", project: proj });
+    const ask = t.open({ kind: "request", title: "Own skills per agent", project: proj });
+    const other = t.open({ kind: "task", title: "Not named", project: proj });
+    state.mergedList = [merged(61, `Apply the set (${task.key}, ${ask.number})`), { ...merged(62, `${other.key}: closed unmerged`), merged_at: null }];
+    expect(await t.followMerges()).toBe(2);
+    expect(t.get(task.id)).toMatchObject({ status: "closed", pr: { number: 61, state: "merged", url: "https://github.com/acme/app/pull/61" } });
+    expect(t.get(ask.id)).toMatchObject({ status: "built", pr: { number: 61 } });
+    expect(t.get(other.id)!.status).toBe("open");
+    expect(calls.at(-1)!.auth).toBeUndefined();
+    expect(t.notes(task.id).at(-1)!.text).toMatch(/PR #61 .* names this ticket and was merged/);
+  });
+
+  it("counts each PR once per ticket: a ticket you reopen stays open, and a second PR links too", async () => {
+    const { state, proj, t } = setup();
+    const a = t.open({ kind: "task", title: "Twice", project: proj });
+    state.mergedList = [merged(58, `First part (${a.key})`, "x", "2099-01-01T00:00:00Z")];
+    expect(await t.followMerges()).toBe(1);
+    t.say(a.id, "Not done yet", { status: "open" });
+    expect(await t.followMerges()).toBe(0);
+    expect(t.get(a.id)!.status).toBe("open");
+    state.mergedList = [merged(59, "Follow-up", `sf/${a.key}-follow-up`, "2099-01-02T00:00:00Z"), ...state.mergedList];
+    expect(await t.followMerges()).toBe(1);
+    expect(t.get(a.id)).toMatchObject({ status: "closed", pr: { number: 59 } });
+    expect(await t.followMerges()).toBe(0);
+  });
+
+  it("links a PR you name by number or address: merged moves the ticket now, open is followed until it merges", async () => {
+    const { gh, state, proj, t } = setup();
+    const a = t.open({ kind: "bug", title: "Fixed elsewhere", project: proj });
+    expect((await t.linkPr(a.id, "https://github.com/acme/app/pull/7")).pr).toMatchObject({ number: 7, state: "open" });
+    expect(t.get(a.id)!.status).toBe("open");
+    gh.setToken(TOKEN);
+    state.merged = true;
+    expect(await t.followPrs()).toBe(1);
+    expect(t.get(a.id)!.status).toBe("closed");
+    const b = t.open({ kind: "bug", title: "Already in", project: proj });
+    expect(await t.linkPr(b.id, "#7")).toMatchObject({ status: "closed", pr: { number: 7, state: "merged" } });
+    await expect(t.linkPr(b.id, "soon")).rejects.toThrow(/number/);
+  });
+
+  it("leaves a ticket alone when it was opened after the PR merged", async () => {
+    const { state, proj, t } = setup();
+    const a = t.open({ kind: "task", title: "Later", project: proj });
+    state.mergedList = [merged(5, `Old work ${a.key}`, "x", "2020-01-01T00:00:00Z")];
+    expect(await t.followMerges()).toBe(0);
+    expect(t.get(a.id)!.status).toBe("open");
   });
 });

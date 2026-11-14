@@ -214,3 +214,18 @@
 @container (max-width: 640px) { .ms-feat { grid-template-columns: 36px minmax(0, 1fr) 90px; } .ms-tb { display: none; } .ms-jr summary { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .mission { padding: 16px; } .ms-feat { grid-template-columns: 36px minmax(0, 1fr) 90px; } .ms-tb { display: none; } .ms-jr summary { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .mt-road.live, .mt-pulse, .mt-bead.live, .ms-main { animation: none; } .ms-scr, .ms-fuel .bar i, .ms-xpbar i { transition: none; } }
+
+/* A repo-worked project's first tab: four lanes of tickets. */
+.rw-lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; align-items: start; }
+.rw-lane h4 i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-3); flex: none; }
+.rw-lane.tone-gate h4 i { background: var(--gate); }
+.rw-lane.tone-work h4 i { background: var(--accent); }
+.rw-lane.tone-done h4 i { background: var(--good); }
+.rw-n { margin-left: auto; color: var(--muted); font-size: 13px; }
+.rw-hint, .rw-none { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.rw-lane ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.rw-lane li { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.rw-lane li button { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--ink); }
+.rw-lane li button:hover { color: var(--accent); }
+.rw-lane li button .mono { color: var(--muted); font-size: 12.5px; margin-right: 4px; }
+.rw-more { display: inline-block; margin-top: 10px; font-size: 13px; color: var(--muted); }

@@ -23,7 +23,7 @@ interface LinkView { to: number; relation: string; title?: string; status?: Tick
 interface Detail {
   ticket: TicketView; notes: NoteView[]; links: LinkView[]; lines: TicketView[]; parent: TicketView | null; moves: { to: TicketStatus; label: string }[]; document: string;
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
-  repo: { source: string; dir: string; branch: string | null } | null;
+  repo: { source: string; dir: string; branch: string | null; github?: { owner: string; name: string } } | null;
   working: boolean;
   queue: { position: number | null; why: string | null } | null;
 }
@@ -66,6 +66,7 @@ export const ticketsApi = {
   edit: (id: number, field: string, value: unknown, key?: string) => call<TicketView>("POST", `/api/tickets/${id}/edit`, { field, value, key }),
   say: (id: number, text: string, status?: TicketStatus) => call<TicketView>("POST", `/api/tickets/${id}/say`, { text, status }),
   link: (id: number, to: number | string, relation: string) => call<TicketView>("POST", `/api/tickets/${id}/link`, { to, relation }),
+  linkPr: (id: number, pr: string) => call<TicketView>("POST", `/api/tickets/${id}/pr`, { pr }),
   line: (id: number, dir: "up" | "down") => call<TicketView[]>("POST", `/api/tickets/${id}/line`, { dir }),
   work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number, again?: boolean) => call<{ run: number | null; branch?: string }>("POST", `/api/tickets/${id}/work`, { maxUsd, where, again }),
   ask: (id: number, agent?: string) => call<{ reply?: string; error?: string }>("POST", `/api/tickets/${id}/ask`, { agent }),
@@ -298,6 +299,7 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   const [busy, setBusy] = useState<string | null>(null);
   const [linkTo, setLinkTo] = useState("");
   const [showDoc, setShowDoc] = useState(false);
+  const [prRef, setPrRef] = useState("");
   // A Work it the factory held back because that idea is built or building (hooks stay above the early return).
   const [dup, setDup] = useState<{ run: number; error: string } | null>(null);
   useEffect(() => { ticketsApi.get(id).then(setD).catch((e) => onError((e as Error).message)); }, [id, last]);
@@ -387,6 +389,14 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
           <span className="muted">{t.pr.state === "open" ? "open as a draft · CI runs on it · a merge moves this ticket on" : t.pr.state === "merged" ? "merged" : "closed without merging"}</span>
           <a className="ghost tiny" href={t.pr.url} target="_blank" rel="noreferrer">Open on GitHub</a>
         </div>
+      )}
+      {!t.pr && d.repo?.github && (
+        <form className="tk-runstrip tk-prlink" aria-label="Link a pull request" onSubmit={(e) => { e.preventDefault(); if (prRef.trim()) void act("pr", () => ticketsApi.linkPr(id, prRef.trim()).then(() => setPrRef(""))); }}>
+          <span className="mono">⇄</span>
+          <span className="muted">Done in a pull request elsewhere?</span>
+          <input value={prRef} onChange={(e) => setPrRef(e.target.value)} placeholder="PR number or address" aria-label="Pull request number or address" />
+          <button className="ghost tiny" disabled={!prRef.trim() || busy === "pr"}>{busy === "pr" ? "Linking…" : "Link it"}</button>
+        </form>
       )}
       {t.branch && !t.pr && (
         <div className="tk-runstrip tk-branch" aria-label="Branch">
