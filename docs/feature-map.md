@@ -81,7 +81,7 @@ For each feature the map counts, in this base's log, the events its files write 
 
 A new module, screen or API area without a record fails the build with a sentence that says what to add and where.
 
-**Not covered yet:** the same rule for the apps the factory builds for other projects. Their `src/schema.js` already lists features, and the app's System view shows them; requiring a purpose and a flow per feature there is a change to the Planner's contract and the app check, and is filed as its own ticket.
+**The same rule in the apps the factory builds.** A built app lists its features in `src/schema.js` as `{ name, purpose, flow, where }`. The Planner's and Builder's contract asks for them (`bay/builtin.ts`), and the app check (`factory/appkit.ts`), which runs at every test round, refuses a build with no features or with a feature that lacks a purpose, a flow of two steps or a place that exists. A failure goes to the Fixer like any failing test. The app's own System view lists each feature with its purpose and steps. This is the engine enforcing the rule; nobody writes these records by hand.
 
 ## The Brain, the first case
 

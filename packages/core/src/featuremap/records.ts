@@ -100,7 +100,7 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
   {
     id: "app-kit", name: "App kit and app check", group: "Engine",
     purpose: "Makes everything the factory builds a real program: a server, a data store, navigation and full create, edit and delete for every entity, with a check that proves it.",
-    spec: ["Every built app stands on the kit: server.js, a data layer, a web shell and a System view.", "The app check proves create, edit and delete on every entity, no command-line arguments and no JSON boxes.", "The app starts with one press and opens with sample records.", "The kit in the repository and the copy the core carries always match."],
+    spec: ["Every built app stands on the kit: server.js, a data layer, a web shell and a System view.", "The app check proves create, edit and delete on every entity, no command-line arguments and no JSON boxes.", "The app starts with one press and opens with sample records.", "Every feature of a built app has its record in src/schema.js (name, purpose, flow, where); the app check refuses one without it.", "The kit in the repository and the copy the core carries always match."],
     flow: ["The plan is marked as an app", "The kit is installed into the project", "The crew writes the schema, the logic and the views", "The app check runs at every test round"],
     design: "Seen inside each built app: its own screens first, entity lists under Manage, and a System view of entities, flows, features, activity, data and code.",
     screens: [], docs: ["docs/apps.md", "docs/screens.md"], stations: ["plan", "build", "fix", "review"],

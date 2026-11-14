@@ -384,7 +384,7 @@ export const entities = [{
   ],
 }];
 export const flows = [{ name: "Write to a goal", description: "From an empty page to a finished piece.", steps: ["Create a piece", "Set its word goal", "Write", "Watch its bar fill on Progress"] }];
-export const features = [{ name: "Progress", description: "Every piece against its goal", where: "home" }, { name: "Quick count", description: "Count any text as you type", where: "home" }];
+export const features = [{ name: "Progress", purpose: "Shows every piece against its word goal", flow: ["Open the app", "Read each piece's bar"], where: "home" }, { name: "Quick count", purpose: "Counts any text as you type it", flow: ["Type or paste text", "Read the count"], where: "home" }];
 FILE>>>
 <<<FILE index.html
 <!doctype html>

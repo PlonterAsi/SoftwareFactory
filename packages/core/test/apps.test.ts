@@ -38,6 +38,19 @@ describe("the app check", () => {
     expect(() => statSync(join(dir, "data"))).toThrow();
   });
 
+  it("refuses a feature without its record: a purpose, a flow and a place in the app", async () => {
+    const { dir } = await shippedApp();
+    const file = join(dir, "src", "schema.js");
+    const src = readFileSync(file, "utf8");
+    const swap = (features: string) => writeFileSync(file, src.replace(/export const features = .*;/, `export const features = ${features};`));
+    swap('[{ name: "Progress", description: "Bars", where: "e/ghost" }, { name: "Quick count", purpose: "Counts any text as you type it", flow: ["Type", "Read the count"], where: "home" }]');
+    const p = checkApp(dir).problems;
+    expect(p).toHaveLength(1);
+    expect(p[0]).toMatch(/the feature "Progress" in src\/schema\.js needs a purpose .*a flow of at least two steps.*there is no entity ghost/);
+    swap("[]");
+    expect(checkApp(dir).problems.join("\n")).toMatch(/lists no features/);
+  });
+
   it("names what makes a build a script and not a program", async () => {
     const { dir } = await shippedApp();
     writeFileSync(join(dir, "server.js"), readFileSync(join(dir, "server.js"), "utf8") + "\nconsole.log(process.argv[2]);\n");
