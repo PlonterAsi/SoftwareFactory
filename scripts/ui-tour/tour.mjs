@@ -63,6 +63,8 @@ async function waitForGate(run, gate) {
 
 const problems = [];
 try {
+  // The wiring map is generated, not committed: make it before the core starts from source.
+  await new Promise((done, fail) => spawn(process.execPath, [join(root, "packages/core/scripts/wiring.mjs")], { stdio: "ignore" }).on("exit", (c) => (c ? fail(new Error("wiring.mjs failed")) : done())));
   start(process.execPath, [require.resolve("tsx/cli"), "src/server.ts"], join(root, "packages/core"), { SF_DB: join(data, "factory.db"), SF_PORT: "4317", SF_RUNTIME: "mock", SF_AUTO_RESUME: "0", SF_DROP: join(data, "drop") });
   start(process.execPath, [[join(root, "apps/bridge/node_modules/vite/bin/vite.js"), join(root, "node_modules/vite/bin/vite.js")].find((f) => existsSync(f)), "--strictPort"], join(root, "apps/bridge"));
   await waitFor(CORE + "/api/health", "The core");

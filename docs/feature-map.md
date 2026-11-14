@@ -53,7 +53,7 @@ In the app a record is edited in a form (**Edit the record**), and a feature tha
 | Which API areas it answers (core) or calls (Bridge) | `/api/<area>` in the text |
 | Which tables it creates or queries | `CREATE TABLE`, and `FROM`, `JOIN`, `INTO`, `UPDATE` |
 
-Run it after changing code: `npm run wiring -w @sf/core`. The test run fails when the file is stale.
+The file is not committed. It is written before every test run, typecheck, build and dev start (the `pre*` scripts in `packages/core/package.json`), so it always matches the code and two pull requests never conflict over it. To write it by hand: `npm run wiring -w @sf/core`.
 
 `featureMap()` (`featuremap/map.ts`) gives every file to the record with the longest matching path, then folds the wiring by feature:
 
@@ -75,7 +75,7 @@ For each feature the map counts, in this base's log, the events its files write 
 
 `packages/core/test/featuremap.test.ts`, run by `npm test` and so by every build:
 
-1. the wiring file is the one the code gives now;
+1. the wiring is generated from the code as it is now (before every test run and build);
 2. every source file belongs to a record, and every API area the core answers is claimed by exactly one record;
 3. every record has a purpose, a spec, a flow of two steps or more, a design, and documents that exist; every path and API area it claims is real.
 
@@ -103,5 +103,4 @@ Events: `brain.principle.saved` now may carry `source {kind: "rule", fragment, n
 
 1. Write the code.
 2. Add its record to `records.ts` (or add its files to the record of the feature it belongs to).
-3. `npm run wiring -w @sf/core`.
-4. `npm test`. The check says what is still missing.
+3. `npm test`. The check says what is still missing.

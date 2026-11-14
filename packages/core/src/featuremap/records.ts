@@ -354,7 +354,7 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
       "The person can edit a record, add a planned feature and remove one they added, in forms.",
       "A check in the test run fails when a source file or an API area has no record, or a record is incomplete.",
     ],
-    flow: ["Code changes", "The wiring is regenerated from it", "The check fails until every file and API area has a complete record", "The app folds records, wiring and the event log into the map", "The person reads it, and edits records in place"],
+    flow: ["Code changes", "The wiring is regenerated from it before every test run and build", "The check fails until every file and API area has a complete record", "The app folds records, wiring and the event log into the map", "The person reads it, and edits records in place"],
     design: "The Feature map page: totals, the list of features by group with a state mark, and one feature's page with its record, its connections drawn both ways, its shared data, its proof of life and its loose ends.",
     screens: ["/map"], docs: ["docs/feature-map.md"], stations: [],
     files: [`${C}featuremap/`, `${B}FeatureMap.tsx`], api: ["/api/feature-map"],

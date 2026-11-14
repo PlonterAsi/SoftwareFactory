@@ -15,12 +15,13 @@ const root = fileURLToPath(new URL("../../../", import.meta.url));
 const tmp = (p: string) => mkdtempSync(join(tmpdir(), p));
 
 describe("the feature check: no feature ships without its record", () => {
-  it("the wiring map is the one the code gives now (run `npm run wiring -w @sf/core` after changing code)", () => {
+  it("the wiring map is made from the code before every test run and build, so it is never stale", () => {
+    // wiring.generated.ts is not committed: pretest, prebuild, pretypecheck and predev write it (packages/core/package.json).
     const fresh = execFileSync(process.execPath, [join(root, "packages/core/scripts/wiring.mjs"), "--print"], { encoding: "utf8", maxBuffer: 64e6 });
-    const onDisk = readFileSync(join(root, "packages/core/src/featuremap/wiring.generated.ts"), "utf8").replace(/\r\n/g, "\n");
-    // The generated file describes itself too, so compare everything but its own line count.
-    const strip = (s: string) => s.replace(/("packages\/core\/src\/featuremap\/wiring\.generated\.ts": \{\s*"lines": )\d+/, "$1 0");
-    expect(strip(onDisk)).toBe(strip(fresh));
+    expect(fresh).toContain("export const WIRING");
+    expect(Object.keys(WIRING.files).length).toBeGreaterThan(100);
+    const scripts = JSON.parse(readFileSync(join(root, "packages/core/package.json"), "utf8")).scripts;
+    for (const k of ["pretest", "prebuild", "pretypecheck", "predev"]) expect(scripts[k]).toBe("node scripts/wiring.mjs");
   });
 
   it("every source file and every API area belongs to a feature, and every record is complete", () => {

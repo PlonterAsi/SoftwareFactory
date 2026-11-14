@@ -10,3 +10,4 @@ src-tauri/tauri.ci.json
 src-tauri/tauri.old.json
 smoke-update/
 ui-tour-out/
+packages/core/src/featuremap/wiring.generated.ts
