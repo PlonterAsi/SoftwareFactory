@@ -113,6 +113,14 @@ describe("intake: which route work in a repo takes", () => {
     expect(big.why).toMatch(/feature-sized/);
   });
 
+  it("says the kind the way a person does: an idea, an epic", () => {
+    const long = "Add a contact page with a form that sends an email, and a thank you page, and a link to it in the menu";
+    expect(routeWork({ kind: "idea", text: long }).why).toMatch(/^an idea of /);
+    expect(routeWork({ kind: "plan", text: long }).why).toMatch(/^an epic of /);
+    expect(routeWork({ kind: "idea", size: "M", text: "x" }).why).toMatch(/^an idea sized M/);
+    expect(routeWork({ kind: "request", text: long }).why).toMatch(/^a request of /);
+  });
+
   it("the person's choice wins, and a limit under what an engine run needs keeps it light", () => {
     expect(routeWork({ kind: "bug", text: "x", asked: "engine" })).toEqual({ route: "engine", why: "you chose this route", chosen: true });
     expect(routeWork({ kind: "request", size: "L", text: "x", asked: "light" }).route).toBe("light");
@@ -302,6 +310,20 @@ describe("tickets in a repo project take the route that fits", () => {
     expect(git(w.src, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
     expect(git(w.src, "status", "--porcelain")).toBe("");
   }, 60_000);
+
+  it("an epic that holds tickets is worked through them: no route is suggested and no run starts over the whole epic", () => {
+    const w = world();
+    const epic = w.tickets.open({ kind: "plan", project: w.project, title: "A members area", body: "Add sign up, sign in, a profile page and a page only members can read, with a link to each in the menu" });
+    // With no tickets under it, an epic is one large ask: the engine.
+    expect(w.tickets.detail(epic.id)!.route).toMatchObject({ route: "engine" });
+    const part = w.tickets.open({ kind: "task", project: w.project, title: "Sign up page", parent: epic.id });
+    expect(w.tickets.detail(epic.id)!.route).toBeNull();
+    expect(() => w.tickets.work(epic.id)).toThrow(/worked through its tickets \(0 of 1 done\)/);
+    expect(() => w.tickets.work(epic.id, { route: "engine" })).toThrow(/worked through its tickets/);
+    expect(events(w.log, "factory.run.started")).toHaveLength(0);
+    // Its ticket still takes a route of its own.
+    expect(w.tickets.detail(part.id)!.route).toMatchObject({ route: "light" });
+  });
 
   it("a bug stays one session in the repo, and so does anything the crew starts on its own money", async () => {
     const w = world();
