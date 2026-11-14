@@ -107,6 +107,34 @@ describe("tickets: the crew opens a PR", () => {
     expect(sent.status).toBe("built");
   }, 30_000);
 
+  it("a repo imported from GitHub is a GitHub repo: built from its copy on this computer, sent to GitHub on your press", async () => {
+    const f = fakeGitHub();
+    const log = new EventLog();
+    const proj = createProject(log, { name: "Acme app", kind: "imported" });
+    const copy = join(tmp(), "acme-app");
+    git(tmp(), "clone", "-q", f.bare, copy);
+    log.append("repo.import.started", { projectId: proj, source: "https://github.com/acme/app", local: false, dir: copy });
+    log.append("repo.imported", { projectId: proj, source: "https://github.com/acme/app", local: false, dir: copy, branch: "main", head: git(copy, "rev-parse", "HEAD") });
+    const t = new Tickets(log, { runtime: new MockRuntime({ delayMs: 0 }), workRoot: tmp(), github: f.gh, canShip: () => null });
+    const a = t.open({ kind: "task", title: "From the import", project: proj });
+    expect(t.detail(a.id)!.repo).toMatchObject({ dir: copy, github: { owner: "acme", name: "app" } });
+    t.work(a.id); await t.waitRepo(a.id);
+    const built = t.get(a.id)!;
+    expect(built).toMatchObject({ status: "built", pr: null, pushedUrl: null });
+    // Built from the copy the import already made (no sign-in needed), not from GitHub.
+    expect(git(built.branchDir!, "remote", "get-url", "origin")).toBe(copy);
+    expect(t.notes(a.id).map((n) => n.text).join("\n")).toMatch(/Press Send to GitHub/);
+    const sent = await t.send(a.id);
+    expect(sent.pushedUrl).toBe(`https://github.com/acme/app/compare/main...${encodeURIComponent(built.branch!)}?expand=1`);
+    expect(git(f.bare, "branch", "--list").split("\n").map((b) => b.replace(/^[* ]+/, "")).sort()).toEqual(["main", built.branch]);
+    expect(git(copy, "branch", "--list")).not.toMatch(/sf\//);
+    // A folder on this computer that was imported stays a folder: Add to my folder, never GitHub.
+    const proj2 = createProject(log, { name: "Local one", kind: "imported" });
+    log.append("repo.import.started", { projectId: proj2, source: copy, local: true, dir: copy });
+    log.append("repo.imported", { projectId: proj2, source: copy, local: true, dir: copy, branch: "main", head: git(copy, "rev-parse", "HEAD") });
+    expect(t.detail(t.open({ kind: "task", title: "Local", project: proj2 }).id)!.repo!.github).toBeUndefined();
+  }, 30_000);
+
   it("turns a branch built before the token into a draft PR on your press, and refuses for the practice crew", async () => {
     let why: string | null = null;
     const { gh, proj, t } = setup(() => why);

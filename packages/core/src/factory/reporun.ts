@@ -230,7 +230,9 @@ export class RepoRun extends Run {
       if (!done.has("accepted")) await this.acceptLoop();
       const sha = await this.station("ship", () => this.ship());
       const pr = this.handed.pr as { number: number; url: string } | undefined;
-      this.finish("shipped", pr ? `The change is on branch ${this.info.branch}, as draft pull request #${pr.number}: ${pr.url}` : `The change is on branch ${this.info.branch} in ${this.dir}. ${this.handed.kept ?? ""} To take it into your repo: git fetch "${this.dir}" ${this.info.branch}`.replace(/\s+/g, " "), sha);
+      // Kept on this computer: the ticket has the button that takes it (Tickets.send). A run with no ticket gets the one git line.
+      const take = this.info.ticket ? `Press ${this.ref.github ? "Send to GitHub" : "Add to my folder"} on ticket ${this.info.ticket.key} when you want it there.` : `To take it into your repo: git fetch "${this.dir}" ${this.info.branch}`;
+      this.finish("shipped", pr ? `The change is on branch ${this.info.branch}, as draft pull request #${pr.number}: ${pr.url}` : `The change is on branch ${this.info.branch} in ${this.dir}. ${this.handed.kept ?? ""} ${take}`.replace(/\s+/g, " "), sha);
     } catch (e) {
       this.finish(e instanceof StopRun ? "stopped" : "failed", (e as Error).message);
     }

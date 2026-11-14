@@ -20,7 +20,7 @@ export function StageView({ id, run }: { id: StopId; run?: FactoryRunView }) {
     case "check": return <CheckStage run={run} />;
     case "judge": return <JudgeStage run={run} />;
     case "ok2": return <GateStage run={run} gate="gateB" title="Your OK: build" lead="After the Judge, you try the running app and accept it or send it back with what to fix." />;
-    case "ship": if (run.repo) return <Stage title="Hand over" lead="The branch is pushed and opened as a draft pull request when GitHub access allows; otherwise it waits in the clone. The main line of your repo is never written to."><RepoStrip run={run} /></Stage>;
+    case "ship": if (run.repo) return <Stage title="Hand over" lead="The branch is pushed and opened as a draft pull request when GitHub access allows; otherwise it waits on this computer until you send it with one press. The main line of your repo is never written to."><RepoStrip run={run} /></Stage>;
       return <Stage title="Ship" lead="The app is committed, tagged and listed under Finished apps with a Use button.">{run.finished?.outcome === "shipped" ? <p>Shipped{run.finished.sha ? <> at <span className="mono">{run.finished.sha.slice(0, 8)}</span></> : null}{run.finished.totalUsd != null ? ` for $${run.finished.totalUsd.toFixed(2)}` : ""}. Open it from the Use tab.</p> : <p className="muted">Not shipped yet.</p>}</Stage>;
   }
 }

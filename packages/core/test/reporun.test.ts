@@ -224,6 +224,7 @@ describe("the engine in an imported repo", () => {
     await w.factory.wait(run);
     const fin = events(w.log, "factory.run.finished").at(-1);
     expect(fin.outcome).toBe("shipped");
+    // A run with no ticket has no button to press, so it carries the one git line that takes the branch.
     expect(fin.reason).toMatch(new RegExp(`No GitHub access yet\\. To take it into your repo: git fetch ".*" ${branch}`));
     expect(fin.repo).toMatchObject({ kept: "No GitHub access yet." });
     expect(fin.repo.pr).toBeUndefined();
@@ -280,6 +281,26 @@ describe("tickets in a repo project take the route that fits", () => {
     // Not in the repo until the pull request merges: the QA rule never closes it.
     expect(w.tickets.notes(t.id).some((n) => n.by === "qa-rule")).toBe(false);
     expect(events(w.log, "factory.run.started").at(-1)).toMatchObject({ kind: "repo", maxUsd: 1.5, repo: { ticket: { id: t.id, key: "LP-1" } } });
+  }, 60_000);
+
+  it("a branch the engine kept on this computer goes into your folder on one press, like any ticket branch", async () => {
+    const w = world({ ship: async () => ({ kept: "The repo is not on GitHub, so nothing is pushed." }) });
+    const t = w.tickets.open({ kind: "request", project: w.project, body: "Add a contact page with a form that sends an email, and a thank you page, and a link to it in the menu" });
+    const r = w.tickets.work(t.id, { autoApprove: true });
+    await w.factory.wait(r.run!);
+    const built = w.tickets.get(t.id)!;
+    expect(built).toMatchObject({ status: "built", branch: r.branch, pr: null, pushedUrl: null });
+    const note = w.tickets.notes(t.id).at(-1)!.text;
+    expect(note).toMatch(/Press Add to my folder on this ticket/);
+    expect(note).not.toMatch(/git fetch/);
+    expect(events(w.log, "factory.run.finished").at(-1).reason).toMatch(/Press Add to my folder on ticket LP-1/);
+    // Nothing reached the folder until the press, and the press brings the branch only.
+    expect(git(w.src, "branch", "--list", r.branch!)).toBe("");
+    const sent = await w.tickets.send(t.id);
+    expect(sent.pushedUrl).toBe("local");
+    expect(git(w.src, "branch", "--list", r.branch!)).toContain(r.branch!);
+    expect(git(w.src, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+    expect(git(w.src, "status", "--porcelain")).toBe("");
   }, 60_000);
 
   it("a bug stays one session in the repo, and so does anything the crew starts on its own money", async () => {

@@ -2016,5 +2016,8 @@ button.fm-wire-node .muted { font: 12px/1.2 var(--mono); white-space: nowrap; }
 .repo-strip-facts { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; }
 .repo-strip-note { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.5; overflow-wrap: anywhere; }
 .repo-strip-note code { font: 12.5px var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; user-select: all; }
+.repo-strip-take { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.repo-strip-kept.sent { color: var(--good); }
+.repo-strip-err { flex-basis: 100%; color: var(--bad); }
 /* The route a ticket takes in a repo, said before the work starts. */
 .tk-queue.tk-route { border-style: solid; color: var(--ink-2); }
