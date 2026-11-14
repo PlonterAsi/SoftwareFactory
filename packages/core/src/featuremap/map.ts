@@ -82,7 +82,7 @@ const PROOF: Record<string, string[]> = {
   "needs-you": ["factory.gate"],
   money: ["project.budget", "factory.budget"],
   mission: ["factory.plan"],
-  "crew-prs": ["ticket.branch"],
+  "crew-prs": ["ticket.branch", "ticket.pushed"],
   "use-apps": ["launch.started"],
 };
 

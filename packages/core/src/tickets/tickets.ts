@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { git } from "../factory/workspace.js";
 import type { EventLog, SfEvent } from "../events.js";
 import { kitArgs, kitOf } from "../factory/crew.js";
 import { runAgent } from "../agents.js";
@@ -112,7 +115,7 @@ const toView = (r: Row): TicketView => ({
   blocked: !!r.is_blocked, children: { total: Number(r.n_children ?? 0), done: Number(r.n_done ?? 0) }, kind: r.kind, title: r.title, body: r.body ?? "", answers: JSON.parse(r.answers ?? "{}"), project: r.project == null ? null : Number(r.project),
   status: r.status, priority: r.priority ?? null, severity: r.severity ?? null, size: r.size ?? null, assignee: r.assignee ?? null, parentId: r.parent_id == null ? null : Number(r.parent_id),
   lineOrder: r.line_order == null ? null : Number(r.line_order), tags: JSON.parse(r.tags ?? "[]"), source: r.source, openedBy: r.opened_by, fingerprint: r.fingerprint ?? null,
-  run: r.run == null ? null : Number(r.run), branch: r.branch ?? null, branchDir: r.branch_dir ?? null,
+  run: r.run == null ? null : Number(r.run), branch: r.branch ?? null, branchDir: r.branch_dir ?? null, pushedUrl: r.pushed_url ?? null,
   pr: r.pr_number != null ? { repo: r.pr_repo, number: Number(r.pr_number), url: r.pr_url, state: r.pr_state } : null, createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at ?? null, lastNote: r.last_note ?? null,
 });
 
@@ -627,6 +630,54 @@ export class Tickets {
     return true;
   }
 
+  /**
+   * Your press on a built ticket whose branch stayed on this computer: send that
+   * branch to GitHub. With a token it becomes a draft PR like the crew's own.
+   * Without one, this PC's own Git sign-in pushes it and the ticket carries the
+   * address that starts the pull request. Only the ticket's branch, never main.
+   */
+  async send(id: number, by = "you"): Promise<TicketView> {
+    const t = this.must(id);
+    const gh = this.opts.github;
+    const repo = repoOfProject(this.log, t.project);
+    if (!repo) throw new Error("This ticket's project has no repo to send a branch to.");
+    if (t.pr) throw new Error(`This ticket already has pull request #${t.pr.number}.`);
+    if (!t.branch || !t.branchDir) throw new Error("There is no branch yet: press Work it first.");
+    if (this.inRepo.has(id)) throw new Error("The Builder is still working this ticket.");
+    if (this.sending.has(id)) throw new Error("This branch is already on its way to GitHub.");
+    if (!existsSync(join(t.branchDir, ".git"))) throw new Error("The folder with this branch is gone. Press Work it to build it again.");
+    if (!repo.github) {
+      // A folder on this computer: the branch is added to it and nothing else moves (not its files, not its current branch).
+      if (!existsSync(join(repo.source, ".git"))) throw new Error(`The original folder (${repo.source}) is not on this computer any more.`);
+      try { git(repo.source, "fetch", "-q", t.branchDir, `${t.branch}:${t.branch}`); }
+      catch (e) { throw new Error(/checked out|non-fast-forward|rejected/i.test((e as Error).message) ? `Your folder already has a branch ${t.branch} that differs or is open in it. Switch away from it there, then press again.` : `Could not add the branch to your folder: ${(e as Error).message.slice(0, 300)}`); }
+      this.log.append("ticket.pushed", { id, by, repo: repo.source, branch: t.branch, url: null });
+      this.log.append("ticket.noted", { id, by: "factory", kind: "event", text: `Branch ${t.branch} is now in ${repo.source}. Your files there did not change; merge the branch when you want it.` });
+      return this.get(id)!;
+    }
+    if (!gh) throw new Error("GitHub access is not set up in this core.");
+    const why = this.opts.canShip?.();
+    if (why) throw new Error(`Not sent: ${why}.`);
+    this.sending.add(id);
+    try {
+      let base = "main";
+      try { base = gh.git(t.branchDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(/^origin\//, ""); } catch { /* main */ }
+      if (gh.hasToken()) {
+        let files: string[] = [];
+        try { files = gh.git(t.branchDir, "diff", "--name-only", `origin/${base}...${t.branch}`).split("\n").filter(Boolean); } catch { /* unknown */ }
+        gh.git(t.branchDir, "checkout", "-q", t.branch);
+        await this.openPr(id, repo, { dir: t.branchDir, branch: t.branch, base, files, summary: "", costUsd: 0 });
+      } else {
+        await gh.pushBranch({ repo: repo.github, dir: t.branchDir, branch: t.branch, base });
+        const url = gh.compareUrl(repo.github, base, t.branch);
+        this.log.append("ticket.pushed", { id, by, repo: `${repo.github.owner}/${repo.github.name}`, branch: t.branch, base, url });
+        this.log.append("ticket.noted", { id, by: "factory", kind: "event", text: `The branch is on GitHub. Open the pull request there (${url}), name it ${t.key}, and its merge moves this ticket on by itself.` });
+      }
+    } finally { this.sending.delete(id); }
+    return this.get(id)!;
+  }
+  private sending = new Set<number>();
+
   /** Follow every open PR of a ticket: merged moves it on, closed without a merge sends it back. */
   async followPrs(): Promise<number> {
     const gh = this.opts.github;
@@ -745,7 +796,7 @@ export class Tickets {
           const shipped = await this.openPr(t.id, repo, r).catch((e) => { this.log.append("ticket.noted", { id: t.id, by, kind: "event", text: hideTokens(`Could not open a PR: ${(e as Error).message}`) }); return false; });
           if (shipped) return;
         }
-        const take = `To take it into your repo: git fetch "${r.dir}" ${r.branch}, then review and merge it yourself.`;
+        const take = repo.github ? "It is on this computer only. Press Send to GitHub on this ticket when you want it there." : "Your own folder is untouched. Press Add to my folder on this ticket to get the branch there.";
         this.log.append("ticket.noted", {
           id: t.id, by, kind: "reply", costUsd: r.costUsd, status: r.sha && now.status !== "built" ? "built" : r.sha ? undefined : "open",
           text: r.sha ? `${r.summary || "Done."}\n\nChanged ${r.files.length} file(s) on ${r.branch} (from ${r.base}). ${take}` : `${r.summary || "No change was made."}\n\nNothing changed on ${r.branch}.`,
