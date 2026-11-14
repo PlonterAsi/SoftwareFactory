@@ -48,7 +48,8 @@ const REPO_BENCH = workbenchContract({
 });
 
 /**
- * The repo a project's tickets are worked in: the import's working copy, else
+ * The repo a project's tickets are worked in: the import's working copy (with
+ * `github` when it was imported from there, so its branches can be sent), else
  * a `repo` link that is a folder on this computer, else a `github` link
  * ("owner/name"; SoftwareFactory's own project has one), cloned from GitHub.
  */
@@ -56,7 +57,11 @@ export function repoOfProject(log: EventLog, project: number | null): RepoRef | 
   if (project == null) return null;
   const has = (t: string) => !!log.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
   const r = has("repo_imports") ? importOf(log, project) : null;
-  if (r?.dir && existsSync(join(r.dir, ".git"))) return { source: r.source, dir: r.dir, branch: r.branch ?? null };
+  if (r?.dir && existsSync(join(r.dir, ".git"))) {
+    // Imported from GitHub: it is worked from the copy on this computer (no sign-in needed), and its branches go to GitHub.
+    const github = r.local ? null : parseGitHubRepo(r.source);
+    return { source: r.source, dir: r.dir, branch: r.branch ?? null, ...(github ? { github } : {}) };
+  }
   if (has("project_links")) {
     const rows = log.db.prepare("SELECT ref FROM project_links WHERE project_id = ? AND kind = 'repo'").all(project) as { ref: string }[];
     for (const { ref } of rows) if (existsSync(join(ref, ".git"))) return { source: ref, dir: ref, branch: null };

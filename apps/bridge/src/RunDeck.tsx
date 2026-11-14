@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Blueprint } from "./projects/mission/Blueprint";
+import { ticketsApi } from "./Tickets";
 import type { FactoryRunView, LoopEventView, SeatView, Vote } from "./api";
 
 type Tab = "council" | "product" | "build" | "judge" | "plan" | "tests" | "loop" | "files" | "review" | "engine" | "visuals";
@@ -61,15 +62,23 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
 export function RepoStrip({ run }: { run: FactoryRunView }) {
   const r = run.repo!;
   const done = run.finished?.outcome === "shipped";
+  // A finished branch with no pull request waits on this computer; its ticket knows whether you took it since.
+  const take = useTakeBranch(done && !r.pr && r.ticket ? r.ticket.id : null);
+  const t = take.d?.ticket;
+  const onGitHub = !!take.d?.repo?.github;
+  const pr = r.pr ?? t?.pr ?? null;
+  const sent = !pr && !!t?.pushedUrl;
   return (
-    <div className={`repo-strip${r.pr ? " has-pr" : ""}`} role="note" aria-label="This run works in an existing repo">
+    <div className={`repo-strip${pr ? " has-pr" : ""}`} role="note" aria-label="This run works in an existing repo">
       <div className="repo-strip-main">
         <span className="repo-strip-k">In the repo</span>
         <strong>{r.name}</strong>
         <span className="mono repo-strip-branch" title={`Branch ${r.branch}${r.base ? `, from ${r.base.slice(0, 7)}` : ""}. The main line and your own copy are never written to.`}>{r.branch}</span>
         {r.ticket && <span className="mono muted">{r.ticket.key}</span>}
-        {r.pr
-          ? <a className="repo-strip-pr" href={r.pr.url} target="_blank" rel="noreferrer">Draft PR #{r.pr.number}</a>
+        {pr
+          ? <a className="repo-strip-pr" href={pr.url} target="_blank" rel="noreferrer">Draft PR #{pr.number}</a>
+          : sent && onGitHub ? <a className="repo-strip-pr" href={t!.pushedUrl!} target="_blank" rel="noreferrer">On GitHub: open the pull request</a>
+          : sent ? <span className="repo-strip-kept sent">Branch added to your folder</span>
           : done ? <span className="repo-strip-kept">Branch kept on this computer</span> : null}
       </div>
       <div className="repo-strip-facts muted">
@@ -79,9 +88,48 @@ export function RepoStrip({ run }: { run: FactoryRunView }) {
         {r.starts && <span>starts with: {r.starts}</span>}
       </div>
       {!!r.notes?.length && <p className="repo-strip-note">Not set up on this computer: {r.notes.join("; ")}</p>}
-      {done && !r.pr && <p className="repo-strip-note">{r.kept} To take it into your repo: <code>git fetch "{r.dir ?? run.dir}" {r.branch}</code></p>}
+      {done && !pr && !r.ticket && <p className="repo-strip-note">{r.kept} To take it into your repo: <code>git fetch "{r.dir ?? run.dir}" {r.branch}</code></p>}
+      {done && !pr && r.ticket && (sent
+        ? <p className="repo-strip-note">{onGitHub ? "Only this branch was sent, never main. Its merge moves the ticket on by itself." : "Your files and your current branch there did not change. Merge the branch when you want it."}</p>
+        : (
+          <p className="repo-strip-note repo-strip-take">
+            <span>{r.kept ?? "The branch stays on this computer."}</span>
+            {take.d?.repo && t?.branch
+              ? <button className="primary tiny" disabled={take.busy} onClick={() => void take.send()} title={onGitHub ? "Sends only this branch, never main. Uses your GitHub token, or this computer's own Git sign-in." : "Adds only this branch to your own folder. Your files and your current branch there do not change."}>{take.busy ? (onGitHub ? "Sending…" : "Adding…") : onGitHub ? "Send to GitHub" : "Add to my folder"}</button>
+              : <span>Ticket {r.ticket.key} has the button that takes it.</span>}
+            {take.err && <span className="repo-strip-err" role="alert">{take.err}</span>}
+          </p>
+        ))}
     </div>
   );
+}
+
+/**
+ * The one press that takes a finished branch off this computer, the same one its ticket offers (Tickets.send):
+ * Send to GitHub for a repo that lives there, Add to my folder for a folder here. Every strip on the page
+ * hears when one of them sent it.
+ */
+const TAKEN = "sf:branch-taken";
+function useTakeBranch(ticket: number | null) {
+  const [d, setD] = useState<Awaited<ReturnType<typeof ticketsApi.get>> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (ticket == null) { setD(null); return; }
+    let live = true;
+    const load = () => { ticketsApi.get(ticket).then((x) => { if (live) setD(x); }).catch(() => { /* the strip still says where the branch is */ }); };
+    load();
+    window.addEventListener(TAKEN, load);
+    return () => { live = false; window.removeEventListener(TAKEN, load); };
+  }, [ticket]);
+  const send = async () => {
+    if (ticket == null) return;
+    setBusy(true); setErr("");
+    try { await ticketsApi.send(ticket); } catch (e) { setErr((e as Error).message); }
+    window.dispatchEvent(new Event(TAKEN));
+    setBusy(false);
+  };
+  return { d, busy, err, send };
 }
 
 export function TaskGraph({ run }: { run: FactoryRunView }) {

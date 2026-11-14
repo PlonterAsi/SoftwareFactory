@@ -844,8 +844,9 @@ export class Tickets {
     const by = bay?.crewFor("build")[0]?.id ?? "builder";
     this.log.append("ticket.noted", { id: t.id, by, status: t.status === "in_progress" ? undefined : "in_progress", text: `Working it in a clone of ${repo.source}, on branch ${branch}. ${repo.github ? "Only that branch is ever pushed, never main." : "The original repo is not touched and nothing is pushed."}` });
     const gh = this.opts.github;
-    // A GitHub repo is cloned from where this core's GitHub access points (github.com; a local stand-in in tests).
-    if (repo.github && gh) repo = { ...repo, dir: gh.remote(repo.github) };
+    // A GitHub repo with no copy on this computer is cloned from where this core's GitHub access points
+    // (github.com; a local stand-in in tests). One imported from GitHub is cloned from its copy here.
+    if (repo.github && gh && !existsSync(join(repo.dir, ".git"))) repo = { ...repo, dir: gh.remote(repo.github) };
     const job = workInRepo(this.log, runtime, bay, { id: t.id, key: t.key, title: t.title, document: doc, repo, workRoot, maxUsd: Math.min(maxUsd ?? 0.6, 1.5), git: gh ? (d, ...a) => gh.git(d, ...a) : undefined, projectId: t.project, checks: harnessChecks({ maxMinutes: this.opts.factory?.maxRunMinutes }) })
       .then(async (r) => {
         if (!r.ok) {
@@ -1004,7 +1005,10 @@ export class Tickets {
       this.log.append("ticket.branch", { id: t.id, by: "factory", source: r.source, dir: p.dir, branch: r.branch, base: r.base, sha: r.sha, files: r.files ?? [], costUsd: Number(p.totalUsd ?? 0) });
       if (r.pr) this.log.append("ticket.pr", { id: t.id, by: "factory", repo: r.pr.repo, number: r.pr.number, url: r.pr.url, branch: r.branch, state: "open" });
       const checked = tp ? `${tp.passed} checks green${tp.failed ? `, ${tp.failed} red` : ""} (the repo's own tests, no secrets, no test removed)` : "no test report";
-      const where = r.pr ? `Opened draft PR #${r.pr.number}: ${r.pr.url}. When it merges, this ticket moves on by itself.` : `${r.kept ?? "The branch stays on this computer."} To take it into your repo: git fetch "${p.dir}" ${r.branch}, then review and merge it yourself.`;
+      // No pull request: the branch waits in the clone, and the ticket's own button takes it from there (send()).
+      const onGitHub = !!repoOfProject(this.log, t.project)?.github;
+      const where = r.pr ? `Opened draft PR #${r.pr.number}: ${r.pr.url}. When it merges, this ticket moves on by itself.`
+        : `${r.kept ?? "The branch stays on this computer."} ${onGitHub ? "Press Send to GitHub on this ticket when you want it there." : "Your own folder is untouched. Press Add to my folder on this ticket to get the branch there."}`;
       this.log.append("ticket.noted", { id: t.id, by: "factory", kind: "reply", costUsd: Number(p.totalUsd ?? 0), status: t.status === "built" ? undefined : "built", text: `Run #${run} built it on branch ${r.branch}: ${r.files?.length ?? 0} file(s) changed, ${checked}, $${Number(p.totalUsd ?? 0).toFixed(4)}.\n\n${where}` });
       return;
     }
