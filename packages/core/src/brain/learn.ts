@@ -60,6 +60,15 @@ const RULE_STATIONS: Slot[] = ["council", "design", "critique", "plan", "build",
 /** The rule without the label the person typed in front of it ("Rule: ...", "Decision: ..."). */
 const bare = (text: string) => text.trim().replace(/^(rule|decision|important)\s*[:\-]\s*/i, "").trim();
 
+/**
+ * Only what the person typed is "your rule". The Improvement Council, the factory and the error catcher
+ * capture signals of their own, and the Order Engine files those as explicit too.
+ */
+const NOT_YOURS = /^(improve|factory|error|agent)/;
+const yours = (source: string | undefined) => !NOT_YOURS.test(source ?? "");
+/** A whole sentence, not one cut off in the middle where it was split. */
+const whole = (text: string) => !/[,;:]$/.test(bare(text));
+
 function titleOf(text: string): string {
   const words = bare(text).replace(/\s+/g, " ").trim().replace(/[.;:,]+$/, "").split(" ");
   const t = words.slice(0, 9).join(" ").replace(/^./, (c) => c.toUpperCase());
@@ -74,6 +83,7 @@ export function brainSuggestions(log: EventLog, order: OrderState, list: Princip
   const nodes = new Map(order.nodes.map((n) => [n.id, n.title]));
   return order.fragments
     .filter((f) => f.state === "live" && f.origin === "explicit" && isCanonKind(f.kind) && !taken.has(f.id) && f.text.trim().length >= 12)
+    .filter((f) => yours(order.signals[f.signalId]?.source) && whole(f.text))
     .sort((a, b) => Number(b.important || b.pinned) - Number(a.important || a.pinned) || b.ts.localeCompare(a.ts))
     .slice(0, 30)
     .map((f) => ({ fragment: f.id, text: bare(f.text), kind: f.kind as "rule" | "decision", node: f.nodeId != null ? nodes.get(f.nodeId) ?? null : null, important: f.important || f.pinned, ts: f.ts, title: titleOf(f.text) }));

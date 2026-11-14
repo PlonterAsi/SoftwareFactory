@@ -113,8 +113,12 @@ describe("the Brain shows its use and learns from the person's rules", () => {
     const say = async (text: string) => { const s = captureSignal(log, text, "bridge"); await order.ingest({ id: s.id, text: s.text, source: "bridge" }); };
     await say("Project: Recipes\nRule: every screen must work with the keyboard alone, never the mouse only.");
     await say("Rule: always show prices in shekels.");
+    // What the Improvement Council captured is its own task, not the person's rule.
+    const own = captureSignal(log, "Rule: always keep the human gate for a failed review.", "improve");
+    await order.ingest({ id: own.id, text: own.text, source: "improve" });
     const offered = brainSuggestions(log, order.state());
     expect(offered.length).toBeGreaterThanOrEqual(2);
+    expect(offered.some((s) => /human gate/.test(s.text))).toBe(false);
     const keys = offered.find((s) => /keyboard/.test(s.text))!;
     const id = acceptSuggestion(log, order.state(), keys.fragment);
     const p = principles(log).find((x) => x.id === id)!;
