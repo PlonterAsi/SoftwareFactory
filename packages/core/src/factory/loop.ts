@@ -711,6 +711,7 @@ class Run {
       }
       let retry = "";
       let wasHollow = false;
+      let deadBefore = new Set<string>();
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
         const left = features.filter((x) => x.state !== "built").length;
@@ -737,11 +738,23 @@ class Run {
           invalid = [...new Set(invalid)].slice(0, 10);
           if (process.env.SF_LINK_CHECK !== "off") {
             const where = linkFiles(this.dir, (x) => isLockedTest(x) || isKitFile(x));
-            const mine = Object.keys(where).filter((u) => files.includes(where[u]) && !this.linksSeen.has(u));
+            const mine = Object.keys(where).filter((u) => (files.includes(where[u]) || deadBefore.has(u)) && !this.linksSeen.has(u));
             const links = await this.f.checkLinks(mine).catch(() => null);
             for (const u of mine) this.linksSeen.add(u);
             if (links && !links.skipped) deadLinks = links.dead.map((d) => `${d.url} (in ${where[d.url]})`).slice(0, 20);
             for (const d of links?.dead ?? []) this.linksSeen.delete(d.url);
+            if (attempt === 1) deadBefore = new Set((links?.dead ?? []).map((d) => d.url));
+            // Run 4004: the Builder was told twice and still left made-up video links in the seed. An empty
+            // link is right and a made-up one is a defect, so after its second try the core empties them.
+            if (attempt === 2 && links && !links.skipped && links.dead.length) {
+              const blanked: string[] = [];
+              for (const d of links.dead) {
+                const file = where[d.url];
+                if (!file) continue;
+                try { const p = join(this.dir, file); const before = readFileSync(p, "utf8"); const after = before.split(d.url).join(""); if (after !== before) { writeFileSync(p, after); blanked.push(`${d.url} (in ${file})`); } } catch { /* left for the link check after the build */ }
+              }
+              if (blanked.length) { this.log.append("factory.links.blanked", { run: this.id, feature: f.id, links: blanked }); deadLinks = deadLinks.filter((x) => !blanked.includes(x)); }
+            }
           }
         }
         if (files.length && !broke.length && !invalid.length && /^(Screen|Judge): /.test(f.title)) {

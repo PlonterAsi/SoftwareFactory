@@ -606,6 +606,32 @@ describe("the build loop: one feature per fresh session", () => {
     expect(retro.bad.join("\n")).toMatch(/F2 .* reported done while the app could not start/);
   });
 
+  it("empties a made-up link the Builder left after its second try (run 4004)", async () => {
+    const log = new EventLog();
+    const { rt } = featureCrew((id, nth, cwd, files) => {
+      if (id !== "F2") return false;
+      // Both tries leave the same invented video link in the seed.
+      write(cwd, files.filter((f) => f.path === "src/count.js" || f.path === "src/schema.js").map((f) => f.path !== "src/schema.js" ? f : { path: f.path, content: f.content + '\nexport const demo = { video: "https://www.youtube.com/watch?v=sample-fast-aerial" };\n' }));
+      return true;
+    });
+    const dir = tmp("sf-proj-");
+    const f = new Factory(log, rt, dir);
+    f.checkLinks = async (urls) => { const dead = urls.filter((u) => /sample-fast-aerial/.test(u)).map((url) => ({ url, ok: false as const, status: 404 })); return { pass: !dead.length, checked: urls.length, dead, unknown: 0 }; };
+    const old = process.env.SF_LINK_CHECK;
+    process.env.SF_LINK_CHECK = "on";
+    try {
+      const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+      await f.wait(run);
+    } finally { process.env.SF_LINK_CHECK = old; }
+    const f2 = events(log, "factory.feature").filter((e) => e.id === "F2" && e.state !== "building");
+    expect(f2.map((e) => e.state)).toEqual(["broken", "built"]);
+    expect(events(log, "factory.links.blanked")[0].links[0]).toMatch(/sample-fast-aerial \(in src\/schema\.js\)/);
+    const fin = events(log, "factory.run.finished").at(-1);
+    const schema = readFileSync(join(fin.dir, "src/schema.js"), "utf8");
+    expect(schema).not.toMatch(/sample-fast-aerial/);
+    expect(schema).toMatch(/video: ""/);
+  });
+
   it("puts the plan's entity and field names into the spelling the app kit accepts (run 3185)", async () => {
     const { kitName, validatePlan } = await import("../src/factory/loop.js");
     expect([kitName("band_min"), kitName("Band Override"), kitName("rankScale"), kitName("2nd-best_video"), kitName("")]).toEqual(["bandMin", "bandOverride", "rankScale", "ndBestVideo", "field"]);
@@ -1109,6 +1135,10 @@ describe("what run 2898 taught the engine", () => {
     mkdirSync(join(dir, "data"), { recursive: true });
     writeFileSync(join(dir, "src/schema.js"), 'export const seed = [{ video: "https://www.youtube.com/watch?v=real123" }];');
     writeFileSync(join(dir, "data/db.json"), '{"items":[{"video":"https://www.youtube.com/watch?v=example1"}]}');
+    // Run 4004: the research notes' own sources (metafy.gg, weteachleague.com) failed the product's link check.
+    mkdirSync(join(dir, "docs/product"), { recursive: true });
+    writeFileSync(join(dir, "docs/product/BRIEF.md"), "- Coaching sessions exist (https://metafy.gg/rocket-league)");
+    writeFileSync(join(dir, "PROGRESS.md"), "Used https://example-notes.org/page for reference");
     const where = linkFiles(dir, () => false);
     expect(where).toEqual({ "https://www.youtube.com/watch?v=real123": "src/schema.js" });
     const c = linkCase({ pass: false, checked: 1, unknown: 0, dead: [{ url: "https://www.youtube.com/watch?v=real123", ok: false, note: "no such YouTube video", file: "src/schema.js" }] });

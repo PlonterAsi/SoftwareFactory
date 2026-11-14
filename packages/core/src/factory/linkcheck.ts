@@ -32,7 +32,7 @@ export function linksIn(dir: string, isExcluded: (p: string) => boolean): string
 export function linkFiles(dir: string, isExcluded: (p: string) => boolean): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [p, content] of Object.entries(readTree(dir))) {
-    if (isExcluded(p) || !/\.(js|mjs|json|html|md|csv)$/i.test(p) || /^(node_modules|\.git|data)\//.test(p) || p === "SPEC.md" || p === "README.md") continue;
+    if (isExcluded(p) || !/\.(js|mjs|json|html|md|csv)$/i.test(p) || /^(node_modules|\.git|data|docs)\//.test(p) || p === "SPEC.md" || p === "README.md" || p === "PROGRESS.md" || p === "features.json") continue;
     for (const m of content.matchAll(URL_RE)) {
       const url = m[0].replace(/[.,;:!?]+$/, "");
       try {

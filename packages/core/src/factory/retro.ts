@@ -117,6 +117,8 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
     const still = again.filter((l) => (l.missing ?? []).length);
     if (again.length) (still.length ? bad : good).push(`Builder: ${still.length ? `${still.length} of ${plural(again.length, "screen")} sent back still missed designed items on the second look (${still.map((l) => `${l.screen}: ${l.seen} of ${l.of}`).join(", ")})` : `every screen sent back had what was missing on the second look (${plural(again.length, "screen")})`}.`);
   }
+  const blanked = of("factory.links.blanked").flatMap((b) => b.links ?? []);
+  if (blanked.length) bad.push(`Builder: left ${plural(blanked.length, "made-up link")} after being told twice; the core emptied ${blanked.length === 1 ? "it" : "them"} (${String(blanked[0]).slice(0, 120)}).`);
   const unmatched = allLooks.filter((l) => l.skipped);
   if (unmatched.length) bad.push(`Planner: ${plural(unmatched.length, "view")} matched no designed screen, so the judge could not look at ${unmatched.length === 1 ? "it" : "them"} while building (${unmatched.map((l) => l.screen).join(", ")}).`);
   const firstScreens = of("factory.screens")[0];
