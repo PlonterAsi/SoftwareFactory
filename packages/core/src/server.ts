@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +35,8 @@ import { DropFolder } from "./bridge/drop.js";
 import { askForApp } from "./factory/appagent.js";
 import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
 import { GitHub, ghCliToken, parseGitHubRepo } from "./tickets/github.js";
+import { RunnerManager } from "./runners/manager.js";
+import { runnersRoute } from "./runners/routes.js";
 import { linkToProject } from "./projects/service.js";
 import { ErrorCapture, isFault } from "./tickets/capture.js";
 import { classifyIntake, ensureSelfProject, filedAlready, projectToTicket } from "./tickets/intake.js";
@@ -68,10 +70,12 @@ export interface CoreOptions {
   github?: GitHub;
   /** The installed app's version, from the shell (SF_APP_VERSION). A new one is recorded as `app.updated`. */
   appVersion?: string;
+  /** Jobs running on this PC's build runners right now (the app's own, not a base's). An update that installs by itself waits for them. */
+  runnerJobs?: () => number;
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion, github: githubIn }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion, github: githubIn, runnerJobs = () => 0 }: CoreOptions) {
   // GitHub write access for the crew's PRs; the token lives in the data folder, never in the log.
   // Each agent's own skills and MCP servers: the person's library and the built kits live in the data folder.
   if (dataDir) configureKits({ dataDir });
@@ -183,12 +187,12 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         clients: { origins: Object.fromEntries(clients.origins), streams: Object.fromEntries(clients.streams) },
       });
       if (req.method === "GET" && url.pathname === "/api/factory/cycles") return json(res, 200, { cycles: log.view("engine-cycles", engineCycles) });
-      if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeCount(), agentCalls.size));
+      if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeCount(), agentCalls.size, runnerJobs()));
       if (req.method === "POST" && url.pathname === "/api/updates") {
         const body = await readJson(req);
         if (typeof body.auto !== "boolean") return json(res, 400, { error: "Send { auto: true } or { auto: false }." });
         log.append("settings.changed", { key: "autoUpdate", value: body.auto });
-        return json(res, 200, updatesReport(log, appVersion, factory.activeCount(), agentCalls.size));
+        return json(res, 200, updatesReport(log, appVersion, factory.activeCount(), agentCalls.size, runnerJobs()));
       }
       if (req.method === "POST" && url.pathname === "/api/updates/install") {
         // The Bridge says so before it installs. An install that starts by itself is refused while anything is
@@ -197,10 +201,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const body = await readJson(req);
         const by = body.by === "person" ? "person" : "auto";
         const runs = factory.activeRuns();
-        const payload = { by, version: typeof body.version === "string" ? body.version.slice(0, 40) : null, from: appVersion ?? null, activeRuns: runs.length, agentCalls: agentCalls.size, runs: runs.slice(0, 10) };
-        if (by === "auto" && (runs.length || agentCalls.size)) {
+        const payload = { by, version: typeof body.version === "string" ? body.version.slice(0, 40) : null, from: appVersion ?? null, activeRuns: runs.length, agentCalls: agentCalls.size, runnerJobs: runnerJobs(), runs: runs.slice(0, 10) };
+        if (by === "auto" && (runs.length || agentCalls.size || payload.runnerJobs)) {
           log.append("app.update.held", payload);
-          return json(res, 409, { ok: false, activeRuns: runs.length, agentCalls: agentCalls.size, error: "Work is in flight, so the update waits." });
+          return json(res, 409, { ok: false, activeRuns: runs.length, agentCalls: agentCalls.size, runnerJobs: payload.runnerJobs, error: "Work is in flight, so the update waits." });
         }
         log.append("app.update.started", payload);
         return json(res, 200, { ok: true, activeRuns: runs.length, agentCalls: agentCalls.size });
@@ -486,14 +490,16 @@ export interface UpdatesReport {
   activeRuns: number;
   /** Agent calls in flight anywhere in the core: a ticket's crew, a Council session, an import, the Overseer. */
   agentCalls: number;
+  /** Jobs running on this PC's build runners. Installing would cut them off, so an update that installs by itself waits. */
+  runnerJobs: number;
   /** Versions this install has run, newest first. */
   history: { ts: string; from: string | null; to: string }[];
 }
 
-export function updatesReport(log: EventLog, appVersion: string | undefined, activeRuns: number, agentCalls = 0): UpdatesReport {
+export function updatesReport(log: EventLog, appVersion: string | undefined, activeRuns: number, agentCalls = 0, runnerJobs = 0): UpdatesReport {
   const history = (log.db.prepare("SELECT ts, from_version, to_version FROM app_versions ORDER BY id DESC LIMIT 10").all() as { ts: string; from_version: string | null; to_version: string }[])
     .map((r) => ({ ts: r.ts, from: r.from_version, to: r.to_version }));
-  return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns, agentCalls, history };
+  return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns, agentCalls, runnerJobs, history };
 }
 
 /** Link SoftwareFactory's own project to its GitHub repo once, so its tickets are worked there. */
@@ -725,7 +731,7 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
  * The default base keeps the old env overrides (SF_PROJECTS, SF_DROP); other bases keep
  * everything inside their own folder.
  */
-export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boolean } = {}): BootedBase & { core: ReturnType<typeof createCore>; log: EventLog } {
+export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isDefault?: boolean; runnerJobs?: () => number } = {}): BootedBase & { core: ReturnType<typeof createCore>; log: EventLog } {
   if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
   const log = new EventLog(dbPath);
   // Crew mode: what you last picked in the Bridge, else what the shell found (real when Claude Code is installed).
@@ -741,7 +747,7 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
   const improveMax = process.env.SF_IMPROVE_MAX_USD ? Number(process.env.SF_IMPROVE_MAX_USD) : undefined;
   const improveEvery = process.env.SF_IMPROVE_EVERY_H ? Number(process.env.SF_IMPROVE_EVERY_H) : undefined;
   // The installed app may use the GitHub CLI's login for crew PRs; tests build a core without it, so they never reach the real GitHub.
-  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir, github: new GitHub({ dataDir, cli: process.env.VITEST ? undefined : ghCliToken }), order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
+  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir, github: new GitHub({ dataDir, cli: process.env.VITEST ? undefined : ghCliToken }), order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION, runnerJobs });
   core.drop.start();
   const timers: NodeJS.Timeout[] = [];
   faultCore = core; // the open base hears what the process throws
@@ -800,13 +806,23 @@ if (isMain) {
   // Bases: the home folder (where factory.db has always been) keeps the list of factories this app hosts.
   // The factory that was here before is "Main factory"; the others live in their own folders.
   const home = dbPath === ":memory:" ? null : dirname(dbPath);
+  // Build runners belong to the app, not to a base: they keep working across a base switch and stop with the core.
+  // The GitHub sign-in used is the GitHub CLI's on this PC, else the token pasted in Systems; neither is stored here.
+  const runners = home ? new RunnerManager({ home, token: () => ghCliToken() ?? pastedToken(home) }) : null;
+  const runnerJobs = () => runners?.busyCount() ?? 0;
   const host = home ? new BaseHost(new BaseRegistry(home), (b) => {
     console.log(`${new Date().toISOString()} opening base #${b.id} "${b.name}" at ${b.folder}`);
-    return bootBase(b.isDefault ? dbPath : join(b.folder, "factory.db"), { isDefault: b.isDefault });
+    return bootBase(b.isDefault ? dbPath : join(b.folder, "factory.db"), { isDefault: b.isDefault, runnerJobs });
   }, openFolder) : null;
   const single = host ? null : bootBase(dbPath);
-  const server = createServer(host ? host.handle : single!.handler);
-  process.on("exit", () => { if (host) host.dispose(); else single!.dispose(); });
+  const inner = host ? host.handle : single!.handler;
+  const server = createServer(async (req, res) => {
+    if (runners && (req.url ?? "").startsWith("/api/runners")) {
+      try { if (await runnersRoute(runners, req, res, new URL(req.url ?? "/", "http://localhost"))) return; } catch (e) { console.error("runners route failed:", e); }
+    }
+    return inner(req, res);
+  });
+  process.on("exit", () => { runners?.stopAll(); if (host) host.dispose(); else single!.dispose(); });
   // Nothing thrown is lost: it is a bug ticket on the open base before anything else happens.
   process.on("unhandledRejection", (e) => { console.error("unhandled rejection:", e); faultCore?.fault("the core (unhandled promise rejection)", e); });
   process.on("uncaughtException", (e) => {
@@ -847,5 +863,11 @@ if (isMain) {
     else if (stalled >= 2_000) console.error(`${new Date(now).toISOString()} the core was busy for ${(stalled / 1000).toFixed(1)} s and could not answer`);
     tick = now;
   }, 500).unref();
+  runners?.startAll();
   server.listen(port, "127.0.0.1", () => console.log(`${new Date().toISOString()} SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, base ${host ? `"${host.current.name}" at ${host.current.folder}` : dbPath})`));
+}
+
+/** The GitHub token pasted in Systems (the file `github-token` in the data folder), or null. */
+function pastedToken(home: string): string | null {
+  try { return readFileSync(join(home, "github-token"), "utf8").trim() || null; } catch { return null; }
 }

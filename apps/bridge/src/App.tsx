@@ -14,6 +14,7 @@ import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
 import { DataDeck, useStore } from "./DataDeck";
 import { UpdateBanner, VersionChip, useUpdates } from "./Updates";
+import { RunnersPage } from "./Runners";
 import { Home } from "./projects/Home";
 import { Workspace } from "./projects/Workspace";
 import { href, useRoute, type FactoryView } from "./projects/router";
@@ -153,6 +154,8 @@ export function App() {
     ? <NeedsYou factoryRuns={f.factoryRuns} featuresWaiting={featuresWaiting} conflicts={open} ticketsForYou={ticketCounts?.you ?? 0} onShowRun={showRun} />
     : route.page === "bases"
     ? <BasesPage bases={bases.data} refresh={bases.refresh} />
+    : route.page === "runners"
+    ? <RunnersPage />
     : route.page === "kit"
     ? <KitPage />
     : route.page === "brain"

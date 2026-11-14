@@ -28,10 +28,10 @@ export interface UpdateStatus {
   error: string | null;
   checkedAt: string | null;
 }
-export interface UpdatesReport { auto: boolean; appVersion: string | null; activeRuns: number; agentCalls?: number; history: { ts: string; from: string | null; to: string }[] }
+export interface UpdatesReport { auto: boolean; appVersion: string | null; activeRuns: number; agentCalls?: number; runnerJobs?: number; history: { ts: string; from: string | null; to: string }[] }
 
-/** Work an update that installs by itself must wait for: builds (one waiting for your answer too) and agent calls in flight. */
-export const working = (r: UpdatesReport | null | undefined) => (r?.activeRuns ?? 0) > 0 || (r?.agentCalls ?? 0) > 0;
+/** Work an update that installs by itself must wait for: builds (one waiting for your answer too), agent calls in flight, and jobs on this PC's build runners. */
+export const working = (r: UpdatesReport | null | undefined) => (r?.activeRuns ?? 0) > 0 || (r?.agentCalls ?? 0) > 0 || (r?.runnerJobs ?? 0) > 0;
 
 export interface TokenState { set: boolean; hint: string | null }
 
@@ -215,7 +215,7 @@ export function UpdateBanner({ u }: { u: Updates }) {
   );
   if (u.report?.auto && working(u.report)) return (
     <div className="update-banner quiet" role="status">
-      <span>v{s.version} is ready. It installs by itself when the crew finishes what it is working on.</span>
+      <span>v{s.version} is ready. It installs by itself when {(u.report.runnerJobs ?? 0) > 0 && !u.report.agentCalls ? "the job on this PC's build runner finishes" : "the crew finishes what it is working on"}.</span>
       <InstallAnyway u={u} className="ghost sm" label="Install now (that work is cut short)" />
     </div>
   );
@@ -253,7 +253,8 @@ export function UpdatesSection({ u }: { u: Updates }) {
           {s.notes && <p className="place-hint">{s.notes}</p>}
           {r && working(r) ? <InstallAnyway u={u} label={`Install v${s.version} now`} /> : <button onClick={u.install}>Install v{s.version} now</button>}
           {r && r.activeRuns > 0 && <p className="place-hint">{r.activeRuns} build{r.activeRuns > 1 ? "s are" : " is"} running. Installing now pauses {r.activeRuns > 1 ? "them" : "it"}; {r.activeRuns > 1 ? "they resume" : "it resumes"} from the last finished station when the new version starts.</p>}
-          {r && r.activeRuns === 0 && working(r) && <p className="place-hint">The crew is in the middle of {r.agentCalls === 1 ? "an agent call" : `${r.agentCalls} agent calls`} (a ticket, a Council session or a chat answer). Installing now cuts that work short.</p>}
+          {r && r.activeRuns === 0 && (r.runnerJobs ?? 0) > 0 && <p className="place-hint">A build runner on this PC is running a job for GitHub. Installing now cuts that job off, and GitHub shows it as failed.</p>}
+          {r && r.activeRuns === 0 && (r.agentCalls ?? 0) > 0 && <p className="place-hint">The crew is in the middle of {r.agentCalls === 1 ? "an agent call" : `${r.agentCalls} agent calls`} (a ticket, a Council session or a chat answer). Installing now cuts that work short.</p>}
         </>}
       </>}
       {u.desktop && <TokenField u={u} />}
