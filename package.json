@@ -2,7 +2,7 @@
   "name": "softwarefactory",
   "private": true,
   "version": "0.1.0",
-  "description": "SoftwareFactory: loop-engineered software factory with an AI crew. Milestone 5: Bridge polish and the Overseer.",
+  "description": "SoftwareFactory: loop-engineered software factory with an AI crew.",
   "workspaces": [
     "packages/*",
     "apps/*"

@@ -89,7 +89,7 @@ POST /api/agent/run   { prompt, model?, projectId? }
 GET  /api/chat/routes                                  { filed: { signalId: [projectId] }, factoryRuns: { runId: projectId } }
 ```
 
-**Whole factory** in the top bar is the cross-project view from before (star map, factory floor, Agent Bay, Order deck, Data vault).
+The cross-project views from before (star map, factory floor, Agent Bay, Order deck, Data vault) each have their own page under **Factory** in the sidebar ([app.md](app.md)).
 
 Addresses: `#/` projects, `#/p/12/runs/57` project 12's Runs panel showing run 57, `#/factory/bay` the Agent Bay. The old `#order`, `#bay`, `#data` still work.
 

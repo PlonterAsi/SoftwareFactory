@@ -8,7 +8,7 @@ Any Claude thread that works on SoftwareFactory judges the product by using it t
 2. **See what he sees.** `powershell -ExecutionPolicy Bypass -File scripts/dogfood/window-shot.ps1 <out.png>` saves a screenshot of the real SoftwareFactory window (it reads the window, it clicks nothing).
 3. **Use the same UI against his real core.** `npm ci`, then `npm run dev -w @sf/bridge` and open `http://localhost:5173` in the browser pane. Vite proxies `/api` to the running app's core on port 4317, so this is his data with the Bridge from your branch. View choices (layout and so on) live in that browser's storage, not in his app.
 4. **Write down every friction point** as you hit it: what you tried, what happened, what you expected.
-5. **Log each one in SoftwareFactory.** Until tickets land on main, a friction point is a note captured in the project "UI/UX improvement of SoftwareFactory" (open it, type in the Assistant box, press Capture: free, no AI call). When tickets are on main, use a ticket instead.
+5. **Log each one in SoftwareFactory** as a ticket in SoftwareFactory's own project (Tickets, or the *Bug* button in the top strip, which attaches the screen). Opening a ticket is free: no AI call.
 6. **Fix the smallest ones in a PR**, check them in the browser pane against the real core, merge after CI is green. The app updates itself within minutes of the next window open (see [updates.md](updates.md)).
 7. **Re-run step 2 after the update** to confirm he now sees the fix.
 
