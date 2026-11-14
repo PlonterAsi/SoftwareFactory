@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { DiscoveryRoundView, FactoryRunView, ProductDocsView } from "../../api";
 import { GateActions } from "../../GateActions";
 import { Blueprint } from "./Blueprint";
-import { CouncilView, JudgeView, LoopView, ReviewView, TestGrid } from "../../RunDeck";
+import { CouncilView, JudgeView, LoopView, RepoStrip, ReviewView, TestGrid } from "../../RunDeck";
 import { designRounds, type StopId } from "./model";
 
 const CRIT: [string, string][] = [["coverage", "Coverage"], ["journey", "Journeys"], ["screens", "Screens"], ["originality", "Originality"], ["buildable", "Buildable"]];
@@ -20,7 +20,8 @@ export function StageView({ id, run }: { id: StopId; run?: FactoryRunView }) {
     case "check": return <CheckStage run={run} />;
     case "judge": return <JudgeStage run={run} />;
     case "ok2": return <GateStage run={run} gate="gateB" title="Your OK: build" lead="After the Judge, you try the running app and accept it or send it back with what to fix." />;
-    case "ship": return <Stage title="Ship" lead="The app is committed, tagged and listed under Finished apps with a Use button.">{run.finished?.outcome === "shipped" ? <p>Shipped{run.finished.sha ? <> at <span className="mono">{run.finished.sha.slice(0, 8)}</span></> : null}{run.finished.totalUsd != null ? ` for $${run.finished.totalUsd.toFixed(2)}` : ""}. Open it from the Use tab.</p> : <p className="muted">Not shipped yet.</p>}</Stage>;
+    case "ship": if (run.repo) return <Stage title="Hand over" lead="The branch is pushed and opened as a draft pull request when GitHub access allows; otherwise it waits in the clone. The main line of your repo is never written to."><RepoStrip run={run} /></Stage>;
+      return <Stage title="Ship" lead="The app is committed, tagged and listed under Finished apps with a Use button.">{run.finished?.outcome === "shipped" ? <p>Shipped{run.finished.sha ? <> at <span className="mono">{run.finished.sha.slice(0, 8)}</span></> : null}{run.finished.totalUsd != null ? ` for $${run.finished.totalUsd.toFixed(2)}` : ""}. Open it from the Use tab.</p> : <p className="muted">Not shipped yet.</p>}</Stage>;
   }
 }
 
@@ -177,8 +178,8 @@ function BuildStage({ run }: { run: FactoryRunView }) {
   const total = last ? (last.passed ?? 0) + (last.failed ?? 0) : 0;
   const ahead = Math.max(0, Math.max(0, ...f.map((x) => x.of ?? 0)) - f.length);
   return (
-    <Stage title="Build" lead={f.length ? "One feature per fresh Builder session. After each one the core runs the locked tests for free, and a feature that breaks a passing test goes back once." : "The Tester writes the tests and locks them, then the Builder writes the app."}>
-      {total > 0 && <div className="ms-xp"><span className="mono">{last!.passed}/{total}</span><div className="ms-xpbar"><i style={{ width: `${((last!.passed ?? 0) / total) * 100}%` }} /></div><span className="muted small">locked tests passing</span></div>}
+    <Stage title="Build" lead={run.repo ? "The change is built on its branch in a clone of the repo. The repo's own tests ran before anything changed; they run again after each feature, and a feature that breaks one that passed goes back once." : f.length ? "One feature per fresh Builder session. After each one the core runs the locked tests for free, and a feature that breaks a passing test goes back once." : "The Tester writes the tests and locks them, then the Builder writes the app."}>
+      {total > 0 && <div className="ms-xp"><span className="mono">{last!.passed}/{total}</span><div className="ms-xpbar"><i style={{ width: `${((last!.passed ?? 0) / total) * 100}%` }} /></div><span className="muted small">{run.repo ? "of the repo's tests passing" : "locked tests passing"}</span></div>}
       {f.length ? (
         <div className="ms-feats">
           {f.map((x) => {
@@ -204,7 +205,7 @@ function CheckStage({ run }: { run: FactoryRunView }) {
   const last = run.tests.at(-1);
   const total = last ? last.passed + last.failed : 0;
   return (
-    <Stage title="Test and fix" lead="The core runs the locked tests. Failures go to the Fixer, who works until they pass; a stall climbs to a stronger model before anyone asks you. Then the Reviewer checks each criterion by running the app.">
+    <Stage title="Test and fix" lead={run.repo ? "The core runs the repo's own tests, its type and lint checks, a secret scan and a check that no test was removed or skipped. Failures go to the Fixer. Tests that already failed before the change are not held against it. Then the Reviewer checks each criterion by running it." : "The core runs the locked tests. Failures go to the Fixer, who works until they pass; a stall climbs to a stronger model before anyone asks you. Then the Reviewer checks each criterion by running the app."}>
       {total > 0 && <div className="ms-xp"><span className="mono">{last!.passed}/{total}</span><div className="ms-xpbar"><i style={{ width: `${(last!.passed / total) * 100}%` }} /></div><span className="muted small">tests passing{run.fixRounds ? ` after ${run.fixRounds} fix round${run.fixRounds > 1 ? "s" : ""}` : ""}</span></div>}
       <h3>Tests by round</h3><TestGrid run={run} />
       <h3>Fix rounds</h3><LoopView run={run} />

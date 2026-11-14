@@ -80,8 +80,8 @@ export const branchFor = (key: string, title: string) =>
   `sf/${key.startsWith("#") ? `ticket-${key.slice(1)}` : key}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "work"}`;
 
 /** Make (or reuse) the clone for one ticket and put it on the ticket's branch. Returns the clone folder and the base commit. */
-export function prepareClone(repo: RepoRef, workRoot: string, id: number, branch: string, run: (dir: string, ...args: string[]) => string = git): { dir: string; base: string } {
-  const dir = resolve(workRoot, `ticket-${id}`);
+export function prepareClone(repo: RepoRef, workRoot: string, id: number, branch: string, run: (dir: string, ...args: string[]) => string = git, folder = `ticket-${id}`): { dir: string; base: string } {
+  const dir = resolve(workRoot, folder);
   mkdirSync(workRoot, { recursive: true });
   if (!existsSync(join(dir, ".git"))) {
     // A plain clone: the original repo gets no worktree entry, branch or file from us.

@@ -24,6 +24,15 @@ export interface RouteStep {
 
 /** The build order, as the core's featuresOf derives it (packages/core/src/factory/features.ts). */
 export function routeOf(plan: PlanView, docs: ProductDocsView | undefined, features: FeatureView[]): RouteStep[] {
+  // A change to an existing codebase: the plan's own features are the route, in the order they are built.
+  if (plan.repo && plan.features?.length) {
+    const steps: RouteStep[] = plan.features.map((f) => ({ id: f.id, kind: "logic" as const, title: f.title, gets: f.what, shows: [...f.files, `Done when: ${f.done}`], can: [], chips: [] }));
+    // A small run builds them in one session: its one step then stands for all of them.
+    for (const f of features) if (!steps.some((o) => o.id === f.id)) steps.push({ id: f.id, kind: "logic", title: f.title, gets: "", shows: [], can: [], chips: [] });
+    for (const o of steps) o.feature = features.find((f) => f.id === o.id);
+    if (features.length === 1 && steps.length > 1 && features[0].id === "F1") for (const o of steps) o.feature = features[0];
+    return steps;
+  }
   const views = plan.views ?? [];
   const out: RouteStep[] = [];
   const modules = plan.tasks.filter((t) => !/^views?\b|index\.html|web\/app/i.test(t.title));
@@ -97,14 +106,19 @@ export function Blueprint({ run, compact }: { run: FactoryRunView; compact?: boo
     <div className={`bp${compact ? " compact" : ""}`}>
       <header className="bp-hero">
         <div className="bp-title">
-          <span className="bp-kicker">The plan</span>
+          <span className="bp-kicker">{plan.repo ? `The plan for a change${run.repo ? ` to ${run.repo.name}` : ""}` : "The plan"}</span>
           <h2>{plan.name}</h2>
           <p>{plan.summary}</p>
         </div>
         <div className="bp-stats">
-          <Stat n={screens.length} l="screens" />
-          <Stat n={plan.entities?.length ?? 0} l="kinds of data" />
-          <Stat n={plan.flows?.length ?? 0} l="ways it's used" />
+          {plan.repo ? <>
+            <Stat n={plan.features?.length ?? route.length} l="features" />
+            <Stat n={plan.files?.length ?? 0} l="files touched" />
+          </> : <>
+            <Stat n={screens.length} l="screens" />
+            <Stat n={plan.entities?.length ?? 0} l="kinds of data" />
+            <Stat n={plan.flows?.length ?? 0} l="ways it's used" />
+          </>}
           <Stat n={plan.acceptance.length} l="checks for done" />
           {openGaps.length > 0 ? <Stat n={openGaps.length} l="gaps still open" warn /> : gaps.length > 0 ? <Stat n={gaps.length} l="gaps caught and added" /> : null}
         </div>
@@ -113,7 +127,7 @@ export function Blueprint({ run, compact }: { run: FactoryRunView; compact?: boo
       <section className="bp-sec">
         <div className="bp-sec-h">
           <h3>The build route</h3>
-          <p>{started ? `${built} of ${route.length} steps built${now ? `. Now: ${now.title}.` : "."}` : `The Builder takes these ${route.length} steps in order, one fresh session each. The locked tests run after every step.`}</p>
+          <p>{started ? `${built} of ${route.length} steps built${now ? `. Now: ${now.title}.` : "."}` : plan.repo ? `The Builder takes these ${route.length} step${route.length === 1 ? "" : "s"} in order on the branch. The repo's own tests run after every step: what passed before must still pass.` : `The Builder takes these ${route.length} steps in order, one fresh session each. The locked tests run after every step.`}</p>
         </div>
         <ol className="bp-strip" aria-label="Build route at a glance">
           {route.map((s, i) => {
@@ -140,7 +154,7 @@ export function Blueprint({ run, compact }: { run: FactoryRunView; compact?: boo
                   <div className="bp-card-h">
                     {s.kind === "screen" ? <Thumb n={Math.min(s.shows.length, 6)} /> : <span className={`bp-glyph g-${s.kind}`} aria-hidden />}
                     <div className="bp-card-t">
-                      <span className="bp-kind">{s.kind === "screen" ? "Screen" : s.kind === "shell" ? "Foundation" : "Logic"}</span>
+                      <span className="bp-kind">{plan.repo ? "Feature" : s.kind === "screen" ? "Screen" : s.kind === "shell" ? "Foundation" : "Logic"}</span>
                       <h4>{s.title}</h4>
                     </div>
                     <span className={`bp-state ${tone}`}>{label}{s.feature && s.feature.attempt > 1 ? ` · try ${s.feature.attempt}` : ""}</span>
@@ -157,7 +171,7 @@ export function Blueprint({ run, compact }: { run: FactoryRunView; compact?: boo
                     </div>
                   )}
                   {(more || (s.kind === "logic" && s.shows.length > 4)) && <button className="bp-more" onClick={() => setOpen(isOpen ? null : s.id)}>{isOpen ? "Show less" : "Show all"}</button>}
-                  {t > 0 && <div className="bp-tests"><span className="bp-bar"><i style={{ width: `${((s.feature!.passed ?? 0) / t) * 100}%` }} /></span><span>{s.feature!.passed}/{t} locked tests pass after this step</span></div>}
+                  {t > 0 && <div className="bp-tests"><span className="bp-bar"><i style={{ width: `${((s.feature!.passed ?? 0) / t) * 100}%` }} /></span><span>{s.feature!.passed}/{t} {plan.repo ? "of the repo's tests" : "locked tests"} pass after this step</span></div>}
                 </div>
               </li>
             );
@@ -181,11 +195,22 @@ export function Blueprint({ run, compact }: { run: FactoryRunView; compact?: boo
       )}
 
       <section className="bp-sec">
-        <div className="bp-sec-h"><h3>Done means</h3><p>Each line is a check the locked tests or the Reviewer hold the build to.</p></div>
+        <div className="bp-sec-h"><h3>Done means</h3><p>{plan.repo ? "Each line is a check the Reviewer runs on the branch before it reaches you." : "Each line is a check the locked tests or the Reviewer hold the build to."}</p></div>
         <ol className="bp-checks">
           {plan.acceptance.map((a, i) => { const [h, b] = headed(a); const k = `c${i}`; return <li key={i} className={open === k ? "open" : ""} onClick={() => setOpen(open === k ? null : k)} title={open === k ? "" : "Click to read it all"}><span className="bp-cn">{i + 1}</span><div>{h && <b>{h}</b>}<p>{b}</p></div></li>; })}
         </ol>
       </section>
+
+      {plan.repo && (plan.interface || plan.testing || (plan.risks?.length ?? 0) > 0) && (
+        <section className="bp-sec">
+          <div className="bp-sec-h"><h3>How it fits the codebase</h3><p>Where the change goes, how it is tested, and what the plan guards against.</p></div>
+          <ul className="bp-gaps">
+            {plan.interface && <li className="added"><span className="bp-gap-tag">approach</span><span>{plan.interface}</span></li>}
+            {plan.testing && <li className="added"><span className="bp-gap-tag">tests</span><span>{plan.testing}</span></li>}
+            {(plan.risks ?? []).map((r) => <li key={r}><span className="bp-gap-tag">risk</span><span>{r}</span></li>)}
+          </ul>
+        </section>
+      )}
 
       {gaps.length > 0 && (
         <section className="bp-sec">

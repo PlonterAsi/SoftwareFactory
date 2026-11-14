@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { showTicket } from "../../BugReport";
 import { AskBanner } from "../../Intake";
 import { ticketsApi, type TicketView } from "../../Tickets";
+import { GateActions } from "../../GateActions";
+import type { FactoryRunView } from "../../api";
 import type { PanelContext } from "../panels";
 
 /** The repo a project is worked in, when it has one and is not built by factory runs: its own GitHub repo, or one you imported. */
@@ -51,10 +53,53 @@ function RepoAsk({ projectId, name }: { projectId: number; name: string }) {
       <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder={`${ask.hint} The first line is the title.`} rows={3} aria-label="Your ask"
         onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void open(); } }} />
       <div className="rw-ask-foot">
-        <span className="rw-hint">It becomes a ticket. The crew works it on a branch of its own copy, and you look before anything is taken.</span>
+        <span className="rw-hint">It becomes a ticket. The crew works it on a branch of its own copy, and you look before anything is taken. A fix or a small task takes one Builder session; a feature gets the whole engine: designed, planned for your OK, built, reviewed and judged.</span>
         <button onClick={open} disabled={busy || !text.trim()}>{busy ? "Opening…" : "Open the ticket"}</button>
       </div>
       {err && <p className="alert-text" role="alert">{err}</p>}
+    </section>
+  );
+}
+
+const STATION_WORD: Record<string, string> = { intake: "setting up the clone", council: "the Council is talking it over", discover: "designing the change", plan: "planning", gateA: "the plan waits for you", tests: "running the repo's tests", build: "building", test: "testing", fix: "fixing", review: "the Reviewer is checking it", evaluate: "the judge is looking at the site", gateB: "the build waits for you", ship: "handing the branch over" };
+
+/** Where a run stands, in a few words. */
+function runWord(r: FactoryRunView): [string, string] {
+  if (r.waiting) return [r.waiting.gate === "gateA" ? "The plan waits for your OK" : r.waiting.gate === "gateB" ? "The build waits for your OK" : "Needs your call", "gate"];
+  if (r.finished) return r.finished.outcome === "shipped" ? [r.repo?.pr ? `Done: draft PR #${r.repo.pr.number}` : "Done: the branch is ready to take", "done"] : [r.finished.resumable ? "Stopped part way" : r.finished.outcome === "stopped" ? "Stopped" : "Failed", "fail"];
+  const at = Object.entries(r.stations).filter(([, v]) => v.state === "active").map(([k]) => k).at(-1);
+  return [at ? STATION_WORD[at] ?? at : "starting", "work"];
+}
+
+/** The engine's runs in this repo: each a feature being designed, planned, built and judged on its own branch. */
+function EngineRuns({ ctx }: { ctx: PanelContext }) {
+  const { project: p, factory, showRun } = ctx;
+  const mine = useMemo(() => factory.factoryRuns.filter((r) => p.runIds.includes(r.run)).reverse(), [factory.factoryRuns, p.runIds]);
+  if (!mine.length) return null;
+  return (
+    <section className="ms-card rw-runs" aria-label="Features on the engine">
+      <h4>Features on the engine<span className="mono rw-n">{mine.length}</span></h4>
+      <p className="rw-hint">Each one is designed, planned for your OK, built on its own branch, reviewed and judged on the running site.</p>
+      <ul>
+        {mine.slice(0, 4).map((r) => {
+          const [word, tone] = runWord(r);
+          return (
+            <li key={r.run} className={`rw-run tone-${tone}`}>
+              <div className="rw-run-head">
+                <i />
+                <button className="link rw-run-name" onClick={() => showRun(r.run)} title={r.idea}><span className="mono">#{r.run}</span> {r.plan?.name ?? r.idea.split("\n")[0].slice(0, 90)}</button>
+                <span className="rw-run-word">{word}</span>
+                <span className="mono muted">${r.spentUsd.toFixed(2)} of ${r.maxUsd.toFixed(2)}</span>
+                {r.repo?.pr && <a className="tk-prchip pr-open" href={r.repo.pr.url} target="_blank" rel="noreferrer">PR #{r.repo.pr.number}</a>}
+                <button className="ghost sm" onClick={() => showRun(r.run)}>Open the run</button>
+              </div>
+              {r.repo && <div className="rw-run-branch mono muted">{r.repo.branch}{r.repo.ticket ? ` · ${r.repo.ticket.key}` : ""}</div>}
+              {r.waiting && <GateActions run={r} compact />}
+            </li>
+          );
+        })}
+      </ul>
+      {mine.length > 4 && <a className="rw-more" href={`#/p/${p.id}/runs`}>and {mine.length - 4} more</a>}
     </section>
   );
 }
@@ -98,6 +143,7 @@ export function RepoWork({ ctx, repo }: { ctx: PanelContext; repo: WorkedRepo })
         </div>
         <a className="btn-ghost" href={`#/p/${p.id}/tickets`}>Open all tickets</a>
       </section>
+      <EngineRuns ctx={ctx} />
       {repo.imported && (
         <>
           <RepoAsk projectId={p.id} name={p.name} />

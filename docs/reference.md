@@ -172,6 +172,7 @@ Every row of the log is `{ id, ts, type, payload }`. A run's id is the id of its
 | Build | `factory.files`, `factory.feature`, `factory.fastgate`, `factory.ui`, `factory.screens`, `factory.screen.look`, `factory.links`, `factory.links.blanked` |
 | Fix | `factory.attempt`, `factory.ladder` |
 | Review and judge | `factory.review`, `factory.review.open`, `factory.evaluation`, `factory.repair`, `factory.repair.stopped` |
+| Engine in a repo | `factory.repo` (the clone, its branch, its stack, how its tests and site run), `factory.branch` (the branch handed over: its pull request, or why it stayed in the clone) |
 | Engine review | `factory.retro`, `factory.visual` |
 | Order Engine | `order.ingest`, `order.node`, `order.fragment`, `order.fragment.moved`, `order.fragment.pinned`, `order.conflict`, `order.conflict.resolved`, `order.sweep`, `order.sweep.undone`, `order.briefing`, `order.visual` |
 | Projects | `project.created`, `project.updated`, `project.linked`, `project.unlinked`, `project.budget` |
@@ -266,6 +267,7 @@ The installed app sets what it needs itself. These matter in development, tests 
 | Design: pass score, rounds, budget share | 4, 3, 35% | `PASS_SCORE`, `MAX_DISCOVERY_ROUNDS`, `DISCOVERY_BUDGET_SHARE` in `factory/discovery.ts` |
 | Views kept in a plan | 6 | `MAX_VIEWS` in `factory/loop.ts` |
 | Feature loop: starts at, budget share, least per feature | $3, 55%, $0.15 | `FEATURE_LOOP_MIN_USD`, `BUILD_BUDGET_SHARE`, `FEATURE_MIN_USD` in `factory/features.ts` |
+| Engine run in a repo: least it needs (below it the work takes one Builder session) | $1.50 | `REPO_ENGINE_MIN_USD` in `factory/reporun.ts` |
 | Judge: pass score, looks, per-screen look | 4, 2, $0.15 | `PRODUCT_PASS_SCORE`, `MAX_EVALUATION_ROUNDS`, `SCREEN_LOOK_USD` in `factory/evaluate.ts` |
 | Repair: budget share, per feature, least to start | 25%, $0.40, $0.30 | `REPAIR_BUDGET_SHARE`, `REPAIR_FEATURE_USD`, `REPAIR_FEATURE_MIN_USD` |
 | Run time | 30 min up to $2, in proportion above, 240 min at most | `factory/stoprules.ts` |
