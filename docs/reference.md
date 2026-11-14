@@ -141,6 +141,7 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 |---|---|
 | `GET /api/imports`, `POST /api/imports` | List; import `{ source, name?, maxUsd? }` |
 | `GET /api/imports/:projectId`, `POST /api/imports/:projectId/explore` | Detail with code map; explore again |
+| `POST /api/imports/follow` | `{ on }`: keep imported repos current by themselves. Every 12 hours each source is asked for its newest commit (free); when it moved, the repo is explored again (at most $0.15 a time, $0.50 a day in all) and the Improvement Council has a reason to look at the project again. On by default; setting `importsFollow` |
 | `GET /api/launch/projects/:id` | How this project can be run |
 | `POST /api/launch/projects/:id/start` \| `go` \| `folder` \| `terminal` \| `files` \| `samples` | Start a way of running it; one-press start; use a folder of yours; open a terminal; save, rename or delete a data file; make sample inputs |
 | `GET /api/launch/projects/:id/files?dir=&path=` | Its data files |
@@ -179,7 +180,7 @@ Every row of the log is `{ id, ts, type, payload }`. A run's id is the id of its
 | Brain | `brain.principle.saved`, `brain.principle.reset`, `brain.suggestion.dismissed` |
 | Feature map | `featuremap.record.saved`, `featuremap.record.reset` |
 | Improvement | `improve.session`, `improve.seat`, `improve.proposal`, `improve.proposal.accepted`, `improve.proposal.decided`, `improve.proposal.linked`, `improve.visual` |
-| Imports | `repo.import.started`, `repo.imported`, `repo.import.failed`, `repo.explore.started`, `repo.explore.station`, `repo.explore.finished`, `repo.mapped`, `repo.module.understood`, `repo.suggestion` |
+| Imports | `repo.import.started`, `repo.imported`, `repo.import.failed`, `repo.explore.started`, `repo.explore.station`, `repo.explore.finished`, `repo.moved`, `repo.mapped`, `repo.module.understood`, `repo.suggestion` |
 | Launch | `launch.started`, `launch.url`, `launch.stopped`, `launch.exited` |
 | Finished apps | `integration.requested`, `integration.briefed`, `integration.decided`, `integration.installed`, `integration.failed`, `integration.removed`, `integration.used` |
 | Add-ons | `plugin.installed`, `plugin.enabled`, `plugin.disabled`, `plugin.failed`, `plugin.removed`, `plugin.data`, `plugin.log`, `plugin.emitted` |

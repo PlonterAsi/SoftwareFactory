@@ -164,7 +164,7 @@ export class ImproveCouncil {
       const d = projectDetail(this.log, p.id);
       if (!d) continue;
       d.runIds.forEach((r) => held.add(r));
-      add({ kind: "project", id: p.id, title: p.name }, newest([...notesIn(new Set(d.nodeIds)).map((f) => f.ts), ...d.runIds.map((r) => finished.get(r)), p.summary ? p.createdAt : null]));
+      add({ kind: "project", id: p.id, title: p.name }, newest([...notesIn(new Set(d.nodeIds)).map((f) => f.ts), ...d.runIds.map((r) => finished.get(r)), p.summary ? p.createdAt : null, ...[...changeSources.values()].map((fn) => fn(this.log, p.id))]));
     }
     // An idea inside a project with enough notes gets its own look.
     for (const n of st.nodes.filter((x) => x.mergedInto == null && x.kind === "idea" && x.parentId != null)) {
@@ -451,6 +451,11 @@ export class ImproveCouncil {
 export type ContextSource = (log: EventLog, target: Target) => string | null | undefined;
 const contextSources = new Map<string, ContextSource>();
 export function registerImproveContext(name: string, fn: ContextSource) { contextSources.set(name, fn); }
+
+/** Other parts of the factory can say when a project last changed in a way worth a new look (an imported repo that moved). */
+export type ChangeSource = (log: EventLog, projectId: number) => string | null | undefined;
+const changeSources = new Map<string, ChangeSource>();
+export function registerImproveChange(name: string, fn: ChangeSource) { changeSources.set(name, fn); }
 
 interface RunRow { id: number; idea: string; plan_name: string | null; outcome: string | null; reason: string | null; total_usd: number | null; fix_rounds: number | null }
 const runLine = (r: RunRow) => `run #${r.id} ${r.plan_name ?? r.idea.slice(0, 80)}: ${r.outcome ?? "in flight"}${r.total_usd != null ? `, $${r.total_usd.toFixed(3)}` : ""}${r.fix_rounds ? `, ${r.fix_rounds} fix rounds` : ""}${r.outcome && r.outcome !== "shipped" && r.reason ? ` (${r.reason.slice(0, 100)})` : ""}`;

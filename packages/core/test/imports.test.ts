@@ -142,6 +142,38 @@ describe("importing and exploring", () => {
     expect(importOf(log, projectId)?.explores).toBe(3);
   });
 
+  it("follows a repo by itself: explores again only when the source moved, inside the follow caps, and the Council gets a reason to look again", async () => {
+    const src = fixtureRepo();
+    const log = new EventLog();
+    const rt = new MockRuntime({ delayMs: 0 });
+    const x = new RepoExplorer(log, rt, tmp(), new AgentBay(log));
+    const { projectId, done } = x.importRepo(src);
+    await done;
+    const explores = () => (log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'repo.explore.started'").get() as { n: number }).n;
+    const before = explores();
+    const t0 = Date.now();
+    // Nothing moved: a free look and nothing else.
+    expect(await x.followTick(t0)).toEqual([]);
+    expect(explores()).toBe(before);
+    // New commit at the source, but it was looked at a moment ago: not due yet.
+    writeFileSync(join(src, "src/pricing/price.js"), "export function price(item) { return item.cents * (item.qty ?? 1) * 2; }\n");
+    commit(src, "double");
+    expect(await x.followTick(t0 + 60_000)).toEqual([]);
+    // Due: it sees the move and explores again, marked as its own doing.
+    expect(await x.followTick(t0 + 13 * 3_600_000)).toEqual([projectId]);
+    expect(explores()).toBe(before + 1);
+    const started = JSON.parse((log.db.prepare("SELECT payload FROM events WHERE type = 'repo.explore.started' ORDER BY id DESC LIMIT 1").get() as { payload: string }).payload);
+    expect(started).toMatchObject({ trigger: "auto", capUsd: 0.15 });
+    expect(log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'repo.moved'").get()).toEqual({ n: 1 });
+    expect(importOf(log, projectId)!.mappedHead).toBe(git(src, "rev-parse", "HEAD"));
+    // The original folder is still never written to.
+    expect(git(src, "status", "--porcelain")).toBe("");
+    // Switched off: it does not look at all.
+    x.follow.on = false;
+    writeFileSync(join(src, "README.md"), "# Shop 2\n"); commit(src, "readme");
+    expect(await x.followTick(t0 + 40 * 3_600_000)).toEqual([]);
+  }, 30_000);
+
   it("stays inside the cap: estimates first and maps the biggest modules it can afford", async () => {
     const dir = fixtureRepo();
     const log = new EventLog();

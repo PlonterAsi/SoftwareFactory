@@ -21,6 +21,7 @@ export interface ImportDetailView {
   import: ImportRowView; map: { explore: number; ts: string; map: CodeMapView } | null;
   notes: Record<string, { purpose: string; role: string; risks: string[]; by: string; hash: string }>;
   suggestions: SuggestionView[]; explores: ({ id: number; ts: string; type: string } & Record<string, any>)[]; busy: boolean; maxUsd: number; mode: "agent" | "heuristic";
+  follow?: { on: boolean; everyHours: number; maxUsd: number; dailyUsd: number; spentTodayUsd: number };
 }
 
 const j = async <T,>(r: Response): Promise<T> => { const b = await r.json(); if (!r.ok) throw new Error(b.error ?? r.statusText); return b as T; };
@@ -28,6 +29,7 @@ export const importsApi = {
   list: () => fetch(`${API}/api/imports`).then((r) => j<{ imports: ImportRowView[]; maxUsd: number; mode: string }>(r)),
   detail: (id: number) => fetch(`${API}/api/imports/${id}`).then((r) => j<ImportDetailView>(r)),
   start: (source: string, maxUsd?: number) => fetch(`${API}/api/imports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source, maxUsd }) }).then((r) => j<{ projectId: number; existing: boolean }>(r)),
+  follow: (on: boolean) => fetch(`${API}/api/imports/follow`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on }) }).then((r) => j<{ on: boolean }>(r)),
   explore: (id: number) => fetch(`${API}/api/imports/${id}/explore`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).then((r) => j<{ projectId: number }>(r)),
 };
 
@@ -35,7 +37,7 @@ export const importsApi = {
 export function useImportDetail(projectId: number, events: SfEvent[]) {
   const [detail, setDetail] = useState<ImportDetailView | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const relevant = events.filter((e) => e.type.startsWith("repo.") || e.type.startsWith("improve.")).at(-1)?.id ?? 0;
+  const relevant = events.filter((e) => e.type.startsWith("repo.") || e.type.startsWith("improve.") || (e.type === "settings.changed" && (e.payload as { key?: string } | undefined)?.key === "importsFollow")).at(-1)?.id ?? 0;
   useEffect(() => {
     let stop = false;
     const t = setTimeout(() => importsApi.detail(projectId).then((d) => { if (!stop) { setDetail(d); setErr(null); } }).catch((e) => !stop && setErr((e as Error).message)), 150);
@@ -207,6 +209,13 @@ export function CodeMapPanel({ projectId, events, onOpenCouncil }: { projectId: 
             <span className="muted small cm-mode">{detail.mode === "agent" ? "real crew" : "practice crew: free heuristics"}</span>
             <button className="ghost sm" disabled={detail.busy || detail.import.status === "importing"} onClick={() => importsApi.explore(detail.import.projectId).catch((e) => setMsg((e as Error).message))}>{detail.busy ? "Exploring…" : "Explore again"}</button>
           </div>
+          {detail.follow && (
+            <label className="cm-follow small" title={`SoftwareFactory looks at the repo every ${detail.follow.everyHours} hours, which is free. When it has new commits it explores again, paying only for what changed: at most ${usd(detail.follow.maxUsd)} a time and ${usd(detail.follow.dailyUsd)} a day for all imported repos. The Improvement Council then looks at the project again.`}>
+              <input type="checkbox" checked={detail.follow.on} onChange={(e) => importsApi.follow(e.target.checked).then(() => setMsg(null)).catch((x) => setMsg((x as Error).message))} />
+              <span>Keep up with the repo by itself</span>
+              <span className="muted">{detail.follow.on ? `checks every ${detail.follow.everyHours} h · ${usd(detail.follow.spentTodayUsd)} of ${usd(detail.follow.dailyUsd)} used today` : "off: it only looks when you press Explore again"}</span>
+            </label>
+          )}
           {detail.import.error && <div className="cm-error">{detail.import.error}</div>}
           {map && (
             <div className="cm-facts mono small">
