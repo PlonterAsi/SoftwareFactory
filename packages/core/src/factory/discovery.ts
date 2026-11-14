@@ -137,31 +137,90 @@ export function validateCritique(j: unknown): Critique {
 export const critiquePasses = (c: Critique) => RUBRIC.every((k) => c.scores[k] >= PASS_SCORE);
 export const critiqueTotal = (c: Critique) => RUBRIC.reduce((a, k) => a + c.scores[k], 0);
 
-/** What the Critic is asked. It sees the person's words and the documents, never the Designer's reasoning. */
-export function critiquePrompt(idea: string, docs: ProductDocs, round: number): string {
+/**
+ * What the Critic is asked. It sees the person's words and the documents, never the Designer's reasoning.
+ *
+ * On a later round it also sees its own last scores and problems. Runs 3185 to 4004: `buildable` stayed at 3
+ * for three rounds "for new reasons" each time. The Designer fixed what was listed and the Critic, starting
+ * blank, found something else to hold the score down, so the loop could not end. A judge that sees what it
+ * asked for checks that first, and a new problem has to be worth a round.
+ */
+export function critiquePrompt(idea: string, docs: ProductDocs, round: number, before?: Critique): string {
   return [
     `What the person asked for, in their words:\n${idea}`,
     `The product documents (round ${round}):\n${JSON.stringify(docs, null, 2)}`,
+    before ? [
+      `You judged the version before this one. Your scores then: ${RUBRIC.map((k) => `${k} ${before.scores[k]}`).join(", ")}. The problems you listed, which the Designer was told to fix:`,
+      before.problems.map((p, i) => `${i + 1}. ${p.where ? `[${p.where}] ` : ""}${p.problem}${p.fix ? ` Fix asked: ${p.fix}` : ""}`).join("\n") || "(none)",
+      "First check each of those against the documents above: is it fixed? A score goes up when the problems that held it down are fixed. Do not put a new, smaller problem in a fixed one's place to keep a score where it was. List a new problem only when the revision brought it in, or when a real user of the product would be stopped by it. A problem you list again says what is still missing.",
+    ].join("\n") : "",
     `Score each of these from 1 (fails) to 5 (clearly true). Be hard to please: a 4 means a real user would not notice a problem.\n${RUBRIC.map((k) => `- ${k}: ${RUBRIC_TEXT[k]}`).join("\n")}`,
     "For every score under 5, list the concrete problem and the change that would fix it.",
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
-/** What the Designer gets on a later round: its own documents and what the Critic found. */
-export function revisePrompt(idea: string, docs: ProductDocs, c: Critique, round: number): string {
+/** What the Designer gets on a later round: its own documents and what the Critic found. On the last round, what cannot be fixed is cut. */
+export function revisePrompt(idea: string, docs: ProductDocs, c: Critique, round: number, last = false): string {
   return [
     `Idea: ${idea}`,
     `Round ${round}. Your product documents so far:\n${JSON.stringify(docs, null, 2)}`,
     `A critic scored them (1 to 5, ${PASS_SCORE} passes): ${RUBRIC.map((k) => `${k} ${c.scores[k]}`).join(", ")}.`,
     `Problems to fix:\n${c.problems.map((p) => `- ${p.where ? `[${p.where}] ` : ""}${p.problem}${p.fix ? ` Fix: ${p.fix}` : ""}`).join("\n") || "- (none listed; raise every score under the bar)"}`,
     "Return the whole set of documents again in the same JSON shape, with every problem fixed. Keep what already works. Do not drop anything the person asked for.",
+    last ? "This is the last round, so nothing may stay open. A problem you cannot fully fix is settled by making the design smaller: a value no origin can really supply leaves the screen, or becomes something the person enters, or a fixed set written out in a rule from the research; a step that depends on it is rewritten without it. What the person asked for by name is never removed: give it its simplest honest form. Say in \"assumptions\" what you cut and why." : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+/**
+ * The next version of a shipped app (docs/engine.md "The next version runs on the same engine").
+ *
+ * A shipped product is changed far more often than it is started, and that path had no design at all: the ask
+ * went straight to the Planner, nothing judged the result as a product, and nothing remembered the design the
+ * first version was built from. The design now travels with the app: the next version starts from the documents
+ * the last one settled on, the ask becomes part of them, and the judge checks what this version adds.
+ */
+
+/** The design with the person's new ask as one more requirement of theirs: what a small next version is judged on. */
+export function withAsk(base: ProductDocs, ask: string): ProductDocs {
+  const text = keepWhole(ask, DOC_LIMITS.requirementChars);
+  if (!text || base.requirements.some((r) => r.text === text)) return base;
+  const n = 1 + Math.max(0, ...base.requirements.map((r) => Number(r.id.match(/^N(\d+)$/)?.[1] ?? 0)));
+  return { ...base, requirements: [...base.requirements, { id: `N${n}`, text, from: "person", must: true }] };
+}
+
+/** What the Designer is asked for a next version: the same documents, changed only where the ask needs it. */
+export function nextVersionPrompt(ask: string, base: ProductDocs): string {
+  return [
+    `This product already shipped. Its product documents, as built:\n${JSON.stringify(base, null, 2)}`,
+    `The person who uses it now asks for this, for its next version:\n${ask}`,
+    "Return the whole set of documents again in the same JSON shape, changed only where the ask needs it: the screens it touches or adds, the journey steps that change, the rules it needs, and one requirement per thing the ask names (from \"person\", with a new id that continues the numbering). Keep every existing requirement with its id and its words, and every screen id. Do not redesign what works and do not search the web: design the change from the documents and the ask.",
   ].join("\n\n");
 }
 
-/** The documents as the Planner reads them. */
-export function docsForPlanner(d: ProductDocs): string {
+/**
+ * The Designer's next-version documents on top of the shipped ones. Nothing that shipped may fall out because
+ * an agent forgot it: every shipped requirement stays (with its words), a shipped screen or rule the answer
+ * left out is put back, and the research is kept.
+ */
+export function mergeNextDocs(base: ProductDocs, next: ProductDocs): ProductDocs {
+  const baseIds = new Set(base.requirements.map((r) => r.id));
+  const baseTexts = new Set(base.requirements.map((r) => r.text));
+  const added = next.requirements.filter((r) => !baseTexts.has(r.text)).map((r, i) => (baseIds.has(r.id) ? { ...r, id: `N${base.requirements.length + i + 1}` } : r));
+  const screens = [...next.screens, ...base.screens.filter((s) => !next.screens.some((x) => x.id === s.id))].slice(0, 6);
+  const rules = [...next.rules, ...base.rules.filter((r) => !next.rules.some((x) => (x.name && x.name === r.name) || x.rule === r.rule))].slice(0, DOC_LIMITS.rules);
+  return { ...next, research: base.research, screens, rules, requirements: [...base.requirements, ...added] };
+}
+
+/** What a next version adds to the design: the requirements the shipped documents did not have. The judge checks these. */
+export function newRequirements(base: ProductDocs, docs: ProductDocs): ProductDocs["requirements"] {
+  const had = new Set(base.requirements.map((r) => `${r.id}\n${r.text}`));
+  return docs.requirements.filter((r) => !had.has(`${r.id}\n${r.text}`));
+}
+
+/** The documents as the Planner reads them. For a next version the shipped plan already implements most of them. */
+export function docsForPlanner(d: ProductDocs, next?: { added: ProductDocs["requirements"] }): string {
   return [
-    "Product documents (the design this plan implements; they were written and reviewed before you):",
+    next ? "Product documents of the next version (the shipped design with the person's ask designed in; written and reviewed before you):" : "Product documents (the design this plan implements; they were written and reviewed before you):",
     `Who it is for: ${d.brief.who}`,
     `Problem: ${d.brief.problem}`,
     `Promise: ${d.brief.promise}`,
@@ -171,7 +230,9 @@ export function docsForPlanner(d: ProductDocs): string {
     `Requirements:\n${d.requirements.map((r) => `- ${r.id}${r.must ? "" : " (nice to have)"}: ${r.text}`).join("\n")}`,
     d.rules?.length ? `The product's rules (implement them exactly; each needs a test):\n${d.rules.map((r) => `- ${r.name ? `${r.name}: ` : ""}${r.rule}`).join("\n")}` : "",
     d.research.length ? `What the research found:\n${d.research.map((r) => `- ${r.finding}${r.source ? ` (${r.source})` : ""}`).join("\n")}` : "",
-    "Implement this design: one view per screen with the same id (the home screen's view has id \"dashboard\"), one flow per journey, and acceptance criteria that cover every requirement not marked nice to have.",
+    next
+      ? `The shipped plan already implements this design except what is new. New in this version:\n${next.added.map((r) => `- ${r.id}: ${r.text}`).join("\n") || "- (nothing listed: plan what the ask needs)"}\nKeep the shipped views with their ids; add a view only for a screen the shipped plan does not have; say in a view's \"shows\" what this version changes on it; and write acceptance criteria only for what is new.`
+      : "Implement this design: one view per screen with the same id (the home screen's view has id \"dashboard\"), one flow per journey, and acceptance criteria that cover every requirement not marked nice to have.",
   ].filter(Boolean).join("\n\n");
 }
 

@@ -114,7 +114,7 @@ export interface FactoryRunView {
   resumed?: { from: string; auto: boolean; count: number; at: string };
 }
 
-export interface EvaluationView { round: number; pass: boolean; skipped?: string; bar: number; screens: number; requirements: { id: string; met: boolean; evidence: string }[]; scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] }
+export interface EvaluationView { round: number; pass: boolean; skipped?: string; bar: number; screens: number; requirements: { id: string; met: boolean; evidence: string; /** Set for a screen item carried from the build: it is in no product document. */ text?: string }[]; scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] }
 /** The approved spec as the Planner wrote it. Everything past tasks and acceptance is optional (older plans lack it). */
 export interface PlanView {
   name: string; summary: string; acceptance: string[];

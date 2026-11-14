@@ -118,7 +118,11 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
     if (again.length) (still.length ? bad : good).push(`Builder: ${still.length ? `${still.length} of ${plural(again.length, "screen")} sent back still missed designed items on the second look (${still.map((l) => `${l.screen}: ${l.seen} of ${l.of}`).join(", ")})` : `every screen sent back had what was missing on the second look (${plural(again.length, "screen")})`}.`);
   }
   const blanked = of("factory.links.blanked").flatMap((b) => b.links ?? []);
-  if (blanked.length) bad.push(`Builder: left ${plural(blanked.length, "made-up link")} after being told twice; the core emptied ${blanked.length === 1 ? "it" : "them"} (${String(blanked[0]).slice(0, 120)}).`);
+  const foundLinks = of("factory.links.found").flatMap((b) => b.links ?? []);
+  if (foundLinks.length) good.push(`Checks: ${plural(foundLinks.length, "made-up link")} replaced by the real page a web search found, each opened by the core first (${String(foundLinks[0]?.dead).slice(0, 80)} became ${String(foundLinks[0]?.real).slice(0, 80)}).`);
+  if (blanked.length) bad.push(`Builder: wrote ${plural(blanked.length, "made-up link")} no search could find a real page for; the core emptied ${blanked.length === 1 ? "it" : "them"} (${String(blanked[0]).slice(0, 120)}).`);
+  const carried = Object.values(of("factory.screen.look").reduce((m: Record<string, string[]>, l) => { if (l.feature && Array.isArray(l.open)) m[l.feature] = l.open; return m; }, {})).flat();
+  if (carried.length) bad.push(`Build loop: ${plural(carried.length, "designed screen item")} still missing after the Builder's second try went to the judge's list for the whole app.`);
   const unmatched = allLooks.filter((l) => l.skipped);
   if (unmatched.length) bad.push(`Planner: ${plural(unmatched.length, "view")} matched no designed screen, so the judge could not look at ${unmatched.length === 1 ? "it" : "them"} while building (${unmatched.map((l) => l.screen).join(", ")}).`);
   const firstScreens = of("factory.screens")[0];

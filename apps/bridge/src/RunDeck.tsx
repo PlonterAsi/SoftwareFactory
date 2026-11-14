@@ -237,6 +237,8 @@ export function JudgeView({ run }: { run: FactoryRunView }) {
   const e = run.evaluations[i];
   if (e.skipped) return <div className="empty">Not judged: {e.skipped}.</div>;
   const met = e.requirements.filter((q) => q.met).length;
+  // What each id asks for: the design's requirements, or a screen item carried from the build (it brings its own text).
+  const asked = new Map((run.discovery.at(-1)?.docs.requirements ?? []).map((q) => [q.id, q.text]));
   return (
     <div className="product">
       <div className="product-top">
@@ -249,7 +251,7 @@ export function JudgeView({ run }: { run: FactoryRunView }) {
         ))}
       </div>
       <table className="product-reqs"><tbody>
-        {e.requirements.map((q) => <tr key={q.id} className={q.met ? "" : "unmet"}><td className="mono muted">{q.id}</td><td>{q.met ? "✓ seen working" : "✗ not seen"}</td><td>{q.evidence}</td></tr>)}
+        {e.requirements.map((q) => <tr key={q.id} className={q.met ? "" : "unmet"}><td className="mono muted">{q.id}</td><td>{q.met ? "✓ seen working" : "✗ not seen"}</td><td>{(q.text ?? asked.get(q.id)) && <div className="req-asked">{q.text ?? asked.get(q.id)}</div>}<span className="muted">{q.evidence}</span></td></tr>)}
       </tbody></table>
       {!!e.problems.length && <BriefList title="What a user would hit" cls="concerns" items={e.problems.map((p) => `${p.where ? `${p.where}: ` : ""}${p.problem}${p.fix ? ` → ${p.fix}` : ""}`)} />}
     </div>

@@ -13,9 +13,9 @@ import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
-import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, RUBRIC, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
-import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
-import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
+import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mergeNextDocs, mustRequirements, newRequirements, nextVersionPrompt, withAsk, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
+import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featureCapUsd, featurePrompt, featuresFile, featuresOf, nextFeaturesOf, progressEntry, type Feature } from "./features.js";
+import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, withScreenItems, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
 import { visualCheck } from "./visualize.js";
@@ -23,7 +23,7 @@ import { checkUi, uiCase } from "./uicheck.js";
 import { appCase, checkApp, checkAppLive, installKit, isKitFile, probeStart } from "./appkit.js";
 import { checkScreens, readScreens, screenCase, type ScreenCheck } from "./screencheck.js";
 import { dryRunTests, lockedTestFaults } from "./testcheck.js";
-import { checkLinks, linkCase, linkFiles, type LinkCheck } from "./linkcheck.js";
+import { FIND_LINKS_MAX, FIND_LINKS_USD, checkLinks, findLinksPrompt, linkCase, linkContext, linkFiles, validateFoundLinks, type LinkCheck } from "./linkcheck.js";
 import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, answerSummary, changedFiles, hasWorkbench, restoreFromHead, restoreProtected, testDispute, workbenchContract, writtenOnDisk } from "./workbench.js";
 import {
   commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, runTests, syntaxErrors, testsHash, writeFiles, type TestRun,
@@ -381,6 +381,11 @@ class Run {
   private docsCritique: Critique | null = null;
   /** A feature run: the plan that shipped, which the next version builds on. */
   private basePlan: Plan | null = null;
+  /** A next version: the product documents the app shipped with, and the idea its first version was built from. */
+  private baseDocs: ProductDocs | null = null;
+  private firstIdea = "";
+  /** What the person asked for, as the Critic and the judge read it: for a next version, the first idea and then the ask. */
+  private get asked(): string { return this.baseDocs && this.firstIdea ? `${this.firstIdea}\n\nThe app shipped. For its next version the person now asks: ${this.idea}` : this.idea; }
 
   constructor(
     private f: Factory, private log: EventLog, private runtime: AgentRuntime,
@@ -396,6 +401,9 @@ class Run {
         const base = restoreState(this.log, this.screen.baseRun);
         this.basePlan = base.plan ?? null;
         if (!this.dir) this.dir = base.dir ?? "";
+        const shipped = shippedDesign(this.log, this.screen.baseRun);
+        this.baseDocs = shipped.docs;
+        this.firstIdea = shipped.idea;
       }
       const done = from?.done ?? new Set<string>();
       if (!done.has("intake")) await this.station("intake", async () => { captureSignal(this.log, this.idea, "factory"); });
@@ -430,6 +438,7 @@ class Run {
     this.reviewNotes = st.review;
     this.evaluation = st.evaluation;
     this.pendingSendBack = st.sentBack;
+    this.screenOpen = new Map(Object.entries(st.screenOpen ?? {}));
     if (st.plan) { this.plan = st.plan; this.dir = st.dir ?? ""; }
     if (st.lockedHash) {
       this.lockedHash = st.lockedHash;
@@ -488,32 +497,43 @@ class Run {
    */
   private async discoverLoop() {
     // The next version of a shipped app keeps the design it has: its plan is the base.
-    if (this.screen) { this.mark("discover", "skipped", undefined, "The next version of a shipped app keeps its design"); return; }
+    const base = this.screen?.kind === "feature" ? this.baseDocs : null;
+    if (this.screen && !base) { this.mark("discover", "skipped", undefined, "The next version of a shipped app keeps its design"); return; }
+    // A next version starts from the design the app shipped with. A small one (or the practice crew) keeps it
+    // and adds the ask as one more requirement; a product-sized one has the Designer design the ask in.
+    if (base && !(this.bench && this.o.maxUsd >= FEATURE_LOOP_MIN_USD)) {
+      this.docs = withAsk(base, this.idea);
+      this.log.append("factory.discovery", { run: this.id, round: 1, docs: this.docs, critique: null, pass: true, bar: PASS_SCORE, kept: this.screen!.baseRun });
+      this.mark("discover", "skipped", undefined, "The shipped design is kept, with what you asked for added to its requirements");
+      return;
+    }
+    const rounds = base ? NEXT_VERSION_ROUNDS : MAX_DISCOVERY_ROUNDS;
     let best: { docs: ProductDocs; critique: Critique | null; round: number } | null = null;
     let last: { docs: ProductDocs; critique: Critique | null } | null = null;
     let why = "";
     let found: Finding[] | null = null;
-    for (let round = 1; round <= MAX_DISCOVERY_ROUNDS; round++) {
+    for (let round = 1; round <= rounds; round++) {
       const got = await this.station("discover", async () => {
         const designer = this.one("design");
         // Design is worth a real share of the run, but a small run cannot afford much research: say so up front.
         const designCap = Math.min(designer.budgetUsd, this.o.maxUsd * 0.25);
-        const searches = round > 1 ? 0 : designCap >= 0.3 ? 6 : designCap >= 0.12 ? 2 : 0;
+        const searches = round > 1 || base ? 0 : designCap >= 0.3 ? 6 : designCap >= 0.12 ? 2 : 0;
         // Research is a step of its own, not a suggestion: in run 2898 the Designer was offered six searches,
         // answered in one turn without any, and designed a research product from memory.
         if (searches && this.bench && !found) found = await this.research(designer, searches, designCap);
         const prompt = (last?.critique
-          ? revisePrompt(this.idea, last.docs, last.critique, round)
+          ? revisePrompt(this.asked, last.docs, last.critique, round, round === rounds)
+          : base ? `${nextVersionPrompt(this.idea, base)}${this.brief ? `\n\n${briefText(this.brief)}` : ""}`
           : `Idea: ${this.idea}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}`)
           + (found?.length ? `\n\n${researchForDesigner(found)}` : "")
           + `\n\n${found ? "Do not search the web on this call: the research above is what was found." : searches ? `You can afford at most ${searches} web searches on this call.` : "Do not search the web on this call: work from what you know and what is above."}`;
         let docs: ProductDocs;
-        try { docs = validateDocs(parseJsonBlock(await this.ask(designer, prompt, { round }, { capUsd: designCap }))); }
+        try { docs = validateDocs(parseJsonBlock(await this.ask(designer, prompt, { round }, { capUsd: designCap }))); if (base) docs = mergeNextDocs(base, docs); }
         catch (e) { if (!(e instanceof StopRun)) this.verdict(designer, "design", false, round, (e as Error).message); throw e; }
         // A separate agent judges: an agent asked to grade its own design praises it.
         const critic = this.one("critique");
         let critique: Critique | null = null;
-        try { critique = validateCritique(parseJsonBlock(await this.ask(critic, critiquePrompt(this.idea, docs, round), { round }, { capUsd: Math.max(0.05, this.o.maxUsd * 0.1) }))); }
+        try { critique = validateCritique(parseJsonBlock(await this.ask(critic, critiquePrompt(this.asked, docs, round, last?.critique ?? undefined), { round }, { capUsd: Math.max(0.05, this.o.maxUsd * 0.1) }))); }
         catch (e) { if (e instanceof StopRun) throw e; this.verdict(critic, "critique", false, round, (e as Error).message); }
         const pass = !!critique && critiquePasses(critique);
         if (critique) this.verdict(designer, "design", pass, round, pass ? undefined : critique.problems[0]?.problem);
@@ -524,7 +544,7 @@ class Run {
       if (!best || (got.critique ? critiqueTotal(got.critique) : 0) >= (best.critique ? critiqueTotal(best.critique) : 0)) best = { ...got, round };
       if (got.pass) break;
       if (!got.critique) { why = "the Critic gave no usable scores"; break; }
-      if (round === MAX_DISCOVERY_ROUNDS) { why = `still under the bar after ${round} rounds`; break; }
+      if (round === rounds) { why = `still under the bar after ${round} rounds`; break; }
       if (this.spent >= this.o.maxUsd * DISCOVERY_BUDGET_SHARE) { why = "discovery used its share of the budget"; break; }
     }
     this.docs = best!.docs;
@@ -560,7 +580,7 @@ class Run {
         const onTop = this.basePlan
           ? `This app already shipped. Its approved plan:\n${JSON.stringify(this.basePlan, null, 2)}\n\nThe person now asks to add: ${this.idea}\n\nWrite the plan for its next version in the same JSON shape: keep the same name and slug, and every existing entity, field, view, flow and exported function (they still work and their tests stay locked); add what the ask needs. New fields on existing entities are optional, so records already saved still load. In "acceptance", list ONLY the new criteria: the old ones stay as they are.`
           : `Idea: ${this.idea}`;
-        const text = await this.ask(this.one("plan"), `${onTop}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${this.docs ? `\n\n${docsForPlanner(this.docs)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
+        const text = await this.ask(this.one("plan"), `${onTop}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${this.docs ? `\n\n${docsForPlanner(this.docs, this.basePlan && this.baseDocs ? { added: newRequirements(this.baseDocs, this.docs) } : undefined)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
         let plan = validatePlan(parseJsonBlock<Plan>(text));
         // Nothing the person asked for may fall out of the plan (run 2623's plan dropped the skill tree, the
         // practice plan, the session log and the genre shapes). A second agent lists what the plan misses; the
@@ -579,7 +599,7 @@ class Run {
         }
         if (this.docs && !this.basePlan) {
           const fixed = withDesignedScreens(plan, this.docs);
-          if (fixed.added.length) { plan = fixed.plan; this.log.append("factory.plan.gaps", { run: this.id, missing: fixed.added.map((n) => `screen: ${n}`), addedByCore: true }); }
+          if (fixed.added.length) { plan = fixed.plan; this.log.append("factory.plan.gaps", { run: this.id, missing: fixed.added.map((n) => `screen: ${n}`), addedByCore: true, ...(fixed.replaced.length ? { replaced: fixed.replaced } : {}) }); }
         }
         if (this.basePlan) { plan.slug = this.basePlan.slug; plan.app = true; }
         this.plan = plan;
@@ -588,7 +608,7 @@ class Run {
           initRepo(this.dir);
         }
         // The product documents live in the project: every later agent and the person can read them there.
-        const spec = writeFiles(this.dir, [{ path: "SPEC.md", content: specMarkdown(this.idea, plan) }, ...(this.docs ? docsFiles(this.idea, this.docs, this.docsCritique) : [])], { lockTests: true });
+        const spec = writeFiles(this.dir, [{ path: "SPEC.md", content: specMarkdown(this.idea, plan) }, ...(this.docs ? docsFiles(this.asked, this.docs, this.docsCritique) : [])], { lockTests: true });
         const sha = commitAll(this.dir, `Spec and plan: ${plan.name}`);
         this.log.append("factory.plan", { run: this.id, plan, dir: this.dir, sha, written: spec.written });
       });
@@ -651,22 +671,21 @@ class Run {
     if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
     this.builder = this.one("build");
     // A real crew with a product-sized budget builds one feature per fresh session (features.ts).
-    if (this.bench && this.plan.app && !this.screen && this.o.maxUsd >= FEATURE_LOOP_MIN_USD) return this.buildByFeature();
+    // The next version of a shipped app is built the same way: what it adds, one feature per session.
+    if (this.bench && this.plan.app && (!this.screen || (this.screen.kind === "feature" && this.basePlan)) && this.o.maxUsd >= FEATURE_LOOP_MIN_USD) return this.buildByFeature();
     const text = await this.askBench(this.builder, this.screen?.kind === "feature"
       ? [
         `This app already shipped and its locked acceptance tests pass. Build its next version on top of the existing code: add what the spec adds (new entities, fields, views and logic) and keep everything that works.`,
         `Keep every existing export, entity, view and file working; records the person already saved must still load, so new fields are optional. All locked tests, old and new, must pass. Return only the files you add or change, each in full.`,
         `Spec of the next version:\n${JSON.stringify(this.plan, null, 2)}`,
-        `Locked acceptance tests (read only):\n${this.testsText()}`,
-        `Current code:\n${this.codeText()}`,
+        ...this.codeForBuilder(),
       ].join("\n\n")
       : this.screen
       ? [
         `This project already shipped and its locked acceptance tests pass, but it is a script, not a program. Turn it into a real app on the app kit (already in the folder), on top of the existing code: write src/schema.js (the entities it works on and keeps, such as its inputs, settings and a history of its results, each with sample records), web/app.js with views that run its logic through forms and draw the results, index.html and web/style.css.`,
         `Keep every existing export, file and command working (the CLI too, if there is one). If the logic the app needs lives in a module that imports node: modules, move the pure part into a browser-safe module under src/ and have the old module import it from there; work that truly needs the disk goes in api.js. The locked tests must still pass. Return only the files you add or change, each in full, and update README.md to say the app opens from the Run tab's Start.`,
         `Spec:\n${JSON.stringify(this.plan, null, 2)}`,
-        `Locked acceptance tests (read only):\n${this.testsText()}`,
-        `Current code:\n${this.codeText()}`,
+        ...this.codeForBuilder(),
       ].join("\n\n")
       : `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nLocked acceptance tests:\n${this.testsText()}`);
     const res = this.takeWork(text);
@@ -685,7 +704,8 @@ class Run {
   private async buildByFeature(more: Feature[] = [], pool?: number) {
     const builder = this.builder!;
     const path = join(this.dir, "features.json");
-    let features = featuresOf(this.plan, this.docs);
+    const next = this.screen?.kind === "feature" && this.basePlan ? this.screen : null;
+    let features = next ? nextFeaturesOf(this.basePlan!, this.plan, this.docs, this.idea, next.tag) : featuresOf(this.plan, this.docs);
     try {
       // Picked up again after a failed call: what is built stays built.
       const kept = (JSON.parse(readFileSync(path, "utf8")).features ?? []) as { id: string; state: string }[];
@@ -697,6 +717,8 @@ class Run {
     if (!existsSync(progress)) writeFileSync(progress, `# Progress\n\nOne entry per feature, written by SoftwareFactory after each build session.\n\n`);
     const buildStart = this.spent;
     let passing = new Set<string>();
+    // A next version starts on an app whose tests pass: a shipped test its first feature breaks is caught too.
+    if (next && !more.length) { try { passing = new Set((await runTests(this.dir)).cases.filter((c) => c.pass).map((c) => `${c.file}::${c.name}`)); } catch { /* judged from the first feature on */ } }
     let wroteAny = features.some((f) => f.state === "built");
     for (let i = 0; i < features.length; i++) {
       const f = features[i];
@@ -717,9 +739,9 @@ class Run {
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
         const left = features.filter((x) => x.state !== "built").length;
-        const cap = Math.min(builder.budgetUsd, Math.max(FEATURE_MIN_USD, ((pool ?? this.o.maxUsd * BUILD_BUDGET_SHARE) - (this.spent - buildStart)) / left));
+        const cap = Math.min(featureCapUsd(builder.budgetUsd, this.o.maxUsd), Math.max(FEATURE_MIN_USD, ((pool ?? this.o.maxUsd * BUILD_BUDGET_SHARE) - (this.spent - buildStart)) / left));
         this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: "building", attempt, capUsd: Number(cap.toFixed(3)) });
-        const text = await this.askBench(builder, featurePrompt(this.plan, features, f, !!this.docs, retry), { round: i + 1 }, { capUsd: cap });
+        const text = await this.askBench(builder, featurePrompt(this.plan, features, f, !!this.docs, retry), { round: i + 1 }, { capUsd: cap, raiseCap: cap > builder.budgetUsd });
         const res = this.takeWork(text);
         const files = res.written.map((w) => w.path).filter((p) => p !== "features.json" && p !== "PROGRESS.md");
         const t = await runTests(this.dir);
@@ -749,20 +771,14 @@ class Run {
             const mine = Object.keys(where).filter((u) => (files.includes(where[u]) || deadBefore.has(u)) && !this.linksSeen.has(u));
             const links = await this.f.checkLinks(mine).catch(() => null);
             for (const u of mine) this.linksSeen.add(u);
-            if (links && !links.skipped) deadLinks = links.dead.map((d) => `${d.url} (in ${where[d.url]})`).slice(0, 20);
-            for (const d of links?.dead ?? []) this.linksSeen.delete(d.url);
-            if (attempt === 1) deadBefore = new Set((links?.dead ?? []).map((d) => d.url));
-            // Run 4004: the Builder was told twice and still left made-up video links in the seed. An empty
-            // link is right and a made-up one is a defect, so after its second try the core empties them.
-            if (attempt === 2 && links && !links.skipped && links.dead.length) {
-              const blanked: string[] = [];
-              for (const d of links.dead) {
-                const file = where[d.url];
-                if (!file) continue;
-                try { const p = join(this.dir, file); const before = readFileSync(p, "utf8"); const after = before.split(d.url).join(""); if (after !== before) { writeFileSync(p, after); blanked.push(`${d.url} (in ${file})`); } } catch { /* left for the link check after the build */ }
-              }
-              if (blanked.length) { this.log.append("factory.links.blanked", { run: this.id, feature: f.id, links: blanked }); deadLinks = deadLinks.filter((x) => !blanked.includes(x)); }
-            }
+            // Run 4004: the Builder was told twice and still left made-up video links in the seed (it has no
+            // web search at its workbench). An agent that can search finds the real pages; what it cannot find,
+            // and what is still dead after the Builder's second try, the core empties: an empty link is right.
+            let dead = links && !links.skipped ? links.dead.map((d) => d.url) : [];
+            for (const u of dead) this.linksSeen.delete(u);
+            if (dead.length) dead = await this.settleDeadLinks(f, dead, where, attempt);
+            deadLinks = dead.map((u) => `${u} (in ${where[u]})`).slice(0, 20);
+            if (attempt === 1) deadBefore = new Set(dead);
           }
         }
         if (files.length && !broke.length && !invalid.length && /^(Screen|Judge): /.test(f.title)) {
@@ -783,7 +799,7 @@ class Run {
           retry = [
             invalid.length ? `The app kit refuses the schema you left, so the app cannot start:\n${invalid.join("\n")}\n\nFix src/schema.js: every field needs a lowerCamelCase "name" (letters and digits only, like "bandOverride"), a known type, and options for a choice.` : "",
             stored.length ? `These files keep data in the browser's localStorage or sessionStorage: ${stored.join(", ")}.\n\nEverything the person enters or changes (plans, settings, added items) is a record in the app's store: add the entity or field to src/schema.js and read and write it through the store the views get, never through the browser's storage.` : "",
-            deadLinks.length ? `The core opened every link you wrote and these do not exist:\n${deadLinks.join("\n")}\n\n${sources.length ? `Addresses the research found, which do exist:\n${sources.join("\n")}\n\n` : ""}Never write a link from memory. Use only addresses listed in docs/product/BRIEF.md (the research), or search the web for the real page and use the address the search returned. If you cannot find the real one, leave the link empty: an empty link is right, a made-up one is a defect.` : "",
+            deadLinks.length ? `The core opened every link you wrote and these do not exist:\n${deadLinks.join("\n")}\n\n${sources.length ? `Addresses the research found, which do exist:\n${sources.join("\n")}\n\n` : ""}Never write a link from memory. Use only addresses listed in docs/product/BRIEF.md (the research), copied exactly. Where the research has no page for it, leave the link empty: an empty link is right, a made-up one is a defect.` : "",
             hollow.length ? `A product judge opened the running app after your call and did not find these on the screen you built:\n${hollow.map((h) => `- ${h}`).join("\n")}\n\nMake each one real on that screen: shown with sample records from the seed, and every action a control that changes the data through the store.` : "",
             crashed.length ? `The core opened the app in a real browser after your call, and these screens did not draw:\n${crashed.slice(0, 10).join("\n").slice(0, 1500)}\n\nFix the cause in the page code (a value read before it exists, a wrong import, a missing record) and make sure every screen draws with the sample records and with none.` : "",
           ].filter(Boolean).join("\n\n");
@@ -802,6 +818,49 @@ class Run {
       }
     }
     if (!wroteAny && !more.length) throw new Error("The Builder returned no files");
+  }
+
+  /**
+   * Links the core opened and found dead, in files a feature just wrote. An agent with web search is asked
+   * once for the real page of each; the core opens what it answers and puts the ones that exist in place.
+   * When the search answered, or this is the Builder's second try, the rest are emptied. Returns the links
+   * still dead in the files (only when nobody could search on the first try: the Builder then gets one more).
+   */
+  private async settleDeadLinks(f: Feature, dead: string[], where: Record<string, string>, attempt: number): Promise<string[]> {
+    const read = (file: string) => { try { return readFileSync(join(this.dir, file), "utf8"); } catch { return ""; } };
+    let found: Record<string, string> | null = null;
+    if (attempt === 1 && this.bench && this.o.maxUsd - this.spent >= FIND_LINKS_USD * 2) {
+      const asked = dead.slice(0, FIND_LINKS_MAX).map((url) => ({ url, file: where[url] ?? "", context: linkContext(read(where[url] ?? ""), url) }));
+      try {
+        const got = validateFoundLinks(parseJsonBlock(await this.ask(this.one("design"), findLinksPrompt(this.plan.name, asked), { round: 0 }, { capUsd: FIND_LINKS_USD })), asked.map((a) => a.url));
+        const reals = [...new Set(Object.values(got))];
+        // Nothing is taken on the finder's word either: an address it returns is opened like any other.
+        const check = reals.length ? await this.f.checkLinks(reals).catch(() => null) : null;
+        const bad = new Set((check?.dead ?? []).map((d) => d.url));
+        found = !reals.length ? {} : !check || check.skipped ? null : Object.fromEntries(Object.entries(got).filter(([, real]) => !bad.has(real)));
+        this.log.append("factory.links.search", { run: this.id, feature: f.id, asked: asked.length, answered: Object.keys(got).length, real: found ? Object.keys(found).length : 0 });
+      } catch (e) { if (e instanceof StopRun) throw e; this.log.append("factory.links.search", { run: this.id, feature: f.id, asked: asked.length, answered: 0, real: 0, error: String((e as Error).message).slice(0, 200) }); }
+    }
+    if (!found && attempt === 1) return dead;
+    const replaced: { dead: string; real: string; file: string }[] = [];
+    const blanked: string[] = [];
+    // The longest first: one address may be the start of another.
+    for (const url of [...dead].sort((a, b) => b.length - a.length)) {
+      const file = where[url];
+      if (!file) continue;
+      const real = found?.[url] ?? "";
+      try {
+        const before = readFileSync(join(this.dir, file), "utf8");
+        const after = before.split(url).join(real);
+        if (after === before) continue;
+        writeFileSync(join(this.dir, file), after);
+        if (real) { replaced.push({ dead: url, real, file }); this.linksSeen.add(real); } else blanked.push(`${url} (in ${file})`);
+      } catch { /* left for the link check after the build */ }
+    }
+    if (replaced.length) this.log.append("factory.links.found", { run: this.id, feature: f.id, links: replaced });
+    if (blanked.length) this.log.append("factory.links.blanked", { run: this.id, feature: f.id, links: blanked });
+    const done = new Set([...replaced.map((r) => r.dead), ...blanked.map((b) => b.split(" (in ")[0])]);
+    return dead.filter((u) => !done.has(u));
   }
 
   /** A real crew works at the workbench (factory/workbench.ts): it runs the tests itself and fixes until they pass. */
@@ -1101,6 +1160,15 @@ class Run {
    * loop as work and is judged once more; what is still open then is shown at the build gate.
    */
   private evaluation: Evaluation | null = null;
+  /** Per screen feature, the designed items its last look did not find. They join the judge's requirements. */
+  private screenOpen = new Map<string, string[]>();
+  /** The product documents as the judge reads them: the design, plus what the screens still lacked when built. */
+  private judgeDocs(): ProductDocs | null {
+    if (!this.docs) return null;
+    // A next version is judged on what it adds: the rest was judged when it shipped, and its tests are locked.
+    const docs = this.baseDocs ? { ...this.docs, requirements: newRequirements(this.baseDocs, this.docs) } : this.docs;
+    return withScreenItems(docs, [...this.screenOpen.values()].flat());
+  }
   /** The judge's look at one screen just built: what of its design a person would not find. [] when it all shows or the look cannot run. */
   private async lookAtScreen(f: Feature, attempt = 1): Promise<string[]> {
     const id = f.what.match(/^The view "([^"]+)"/)?.[1];
@@ -1111,28 +1179,32 @@ class Run {
     if (!shots?.length) return [];
     const mine = shots.filter((s) => s.route === id || s.route.startsWith(`${id}/`));
     try {
-      const e = validateEvaluation(parseJsonBlock(await this.ask(this.one("evaluate"), screenLookPrompt(this.idea, docs, mine.length ? mine : shots), { round: 0 }, { capUsd: SCREEN_LOOK_USD })), docs);
+      const e = validateEvaluation(parseJsonBlock(await this.ask(this.one("evaluate"), screenLookPrompt(this.asked, docs, mine.length ? mine : shots), { round: 0 }, { capUsd: SCREEN_LOOK_USD })), docs);
       const req = (rid: string) => docs.requirements.find((r) => r.id === rid)?.text ?? rid;
-      const out = e.requirements.filter((r) => !r.met).map((r) => `${req(r.id)} (the judge saw: ${r.evidence})`);
-      this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, attempt, seen: e.requirements.length - out.length, of: e.requirements.length, missing: out.slice(0, 20) });
+      const unmet = e.requirements.filter((r) => !r.met);
+      const out = unmet.map((r) => `${req(r.id)} (the judge saw: ${r.evidence})`);
+      const open = unmet.map((r) => req(r.id)).slice(0, 12);
+      if (open.length) this.screenOpen.set(f.id, open); else this.screenOpen.delete(f.id);
+      this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, attempt, seen: e.requirements.length - out.length, of: e.requirements.length, missing: out.slice(0, 20), open });
       return out.slice(0, 12);
     } catch (e) { if (e instanceof StopRun) throw e; return []; }
   }
 
   private async evaluateLoop() {
     const skip = (why: string) => { this.mark("evaluate", "skipped", undefined, why); };
-    if (!this.docs || !this.plan.app || this.screen) return skip("No product design to judge this build against");
+    if (!this.docs || !this.plan.app || (this.screen && !this.baseDocs)) return skip("No product design to judge this build against");
+    if (!this.judgeDocs()!.requirements.some((r) => r.must)) return skip("This version adds no requirement of its own to judge");
     for (let round = 1; round <= MAX_EVALUATION_ROUNDS; round++) {
       const screens = await this.f.readScreens(this.dir).catch(() => null);
       if (!screens?.length) {
         this.log.append("factory.evaluation", { run: this.id, round, pass: false, skipped: "the app's screens could not be read in a browser on this computer" });
         return skip("The app's screens could not be read in a browser here, so the product was not judged");
       }
-      const docs = this.docs;
+      const docs = this.judgeDocs()!;
       const ev = await this.station("evaluate", async () => {
         const judge = this.one("evaluate");
         let e: Evaluation;
-        try { e = validateEvaluation(parseJsonBlock(await this.ask(judge, evaluationPrompt(this.idea, docs, screens, round), { round }, { capUsd: Math.max(0.1, this.o.maxUsd * 0.08) })), docs); }
+        try { e = validateEvaluation(parseJsonBlock(await this.ask(judge, evaluationPrompt(this.asked, docs, screens, round), { round }, { capUsd: Math.max(0.1, this.o.maxUsd * 0.08) })), docs); }
         catch (err) { if (!(err instanceof StopRun)) this.verdict(judge, "evaluate", false, round, (err as Error).message); throw err; }
         const pass = evaluationPasses(e);
         this.verdict(judge, "evaluate", true, round);
@@ -1141,7 +1213,10 @@ class Run {
         return { e, pass };
       }, round);
       this.evaluation = ev.e;
-      if (ev.pass || round === MAX_EVALUATION_ROUNDS) return;
+      // What the Reviewer proved still broken (by running it) is repaired even when the judge passes: the
+      // judge only sees screens (run 4004 went to the build gate with 3 criteria the Reviewer saw fail).
+      const left = round === 1 && this.reviewNotes?.verdict === "fix" ? reviewRepair(this.reviewNotes) : null;
+      if ((ev.pass && !left) || round === MAX_EVALUATION_ROUNDS) return;
       // Not worth starting a fix it cannot finish: the person sees what is open at the build gate.
       if (this.o.maxUsd - this.spent < 0.3) return;
       // What the judge found goes back to the build loop as features, each in a fresh session (run 2898: one
@@ -1151,10 +1226,11 @@ class Run {
       // Run 3185 was resumed after the build (the app restarted), so the Builder was never picked in this
       // process and the judge's findings silently skipped the repair features. Pick it here when needed.
       this.builder ??= this.one("build");
-      const work: Feature[] = this.bench && this.o.maxUsd >= FEATURE_LOOP_MIN_USD && existsSync(join(this.dir, "features.json")) ? repairFeatures(ev.e, docs, most) : [];
-      // What the Reviewer proved still broken (by running it) goes first: the judge only sees screens.
-      const left = round === 1 && this.reviewNotes?.verdict === "fix" ? reviewRepair(this.reviewNotes) : null;
-      if (left && work.length) { work.unshift(left); if (work.length > most) work.pop(); }
+      const canRepair = this.bench && this.o.maxUsd >= FEATURE_LOOP_MIN_USD && existsSync(join(this.dir, "features.json"));
+      const work: Feature[] = canRepair && !ev.pass ? repairFeatures(ev.e, docs, most) : [];
+      // The Reviewer's failures go first.
+      if (left && canRepair) { work.unshift(left); if (work.length > Math.max(1, most)) work.pop(); }
+      if (!work.length && ev.pass) return;
       if (work.length) {
         this.log.append("factory.repair", { run: this.id, round, features: work.map((f) => ({ id: f.id, title: f.title })), poolUsd: Number(pool.toFixed(2)) });
         // Repairs are extra work on a product that is already built: one that cannot finish never fails the
@@ -1168,6 +1244,7 @@ class Run {
         }
         if (this.o.maxUsd - this.spent < 0.3) return;
         await this.testFixLoop("", true);
+        if (left && work.includes(left)) await this.recheckReview();
       } else await this.testFixLoop(evaluationFeedback(ev.e, docs), true);
       // The judge's second look needs money too; without it the person decides on the first look.
       if (this.o.maxUsd - this.spent < 0.15) return;
@@ -1202,7 +1279,7 @@ class Run {
    * a product budget the work is built as features in fresh sessions (the note first), then judged again.
    */
   private async sendBack(note: string) {
-    const docs = this.docs;
+    const docs = this.judgeDocs();
     const open = this.evaluation && docs && !evaluationPasses(this.evaluation) ? this.evaluation : null;
     const features = join(this.dir, "features.json");
     const pool = Math.min(this.o.maxUsd * REPAIR_BUDGET_SHARE, this.o.maxUsd - this.spent - 0.4);
@@ -1225,22 +1302,49 @@ class Run {
         this.log.append("factory.repair.stopped", { run: this.id, round, reason: `a repair call failed: ${String((e as Error).message).slice(0, 200)}`, spentUsd: Number(this.spent.toFixed(4)) });
       }
       if (this.o.maxUsd - this.spent >= 0.3) await this.testFixLoop("", true);
+      if (review) await this.recheckReview();
       if (this.o.maxUsd - this.spent >= 0.3) await this.judgeOnce();
       return;
     }
     await this.testFixLoop(open && docs ? `${note}\n\nWhat the product judge still found open when the person sent the build back:\n${evaluationFeedback(open, docs)}` : note, true);
   }
 
+  /**
+   * After a repair of what the Reviewer saw fail, it runs those criteria again, and only those, so the build
+   * gate says what is true now. Without this the gate kept the old count however well the repair went.
+   */
+  private async recheckReview() {
+    const r = this.reviewNotes;
+    const failing = (r?.criteria ?? []).filter((c) => !c.pass);
+    if (!r || r.verdict !== "fix" || !failing.length || !this.bench) return;
+    const m = this.one("review");
+    const cap = Math.min(reviewCapUsd(m.budgetUsd, this.o.maxUsd) / 2, this.o.maxUsd - this.spent - 0.2);
+    if (cap < 0.1) return;
+    const round = 1 + this.log.list({ type: "factory.review", limit: 1e6 }).filter((e) => (e.payload as { run: number }).run === this.id).length;
+    try {
+      const text = await this.ask(m, `Spec:\n${JSON.stringify({ name: this.plan.name, interface: this.plan.interface }, null, 2)}\n\n${VERIFY_CONTRACT}\n\nThese acceptance criteria failed when you ran them on an earlier review, and the code was repaired since. Read only the code they touch, run ONLY these criteria again, and answer with your JSON: "findings" empty unless one of these still fails, and one "criteria" entry per criterion below, in this order.\n${failing.map((c, i) => `${i + 1}. ${c.text}`).join("\n")}`, { round }, { capUsd: cap, raiseCap: true });
+      try { restoreFromHead(this.dir, changedFiles(this.dir)); } catch { /* nothing to put back */ }
+      const again = mergeRecheck(r, parseReview(text));
+      this.verdict(m, "review", true, round);
+      this.log.append("factory.review", { run: this.id, round, agent: m.id, recheck: true, ...again });
+      this.reviewNotes = again;
+    } catch (e) {
+      if (e instanceof StopRun) throw e;
+      try { restoreFromHead(this.dir, changedFiles(this.dir)); } catch { /* nothing to put back */ }
+      this.log.append("factory.continued", { run: this.id, station: "review", agent: m.id, round, attempt: 1, files: [], reason: `the Reviewer's second run of the failing criteria gave no answer (${String((e as Error).message).slice(0, 120)}); the build gate shows its last full review` });
+    }
+  }
+
   /** One more look by the product judge, so the build gate shows where the product stands now. */
   private async judgeOnce() {
-    const docs = this.docs;
+    const docs = this.judgeDocs();
     if (!docs || !this.plan.app) return;
     const screens = await this.f.readScreens(this.dir).catch(() => null);
     if (!screens?.length) return;
     const round = 1 + this.log.list({ type: "factory.evaluation", limit: 1e6 }).filter((e) => (e.payload as { run: number }).run === this.id).length;
     const judge = this.one("evaluate");
     try {
-      const e = validateEvaluation(parseJsonBlock(await this.ask(judge, evaluationPrompt(this.idea, docs, screens, round), { round }, { capUsd: Math.max(0.1, this.o.maxUsd * 0.08) })), docs);
+      const e = validateEvaluation(parseJsonBlock(await this.ask(judge, evaluationPrompt(this.asked, docs, screens, round), { round }, { capUsd: Math.max(0.1, this.o.maxUsd * 0.08) })), docs);
       const pass = evaluationPasses(e);
       this.verdict(judge, "evaluate", true, round);
       this.log.append("factory.evaluation", { run: this.id, round, pass, bar: PRODUCT_PASS_SCORE, screens: screens.length, ...e });
@@ -1292,7 +1396,7 @@ class Run {
       // Every link the app ships, opened for real (run 2623 shipped 14 made-up YouTube links).
       if (process.env.SF_LINK_CHECK !== "off") {
         const where = linkFiles(this.dir, (p) => isLockedTest(p) || isKitFile(p));
-        const links = await checkLinks(Object.keys(where));
+        const links = await this.f.checkLinks(Object.keys(where));
         links.dead = links.dead.map((d) => ({ ...d, file: where[d.url] }));
         this.log.append("factory.links", { run: this.id, round, pass: links.pass, checked: links.checked, unknown: links.unknown, dead: links.dead.slice(0, 30), ...(links.skipped ? { skipped: links.skipped } : {}) });
         if (!links.skipped && links.checked) {
@@ -1337,6 +1441,16 @@ class Run {
   }
 
   /** The project's code (not the locked tests, not the spec) as file blocks. */
+  /**
+   * The shipped code and tests for a Builder working on top of them. At the workbench they are in its folder:
+   * pasting a whole shipped app into the prompt was paid for again on every step of the call, and for an app
+   * the size of a product it did not fit at all. Without a workbench the text is all the agent has.
+   */
+  private codeForBuilder(): string[] {
+    if (this.bench) return ["The shipped code and its locked acceptance tests (test/, read only) are in your folder. Read SPEC.md, PROGRESS.md if there is one, src/schema.js and web/app.js first, then only the files the change touches, in one command."];
+    return [`Locked acceptance tests (read only):\n${this.testsText()}`, `Current code:\n${this.codeText()}`];
+  }
+
   private codeText() {
     // The kit is the same in every app and the agents may not change it: they get its API in their contract, not its source.
     return Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md" && !isKitFile(p) && !p.startsWith("data/"))
@@ -1378,7 +1492,7 @@ class Run {
    * cap and left files in the folder, the work goes on by itself: a fresh call reads what is there and finishes
    * it, at most twice, while the run's own budget allows. Anything else fails as before.
    */
-  private async askBench(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; capUsd?: number } = {}): Promise<string> {
+  private async askBench(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; capUsd?: number; raiseCap?: boolean } = {}): Promise<string> {
     try { return await this.ask(m, prompt, meta, x); }
     catch (e) {
       if (!this.bench || !/max_budget/i.test(String((e as Error).message))) throw e;
@@ -1592,17 +1706,26 @@ export const MAX_VIEWS = 6;
  * Every designed screen is a view of the plan. The core checks this itself and adds what the Planner left
  * out: a screen the person saw in the design must not depend on an agent remembering it.
  */
-export function withDesignedScreens(plan: Plan, docs: ProductDocs): { plan: Plan; added: string[] } {
+export function withDesignedScreens(plan: Plan, docs: ProductDocs): { plan: Plan; added: string[]; replaced: string[] } {
   const key = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "");
   const views = [...(plan.views ?? [])];
   const added: string[] = [];
+  const replaced: string[] = [];
+  const builds = (v: { id: string; label: string }, s: ProductDocs["screens"][number], i: number) => key(v.id) === key(s.id) || key(v.label) === key(s.name) || (i === 0 && v.id === "dashboard");
   docs.screens.forEach((s, i) => {
-    const has = views.some((v) => key(v.id) === key(s.id) || key(v.label) === key(s.name) || (i === 0 && v.id === "dashboard"));
-    if (has || views.length >= MAX_VIEWS) return;
+    if (views.some((v) => builds(v, s, i))) return;
+    if (views.length >= MAX_VIEWS) {
+      // Run 4004: the plan was full (6 views), one of them the Planner's own, and the designed Skill tree
+      // had no room. A designed screen comes before a view nobody designed: the last such view makes way.
+      const own = views.map((v, at) => ({ v, at })).filter(({ v }) => v.id !== "dashboard" && !docs.screens.some((x, k) => builds(v, x, k))).at(-1);
+      if (!own) return;
+      views.splice(own.at, 1);
+      replaced.push(own.v.label);
+    }
     views.splice(Math.min(i, views.length), 0, { id: i === 0 ? "dashboard" : s.id, label: s.name, shows: [s.purpose, s.shows.length ? `Shows: ${s.shows.join("; ")}.` : "", s.actions.length ? `Actions: ${s.actions.join("; ")}.` : ""].filter(Boolean).join(" ") });
     added.push(s.name);
   });
-  return { plan: added.length ? { ...plan, views } : plan, added };
+  return { plan: added.length ? { ...plan, views } : plan, added, replaced };
 }
 
 /**
@@ -1681,6 +1804,28 @@ export function specMarkdown(idea: string, p: Plan): string {
   ].join("\n");
 }
 
+/** A next version's design is a change to documents that already passed: one revision is enough. */
+export const NEXT_VERSION_ROUNDS = 2;
+
+/**
+ * The design a shipped app carries: the product documents of the run that shipped it, or of the nearest
+ * version before it that has any (a version built before designs travelled has none of its own), and the
+ * idea its first version was built from.
+ */
+export function shippedDesign(log: EventLog, run: number): { docs: ProductDocs | null; idea: string } {
+  let docs: ProductDocs | null = null;
+  let idea = "";
+  for (let id: number | undefined = run, n = 0; id != null && n < 50; n++) {
+    const started = log.get(id);
+    if (started?.type !== "factory.run.started") break;
+    const p = started.payload as { idea?: string; screen?: { baseRun?: number } };
+    docs ??= restoreState(log, id).docs;
+    idea = String(p.idea ?? "");
+    id = p.screen?.baseRun;
+  }
+  return { docs, idea };
+}
+
 /** How many times one run is resumed on its own before it waits for the Resume button. */
 export const MAX_AUTO_RESUMES = 3;
 
@@ -1716,6 +1861,8 @@ export interface RestoredState {
   evaluation: Evaluation | null;
   /** The note of a build-gate send-back the run had not acted on yet when the app closed (run 4004). */
   sentBack: string | null;
+  /** Per screen feature, the designed items its last look did not find. */
+  screenOpen: Record<string, string[]>;
 }
 
 /**
@@ -1735,6 +1882,24 @@ export function reviewRepair(r: ReviewResult): Feature | null {
       ...high.map((f) => `- ${f.text}`)].join("\n"),
     done: "Each criterion above passes when run, each finding is gone, and every test still passes.",
   };
+}
+
+/**
+ * A review after its failing criteria were run again: the criteria that passed before stay, each one that
+ * failed takes its new result (by position when the Reviewer answered for each, else by its text), and the
+ * verdict is "fix" only while something is still failing.
+ */
+export function mergeRecheck(before: ReviewResult, again: ReviewResult): ReviewResult {
+  const failing = (before.criteria ?? []).filter((c) => !c.pass);
+  const got = again.criteria ?? [];
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 80);
+  const now = new Map(failing.map((c, i) => [c, got.length === failing.length ? got[i] : got.find((g) => norm(g.text) === norm(c.text))] as const));
+  const criteria = (before.criteria ?? []).map((c) => { const n = now.get(c); return n ? { text: c.text, pass: n.pass, evidence: n.evidence } : c; });
+  const findings = [
+    ...before.findings.filter((f) => !/^Acceptance criterion not met/.test(f.text)),
+    ...criteria.filter((c) => !c.pass).map((c) => ({ severity: "high" as const, text: `Acceptance criterion not met: ${c.text}${c.evidence ? ` (${c.evidence})` : ""}`.slice(0, 500) })),
+  ];
+  return { verdict: criteria.some((c) => !c.pass) ? "fix" : "pass", findings, ...(criteria.length ? { criteria } : {}) };
 }
 
 /** The question of an escalation (a Retry, more budget) a run was still waiting on, or null. */
@@ -1781,10 +1946,11 @@ export function restoreState(log: EventLog, run: number): RestoredState {
     fixRounds: Math.max(0, ...stations.filter((p) => p.station === "fix" && p.round).map((p) => Number(p.round))),
     plan: plan?.plan, dir: plan?.dir, lockedHash: done.has("tests") ? locked?.hash : undefined,
     brief, docs: (settled ?? disc.at(-1))?.docs ?? null, docsCritique: (settled ?? disc.at(-1))?.critique ?? null,
-    review: reviews.length ? { verdict: reviews.at(-1).verdict, findings: reviews.at(-1).findings } : null,
+    review: reviews.length ? { verdict: reviews.at(-1).verdict, findings: reviews.at(-1).findings ?? [], ...(Array.isArray(reviews.at(-1).criteria) ? { criteria: reviews.at(-1).criteria } : {}) } : null,
     evaluation: (() => { const e = of("factory.evaluation").filter((x) => !x.skipped).at(-1); return e ? { requirements: e.requirements ?? [], scores: e.scores ?? {}, problems: e.problems ?? [] } as Evaluation : null; })(),
     // Run 4004: the person sent the build back with a note, the app updated 30 seconds later, and the
     // resume asked the build gate again as if nothing had been said. An unanswered send-back is carried out.
     sentBack: (() => { const g = gateB.at(-1); return g && g.state === "rejected" && g.note ? String(g.note) : null; })(),
+    screenOpen: (() => { const m: Record<string, string[]> = {}; for (const x of of("factory.screen.look")) { if (!x.feature || !Array.isArray(x.open)) continue; if (x.open.length) m[String(x.feature)] = x.open.map(String); else delete m[String(x.feature)]; } return m; })(),
   };
 }

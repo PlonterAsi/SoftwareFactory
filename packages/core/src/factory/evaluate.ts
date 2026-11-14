@@ -29,7 +29,8 @@ export const PRODUCT_PASS_SCORE = 4;
 export const MAX_EVALUATION_ROUNDS = 2;
 
 export interface Evaluation {
-  requirements: { id: string; met: boolean; evidence: string }[];
+  /** `text` is set for a screen item (it is in no product document, so the Judge tab needs it here). */
+  requirements: { id: string; met: boolean; evidence: string; text?: string }[];
   scores: Record<ProductKey, number>;
   problems: { where: string; problem: string; fix: string }[];
 }
@@ -40,7 +41,7 @@ const str = (x: unknown, max = 300) => String(x ?? "").trim().slice(0, max);
 export function validateEvaluation(j: unknown, docs: ProductDocs): Evaluation {
   const e = (j ?? {}) as Record<string, any>;
   const got = new Map<string, any>((Array.isArray(e.requirements) ? e.requirements : []).map((r: any) => [str(r?.id, 12), r]));
-  const requirements = docs.requirements.filter((r) => r.must).map((r) => { const a = got.get(r.id); return { id: r.id, met: a?.met === true, evidence: str(a?.evidence) || "the judge gave no evidence" }; });
+  const requirements = docs.requirements.filter((r) => r.must).map((r) => { const a = got.get(r.id); return { id: r.id, met: a?.met === true, evidence: str(a?.evidence) || "the judge gave no evidence", ...(SCREEN_ITEM_ID.test(r.id) ? { text: r.text } : {}) }; });
   const scores = Object.fromEntries(PRODUCT_RUBRIC.map((k) => { const n = Math.round(Number(e.scores?.[k])); return [k, Number.isFinite(n) ? Math.min(5, Math.max(1, n)) : 1]; })) as Record<ProductKey, number>;
   const problems = (Array.isArray(e.problems) ? e.problems : []).map((p: any) => ({ where: str(p?.where, 60), problem: str(typeof p === "string" ? p : p?.problem), fix: str(p?.fix) })).filter((p: { problem: string }) => p.problem).slice(0, 12);
   return { requirements, scores, problems };
@@ -68,6 +69,20 @@ export function screenLookPrompt(idea: string, docs: ProductDocs, screens: Scree
 This is a look at ONE screen, ${docs.screens[0]?.name}, just after it was built. Judge only the requirements above, all about this screen; the rest of the app is still being built.`;
 }
 
+/**
+ * What a screen still lacked after the Builder's second try (run 4004: 5 of 6 screens, and the build moved on
+ * with nothing holding the list). Each open item joins the judge's requirements for the whole app, so it is
+ * looked for again when everything is built, goes to the repair work if it is still missing, and is shown at
+ * the build gate until a judge has seen it.
+ */
+export const SCREEN_ITEMS_MAX = 24;
+export const SCREEN_ITEM_ID = /^SC\d+$/;
+export function withScreenItems(docs: ProductDocs, open: string[]): ProductDocs {
+  const have = new Set(docs.requirements.map((r) => r.text));
+  const extra = [...new Set(open)].filter((t) => t && !have.has(t)).slice(0, SCREEN_ITEMS_MAX).map((text, i) => ({ id: `SC${i + 1}`, text, from: "design" as const, must: true }));
+  return extra.length ? { ...docs, requirements: [...docs.requirements.filter((r) => !SCREEN_ITEM_ID.test(r.id)), ...extra] } : docs;
+}
+
 export const evaluationPasses = (e: Evaluation) => e.requirements.every((r) => r.met) && PRODUCT_RUBRIC.every((k) => e.scores[k] >= PRODUCT_PASS_SCORE);
 
 export function evaluationPrompt(idea: string, docs: ProductDocs, screens: ScreenText[], round: number): string {
@@ -76,6 +91,9 @@ export function evaluationPrompt(idea: string, docs: ProductDocs, screens: Scree
     `The product as designed:\nPromise: ${docs.brief.promise}\nJourneys:\n${docs.journeys.map((j) => `- ${j.moment}: ${j.steps.join(" → ")}`).join("\n")}\nScreens:\n${docs.screens.map((s) => `- ${s.name}: ${s.purpose} Shows: ${s.shows.join("; ")}. Actions: ${s.actions.join("; ")}.`).join("\n")}`,
     `The must-have requirements:\n${docs.requirements.filter((r) => r.must).map((r) => `- ${r.id}: ${r.text}`).join("\n")}`,
     `The app as built (round ${round}). The core started it and read every screen in a real browser. This is all of it: what a screen does not show here, the person does not see.\n${screens.map((s) => `=== Screen #/${s.route} ===\n${s.text || "(nothing on this screen)"}\nControls: ${s.controls.length ? s.controls.join(" | ") : "(none)"}`).join("\n\n")}`,
+    // The judge reads text and controls. A change of colour or size is real work it cannot see, and failing it
+    // would send a finished change back to be "fixed" (a next version's ask is often exactly that).
+    "You read each screen's text and controls, not its looks. A requirement that is only about looks (colour, size, spacing, animation) is not yours to fail: mark it met, with the evidence \"looks only: not judged from text\".",
     `Score from 1 (fails) to 5 (clearly true). Be hard to please.\n${PRODUCT_RUBRIC.map((k) => `- ${k}: ${PRODUCT_RUBRIC_TEXT[k]}`).join("\n")}`,
   ].join("\n\n");
 }
