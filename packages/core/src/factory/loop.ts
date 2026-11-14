@@ -428,6 +428,8 @@ class Run {
     this.docs = st.docs;
     this.docsCritique = st.docsCritique;
     this.reviewNotes = st.review;
+    this.evaluation = st.evaluation;
+    this.pendingSendBack = st.sentBack;
     if (st.plan) { this.plan = st.plan; this.dir = st.dir ?? ""; }
     if (st.lockedHash) {
       this.lockedHash = st.lockedHash;
@@ -1172,7 +1174,15 @@ class Run {
     }
   }
 
+  /** A build-gate send-back the run had not acted on when the app closed; it is carried out before the gate asks again. */
+  private pendingSendBack: string | null = null;
   private async acceptLoop() {
+    if (this.pendingSendBack) {
+      const note = this.pendingSendBack;
+      this.pendingSendBack = null;
+      this.log.append("factory.sentback.resumed", { run: this.id, note: note.slice(0, 300) });
+      await this.sendBack(note);
+    }
     for (;;) {
       const unmet = this.reviewNotes?.criteria?.filter((c) => !c.pass).length ?? 0;
       const open = this.evaluation ? this.evaluation.requirements.filter((r) => !r.met).length : 0;
@@ -1182,8 +1192,60 @@ class Run {
       const d = await this.gate("gateB", `Accept the build${notes}`);
       if (d.approve) return;
       if (!d.note) throw new StopRun("You rejected the build.");
-      await this.testFixLoop(d.note, true);
+      await this.sendBack(d.note);
     }
+  }
+
+  /**
+   * The person sent the build back with a note. Run 4004's note was "Need to address the issues found on
+   * this loop": it points at what the judge and the Reviewer found, so those go with it. With a real crew and
+   * a product budget the work is built as features in fresh sessions (the note first), then judged again.
+   */
+  private async sendBack(note: string) {
+    const docs = this.docs;
+    const open = this.evaluation && docs && !evaluationPasses(this.evaluation) ? this.evaluation : null;
+    const features = join(this.dir, "features.json");
+    const pool = Math.min(this.o.maxUsd * REPAIR_BUDGET_SHARE, this.o.maxUsd - this.spent - 0.4);
+    if (this.bench && docs && this.plan.app && existsSync(features) && this.o.maxUsd >= FEATURE_LOOP_MIN_USD && pool >= REPAIR_FEATURE_MIN_USD) {
+      const most = Math.max(1, Math.floor(pool / REPAIR_FEATURE_USD));
+      const round = 1 + this.log.list({ type: "factory.repair", limit: 1e6 }).filter((e) => (e.payload as { run: number }).run === this.id).length;
+      const tag = `G${round}`;
+      const asked: Feature = { id: `${tag}P`, title: "Person: what you asked for at the build gate", state: "todo",
+        what: [`The person looked at the running app at the build gate and sent it back with this note:\n${note}`, open ? "The note refers to what the product judge found; that is listed in the next features. Start with whatever the note itself names." : ""].filter(Boolean).join("\n\n"),
+        done: "What the person's note asks for can be seen and used in the running app, and every test still passes." };
+      const review = this.reviewNotes?.verdict === "fix" ? reviewRepair(this.reviewNotes) : null;
+      const work = [asked, ...(review ? [review] : []), ...(open ? repairFeatures(open, docs, most) : [])].slice(0, most + 1)
+        .map((f, i) => (i === 0 ? f : { ...f, id: `${tag}${f.id}` }));
+      this.builder ??= this.one("build");
+      this.log.append("factory.repair", { run: this.id, round, from: "gateB", note: note.slice(0, 300), features: work.map((f) => ({ id: f.id, title: f.title })), poolUsd: Number(pool.toFixed(2)) });
+      try { await this.buildByFeature(work, pool); }
+      catch (e) {
+        if (e instanceof StopRun) throw e;
+        try { git(this.dir, "checkout", "--", "."); git(this.dir, "clean", "-fdq", "src", "web"); } catch { /* the gate shows the folder as it is */ }
+        this.log.append("factory.repair.stopped", { run: this.id, round, reason: `a repair call failed: ${String((e as Error).message).slice(0, 200)}`, spentUsd: Number(this.spent.toFixed(4)) });
+      }
+      if (this.o.maxUsd - this.spent >= 0.3) await this.testFixLoop("", true);
+      if (this.o.maxUsd - this.spent >= 0.3) await this.judgeOnce();
+      return;
+    }
+    await this.testFixLoop(open && docs ? `${note}\n\nWhat the product judge still found open when the person sent the build back:\n${evaluationFeedback(open, docs)}` : note, true);
+  }
+
+  /** One more look by the product judge, so the build gate shows where the product stands now. */
+  private async judgeOnce() {
+    const docs = this.docs;
+    if (!docs || !this.plan.app) return;
+    const screens = await this.f.readScreens(this.dir).catch(() => null);
+    if (!screens?.length) return;
+    const round = 1 + this.log.list({ type: "factory.evaluation", limit: 1e6 }).filter((e) => (e.payload as { run: number }).run === this.id).length;
+    const judge = this.one("evaluate");
+    try {
+      const e = validateEvaluation(parseJsonBlock(await this.ask(judge, evaluationPrompt(this.idea, docs, screens, round), { round }, { capUsd: Math.max(0.1, this.o.maxUsd * 0.08) })), docs);
+      const pass = evaluationPasses(e);
+      this.verdict(judge, "evaluate", true, round);
+      this.log.append("factory.evaluation", { run: this.id, round, pass, bar: PRODUCT_PASS_SCORE, screens: screens.length, ...e });
+      this.evaluation = e;
+    } catch (err) { if (err instanceof StopRun) throw err; this.verdict(judge, "evaluate", false, round, (err as Error).message); }
   }
 
   private async ship(): Promise<string> {
@@ -1650,6 +1712,10 @@ export interface RestoredState {
   docs: ProductDocs | null;
   docsCritique: Critique | null;
   review: ReviewResult | null;
+  /** The product judge's last verdict, so the build gate still says what is open after a restart. */
+  evaluation: Evaluation | null;
+  /** The note of a build-gate send-back the run had not acted on yet when the app closed (run 4004). */
+  sentBack: string | null;
 }
 
 /**
@@ -1716,5 +1782,9 @@ export function restoreState(log: EventLog, run: number): RestoredState {
     plan: plan?.plan, dir: plan?.dir, lockedHash: done.has("tests") ? locked?.hash : undefined,
     brief, docs: (settled ?? disc.at(-1))?.docs ?? null, docsCritique: (settled ?? disc.at(-1))?.critique ?? null,
     review: reviews.length ? { verdict: reviews.at(-1).verdict, findings: reviews.at(-1).findings } : null,
+    evaluation: (() => { const e = of("factory.evaluation").filter((x) => !x.skipped).at(-1); return e ? { requirements: e.requirements ?? [], scores: e.scores ?? {}, problems: e.problems ?? [] } as Evaluation : null; })(),
+    // Run 4004: the person sent the build back with a note, the app updated 30 seconds later, and the
+    // resume asked the build gate again as if nothing had been said. An unanswered send-back is carried out.
+    sentBack: (() => { const g = gateB.at(-1); return g && g.state === "rejected" && g.note ? String(g.note) : null; })(),
   };
 }

@@ -1009,6 +1009,38 @@ describe("the product judge: the running app is judged as a product", () => {
     await f.wait(run);
   });
 
+  it("a send-back at the build gate builds the note and what the judge found as features, then judges again (run 4004)", async () => {
+    const log = new EventLog();
+    const { rt: inner, seen } = crewWith([{ r2: false }, { r2: false }, { r2: true }]);
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([A-Z0-9]+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoRetries: 0, maxUsd: 20 });
+    const atGateB = async (n: number) => { for (let i = 0; i < 800; i++) { const w = events(log, "factory.gate").filter((g) => g.gate === "gateB" && g.state === "waiting").length; const g = events(log, "factory.gate").at(-1); if (w >= n && g?.state === "waiting") return; if (g?.state === "waiting" && g.gate !== "gateB") f.decide(run, g.gate, { approve: true }); await new Promise((r) => setTimeout(r, 25)); } };
+    await atGateB(1);
+    const judged = events(log, "factory.evaluation").length;
+    f.decide(run, "gateB", { approve: false, note: "Need to address the issues found on this loop" });
+    await atGateB(2);
+    const rep = events(log, "factory.repair").find((r) => r.from === "gateB");
+    expect(rep.features[0]).toMatchObject({ id: "G2P", title: "Person: what you asked for at the build gate" });
+    expect(rep.features.map((x: any) => x.id).slice(1).every((id: string) => id.startsWith("G2"))).toBe(true);
+    const asked = seen.find((x) => x.station === "build" && /Your feature, G2P/.test(x.req.prompt))!;
+    expect(asked.req.prompt).toMatch(/Need to address the issues found on this loop/);
+    expect(events(log, "factory.evaluation").length).toBe(judged + 1);
+    f.decide(run, "gateB", { approve: true });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+  });
+
   it("no browser, no verdict: the judge is skipped and says so, it never guesses", async () => {
     const log = new EventLog();
     const { rt, seen } = crewWith([{ r2: true }]);
