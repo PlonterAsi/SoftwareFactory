@@ -55,7 +55,7 @@ A pull request can carry its own workflow file, so on a public repository a stra
 
 `scripts/smoke/windows-smoke.mjs` installs and uninstalls the app, moves the data folder aside and uses the app's own port. Run in your own Windows account it would break your installed SoftwareFactory. So on a runner of your own the workflow runs `scripts/smoke/sandbox-smoke.mjs` instead:
 
-1. It puts the installers, the scripts and Node.js into one shared folder, and shares Git from the PC read-only.
+1. It puts the installers, the scripts and Node.js into one shared folder, and shares Git from the PC read-only. The sandbox gets no network.
 2. It opens a Windows Sandbox: a clean, throwaway Windows with its own files, registry and ports. A window opens on your desktop; nothing in it needs a click.
 3. The sandbox runs the same smoke test at sign-in. Its console comes back live through the shared folder, then its report, logs and screenshots.
 4. The sandbox is closed and everything in it is gone. The job ends with the test's own result.

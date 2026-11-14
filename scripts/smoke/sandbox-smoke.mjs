@@ -45,6 +45,9 @@ export function wsbConfig({ share, git }) {
     ...(git ? [folder(git, "C:\\git", true)] : []),
     "  </MappedFolders>",
     // Nothing of the PC's is offered to code under test beyond the two folders above.
+    // No network: the test needs none (its update server is inside the sandbox), and the app under test must
+    // not find a real newer version and update itself mid-test. Code under test cannot reach the PC's network either.
+    "  <Networking>Disable</Networking>",
     "  <ClipboardRedirection>Disable</ClipboardRedirection>",
     "  <PrinterRedirection>Disable</PrinterRedirection>",
     "  <AudioInput>Disable</AudioInput>",
@@ -102,7 +105,7 @@ async function main() {
   for (const d of ["in", "out", "node", "scripts"]) mkdirSync(join(share, d), { recursive: true });
   const smokeArgs = [];
   for (const [k, v] of Object.entries(args)) {
-    if (["out", "share", "timeout-min"].includes(k)) continue;
+    if (["out", "share", "timeout-min", "keep-share"].includes(k)) continue;
     if (FILE_ARGS.includes(k)) {
       copyFileSync(v, join(share, "in", basename(v)));
       smokeArgs.push(`--${k}`, `in\\${basename(v)}`);
