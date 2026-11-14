@@ -4,7 +4,7 @@
 
 ## What was measured (2026-11-10)
 
-Raw numbers are in [spike-runtime-results.md](spike-runtime-results.md) (re-run with `npm run spike`). Costs are list prices reported by Claude Code; what is actually billed depends on the plan used.
+Raw numbers are in [spike-runtime-results.md](spike-runtime-results.md) (the script that made them was removed once the runtime was chosen; it is in git history as `packages/core/src/spike.ts`). Costs are list prices reported by Claude Code; what is actually billed depends on the plan used.
 
 | Setup | Context loaded per call | Cost per short Overseer call |
 | --- | ---: | ---: |

@@ -11,7 +11,6 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "spike": "tsx src/spike.ts",
     "factory": "tsx src/factory-cli.ts",
     "order": "tsx src/order-cli.ts",
     "kit": "node scripts/kit.mjs"

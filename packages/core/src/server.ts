@@ -137,6 +137,14 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     const home = p.projectId != null ? projectHome(log, order.state(), Number(p.projectId)) : null;
     order.ingest({ id: e.id, text: p.text, source: p.source, home }).catch((err) => { console.error("order ingest failed:", err); fault("order engine, filing a Signal", err, { signal: e.id }); });
   });
+  // Agent calls in flight, whoever started them. A factory run counts itself (activeRuns), but a ticket's crew,
+  // a Council session, an import or the Overseer are paid work too, and an update that installs by itself
+  // must wait for all of them (GET /api/updates).
+  const agentCalls = new Set<number>();
+  log.on("event", (e: SfEvent) => {
+    if (e.type === "agent.run.started") agentCalls.add(e.id);
+    else if (e.type === "agent.run.completed" || e.type === "agent.run.failed") agentCalls.delete(Number((e.payload as { runId?: number }).runId));
+  });
   // Who is talking to the core: the desktop window sends its page origin (http://tauri.localhost
   // on Windows). Kept in memory only; /api/health shows it, so a smoke test can prove the window
   // reached the core, and the shell can tell a blank window from a dead core.
@@ -171,16 +179,16 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (req.method === "GET" && url.pathname === "/api/health") return json(res, 200, {
         ok: true, runtime: runtime.name, mode: runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime),
         pid: process.pid, node: process.version, schema: log.migration.to,
-        appVersion: appVersion ?? null, activeRuns: factory.activeCount(),
+        appVersion: appVersion ?? null, activeRuns: factory.activeCount(), agentCalls: agentCalls.size,
         clients: { origins: Object.fromEntries(clients.origins), streams: Object.fromEntries(clients.streams) },
       });
       if (req.method === "GET" && url.pathname === "/api/factory/cycles") return json(res, 200, { cycles: log.view("engine-cycles", engineCycles) });
-      if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeCount()));
+      if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeCount(), agentCalls.size));
       if (req.method === "POST" && url.pathname === "/api/updates") {
         const body = await readJson(req);
         if (typeof body.auto !== "boolean") return json(res, 400, { error: "Send { auto: true } or { auto: false }." });
         log.append("settings.changed", { key: "autoUpdate", value: body.auto });
-        return json(res, 200, updatesReport(log, appVersion, factory.activeCount()));
+        return json(res, 200, updatesReport(log, appVersion, factory.activeCount(), agentCalls.size));
       }
       if (req.method === "GET" && url.pathname === "/api/setup") {
         const fresh = url.searchParams.get("fresh") === "1";
@@ -459,15 +467,18 @@ export interface UpdatesReport {
   /** Install updates on its own when the factory is idle (default on). */
   auto: boolean;
   appVersion: string | null;
+  /** Factory runs in flight, a run waiting at a gate included. */
   activeRuns: number;
+  /** Agent calls in flight anywhere in the core: a ticket's crew, a Council session, an import, the Overseer. */
+  agentCalls: number;
   /** Versions this install has run, newest first. */
   history: { ts: string; from: string | null; to: string }[];
 }
 
-export function updatesReport(log: EventLog, appVersion: string | undefined, activeRuns: number): UpdatesReport {
+export function updatesReport(log: EventLog, appVersion: string | undefined, activeRuns: number, agentCalls = 0): UpdatesReport {
   const history = (log.db.prepare("SELECT ts, from_version, to_version FROM app_versions ORDER BY id DESC LIMIT 10").all() as { ts: string; from_version: string | null; to_version: string }[])
     .map((r) => ({ ts: r.ts, from: r.from_version, to: r.to_version }));
-  return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns, history };
+  return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns, agentCalls, history };
 }
 
 /** Link SoftwareFactory's own project to its GitHub repo once, so its tickets are worked there. */
@@ -816,7 +827,9 @@ if (isMain) {
   setInterval(() => {
     const now = Date.now();
     const stalled = now - tick - 500;
-    if (stalled >= 2_000) console.error(`${new Date(now).toISOString()} the core was busy for ${(stalled / 1000).toFixed(1)} s and could not answer`);
+    // A gap of minutes is the PC asleep, not the core at work (core.log of 2026-11-14 said "busy for 14105.6 s" after a night's sleep).
+    if (stalled >= 120_000) console.log(`${new Date(now).toISOString()} the clock jumped ${Math.round(stalled / 1000)} s: the PC slept, or the core was held that long`);
+    else if (stalled >= 2_000) console.error(`${new Date(now).toISOString()} the core was busy for ${(stalled / 1000).toFixed(1)} s and could not answer`);
     tick = now;
   }, 500).unref();
   server.listen(port, "127.0.0.1", () => console.log(`${new Date().toISOString()} SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, base ${host ? `"${host.current.name}" at ${host.current.folder}` : dbPath})`));

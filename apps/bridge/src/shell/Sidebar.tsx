@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { FactoryRunView, ProjectSummary } from "../api";
+import type { ProjectSummary } from "../api";
 import { href, type Route } from "../projects/router";
 import { StatusGlyph } from "../ui";
 import { projectStatus } from "../projects/Home";
@@ -9,8 +9,8 @@ import { shortName } from "../projects/shortName";
  * The left rail of the Foundry Glass shell: where you are, what needs you, and the projects you
  * were last in. Amber appears here only when something waits for you.
  */
-export function Sidebar({ route, needs, projects, factoryRuns, crewBusy, base, conflicts = 0, proposals = 0, tickets = 0, children }: {
-  route: Route; needs: number; projects: ProjectSummary[] | null; factoryRuns: FactoryRunView[]; crewBusy: boolean; base?: string;
+export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0, proposals = 0, tickets = 0, children }: {
+  route: Route; needs: number; projects: ProjectSummary[] | null; crewBusy: boolean; base?: string;
   conflicts?: number; proposals?: number; tickets?: number; children?: ReactNode;
 }) {
   const at = (r: Route["page"], view?: string) => route.page === r && (view == null || (route.page === "factory" && route.view === view));

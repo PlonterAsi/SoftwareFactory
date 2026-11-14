@@ -316,7 +316,11 @@ export class Launcher extends EventEmitter {
   private finish(s: Live, code: number | null, how: "exited" | "stopped" | "failed" | "replaced") {
     if (!isLive(s.state)) return;
     s.state = how === "replaced" ? "stopped" : how;
+    // A program stopped on purpose is killed, and the code a kill leaves (1 on Windows) says nothing about
+    // the program: shown as "stopped · exit 1" it read like a failure. Only a program that ended by itself has a code.
+    if (how === "stopped" || how === "replaced") code = null;
     s.exitCode = code;
+    s.pid = null;
     s.endedAt = new Date().toISOString();
     s.stdinOpen = false;
     // The database may already be closed when a program ends as the app quits; the next start marks it then.

@@ -58,9 +58,6 @@ Never write or change the kit files. You write:
 - A command-line tool (bin/<name>.js) only when the idea explicitly asks for scripting, and then next to the app, never instead of it.
 Never make the person type JSON, arguments or file paths: no text box whose content is parsed as JSON, no screen that asks for a config file.`;
 
-/** Kept for older callers: the build target is now the whole app. */
-export const UI_TARGET = APP_TARGET;
-
 export const CONTRACTS: Record<Slot, string> = {
   council: `Station contract: council.
 You hold one seat on the Council, which looks at a one-line idea before anything is planned. Give your seat's view, in at most 120 words in total.

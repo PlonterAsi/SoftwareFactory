@@ -232,7 +232,6 @@ export function useFactory() {
   }, [online, settingsAt]);
 
   useEffect(() => {
-    let closed = false;
     const es = new EventSource(`${API}/api/events`);
     es.onopen = () => setOnline(true);
     es.onerror = () => setOnline(false);
@@ -240,7 +239,7 @@ export function useFactory() {
       const e = JSON.parse(m.data) as SfEvent;
       setEvents((prev) => (prev.some((p) => p.id === e.id) ? prev : [...prev, e]));
     };
-    return () => { closed = true; es.close(); };
+    return () => es.close();
   }, []);
 
   const signals = useMemo<Signal[]>(

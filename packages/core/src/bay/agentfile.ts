@@ -58,7 +58,6 @@ const FIELDS: [keyof AgentDef, string][] = [
   ["name", "name"], ["id", "id"], ["avatar", "avatar"], ["description", "description"], ["station", "station"], ["model", "model"],
   ["budgetUsd", "budget-usd"], ["plugins", "plugins"], ["skills", "skills"], ["tools", "tools"], ["mcp", "mcp"], ["sample", "sample"],
 ];
-const LISTS = new Set<keyof AgentDef>(["plugins", "skills", "tools", "mcp"]);
 
 /** Check and clean an agent definition. Throws with a plain message on anything unusable. */
 export function normalizeAgent(raw: Partial<AgentDef> & Record<string, unknown>): AgentDef {

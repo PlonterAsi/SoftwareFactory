@@ -11,8 +11,8 @@ The installed app updates itself. Nobody downloads a new setup.exe after the fir
 ## When it updates
 
 1. The app checks 5 seconds after the window opens, then every 30 minutes, and whenever you press Check for updates.
-2. With the automatic setting on and no build running, it counts down 15 seconds and installs. *Not now* skips that version until the next launch.
-3. If a build is running, it waits until the factory is idle. *Install now* is still there: the run is cut and resumes from its last finished station when the new version starts.
+2. With the automatic setting on and nothing working, it counts down 15 seconds and installs. *Not now* skips that version until the next launch. When the countdown ends the app asks the core once more; it installs only if the core answers that nothing is working.
+3. "Working" means a build in flight (one waiting for your answer at a gate counts) or any agent call in flight: a ticket's crew, a Council session, an import, a chat answer. While something is working, the update waits. *Install now* is still there: a build is cut and resumes from its last finished station when the new version starts.
 4. With the setting off, nothing installs until you press Install.
 
 ## The handover

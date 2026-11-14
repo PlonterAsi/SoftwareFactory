@@ -178,6 +178,13 @@ describe("in-app updates", () => {
       expect(h.activeRuns).toBe(0);
       const u = await (await fetch(`${base}/api/updates`)).json();
       expect(u.auto).toBe(true);
+      expect(u).toMatchObject({ activeRuns: 0, agentCalls: 0 });
+      // An agent call outside any factory run (a ticket's crew, a Council seat) holds an automatic install back until it ends.
+      const call = log.append("agent.run.started", { agent: "builder", runtime: "mock", prompt: "x" });
+      expect((await (await fetch(`${base}/api/updates`)).json()).agentCalls).toBe(1);
+      expect((await (await fetch(`${base}/api/health`)).json()).agentCalls).toBe(1);
+      log.append("agent.run.failed", { runId: call.id, agent: "builder", error: "stopped" });
+      expect((await (await fetch(`${base}/api/updates`)).json()).agentCalls).toBe(0);
       expect(u.history.map((x: { from: string | null; to: string }) => `${x.from}->${x.to}`)).toEqual(["0.2.5->0.2.9", "null->0.2.5"]);
       const off = await (await fetch(`${base}/api/updates`, { method: "POST", body: JSON.stringify({ auto: false }) })).json();
       expect(off.auto).toBe(false);

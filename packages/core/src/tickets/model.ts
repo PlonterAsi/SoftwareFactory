@@ -125,13 +125,6 @@ export type Relation = (typeof RELATIONS)[number];
 export const LEVELS = ["epic", "ticket", "subtask"] as const;
 export type Level = (typeof LEVELS)[number];
 
-/** The level a ticket sits at, from its kind and its parent's kind. */
-export function levelOf(kind: TicketKind, parent: { kind: TicketKind } | null | undefined): Level {
-  if (kind === "plan") return "epic";
-  if (!parent || parent.kind === "plan") return "ticket";
-  return "subtask";
-}
-
 /**
  * Whether `child` may sit under `parent`. Returns the reason it may not, or null.
  * An epic sits at the top; a ticket under an epic; a subtask under a ticket
@@ -170,8 +163,6 @@ export function keyFromName(name: string, taken: Set<string> = new Set()): strin
 
 /** "SF-42" or "#7". */
 export const keyText = (key: string | null, number: number | null, id: number) => (key && number != null ? `${key}-${number}` : `#${id}`);
-
-export const SOURCES = ["you", "order", "council", "agent", "factory", "improve"] as const;
 
 /** Kinds that are taste: only you close them, never an agent or a rule. */
 export const TASTE_KINDS: TicketKind[] = ["request", "idea", "plan", "question"];

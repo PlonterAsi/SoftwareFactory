@@ -6,7 +6,7 @@ visualizeEverything applies to what the factory makes, not only to the factory i
 
 ## What the crew builds
 
-The station contracts (`packages/core/src/bay/builtin.ts`, `UI_TARGET`) ask every plan and build for:
+The station contracts (`packages/core/src/bay/builtin.ts`, `APP_TARGET`) ask every plan and build for:
 
 - `index.html` at the project root, `web/app.js` (an ES module) and `web/style.css`. Plain HTML, CSS and JavaScript, no frameworks, nothing from the internet, no build step.
 - The page imports the core from `src/` (`../src/x.js`), so the code the locked tests prove is the code the page runs. Anything the page imports must run in a browser; Node-only code lives in files the page never imports.

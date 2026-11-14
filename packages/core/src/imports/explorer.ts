@@ -34,7 +34,6 @@ import "./tables.js";
  */
 export type ExploreMode = "agent" | "heuristic";
 export type ExploreStation = "fetch" | "scan" | "map" | "survey" | "visual";
-export const EXPLORE_STATIONS: ExploreStation[] = ["fetch", "scan", "map", "survey", "visual"];
 
 export interface ExplorerOptions {
   /** Cap per exploration, USD. */

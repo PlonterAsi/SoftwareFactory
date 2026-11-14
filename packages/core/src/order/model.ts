@@ -109,8 +109,6 @@ export interface OrderState {
   signals: Record<number, { ts: string; text: string; source: string }>;
 }
 
-export const ORDER_EVENT_PREFIX = "order.";
-
 /** Fold the event log into the Order Engine's state. */
 export function foldOrder(events: SfEvent[]): OrderState {
   const nodes = new Map<number, OrderNode>();

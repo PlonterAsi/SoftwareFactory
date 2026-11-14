@@ -27,11 +27,6 @@ import type { OrderState } from "../order/model.js";
  */
 export type ProjectStatus = "active" | "paused" | "shipped" | "archived";
 export const PROJECT_STATUSES: ProjectStatus[] = ["active", "paused", "shipped", "archived"];
-/** Kinds steer which panels a project's view shows first. Free text is allowed; these are the known ones. */
-export const PROJECT_KINDS = ["app", "tool", "library", "research", "general"] as const;
-
-/** Link kinds the core itself fills. Other parts of the app add their own (ticket, proposal, ...). */
-export type CoreLinkKind = "order_node" | "factory_run";
 
 export interface Project {
   id: number;
