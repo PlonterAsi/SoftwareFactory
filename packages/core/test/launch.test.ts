@@ -122,6 +122,20 @@ describe("launch: finding how to run a project", () => {
   it("finds Python, Rust and Go projects, and says when a folder is gone", () => {
     const py = folder({ "app.py": "from flask import Flask\napp = Flask(__name__)\n", "tool.py": "print(1)" });
     expect(detectProfiles(py).profiles[0]).toMatchObject({ id: "py:app.py", kind: "web" });
+    // With a requirements.txt it gets its own environment: Install packages first, then it starts from .venv.
+    const reqs = folder({ "app.py": "from flask import Flask\napp = Flask(__name__)\n", "requirements.txt": "flask\n" });
+    const before = detectProfiles(reqs).profiles;
+    expect(before[0]).toMatchObject({ id: "py:app.py", recommended: true, note: expect.stringMatching(/Install packages first/) });
+    expect(before.find((p) => p.id === "py:install")).toMatchObject({ label: "Install packages", utility: true, command: expect.stringContaining("-m pip install -r requirements.txt") });
+    const venvPy = process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python";
+    mkdirSync(join(reqs, venvPy, ".."), { recursive: true });
+    writeFileSync(join(reqs, venvPy), "");
+    expect(detectProfiles(reqs).profiles[0].note).toMatch(/Install packages first/); // half made: pip has not finished
+    writeFileSync(join(reqs, ".venv", "sf-installed"), "");
+    const after = detectProfiles(reqs).profiles;
+    expect(after[0].note).toBeUndefined();
+    expect((after[0].exec as { file: string }).file).toBe(join(reqs, venvPy));
+    expect(after.find((p) => p.id === "py:install")).toMatchObject({ label: "Install packages again" });
     expect(detectProfiles(folder({ "Cargo.toml": "[package]" })).profiles[0]).toMatchObject({ id: "cargo:run", kind: "program" });
     expect(detectProfiles(folder({ "go.mod": "module x" })).stack).toEqual(["go"]);
     expect(detectProfiles(join(tmp(), "nope"))).toMatchObject({ exists: false, profiles: [] });

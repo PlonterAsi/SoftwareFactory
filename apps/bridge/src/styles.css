@@ -1805,12 +1805,12 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 /* Build runners: the runners this app keeps on this PC, their jobs and live log. */
 .rn-body { display: grid; grid-template-columns: minmax(240px, 300px) 1fr; min-height: 0; flex: 1; }
 .rn-list { border-right: 1px solid var(--line); padding: 10px; display: flex; flex-direction: column; gap: 4px; overflow: auto; }
-.rn-row { display: grid; grid-template-columns: 12px 1fr; gap: 2px 10px; align-items: center; text-align: left; background: transparent; color: var(--ink); border: 1px solid transparent; border-radius: 8px; padding: 9px 10px; font-weight: 400; }
-.rn-row:hover { background: var(--hover); }
-.rn-row.on { background: var(--accent-dim); border-color: var(--line-2); }
-.rn-row-main { display: flex; flex-direction: column; min-width: 0; }
-.rn-row-main .muted { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rn-row-state { grid-column: 2; font-size: 13px; color: var(--ink-2); }
+.rnr-row { display: grid; grid-template-columns: 12px 1fr; gap: 2px 10px; align-items: center; text-align: left; background: transparent; color: var(--ink); border: 1px solid transparent; border-radius: 8px; padding: 9px 10px; font-weight: 400; }
+.rnr-row:hover { background: var(--hover); }
+.rnr-row.on { background: var(--accent-dim); border-color: var(--line-2); }
+.rnr-row-main { display: flex; flex-direction: column; min-width: 0; }
+.rnr-row-main .muted { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rnr-row-state { grid-column: 2; font-size: 13px; color: var(--ink-2); }
 .rn-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--muted); flex: none; }
 .rn-dot.good { background: var(--good); }
 .rn-dot.work { background: var(--accent); animation: twinkle 1.6s ease-in-out infinite; }

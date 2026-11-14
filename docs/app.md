@@ -108,13 +108,14 @@ Everything that waits for you, oldest first, in one list (`shell/NeedsYou.tsx`):
 | Tab | Section | What it shows | File |
 |---|---|---|---|
 | **Mission** | Brief | The newest build as a story: a track of ten stops (Idea, Council, Design loop, Plan, Your OK, Build, Test and fix, Judge, Your OK, Ship), one sentence saying what is happening now, a card for the stop you pick, the budget bar, the answer bar when the build waits for you, *Resume* when it stopped, and the box to **Build it** or **Add it** on top of the shipped app. | `projects/mission/` |
+| **Mission**, in a repo | Brief | A project that already has code (SoftwareFactory itself, or a repo you imported) opens on its work, not on the idea track: a box that turns what you want (a new feature, a bug, a small task) into a ticket, the code in numbers, the crew's suggestions waiting for your yes or no, a way to run it, and four ticket lanes. | `mission/RepoWork.tsx` |
 | **Product** | Brief | The product design of the newest build: the brief, journeys, screens and requirements, with each round's scores from the Critic. | `projects/mission/Mission.tsx`, `stages.tsx` |
 | **Ideas** | Brief | This project's star map and Order deck: its ideas, threads, rules and conflicts. | `projects/builtin.tsx` |
 | **Builds** | Build | Every build of this project as a list (state, spend, date), and the engine's detail tabs for the picked one (see "The run deck"). | `projects/builtin.tsx` |
 | **Money** | Build | Limits for the project (total, first version, each later version) and what each version spent. | `projects/budgetPanel.tsx` |
 | **Tickets** | Build | This project's tickets (same screen as the Tickets page, narrowed). | `TicketsPanel.tsx` |
 | **Agents** | Build | Which agents worked here, with calls and spend. | `projects/builtin.tsx` |
-| **Use** | Ship | Start the finished app with one press, see its page or output inside SF, edit its data files as forms, run its tools without knowing arguments, stop it. | `projects/runPanel.tsx`, `useTool.tsx`, `dataFiles.tsx` |
+| **Use** | Ship | Start the finished app with one press, see its page or output inside SF, edit its data files as forms, run its tools without knowing arguments, stop it. An app that needs packages first (no `node_modules`, or a `requirements.txt` with no `.venv`) shows **Install packages** as the first press; a Python app gets its own `.venv` inside its folder and then starts by itself. | `projects/runPanel.tsx`, `useTool.tsx`, `dataFiles.tsx` |
 | **Integrate** | Ship | Readiness checks and the forms the project can take inside SF (tool, panel, plugin, into the source). Ask, then approve. | `Features.tsx` |
 | **Improvements** | Improve | This project's proposals from the Improvement Council; *Look now*. | `projects/improvePanel.tsx` |
 | **Code map** | Know | Import a git repository (URL, `owner/repo` or a folder), see its modules as a map, and the crew's suggestions as tickets. | `CodeMap.tsx` |
