@@ -10,7 +10,7 @@ Concept page: https://claude.ai/artifact/SNHTW1bAizfhErbGWYbQZH
 | The Sector | `game-sector` | command a strategy map | plant projects, send agents to tickets, defend against bugs, clear decisions, draw campaigns |
 | The Workshop | `game-workshop` | rewire a loop and replay last week | agents per station, caps (fuse), retry limits (governor), gate placement, plugin cartridges |
 
-All three are page-only plugins (Plugins page, Examples, Add, Turn on). They ask for no permissions, have no backend, load nothing from outside, and say on screen that nothing is written to SoftwareFactory. Their data is practice data built into the page.
+All three are page-only plugins (Plugins page, Examples, Add, Turn on). The Dock and the Workshop ask for no permissions (Sector asks to read records since v0.3, see below); they have no backend, load nothing from outside, and say on screen that nothing is written to SoftwareFactory. Their data is practice data built into the page.
 
 Shared rules the real version keeps:
 
@@ -43,4 +43,6 @@ Assaf picked the Sector direction and asked for a real strategy game. The design
 - Threats: bugs grow and crawl along conduits; breaches stop a building; rule conflicts block research; each App ships only after its release wave.
 - Missions, five Commander ranks with unlocks, research. Practice data only; the base menu mirrors the bases model in docs/bases.md.
 
-Done (2026-11-14): the plugin `actions` permission and `records:read` (docs/plugins.md, "Actions"), with the `field-desk` example as proof. Next: Sector reads real records in place of practice data, then orders from the map, then actions that spend money behind a hold to confirm.
+Done (2026-11-14): the plugin `actions` permission and `records:read` (docs/plugins.md, "Actions"), with the `field-desk` example as proof. Done (2026-11-14): Sector v0.3 reads real records. It asks for `records:read`; each App you place is one of your real projects (most open work first, with its open tickets, bugs and what waits for your look in the selection panel), and the loose ideas Scouts carry are your open tickets. It still writes nothing. Outside SoftwareFactory, or without the permission, it falls back to practice names and says so.
+
+Next: orders from the map (open a ticket or add a note from a building), then actions that spend money behind a hold to confirm.

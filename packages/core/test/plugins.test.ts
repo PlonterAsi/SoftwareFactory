@@ -61,10 +61,10 @@ describe("plugin manifests", () => {
     expect(matchesType("order.node", "order.node")).toBe(true);
   });
 
-  it("the three game demos are page-only plugins that ask for nothing and load nothing from outside", () => {
+  it("the three game demos are page-only plugins that write nothing and load nothing from outside; Sector alone reads real records", () => {
     for (const id of ["game-dock", "game-sector", "game-workshop"]) {
       const m = readManifest(join(EXAMPLES_DIR, id));
-      expect(m).toMatchObject({ id, permissions: [], main: null, agents: [] });
+      expect(m).toMatchObject({ id, permissions: id === "game-sector" ? ["records:read"] : [], actions: [], main: null, agents: [] });
       expect(m.panels).toEqual([expect.objectContaining({ where: "page", entry: "ui/index.html" })]);
       const html = readFileSync(join(EXAMPLES_DIR, id, "ui/index.html"), "utf8");
       expect(html).not.toMatch(/<(script|link|img)[^>]+(src|href)="https?:/i);
