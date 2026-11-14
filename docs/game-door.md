@@ -45,4 +45,8 @@ Assaf picked the Sector direction and asked for a real strategy game. The design
 
 Done (2026-11-14): the plugin `actions` permission and `records:read` (docs/plugins.md, "Actions"), with the `field-desk` example as proof. Done (2026-11-14): Sector v0.3 reads real records. It asks for `records:read`; each App you place is one of your real projects (most open work first, with its open tickets, bugs and what waits for your look in the selection panel), and the loose ideas Scouts carry are your open tickets. It still writes nothing. Outside SoftwareFactory, or without the permission, it falls back to practice names and says so.
 
-Next: orders from the map (open a ticket or add a note from a building), then actions that spend money behind a hold to confirm.
+Done (2026-11-14): Sector v0.4 gives orders from the map. It asks for `actions` with one verb, `ticket.open`. Select an App that stands for a real project, press **Give an order**, write one line and pick request, bug or task: a real ticket opens in that project, opened by `plugin:game-sector`. An order never spends; working the ticket stays a choice made in SoftwareFactory. Orders show in the feed and on the end receipt.
+
+In the app, a plugin's own page now comes first on its Add-ons page, with a **Full view** button; what it may do, what it adds and its log fold away under it.
+
+Next: actions that spend money (work a ticket) behind a price and a hold to confirm, and a note on an existing ticket from the map.
