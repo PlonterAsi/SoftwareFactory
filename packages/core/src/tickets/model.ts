@@ -15,6 +15,13 @@
 export const KINDS = ["bug", "request", "task", "idea", "plan", "question"] as const;
 export type TicketKind = (typeof KINDS)[number];
 
+/** A kind as a person says it mid-sentence, with its article: "a bug", "an idea", "an epic" (a plan is shown as an epic). */
+export const aKind = (kind: string): string => {
+  const word = kind === "plan" ? "epic" : kind;
+  return `${/^[aeiou]/i.test(word) ? "an" : "a"} ${word}`;
+};
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 export const KIND_LABEL: Record<TicketKind, string> = {
   bug: "Bug", request: "Request", task: "Task", idea: "Idea", plan: "Epic", question: "Question",
 };
@@ -106,7 +113,7 @@ export const AUTO_KINDS: TicketKind[] = ["bug", "task"];
  */
 export function autoWorkRefusal(t: Pick<TicketView, "kind" | "status" | "size" | "blocked" | "assignee">, handBrake = false): string | null {
   if (t.status !== "ready") return t.status === "open" ? "Not ready yet: once it is ready, the crew can take it." : null;
-  if (!AUTO_KINDS.includes(t.kind)) return `A ${t.kind === "plan" ? "epic" : t.kind} waits for your Work it press.`;
+  if (!AUTO_KINDS.includes(t.kind)) return `${cap(aKind(t.kind))} waits for your Work it press.`;
   if (t.blocked) return "Blocked: it starts when what blocks it is closed.";
   if (t.assignee === "you") return "You took it, so the crew leaves it to you.";
   if (handBrake) return "The thread says to hold it.";
@@ -194,7 +201,7 @@ export function nextMoves(status: TicketStatus, kind: TicketKind): Move[] {
 /** Who may move a ticket where. Returns the reason it is refused, or null. */
 export function refuseMove(kind: TicketKind, from: TicketStatus, to: TicketStatus, by: string): string | null {
   if (from === to) return `It is already ${to.replace("_", " ")}.`;
-  if (by !== "you" && to === "closed" && TASTE_KINDS.includes(kind)) return `A ${kind} is closed only by you; agents and rules leave it built for your look.`;
+  if (by !== "you" && to === "closed" && TASTE_KINDS.includes(kind)) return `${cap(aKind(kind))} is closed only by you; agents and rules leave it built for your look.`;
   if (by !== "you" && isClosed(from)) return "A closed ticket never moves by itself: a late agent reply must not reopen what you closed.";
   return null;
 }

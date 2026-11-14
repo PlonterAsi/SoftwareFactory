@@ -97,6 +97,8 @@ describe("tickets: the ready queue", () => {
     const base = { kind: "task" as const, status: "ready" as const, size: "M" as const, blocked: false, assignee: null };
     expect(autoWorkRefusal(base)).toBeNull();
     expect(autoWorkRefusal({ ...base, assignee: "you" })).toMatch(/You took it/);
-    expect(autoWorkRefusal({ ...base, kind: "plan" })).toMatch(/epic waits/);
+    expect(autoWorkRefusal({ ...base, kind: "plan" })).toMatch(/^An epic waits/);
+    expect(autoWorkRefusal({ ...base, kind: "idea" })).toMatch(/^An idea waits/);
+    expect(autoWorkRefusal({ ...base, kind: "request" })).toMatch(/^A request waits/);
   });
 });

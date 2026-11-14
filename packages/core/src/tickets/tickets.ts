@@ -20,6 +20,7 @@ import {
   FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS,
   SIZES, autoWorkRefusal, ideaFromTicket, isClosed, keyFromName, keyText, nextMoves, refuseMove, refuseParent, titleFrom, workDocument,
   type LinkView, type NoteView, type Priority, type Size, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView,
+  aKind,
 } from "./model.js";
 
 export interface OpenTicket {
@@ -146,6 +147,15 @@ export interface QueueSpot {
   /** Why it is not in line, in a sentence. */
   why: string | null;
 }
+
+/**
+ * In a repo an epic that holds tickets is worked through them: each ticket gets its own branch and pull
+ * request, and one run over the whole epic would build what its done tickets already built. Says so, or null.
+ */
+export const epicOfTickets = (t: Pick<TicketView, "kind" | "children">): string | null =>
+  t.kind === "plan" && t.children.total > 0
+    ? `This epic is worked through its tickets (${t.children.done} of ${t.children.total} done): open one and press Work it. Each gets its own branch.`
+    : null;
 
 /**
  * Tickets: open, edit one field at a time, talk, move, link, plan, and hand a
@@ -422,7 +432,7 @@ export class Tickets {
     return {
       ticket: t, notes, links, lines, parent: t.parentId != null ? this.get(t.parentId) ?? null : null,
       moves: nextMoves(t.status, t.kind), document: workDocument(t, notes, links, lines), run,
-      repo, route: repo && this.opts.repoRuns ? this.routeOf(t, {}) : null, working: this.inRepo.has(id), steps: this.steps(id),
+      repo, route: repo && this.opts.repoRuns && !epicOfTickets(t) ? this.routeOf(t, {}) : null, working: this.inRepo.has(id), steps: this.steps(id),
       queue: t.status === "ready" ? this.spot(t) : null,
     };
   }
@@ -505,7 +515,7 @@ export class Tickets {
   edit(id: number, field: string, value: unknown, by = "you", key?: string): TicketView {
     const t = this.must(id);
     if (field === "answer") {
-      if (!key || !FORMS[t.kind].some((q) => q.key === key)) throw new Error(`A ${t.kind} has no question "${key}"`);
+      if (!key || !FORMS[t.kind].some((q) => q.key === key)) throw new Error(`${aKind(t.kind).replace(/^a/, "A")} has no question "${key}"`);
       this.log.append("ticket.edited", { id, field, key, value: String(value ?? "").slice(0, 4000), by });
       return this.get(id)!;
     }
@@ -596,6 +606,8 @@ export class Tickets {
     const repo = o.where === "new" ? null : repoOfProject(this.log, t.project);
     if (o.where === "repo" && !repo) throw new Error("This ticket's project has no imported repo to work in.");
     if (repo) {
+      const held = epicOfTickets(t);
+      if (held) throw new Error(held);
       // Intake: a bug, a task or a small ask is one session in the clone; a feature gets the whole engine there.
       const routed = this.routeOf(t, o);
       if (routed.route === "engine") {

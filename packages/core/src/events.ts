@@ -134,6 +134,9 @@ export class EventLog extends EventEmitter {
 
   constructor(path = ":memory:") {
     super();
+    // Every part of the core listens here (tickets, the council, plugins, the launcher, imports) and so does each
+    // open window's live stream: more than Node's default of 10, which only printed a leak warning. A real leak still shows past this.
+    this.setMaxListeners(64);
     this.path = path;
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA busy_timeout = 5000");

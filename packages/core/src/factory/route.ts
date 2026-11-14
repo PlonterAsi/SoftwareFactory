@@ -1,4 +1,5 @@
 import { isSmallJob } from "./council.js";
+import { aKind } from "../tickets/model.js";
 
 /**
  * Which way work in an existing codebase goes (Assaf, 14 Nov 2026: "SF needs several entry points, and not
@@ -30,9 +31,9 @@ export function routeWork(x: { kind?: string | null; size?: string | null; text:
   if (x.maxUsd != null && x.maxUsd < min) return { route: "light", why: `its limit of $${x.maxUsd.toFixed(2)} is under the $${min.toFixed(2)} an engine run needs` };
   const kind = x.kind ?? null;
   if (x.size === "L") return { route: "engine", why: "sized L: more than one session's work, so it is designed and planned first" };
-  if (kind && FIX_KINDS.has(kind)) return { route: "light", why: `a ${kind}${x.size ? ` sized ${x.size}` : ""}: one session in the repo` };
+  if (kind && FIX_KINDS.has(kind)) return { route: "light", why: `${aKind(kind)}${x.size ? ` sized ${x.size}` : ""}: one session in the repo` };
   if (x.size === "S") return { route: "light", why: "sized S: one session in the repo" };
-  if (x.size === "M") return { route: "engine", why: `a ${kind ?? "piece of work"} sized M: designed and planned before it is built` };
+  if (x.size === "M") return { route: "engine", why: `${kind ? aKind(kind) : "a piece of work"} sized M: designed and planned before it is built` };
   const small = isSmallJob(x.text);
-  return small.small ? { route: "light", why: `${small.why}: one session in the repo` } : { route: "engine", why: `${kind ? `a ${kind}` : "an ask"} of ${small.why}: feature-sized, so it is designed and planned first` };
+  return small.small ? { route: "light", why: `${small.why}: one session in the repo` } : { route: "engine", why: `${kind ? aKind(kind) : "an ask"} of ${small.why}: feature-sized, so it is designed and planned first` };
 }

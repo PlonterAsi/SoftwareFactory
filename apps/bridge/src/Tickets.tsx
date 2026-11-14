@@ -327,6 +327,8 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   };
   const closed = t.status === "closed" || t.status === "rejected";
   const engineFirst = d.route?.route === "engine";
+  // In a repo an epic that holds tickets is worked through them, one branch each (the core refuses a run over the whole epic).
+  const epicOfTickets = !!d.repo && t.kind === "plan" && t.children.total > 0;
   const stationAt = d.run?.station ? STATION_ORDER.indexOf(d.run.station) : -1;
   return (
     <aside className="tk-page" aria-label={`Ticket ${t.key}`}>
@@ -350,7 +352,7 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
       {d.parent && <div className="muted tk-parent">{t.level === "subtask" ? "Subtask of" : "Part of epic"} <button className="link" onClick={() => onSelect(d.parent!.id)}>{d.parent.key} {d.parent.title}</button></div>}
 
       <div className="tk-crew">
-        {d.repo ? (() => {
+        {epicOfTickets ? null : d.repo ? (() => {
           // Two routes in a repo: one Builder session, or the whole engine. The suggested one is the main button; the other is one press away.
           const running = !!d.run && !d.run.outcome;
           const off = closed || busy != null || d.working || running;
@@ -377,6 +379,11 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
         </button>
         <button className="ghost" onClick={() => setShowDoc((s) => !s)}>{showDoc ? "Hide" : "Work document"}</button>
       </div>
+      {epicOfTickets && !closed && (
+        <div className="tk-queue tk-route" role="note">
+          This epic is worked through its tickets ({t.children.done} of {t.children.total} done): open one and press Work it. Each gets its own branch.
+        </div>
+      )}
       {d.repo && d.route && (t.status === "open" || t.status === "ready") && !d.working && !(d.run && !d.run.outcome) && (
         <div className="tk-queue tk-route" role="note">
           Suggested: {d.route.route === "engine" ? "the whole engine (design, plan, build, review, judge)" : "one Builder session"}. Why: {d.route.why}.
