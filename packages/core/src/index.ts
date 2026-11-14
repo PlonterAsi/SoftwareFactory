@@ -68,3 +68,5 @@ export { installKit, checkApp, checkAppLive, probeStart, KIT_PATHS, type AppChec
 export { BaseRegistry, browse as browseFolders, type Base, type BaseCard, type BaseStatus } from "./bases/registry.js";
 export * from "./bases/host.js";
 export { bootBase } from "./server.js";
+export * from "./runners/manager.js";
+export * from "./runners/routes.js";

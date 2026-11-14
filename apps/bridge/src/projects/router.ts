@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
  *   #/features[/7]         features added from finished projects (feature 7)
  *   #/plugins[/id[/panel]] plugins (one plugin, one of its pages)
  *   #/brain                the Brain: the principles every loop follows
+ *   #/runners              build runners: GitHub's checks and builds, run on this PC
  *   #/bases                the factories this app hosts (open, create, rename, archive)
  *   #/factory[/view]       the whole factory (floor, bay, order, tickets, improve, cycles, data), as before projects
  *   #/bridge[/mode]        the Factory Bridge dashboard (loom, score, quarter)
@@ -26,6 +27,7 @@ export type Route =
   | { page: "plugins"; id?: string; panel?: string }
   | { page: "brain" }
   | { page: "bases" }
+  | { page: "runners" }
   | { page: "kit" }
   | { page: "needs" }
   | { page: "bridge"; mode: BridgeMode };
@@ -43,6 +45,7 @@ export function parse(hash: string): Route {
   if (parts[0] === "plugins") return { page: "plugins", id: parts[1] || undefined, panel: parts[2] || undefined };
   if (parts[0] === "brain") return { page: "brain" };
   if (parts[0] === "bases") return { page: "bases" };
+  if (parts[0] === "runners") return { page: "runners" };
   if (parts[0] === "_kit") return { page: "kit" };
   if (parts[0] === "needs") return { page: "needs" };
   if (parts[0] === "bridge") return { page: "bridge", mode: MODES.includes(parts[1] as BridgeMode) ? (parts[1] as BridgeMode) : "loom" };
@@ -56,6 +59,7 @@ export function href(r: Route): string {
   if (r.page === "plugins") return `#/plugins${r.id ? `/${r.id}${r.panel ? `/${r.panel}` : ""}` : ""}`;
   if (r.page === "brain") return "#/brain";
   if (r.page === "bases") return "#/bases";
+  if (r.page === "runners") return "#/runners";
   if (r.page === "kit") return "#/_kit";
   if (r.page === "needs") return "#/needs";
   if (r.page === "bridge") return r.mode === "loom" ? "#/bridge" : `#/bridge/${r.mode}`;

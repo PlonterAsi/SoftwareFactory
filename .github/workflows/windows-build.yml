@@ -12,6 +12,11 @@
 #   TAURI_SIGNING_PRIVATE_KEY secret set, the installer is signed for the updater and the release
 #   also carries latest.json, which installed apps read to update themselves. The smoke test also
 #   installs an older build and proves it updates itself to this one.
+# - Where it runs: on GitHub's machines, unless the repository variable CI_WINDOWS names a runner of
+#   your own (set and removed from the app: Build runners, "Send builds to this PC"). Then the build
+#   and the publish run on that PC, free. A pull request from a fork never goes to your PC.
+#   The smoke test reinstalls the app and moves its data folder, so it never runs in a person's own
+#   Windows account: it stays on GitHub's machines until CI_SMOKE names an isolated machine. See docs/runners.md.
 name: Windows build
 
 on:
@@ -33,7 +38,7 @@ env:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_WINDOWS || '"windows-latest"') || 'windows-latest' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -144,7 +149,7 @@ jobs:
 
   smoke:
     needs: build
-    runs-on: windows-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_SMOKE || '"windows-latest"') || 'windows-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -176,7 +181,11 @@ jobs:
   publish:
     needs: [build, smoke]
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    # Bash steps only (Git's bash on Windows), so it runs the same on your own Windows runner.
+    runs-on: ${{ fromJSON(vars.CI_WINDOWS || '"ubuntu-latest"') }}
+    defaults:
+      run:
+        shell: bash
     steps:
       # Checkout first: it cleans the workspace, so the downloaded installers must come after it.
       - uses: actions/checkout@v4
@@ -191,8 +200,11 @@ jobs:
       # Installed apps read latest.json from the `updates` branch through GitHub's API, and download the
       # installer through the release asset API, so updates keep working when this repo is private
       # (the app then sends the read token saved in Systems > Updates). See docs/updates.md.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Publish to the "latest" release
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
