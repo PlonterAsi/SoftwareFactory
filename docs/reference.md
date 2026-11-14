@@ -174,7 +174,7 @@ Every row of the log is `{ id, ts, type, payload }`. A run's id is the id of its
 | Engine review | `factory.retro`, `factory.visual` |
 | Order Engine | `order.ingest`, `order.node`, `order.fragment`, `order.fragment.moved`, `order.fragment.pinned`, `order.conflict`, `order.conflict.resolved`, `order.sweep`, `order.sweep.undone`, `order.briefing`, `order.visual` |
 | Projects | `project.created`, `project.updated`, `project.linked`, `project.unlinked`, `project.budget` |
-| Tickets | `ticket.opened`, `ticket.requested`, `ticket.keyed`, `ticket.edited`, `ticket.noted`, `ticket.linked`, `ticket.line.moved`, `ticket.step`, `ticket.run`, `ticket.branch`, `ticket.pr` |
+| Tickets | `ticket.opened`, `ticket.requested`, `ticket.keyed`, `ticket.edited`, `ticket.noted`, `ticket.linked`, `ticket.line.moved`, `ticket.step`, `ticket.run`, `ticket.branch`, `ticket.pushed`, `ticket.pr` |
 | Agent Bay | `bay.agent.saved`, `bay.agent.retired`, `bay.assign`, `bay.test`, `bay.visual` |
 | Brain | `brain.principle.saved`, `brain.principle.reset`, `brain.suggestion.dismissed` |
 | Feature map | `featuremap.record.saved`, `featuremap.record.reset` |

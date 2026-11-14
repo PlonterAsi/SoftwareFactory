@@ -92,6 +92,37 @@ describe("tickets: the crew opens a PR", () => {
     expect(t.notes(a.id).map((n) => n.text).join("\n")).toMatch(/stays on this computer: the practice crew/);
   }, 30_000);
 
+  it("sends a built branch on your press with this PC's own Git sign-in, and hands over the address that starts the PR", async () => {
+    const { bare, calls, proj, t } = setup();
+    const a = t.open({ kind: "task", title: "No token yet", project: proj });
+    t.work(a.id); await t.waitRepo(a.id);
+    expect(t.get(a.id)!).toMatchObject({ status: "built", pr: null, pushedUrl: null });
+    expect(t.notes(a.id).map((n) => n.text).join("\n")).toMatch(/Press Send to GitHub/);
+    expect(git(bare, "branch", "--list")).not.toMatch(/sf\/AA-1/);
+    const sent = await t.send(a.id);
+    expect(sent.pushedUrl).toBe("https://github.com/acme/app/compare/main...sf%2FAA-1-no-token-yet?expand=1");
+    expect(git(bare, "branch", "--list").split("\n").map((b) => b.replace(/^[* ]+/, "")).sort()).toEqual(["main", "sf/AA-1-no-token-yet"]);
+    expect(git(bare, "log", "--oneline", "main")).toMatch(/^\w+ first$/);
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    expect(sent.status).toBe("built");
+  }, 30_000);
+
+  it("turns a branch built before the token into a draft PR on your press, and refuses for the practice crew", async () => {
+    let why: string | null = null;
+    const { gh, proj, t } = setup(() => why);
+    const a = t.open({ kind: "task", title: "Token later", project: proj });
+    t.work(a.id); await t.waitRepo(a.id);
+    why = "the practice crew never opens a PR";
+    await expect(t.send(a.id)).rejects.toThrow(/Not sent: the practice crew/);
+    why = null;
+    gh.setToken(TOKEN);
+    const sent = await t.send(a.id);
+    expect(sent.pr).toEqual({ repo: "acme/app", number: 7, url: "https://github.com/acme/app/pull/7", state: "open" });
+    await expect(t.send(a.id)).rejects.toThrow(/already has pull request #7/);
+    const b = t.open({ kind: "task", title: "Never worked", project: proj });
+    await expect(t.send(b.id)).rejects.toThrow(/no branch yet/);
+  }, 30_000);
+
   it("never pushes to main, keeps tokens out of text, and reads repo names", async () => {
     const { gh } = setup();
     gh.setToken(TOKEN);

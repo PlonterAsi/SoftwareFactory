@@ -1,5 +1,5 @@
 import { chmodSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { git } from "../factory/workspace.js";
 
@@ -118,6 +118,36 @@ export class GitHub {
     const open = await this.call<any[]>("GET", `/repos/${o.repo.owner}/${o.repo.name}/pulls?state=open&head=${encodeURIComponent(`${o.repo.owner}:${o.branch}`)}`);
     if (open.length) return toPr(open[0]);
     return toPr(await this.call<any>("POST", `/repos/${o.repo.owner}/${o.repo.name}/pulls`, { title: o.title, head: o.branch, base: o.base, body: o.body, draft: true }));
+  }
+
+  /**
+   * Push one branch on a person's press, when there is no token: plain git, so this PC's own Git sign-in
+   * decides (Git for Windows asks in its own window the first time). Never a protected branch. It runs
+   * beside the core, not inside it, so a sign-in window cannot freeze the app; it gives up after `timeoutMs`.
+   */
+  async pushBranch(o: { repo: GitHubRepo; dir: string; branch: string; base?: string; timeoutMs?: number }): Promise<void> {
+    if (PROTECTED.test(o.branch) || o.branch === o.base) throw new Error(`The crew never pushes to ${o.branch}.`);
+    if (this.hasToken()) { this.git(o.dir, "push", "-q", this.remote(o.repo), `${o.branch}:refs/heads/${o.branch}`); return; }
+    await new Promise<void>((done, fail) => {
+      const c = spawn("git", ["push", "-q", this.remote(o.repo), `${o.branch}:refs/heads/${o.branch}`], { cwd: o.dir, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+      let err = "";
+      c.stderr?.on("data", (d) => { err += String(d); });
+      const t = setTimeout(() => { c.kill(); fail(new Error("GitHub did not answer in time. If a sign-in window opened, finish it and press again.")); }, o.timeoutMs ?? 120_000);
+      c.on("error", (e) => { clearTimeout(t); fail((e as NodeJS.ErrnoException).code === "ENOENT" ? new Error("Git is not installed (or not on PATH).") : e); });
+      c.on("close", (code) => {
+        clearTimeout(t);
+        if (code === 0) return done();
+        const said = hideTokens(err.trim());
+        fail(new Error(/auth|denied|403|could not read Username|terminal prompts disabled/i.test(said)
+          ? `This computer is not signed in to GitHub for ${o.repo.owner}/${o.repo.name}. Add a token in Systems, GitHub access, and press again.`
+          : `GitHub did not take the branch: ${said.slice(0, 300) || "git push failed"}`));
+      });
+    });
+  }
+
+  /** Where a person starts the pull request for a pushed branch, in the browser. */
+  compareUrl(repo: GitHubRepo, base: string, branch: string): string {
+    return `https://github.com/${repo.owner}/${repo.name}/compare/${encodeURIComponent(base)}...${encodeURIComponent(branch)}?expand=1`;
   }
 
   /**

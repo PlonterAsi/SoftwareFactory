@@ -144,7 +144,7 @@ flowchart TD
   where -->|"yes"| clone["Builder works in a clone,<br/>on branch sf/KEY-title"]
   clone --> pr{"Real crew and a GitHub token?"}
   pr -->|"yes"| draft["Draft pull request. Never main"]
-  pr -->|"no"| local["Branch stays on this PC,<br/>with the git fetch line"]
+  pr -->|"no"| local["Branch stays on this PC,<br/>until you press Send to GitHub"]
   run --> built["Built: waits for your look"]
   draft --> built
   local --> built

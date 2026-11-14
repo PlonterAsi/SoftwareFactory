@@ -286,7 +286,13 @@ describe("tickets: working inside an imported repo", () => {
     expect(builder.tools).toEqual(["Read", "Edit", "Write", "Glob", "Grep", "Bash", "WebFetch", "Skill"]);
     // The workbench: a shell limited to the commands it needs to run the tests itself.
     expect(builder.commands).toContain("npm test");
-    expect(t.notes(a.id).at(-1)!.text).toMatch(/git fetch ".*" sf\/LA-1/);
+    expect(t.notes(a.id).at(-1)!.text).toMatch(/Press Add to my folder/);
+    // Your press adds the branch to the original folder; its files and its current branch stay as they were.
+    const sent = await t.send(a.id);
+    expect(sent.pushedUrl).toBe("local");
+    expect(git(src, "branch", "--list").split("\n").map((b) => b.trim())).toEqual(["* main", done.branch]);
+    expect(git(src, "rev-parse", "HEAD")).toBe(head);
+    expect(existsSync(join(src, "docs"))).toBe(false);
     // A bug worked in a repo never closes by rule: no locked tests ran.
     expect(t.notes(a.id).some((n) => n.by === "qa-rule")).toBe(false);
     // Working it again reuses the clone and its branch.

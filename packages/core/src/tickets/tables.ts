@@ -18,7 +18,7 @@ export const EDITABLE: Record<string, string> = {
 
 export const ticketsProjection: Projection = {
   name: "tickets",
-  version: 5,
+  version: 6,
   tables: ["tickets", "ticket_notes", "ticket_links", "ticket_keys"],
   describe: "Tickets: units of work per project, their append-only thread (notes, agent replies, status moves, events) and links",
   migrate(db) {
@@ -45,6 +45,7 @@ export const ticketsProjection: Projection = {
       run         INTEGER,
       branch      TEXT,
       branch_dir  TEXT,
+      pushed_url  TEXT,
       pr_repo     TEXT,
       pr_number   INTEGER,
       pr_url      TEXT,
@@ -148,8 +149,13 @@ export const ticketsProjection: Projection = {
       db.prepare("UPDATE tickets SET run = ? WHERE id = ?").run(Number(p.run), Number(p.id));
       note("event", `Factory run #${p.run} started on this ticket`);
     } else if (e.type === "ticket.branch") {
-      db.prepare("UPDATE tickets SET branch = ?, branch_dir = ? WHERE id = ?").run(String(p.branch), String(p.dir), Number(p.id));
+      // New work on the branch: what was sent before is behind, so the ticket offers to send again.
+      db.prepare("UPDATE tickets SET branch = ?, branch_dir = ?, pushed_url = CASE WHEN ? THEN NULL ELSE pushed_url END WHERE id = ?").run(String(p.branch), String(p.dir), p.sha ? 1 : 0, Number(p.id));
       note("event", p.sha ? `Branch ${p.branch} at ${String(p.sha).slice(0, 7)}: ${(p.files ?? []).length} file(s) changed in ${p.dir}.` : `Branch ${p.branch} in ${p.dir}: nothing changed.`);
+    } else if (e.type === "ticket.pushed") {
+      // The branch is on GitHub (sent on your press, with this PC's own Git sign-in); `url` starts its pull request.
+      db.prepare("UPDATE tickets SET pushed_url = ?, updated_at = ? WHERE id = ?").run(p.url ? String(p.url) : "local", e.ts, Number(p.id));
+      note("event", p.url ? `Branch ${p.branch} sent to ${p.repo} on GitHub` : `Branch ${p.branch} added to ${p.repo}`);
     } else if (e.type === "ticket.pr") {
       // The ticket's pull request: opened by the crew, then merged or closed on GitHub.
       db.prepare("UPDATE tickets SET pr_repo = ?, pr_number = ?, pr_url = ?, pr_state = ?, updated_at = ? WHERE id = ?").run(String(p.repo), Number(p.number), String(p.url), String(p.state), e.ts, Number(p.id));
