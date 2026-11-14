@@ -13,19 +13,19 @@ import { inProject, registerProjectPanel, registeredPanelIds, unregisterProjectP
  * A plugin page runs in a sandboxed frame. It cannot call the core itself; it asks this window
  * through sf.js (postMessage), and the core checks its permissions again.
  */
-export type PluginPermission = "events:read" | "events:write" | "agents";
+export type PluginPermission = "events:read" | "events:write" | "agents" | "records:read" | "actions";
 export interface PluginPanel { id: string; title: string; entry: string; where: "project" | "page"; order: number }
 export interface PluginManifest {
   id: string; name: string; version: string; description: string; permissions: PluginPermission[]; main: string | null;
-  subscribe: string[]; panels: PluginPanel[]; agents: string[];
+  subscribe: string[]; panels: PluginPanel[]; agents: string[]; actions?: string[];
 }
 export interface PluginView {
   id: string; name: string; version: string; description: string; dir: string; source: string | null;
-  status: "installed" | "enabled" | "disabled"; manifest: PluginManifest; granted: PluginPermission[]; error: string | null; crashes: number;
+  status: "installed" | "enabled" | "disabled"; manifest: PluginManifest; granted: string[]; error: string | null; crashes: number;
   installedAt: string; enabledAt: string | null; running: boolean | null; dataKeys: number;
 }
 export interface PluginExample { id: string; name: string; description: string; dir: string; installed: boolean }
-export interface PluginList { plugins: PluginView[]; examples: PluginExample[]; dir: string; permissions: Record<PluginPermission, string> }
+export interface PluginList { plugins: PluginView[]; examples: PluginExample[]; dir: string; permissions: Record<PluginPermission, string>; actions?: Record<string, string> }
 
 const get = async <T,>(path: string): Promise<T> => {
   const r = await fetch(`${API}${path}`);
@@ -50,6 +50,13 @@ export const pluginsApi = {
     return get<{ events: SfEvent[] }>(`/api/plugins/${id}/events?${s}`);
   },
   call: (id: string, method: string, args: unknown) => post(`/api/plugins/${id}/call`, { method, args }) as Promise<{ value: unknown }>,
+  records: (id: string, q: { kind: string; projectId?: number | null; limit?: number }) => {
+    const s = new URLSearchParams({ kind: q.kind });
+    if (q.projectId != null) s.set("projectId", String(q.projectId));
+    if (q.limit) s.set("limit", String(q.limit));
+    return get<{ records: unknown[] }>(`/api/plugins/${id}/records?${s}`);
+  },
+  act: (id: string, verb: string, args: unknown) => post(`/api/plugins/${id}/act`, { verb, args }) as Promise<{ value: unknown }>,
 };
 
 const LIFECYCLE = (t: string) => t.startsWith("plugin.") && t !== "plugin.data" && t !== "plugin.emitted";
@@ -87,7 +94,7 @@ export function syncPluginPanels(list: PluginView[] | undefined, events: SfEvent
 
 // ---------------- One plugin page, in a sandboxed frame ----------------
 
-type Ask = { sf: 1; rid: number; op: "context" | "events" | "call" | "data" | "subscribe"; args?: Record<string, any> };
+type Ask = { sf: 1; rid: number; op: "context" | "events" | "call" | "data" | "subscribe" | "records" | "act"; args?: Record<string, any> };
 
 export function PluginFrame({ plugin, panel, project, events }: { plugin: PluginView; panel: PluginPanel; project: ProjectDetail | null; events: SfEvent[] }) {
   const frame = useRef<HTMLIFrameElement>(null);
@@ -119,6 +126,13 @@ export function PluginFrame({ plugin, panel, project, events }: { plugin: Plugin
           return reply(m.rid, true, r.events);
         }
         if (m.op === "call") return reply(m.rid, true, (await pluginsApi.call(plugin.id, String(a.method ?? ""), a.args ?? {})).value);
+        if (m.op === "records") return reply(m.rid, true, (await pluginsApi.records(plugin.id, { kind: String(a.kind ?? ""), projectId: p?.id ?? null, limit: Number(a.limit) || undefined })).records);
+        if (m.op === "act") {
+          // In a project's tab, what it makes lands in that project unless it names another.
+          const args = { ...(a.args ?? {}) };
+          if (p && args.project === undefined && a.verb !== "project.create") args.project = p.id;
+          return reply(m.rid, true, (await pluginsApi.act(plugin.id, String(a.verb ?? ""), args)).value);
+        }
         if (m.op === "data") return reply(m.rid, true, (await pluginsApi.data(plugin.id)).data);
         if (m.op === "subscribe") {
           if (!canRead) return reply(m.rid, false, undefined, "This plugin did not ask to read events (events:read)");
@@ -220,7 +234,8 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
   const pages = m.panels.filter((x) => x.where === "page");
   const tabs = m.panels.filter((x) => x.where === "project");
   const page = pages.find((x) => x.id === panelId) ?? pages[0];
-  const newAsks = m.permissions.filter((x) => !p.granted.includes(x));
+  const acts = m.actions ?? [];
+  const newAsks: string[] = [...m.permissions.filter((x) => !p.granted.includes(x)), ...acts.filter((a) => !p.granted.includes(`act:${a}`)).map((a) => `act:${a}`)];
   return (
     <div className="pl-detail">
       <header className="ft-head">
@@ -251,6 +266,9 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
             <li><b>Keep its own small data</b><span className="muted">always, in SoftwareFactory's database</span></li>
             {m.permissions.map((x) => (
               <li key={x} className={newAsks.includes(x) && p.status === "enabled" ? "new" : undefined}><b>{list.permissions[x] ?? x}</b><span className="muted mono">{x}{p.granted.includes(x) ? " · granted" : ""}</span></li>
+            ))}
+            {acts.map((a) => (
+              <li key={a} className={newAsks.includes(`act:${a}`) && p.status === "enabled" ? "new" : undefined}><b>{list.actions?.[a] ?? a}</b><span className="muted mono">action {a}{p.granted.includes(`act:${a}`) ? " · granted" : ""}</span></li>
             ))}
           </ul>
           <p className="muted">Its backend can read only its own folder: no other files, no starting programs, no keys or tokens. Its pages cannot reach the network.</p>

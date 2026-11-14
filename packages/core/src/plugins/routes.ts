@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname } from "node:path";
-import { PERMISSION_TEXT } from "./manifest.js";
+import { PERMISSION_TEXT, PLUGIN_ACTIONS } from "./manifest.js";
 import type { PluginHost } from "./host.js";
 import { FRAME_CSS_SOURCE, FRAME_SDK_SOURCE } from "./runner.js";
 
@@ -18,6 +18,8 @@ import { FRAME_CSS_SOURCE, FRAME_SDK_SOURCE } from "./runner.js";
  *   GET  /api/plugins/:id/data
  *   GET  /api/plugins/:id/events?projectId=&types=a,b&limit=   needs events:read
  *   POST /api/plugins/:id/call                { method, args }  its backend answers
+ *   GET  /api/plugins/:id/records?kind=projects|tickets|agents&projectId=&limit=   needs records:read
+ *   POST /api/plugins/:id/act                 { verb, args }    one listed action; needs actions
  *   GET  /plugins/:id/<path>                  an enabled plugin's pages and their files
  *   GET  /plugins/_sdk/sf.js, sf.css          the helper and base styles every plugin page can load
  */
@@ -29,7 +31,7 @@ export async function pluginsRoute(
   const { plugins } = ctx;
   const path = url.pathname;
   if (req.method === "GET" && path === "/api/plugins") {
-    return [200, { plugins: plugins.list(), examples: plugins.examples(), dir: plugins.root, permissions: PERMISSION_TEXT }];
+    return [200, { plugins: plugins.list(), examples: plugins.examples(), dir: plugins.root, permissions: PERMISSION_TEXT, actions: PLUGIN_ACTIONS }];
   }
   if (req.method === "POST" && path === "/api/plugins/install") {
     const body = await ctx.readJson(req);
@@ -43,7 +45,7 @@ export async function pluginsRoute(
       return [201, plugins.install(String(body.dir))];
     } catch (e) { return [409, { error: (e as Error).message }]; }
   }
-  const m = path.match(/^\/api\/plugins\/([a-z0-9-]+)(?:\/(enable|disable|remove|log|data|events|call))?$/);
+  const m = path.match(/^\/api\/plugins\/([a-z0-9-]+)(?:\/(enable|disable|remove|log|data|events|records|call|act))?$/);
   if (!m) return null;
   const id = m[1];
   const op = m[2];
@@ -58,6 +60,10 @@ export async function pluginsRoute(
         const limit = Number(url.searchParams.get("limit") ?? 500);
         return [200, { events: plugins.events(id, { projectId: pid ? Number(pid) : null, types, limit }) }];
       }
+      if (op === "records") {
+        const pid = url.searchParams.get("projectId");
+        return [200, { records: plugins.records(id, String(url.searchParams.get("kind") ?? ""), { projectId: pid ? Number(pid) : null, limit: Number(url.searchParams.get("limit") ?? 500) }) }];
+      }
       return null;
     }
     if (req.method !== "POST" || !op) return null;
@@ -65,6 +71,7 @@ export async function pluginsRoute(
     if (op === "enable") return [200, plugins.enable(id)];
     if (op === "disable") return [200, plugins.disable(id)];
     if (op === "remove") return [200, await plugins.remove(id)];
+    if (op === "act") return [200, { value: plugins.act(id, String(body.verb ?? ""), (body.args && typeof body.args === "object" ? body.args : {}) as Record<string, unknown>) }];
     if (op === "call") return [200, { value: await plugins.call(id, String(body.method ?? ""), body.args ?? {}) }];
     return null;
   } catch (e) {

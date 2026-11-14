@@ -61,6 +61,7 @@ export * from "./launch/quick.js";
 export * from "./plugins/manifest.js";
 export * from "./plugins/tables.js";
 export * from "./plugins/host.js";
+export * from "./plugins/door.js";
 export * from "./plugins/routes.js";
 export { RUNNER_SOURCE, FRAME_SDK_SOURCE } from "./plugins/runner.js";
 export { DEFAULT_PRINCIPLES, brainBlock, principles, savePrinciple, resetPrinciple, type Principle, type PrincipleView } from "./brain/brain.js";

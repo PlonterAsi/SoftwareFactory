@@ -29,6 +29,7 @@ import { launchRoute } from "./launch/routes.js";
 import { Integrations } from "./integrations/service.js";
 import { integrationsRoute, serveExtension } from "./integrations/routes.js";
 import { PluginHost } from "./plugins/host.js";
+import { coreDoor } from "./plugins/door.js";
 import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
 import { brainRoute } from "./brain/routes.js";
 import { DropFolder } from "./bridge/drop.js";
@@ -123,7 +124,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const explorer = new RepoExplorer(log, runtime, join(dirname(projectsDir), "imports"), bay, { createNode: (title) => order.createNode("project", title) });
   // Finished projects added into SoftwareFactory: their frozen copies live in extensions/, next to projects/.
   // Plugins: folders with a plugin.json, copied into plugins/ next to projects/, each backend in its own locked-down process.
-  const plugins = new PluginHost(log, join(dirname(projectsDir), "plugins"), { bay });
+  const plugins = new PluginHost(log, join(dirname(projectsDir), "plugins"), { bay, door: coreDoor({ log, tickets, bay }) });
   const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"), plugins);
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
   const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {

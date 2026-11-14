@@ -43,4 +43,4 @@ Assaf picked the Sector direction and asked for a real strategy game. The design
 - Threats: bugs grow and crawl along conduits; breaches stop a building; rule conflicts block research; each App ships only after its release wave.
 - Missions, five Commander ranks with unlocks, research. Practice data only; the base menu mirrors the bases model in docs/bases.md.
 
-Next: the plugin actions permission, then a read-only bridge to real records, then orders from the map.
+Done (2026-11-14): the plugin `actions` permission and `records:read` (docs/plugins.md, "Actions"), with the `field-desk` example as proof. Next: Sector reads real records in place of practice data, then orders from the map, then actions that spend money behind a hold to confirm.

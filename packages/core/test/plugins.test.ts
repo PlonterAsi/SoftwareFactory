@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
   AgentBay, EventLog, Factory, MockRuntime, PluginHost, readManifest, ManifestError, matchesType, eventInProject, createCore, projectOf, projectDetail,
-  EXAMPLES_DIR, Integrations,
+  EXAMPLES_DIR, Integrations, Tickets, coreDoor, createProject,
 } from "../src/index.js";
 
 const tmp = (p = "sf-plugins-") => mkdtempSync(join(tmpdir(), p));
@@ -70,6 +70,12 @@ describe("plugin manifests", () => {
       expect(html).not.toMatch(/<(script|link|img)[^>]+(src|href)="https?:/i);
       expect(html).toMatch(/nothing is written to SoftwareFactory/i);
     }
+  });
+
+  it("the field desk example asks for real records and two named actions", () => {
+    const m = readManifest(join(EXAMPLES_DIR, "field-desk"));
+    expect(m).toMatchObject({ id: "field-desk", permissions: ["records:read", "actions"], actions: ["ticket.open", "ticket.note"], main: null });
+    expect(readFileSync(join(EXAMPLES_DIR, "field-desk", "ui/index.html"), "utf8")).not.toMatch(/<(script|link|img)[^>]+(src|href)="https?:/i);
   });
 
   it("the bundled example is a valid plugin", () => {
@@ -211,6 +217,71 @@ describe("the plugin host", () => {
     expect(evs.map((e) => e.type)).toEqual(["factory.run.started", "factory.run.finished"]);
     expect(evs.every((e) => eventInProject(e, projectDetail(log, pid)!))).toBe(true);
     expect(h.events("reader", { types: ["factory.run.started"] })).toHaveLength(2);
+  });
+});
+
+describe("the door to real records and actions", () => {
+  function doorHost() {
+    const log = new EventLog(":memory:");
+    const tickets = new Tickets(log, {});
+    const h = new PluginHost(log, join(tmp(), "plugins"), { door: coreDoor({ log, tickets }) });
+    hosts.push(h);
+    return { log, tickets, h };
+  }
+  const page = { "ui/index.html": "<h1>x</h1>" };
+  const panels = [{ id: "tab", title: "Tab", entry: "ui/index.html" }];
+
+  it("a manifest must name its actions, and only known ones", () => {
+    const bad = (manifest: Record<string, unknown>) => () => readManifest(plugin(page, { id: "ok", panels, ...manifest }));
+    expect(bad({ permissions: ["actions"] })).toThrow(/needs an "actions" list/);
+    expect(bad({ actions: ["ticket.open"] })).toThrow(/needs the actions permission/);
+    expect(bad({ permissions: ["actions"], actions: ["factory.erase"] })).toThrow(/Unknown action factory.erase/);
+    expect(readManifest(plugin(page, { id: "ok", panels, permissions: ["actions"], actions: ["ticket.open", "ticket.open"] })).actions).toEqual(["ticket.open"]);
+  });
+
+  it("reads projects and tickets only with records:read", () => {
+    const { log, tickets, h } = doorHost();
+    const project = createProject(log, { name: "Atlas" });
+    tickets.open({ kind: "task", title: "Draw the map", project });
+    h.install(plugin(page, { id: "blind", panels }));
+    h.enable("blind");
+    expect(() => h.records("blind", "projects")).toThrow(/did not ask for records:read/);
+    h.install(plugin(page, { id: "reader", panels, permissions: ["records:read"] }));
+    expect(() => h.records("reader", "projects")).toThrow(/not turned on/);
+    h.enable("reader");
+    expect(h.records("reader", "projects")).toMatchObject([{ id: project, name: "Atlas" }]);
+    expect(h.records("reader", "tickets", { projectId: project })).toMatchObject([{ title: "Draw the map", kind: "task", project }]);
+    expect(() => h.records("reader", "secrets")).toThrow(/Unknown records/);
+  });
+
+  it("takes only the actions it listed, marks who did it, and logs every try", () => {
+    const { log, tickets, h } = doorHost();
+    h.install(plugin(page, { id: "doer", panels, permissions: ["actions"], actions: ["ticket.open", "project.create"] }));
+    expect(h.enable("doer").granted).toEqual(["actions", "act:ticket.open", "act:project.create"]);
+    const made = h.act("doer", "project.create", { name: "Outpost" }) as { id: number };
+    const t = h.act("doer", "ticket.open", { title: "Scout the ridge", kind: "idea", project: made.id }) as { id: number };
+    expect(tickets.get(t.id)).toMatchObject({ title: "Scout the ridge", kind: "idea", project: made.id, openedBy: "plugin:doer" });
+    expect(() => h.act("doer", "ticket.note", { id: t.id, text: "hello" })).toThrow(/was not given "ticket.note"/);
+    expect(() => h.act("doer", "ticket.open", {})).toThrow(/needs a title/);
+    const acted = log.list({ limit: 1e6 }).filter((e) => e.type === "plugin.acted").map((e) => e.payload as Record<string, unknown>);
+    expect(acted).toMatchObject([{ id: "doer", verb: "project.create", ok: true }, { id: "doer", verb: "ticket.open", ok: true, projectId: made.id }, { id: "doer", verb: "ticket.open", ok: false }]);
+  });
+
+  it("an update that adds an action waits to be turned on again", () => {
+    const { h } = doorHost();
+    h.install(plugin(page, { id: "grow", version: "1.0.0", panels, permissions: ["actions"], actions: ["ticket.open"] }));
+    h.enable("grow");
+    expect(h.install(plugin(page, { id: "grow", version: "1.1.0", panels, permissions: ["actions"], actions: ["ticket.open"] }))).toMatchObject({ status: "enabled" });
+    expect(h.install(plugin(page, { id: "grow", version: "2.0.0", panels, permissions: ["actions"], actions: ["ticket.open", "ticket.note"] }))).toMatchObject({ status: "installed", granted: [] });
+    expect(() => h.act("grow", "ticket.note", { id: 1, text: "x" })).toThrow(/not turned on/);
+  });
+
+  it("stops a plugin that acts too fast", () => {
+    const { h } = doorHost();
+    h.install(plugin(page, { id: "fast", panels, permissions: ["actions"], actions: ["project.create"] }));
+    h.enable("fast");
+    for (let i = 0; i < 60; i++) h.act("fast", "project.create", { name: `P${i}` });
+    expect(() => h.act("fast", "project.create", { name: "one more" })).toThrow(/too fast/);
   });
 });
 
