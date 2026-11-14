@@ -20,7 +20,7 @@ A project can say what it wants with `softwarefactory.json` in its root:
 
 1. **Integrate** tab of the project: a strip of readiness checks (finished, code on disk, tests pass, same as shipped, dependencies, something to open), then the forms it can take, the suggested one marked.
 2. **Ask**: one request per project and form.
-3. **Your approval**: the only human step. Approve or reject on the tab (or from the Features page's "Approve …" link). The top bar's Features link shows how many wait for you.
+3. **Your approval**: the only human step. Approve or reject on the tab (or from the Finished apps page's "Approve …" link). *Needs you* in the sidebar counts it while it waits.
 4. **Installed**: a frozen copy of the project's folder (without `.git`) goes to `<data>/extensions/<slug>-<id>/`. The project's own folder is never touched, and later work on it never breaks the installed feature.
 5. **Update**: when the project ships again, the tab offers "Update to the newest version". An update of a feature you already approved, same project and form, goes through on its own (decided by `auto`) and replaces the old copy.
 6. **Remove**: on the Features page; deletes the copy, keeps the project.

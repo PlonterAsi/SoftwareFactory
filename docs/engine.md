@@ -2,6 +2,68 @@
 
 SoftwareFactory's goal is a complete, working product from one prompt. This page says how the engine gets there, and why it was rebuilt on 2026-11-12.
 
+The first section is the engine as it is today. The sections after it are the record of why each part exists, in the order it was added, each tied to the run that showed the need. The research behind the design is in [loop-engineering.md](loop-engineering.md); the same pipeline drawn as a flow chart is in [flows.md](flows.md).
+
+## The pipeline today
+
+```
+one line
+  └─ intake              the idea is stored as a Signal
+  └─ COUNCIL LOOP        3 to 6 seats vote build / reshape / drop, up to 2 rounds (skipped for a small job)
+  └─ DESIGN LOOP         research → Designer writes brief, journeys, screens, requirements, rules
+                         → Critic scores → revise, up to 3 rounds
+  └─ plan                from the documents; the Critic lists gaps, the Planner adds them once
+  └─ GATE A              you approve the plan
+  └─ tests               acceptance and journey tests, dry run, then locked
+  └─ BUILD LOOP          one feature per fresh session → tests, schema, links, real browser,
+                         judge looks at the screen → commit → next feature
+  └─ TEST ⇄ FIX LOOP     fast checks and the whole suite → Fixer at the workbench → ladder when it stalls
+  └─ REVIEW              the Reviewer verifies each acceptance criterion by running the product
+  └─ JUDGE LOOP          the Product Judge reads every screen and scores the product;
+                         what is not met is built as repair features, then judged once more
+  └─ GATE B              you accept the build (the question names what is still open)
+  └─ ship                commit, tag, and the engine's review of its own run
+```
+
+The code is `Run.go()` in `packages/core/src/factory/loop.ts`. Station ids, in order: `intake`, `council`, `discover`, `plan`, `gateA`, `tests`, `build`, `test`, `fix`, `review`, `evaluate`, `gateB`, `ship`.
+
+### Each loop: goal, observer, stop
+
+A loop needs a goal that can be measured, an observer other than the agent that did the work, and state on disk so each round starts from what the last one learned.
+
+| Loop | Worker | Observer | Passes when | Stops anyway when | State on disk |
+|---|---|---|---|---|---|
+| Council | Visionary, Architect, Skeptic (haiku) | Each seat reads the others in round 2; plain code merges the takes | A majority votes build or reshape | 2 rounds. A majority "drop" asks you once | The brief, in the log |
+| Design | Designer (sonnet), with a research call first | Critic (sonnet), who sees only your words and the documents | All 5 scores are 4 or more: coverage, journey, screens, originality, buildable | 3 rounds, or 35% of the run's budget. The best-scored documents go on | `docs/product/BRIEF.md`, `JOURNEYS.md`, `SCREENS.md`, `REQUIREMENTS.md` |
+| Plan | Planner (haiku) | Critic lists requirements the plan does not cover; the core puts back designed screens | You approve at gate A | You reject without a note | `SPEC.md`, the plan in the log, a commit |
+| Tests | Tester (haiku) | A dry run against stubs before locking | The test files load and fail only on assertions | | `test/`, locked by hash |
+| Build | Builder (sonnet), one fresh session per feature | The core: locked tests, schema, links, the screen in a real browser; then the judge on that one screen | Nothing regressed, the screen draws, the judge finds what the design says it shows | One retry per feature; a screen still hollow ends "broken". 55% of the budget | `features.json`, `PROGRESS.md`, a commit per feature |
+| Test ⇄ fix | Fixer (sonnet) at the workbench | The core runs the suite and the fast checks (syntax, types, lint, secrets) | Every locked test is green | 5 rounds, or a stall: then the ladder (question the test, stronger model, you) | The attempt record, in the log |
+| Review | Reviewer (haiku) at the workbench | It runs the product for each criterion; the core reads its verdict | Every criterion seen working | High-severity findings go to the Fixer once; the rest ride to gate B | The review, in the log |
+| Judge | Product Judge (sonnet), who sees no code | The core reads every screen's text and controls, and decides against the thresholds | Every must-have requirement seen working and function, design, content at 4 or more | 2 looks. Repairs get 25% of the budget, in groups of 5 requirements | The evaluation, in the log |
+| The factory itself | The core, no agent | You, on the Engine tab and the Engine cycles page | | | `factory.retro` |
+
+### What changes the route
+
+| Case | Difference |
+|---|---|
+| Practice crew | Canned agents; the whole route runs free and always builds a word counter |
+| A run under $3 (a ticket at $0.60) | The Builder writes the app in one call; the judge's findings go to one fix round instead of repair features |
+| The next version of a shipped app | No design loop: it keeps its product design, and works on top of the shipped folder and its locked tests |
+| No browser on the computer | The screen check and the judge are skipped and say so; they never count as a pass |
+| `autoApprove` (headless runs, tickets the crew starts itself) | Gates A and B approve themselves. A budget escalation still stops the run |
+| The app closes mid-run | The run resumes from the log at the first station not finished ([storage.md](storage.md)) |
+
+### Money inside a run
+
+Every call has a cap: the lowest of the agent's own cap, what the run has left, and the station's share. The shares: design 35%, build 55%, repair 25% (they overlap on purpose: each is a ceiling, not a reservation). A failed call still counts. When the run's cap is reached, the run asks you for more and never raises it by itself; with a project total set, it cannot go beyond what the project has left. A repair or a second look is skipped when the money for it is not there, so the run always reaches gate B with what it built. All the numbers are in [reference.md](reference.md).
+
+### What is not built yet
+
+- The judge reads screens; it does not click through a journey.
+- Turning a line of the engine review into an engine change is done by people, not by a loop inside SF.
+- Known open items after cycle 5: designs that assume data the research cannot return, Builders inventing links, the last part of screen detail, and an update installing while a run waits at a gate.
+
 ## Why it was rebuilt
 
 Run 2366 (Game Mastery, 2026-11-12) showed every weakness at once. All ten tests passed, but a stray line in the locked test file threw `game is not defined` once the tests were over, so `node --test` failed the whole file. Five things went wrong after that:
@@ -12,7 +74,7 @@ Run 2366 (Game Mastery, 2026-11-12) showed every weakness at once. All ten tests
 4. **There was no way to question a locked test,** even when the test itself was broken.
 5. **"Done" only meant the unit tests were green.** Nothing ever ran the app's own page code, so a cut-off `web/app.js` shipped in run 2099.
 
-## How it works now
+## How it works now (2026-11-12)
 
 ```
 plan → locked tests → build ⟲ → core checks → fix ⟲ (ladder) → verify ⟲ → you accept → ship

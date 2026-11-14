@@ -1,107 +1,39 @@
 # SoftwareFactory
 
-A loop-engineered software factory with an AI crew. Drop a messy idea in; an Order Engine keeps every thought in its place, and agents working in loops (council, plan, build, test, review, fix) turn it into working software, with as few human approval stops as possible. Everything is visualized.
+A loop-engineered software factory with an AI crew. Type one line; agents working in loops design the product, plan it, build it feature by feature, test, fix, review and judge it, and you approve twice. An Order Engine keeps every idea, rule and decision in its place. Everything is visualized, and what it builds are real programs with screens, not scripts.
 
-Plan: [SoftwareFactory: MVP plan and tech stack](https://claude.ai/artifact/9vnEmBfz1VaSGaB1KKwh9H)
+![A project's Mission tab: a build travelling the track, waiting for the plan approval](docs/img/app/mission.png)
 
-![The Bridge, milestone 5: a "since you left" card, the Overseer offering a Build button, a shipped run with Open folder, and factory ideas as systems on the star map](docs/img/bridge-m5.png)
-
-## Status: milestone 5 (Bridge polish and the Overseer)
-
-The Bridge is now meant to be used every day, starting from a fresh Windows PC:
-
-- **Nothing to install to start**: the Windows installer ships its own Node.js. Without Claude Code the app runs the free **practice crew** (canned agents that walk the whole loop and always build a sample word counter); with Claude Code installed and signed in it runs the **real crew**. Git is needed to ship apps.
-![Ship's systems: crew mode, checks for this computer, and where things land](docs/img/bridge-m5-systems.png)
-
-- **Ship's systems** (the *Systems* button or the crew chip in the top bar): switch Practice / Real at any time (remembered in the database), see what this computer has (Node.js, Claude Code, Git, each with the one thing to do if it is missing) and **where things land**: the built-apps folder, the drop folder and the database, each with *Open* and *Copy path*.
-- **Welcome and guidance**: a first launch shows what Build it, Capture and Ask do, with examples to try. A gate waiting for you is also said in the Overseer channel with a *Show me* button. A shipped run has an *Open folder* button. Agent failures read as what to do ("Claude Code is installed but not signed in: run `claude` and sign in"); the raw text stays in the log.
-- **The Overseer** answers from a live status digest of the factory (runs, gates, conflicts, projects and their rules, spend), and when you describe something to build it offers a one-tap **Build** button. Nothing starts until you press it.
-- **Since you left**: when you come back after 10 minutes or more, one card lists what shipped or failed, what waits for you, new conflicts, what was filed where, drops and spend.
-- **Drop folder** (default `%USERPROFILE%\SoftwareFactory\Drop`, changeable in Systems): save a `.txt` or `.md` note there, even from your phone through OneDrive or Google Drive, and it becomes a Signal within seconds. The note moves to `filed/`; the same note is never read twice.
-- **Live factory floor**: the agent working a station docks on it with its avatar, a scan line sweeps the active station, and the flowing edge glows. **Star map**: every factory idea becomes its own system at once (no Archivist call), ringed while building, amber when it waits for you, green when shipped; double-click it to watch its run.
-- **When the core will not start**, the desktop app says why (Node missing, the core crashed), shows the core's log and has a *Restart the core* button. The core writes `core.log` in the data folder.
-- **Storage**: crew mode and drop folder are `settings` rows, picked-up notes are `drops` rows, and "seen up to here" is a `bridge.seen` event, all derived from the log like every other table.
-
-## Improvement Council (constant improvement)
-
-The **Improve** tab: six lens agents (integrate, automate, simplify, enrich, UX, flow) look again at your projects, ideas, shipped apps and SoftwareFactory itself, and queue ranked proposals you accept, park or reject with one tap. It remembers everything it proposed and never repeats itself or brings back what you rejected. Haiku, $0.20 a day cap with a live cost meter; on its own only on the real crew, when something changed. Accepting files a ticket or task; building takes a second tap. Details: [docs/improve.md](docs/improve.md).
-
-![The Improve tab: the lens wheel, the cost meter and the proposals queue](docs/img/bridge-improve.png)
-
-Every project also has an **Improvements** panel with only its own proposals; *Look now* there looks at that project.
-
-## Milestone 4 (the Agent Bay and the Council)
-
-Agents are workers you create, edit, test and put on stations. Every factory run now goes:
+## What it does today
 
 ```
-idea → Council (3 seats, skipped for small jobs) → plan → [you approve plan] → tests (locked)
-     → build → test ⇄ fix → Review (⇄ fix once) → [you accept build] → ship
+one line → Council → Design loop (Designer ⇄ Critic) → Plan → [you approve]
+         → locked tests → Build, one feature per session → test ⇄ fix → Review → Product Judge
+         → [you accept] → ship (a tagged git repo you can start with one press)
 ```
 
-- **Agent Bay** (`packages/core/src/bay`, Bridge tab *Agent Bay*): the built-in crew (Overseer, Archivist, Visionary, Architect, Skeptic, Planner, Tester, Builder, Reviewer, Fixer) are ordinary agents. Each has a name, avatar, model, cap per call, plugins (each agent loads only these; none = lean), skills, tools, a sample task and a prompt.
-  - **Create** one by describing it in a line (the Overseer drafts it; free heuristics on the mock), clone one, or **import** an agent file. Agent files are Markdown with a header that mirrors Claude Code subagent files, so plonter-kit agents import as they are; any agent downloads as `.agent.md`.
-  - **Every save is a version**; the Versions tab shows the prompt diff and rolls back (the restore is a new version, nothing is lost).
-  - **Test** an agent on a sample task: one capped call, checked by the verifier of the station it was made for.
-  - **Assign** by dragging a crew card onto a station seat (or the seat's picker). The Council takes three seats. The factory asks the Bay at the moment a station needs a worker, so an edit applies to the next call, and each call records the agent version that did it.
-  - **Stats** per agent and per version: calls, cost, verifier pass rate, rounds per run, live state (idle, thinking, blocked) on the crew card.
-  - **Station contracts**: an agent's prompt says who it is; the core appends the output contract of the station it works. Any agent can work any station, and editing an agent can never break the format the core parses.
-- **Council** (`packages/core/src/factory/council.ts`): three seats answer the idea in parallel (take, proposals, concerns, vote build / reshape / drop). No build majority: each seat reads the others and answers again (round 2). Plain code merges the takes into a brief for the Planner (what two seats agree on, proposals, concerns). A majority "drop" asks you once; otherwise it never stops the run. Short single-ask ideas skip it (`council: auto|always|never`).
-- **Review**: after the locked tests pass, the Reviewer checks the code against the spec. High-severity findings go to the Fixer once; the rest ride to the build gate as notes.
-- **Bridge**: the Council box on the factory floor shows the votes, the run deck's Council tab draws the round table (seats coloured by vote, agreeing seats linked) with the brief and each take, and a Review tab shows the findings.
-- **Storage**: agents, versions, slots, tests, verdicts, Council sessions and reviews are tables in the database (`bay_*`, `agent_verdicts`, `council_*`, `reviews`), derived from the event log like the rest.
-- **First real run**: [docs/milestone-4-run.md](docs/milestone-4-run.md). The Council cost $0.0025 and turned "sum a CSV" into money in cents with every row accounted for; the CLI shipped for $0.29.
+- **The engine**: nested loops, each with its own goal, an outside observer and a budget. Tests are written first and locked; every screen is opened in a real browser; a separate judge scores the running app; every run ends with a review of the engine itself. [docs/engine.md](docs/engine.md)
+- **Projects**: everything belongs to a project, with its own Mission, product design, builds, money limits, tickets and history. [docs/projects.md](docs/projects.md)
+- **Agents**: create, edit, version, test and assign the workers; each has its own model, cap, skills, tools and MCP servers. A free practice crew walks the whole loop without Claude Code.
+- **Order from mess**: say anything in any order; it is filed under project ▸ idea ▸ thread, rules become Canon, conflicts are raised as cards.
+- **Tickets**: the crew works ready tickets by itself within caps, and SoftwareFactory's own tickets come back as draft pull requests. [docs/tickets.md](docs/tickets.md)
+- **Use what you built**: start a finished app from its project, or add it into SoftwareFactory as a tool, a panel or an add-on. [docs/run.md](docs/run.md), [docs/integrations.md](docs/integrations.md)
+- **Also**: an Improvement Council, repository import with a code map, add-ons, several factories in one app, in-app updates.
 
-## Milestone 3 (the Order Engine)
+## Documentation
 
-Say anything, in any order, in the Overseer channel. Every Signal is filed:
+Start at **[docs/README.md](docs/README.md)**: the map of every document.
 
-```
-Signal (raw, never edited) → Archivist: split · classify · route → Fragments under Project ▸ Idea ▸ Thread
-   → emphasize (rules and decisions enter the node's Canon) · filter (noise hidden)
-   → conflict check against the Canon (plain-code precedence) → visualizeEverything
-daily sweep: fade stale notes · raise old questions · digest busy nodes · propose merges → one briefing
-```
-
-- **Archivist** (`packages/core/src/order`): Haiku in the lean profile, about $0.001 per Signal, with a per-call cap and a daily cap. It only proposes; the core checks the proposal and files it. A free heuristic Archivist takes over when the agent's answer is unusable, the cap is spent, or the runtime is the mock.
-- **Canon is code, not a summary**: the rules and decisions on a node and its parents, each linked to the Signal it came from. Conflicts are resolved by the plan's order: your words beat inferred ones, the more specific node wins there only, newer beats older, important beats unmarked. It asks with a one-tap card when it is still tied, when an unmarked line would override a marked rule, or when a marked rule on a project itself would change.
-- **Unsure placements never block**: under 50% confidence a fragment drifts in the Unsorted belt until you drag it onto a body.
-- **Sweep and briefing**: every sweep action is an undoable event; pinned items, rules and decisions are never faded. Non-urgent items arrive as one Overseer briefing.
-- **Bridge**: the star map is the real node tree (projects are systems, ideas planets, threads moons; size by activity, glow by important Canon, dim when stale), new fragments fly in as particles, conflicts are red links. The Order deck shows the Canon constellation of the selected body, the Unsorted tray, conflict cards, the briefing with undo, and every visual check.
-- **Headless**: `npm run order -- messages.json --mode agent --project Name` files a whole conversation and prints the tree, Canon, conflicts and cost. First real result: [docs/milestone-3-run.md](docs/milestone-3-run.md) (this project's own chat: 33 fragments, the planted conflict caught, $0.014).
-
-## Storage: database, files, cache
-
-The core runs on an organized SQLite database, not loose files. Details: [docs/storage.md](docs/storage.md).
-
-- **Database** (`factory.db`): the append-only event log is the source of truth; organized tables (`signals`, `agent_runs`, `factory_runs`, `artifacts`, `order_nodes`, `order_fragments`, `order_conflicts`) are kept current in the same transaction and can be rebuilt from the log at any time. Versioned migrations; an existing database is backed up before it is upgraded.
-- **Files**: only real files (the generated repos), each pointed at by an `artifacts` row with its SHA-256.
-- **Cache**: folded views in memory, keyed by the newest event, always safe to drop.
-- **Bridge**: the Data vault tab draws all three, flags lagging tables and missing files, and has a one-click rebuild from the log.
-
-## Milestone 2 (thin factory loop)
-
-Type a one-line idea in the Overseer channel and press **Build it**. The factory runs:
-
-```
-idea → Planner (spec + task graph) → [you approve plan] → Tester (acceptance tests, then locked)
-     → Builder → node --test ⇄ Fixer (max 5 rounds) → [you accept build] → git repo on disk, tagged v0.1.0
-```
-
-- **Loop engine** (`packages/core/src/factory`): every station is a loop with a worker, a verifier, exit criteria and a budget, all written to the event log.
-- **Guards**: the Tester writes the tests from the spec before any code exists, and the core refuses any later write to `test/` and re-checks a hash of the tests before every run. One hard money cap per run. The same failures twice in a row, a station error or a spent budget stops at an escalation card instead of burning rounds.
-- **Cheap agents**: agents run with no tools (lean profile) and answer in a strict file format; the core writes the files and runs the tests itself, inside the project folder only, with a scrubbed environment.
-- **visualizeEverything in code**: before a station may pass, the core checks that every thing it produced has the event its Bridge view draws from (floor box, timeline pulse, task graph, test grid, file heat map). A missing visual fails the station.
-- **Bridge**: the factory floor lights up per station with the fix-round counter and a fuel bar for the run budget; gates show an Approve / Send back bar; the run deck shows the plan as a task graph, tests as a pass and fail grid per round, files as a heat map (locked tests in amber), and every visual check.
-- **Headless**: `npm run factory -- "<idea>"` runs the loop with both gates approved for you and prints the total cost. First real result: [docs/milestone-2-run.md](docs/milestone-2-run.md).
-
-## Milestone 1 (skeleton and runtime spike)
-
-- **Bridge UI** (`apps/bridge`): React + TypeScript. Star map (every Signal is a star in the Unsorted belt), factory floor (the 9 stations, React Flow), computation timeline (every agent call with model, time, tokens and cost), Overseer channel.
-- **Core** (`packages/core`): TypeScript. Append-only SQLite event log with full-text search, Signals, the `AgentRuntime` adapter with per-call budget caps, a small JSON API and a live event stream.
-- **Shell** (`src-tauri`): Tauri 2. Opens the Bridge and runs the core as a child process.
-- **Skill** (`packages/core/agent-skills/visualize-everything`, in the agents' skills library): the visualizeEverything station step.
-- **Spike**: [docs/spike-runtime.md](docs/spike-runtime.md). Headless Claude Code in a lean profile costs about $0.0014 per short call on Haiku, versus about $0.99 with every plugin loaded on the default model.
+| | |
+|---|---|
+| [Specification](docs/spec.md) | what it must do, and what is built, partial or planned |
+| [The app](docs/app.md) | every screen and tab |
+| [Flows](docs/flows.md) | user and app flows as diagrams |
+| [The engine](docs/engine.md) | from one line to a shipped app |
+| [Architecture](docs/architecture.md) | processes, modules, data, safety |
+| [Reference](docs/reference.md) | API, events, tables, settings, limits |
+| [Development](docs/development.md) | set up, test, change, release, working rules |
+| [History](docs/history.md) | milestones 1 to 5 |
 
 ## Run it
 
