@@ -108,3 +108,43 @@ export function linkCase(c: LinkCheck) {
     durationMs: 0,
   };
 }
+
+/**
+ * Finding the real page for a made-up link (run 4004: 7 dead links at the first check, and the Builder,
+ * which has no web search at its workbench, was told twice to "search for the real one" before the core
+ * emptied them). An agent that can search is asked once, with the lines each link sits on; the core opens
+ * every address it returns and puts the ones that exist in the dead link's place. What it cannot find is emptied.
+ */
+export const FIND_LINKS_USD = 0.25;
+export const FIND_LINKS_MAX = 12;
+
+/** The lines around a link in its file: what the link was meant to be (a record's title, its topic). */
+export function linkContext(content: string, url: string, max = 420): string {
+  const lines = content.split("\n");
+  const at = lines.findIndex((l) => l.includes(url));
+  if (at < 0) return "";
+  return lines.slice(Math.max(0, at - 4), at + 2).map((l) => l.trim()).filter(Boolean).join(" ").replace(/\s+/g, " ").slice(0, max);
+}
+
+export function findLinksPrompt(product: string, dead: { url: string; file: string; context: string }[]): string {
+  return [
+    "This time you only find pages. Do not design anything and do not write product documents.",
+    `The app "${product}" is being built, and these web addresses in its sample content do not exist: they were written from memory. Each is listed with the lines it sits on, which say what the link was meant to be.`,
+    dead.map((d, i) => `${i + 1}. ${d.url}\n   in ${d.file}: ${d.context || "(no context)"}`).join("\n"),
+    `Use your web search tool now, at most ${dead.length + 2} searches. For each address find the real page or video that was meant, and give the address exactly as a search returned it on this call. When no search finds a real one, answer null for it: an empty link is right, a second made-up one is a defect.`,
+    'Answer with ONE fenced json block and nothing else: {"links": [{"dead": "the address as listed", "real": "https://the-page-a-search-returned" or null}]}.',
+  ].join("\n\n");
+}
+
+/** The finder's answer: for each dead link it was asked about, the address it found (never the same one, never a non-address). */
+export function validateFoundLinks(j: unknown, dead: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  const list = (j as { links?: unknown })?.links;
+  for (const x of Array.isArray(list) ? list : []) {
+    const d = String((x as { dead?: unknown })?.dead ?? "").trim();
+    const real = String((x as { real?: unknown })?.real ?? "").trim().replace(/[.,;:!?]+$/, "");
+    if (!dead.includes(d) || !/^https?:\/\/[^\s"'`<>\\]+\.[^\s"'`<>\\]+$/.test(real) || real === d || dead.includes(real)) continue;
+    out[d] = real;
+  }
+  return out;
+}

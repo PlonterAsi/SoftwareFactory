@@ -137,25 +137,38 @@ export function validateCritique(j: unknown): Critique {
 export const critiquePasses = (c: Critique) => RUBRIC.every((k) => c.scores[k] >= PASS_SCORE);
 export const critiqueTotal = (c: Critique) => RUBRIC.reduce((a, k) => a + c.scores[k], 0);
 
-/** What the Critic is asked. It sees the person's words and the documents, never the Designer's reasoning. */
-export function critiquePrompt(idea: string, docs: ProductDocs, round: number): string {
+/**
+ * What the Critic is asked. It sees the person's words and the documents, never the Designer's reasoning.
+ *
+ * On a later round it also sees its own last scores and problems. Runs 3185 to 4004: `buildable` stayed at 3
+ * for three rounds "for new reasons" each time. The Designer fixed what was listed and the Critic, starting
+ * blank, found something else to hold the score down, so the loop could not end. A judge that sees what it
+ * asked for checks that first, and a new problem has to be worth a round.
+ */
+export function critiquePrompt(idea: string, docs: ProductDocs, round: number, before?: Critique): string {
   return [
     `What the person asked for, in their words:\n${idea}`,
     `The product documents (round ${round}):\n${JSON.stringify(docs, null, 2)}`,
+    before ? [
+      `You judged the version before this one. Your scores then: ${RUBRIC.map((k) => `${k} ${before.scores[k]}`).join(", ")}. The problems you listed, which the Designer was told to fix:`,
+      before.problems.map((p, i) => `${i + 1}. ${p.where ? `[${p.where}] ` : ""}${p.problem}${p.fix ? ` Fix asked: ${p.fix}` : ""}`).join("\n") || "(none)",
+      "First check each of those against the documents above: is it fixed? A score goes up when the problems that held it down are fixed. Do not put a new, smaller problem in a fixed one's place to keep a score where it was. List a new problem only when the revision brought it in, or when a real user of the product would be stopped by it. A problem you list again says what is still missing.",
+    ].join("\n") : "",
     `Score each of these from 1 (fails) to 5 (clearly true). Be hard to please: a 4 means a real user would not notice a problem.\n${RUBRIC.map((k) => `- ${k}: ${RUBRIC_TEXT[k]}`).join("\n")}`,
     "For every score under 5, list the concrete problem and the change that would fix it.",
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
-/** What the Designer gets on a later round: its own documents and what the Critic found. */
-export function revisePrompt(idea: string, docs: ProductDocs, c: Critique, round: number): string {
+/** What the Designer gets on a later round: its own documents and what the Critic found. On the last round, what cannot be fixed is cut. */
+export function revisePrompt(idea: string, docs: ProductDocs, c: Critique, round: number, last = false): string {
   return [
     `Idea: ${idea}`,
     `Round ${round}. Your product documents so far:\n${JSON.stringify(docs, null, 2)}`,
     `A critic scored them (1 to 5, ${PASS_SCORE} passes): ${RUBRIC.map((k) => `${k} ${c.scores[k]}`).join(", ")}.`,
     `Problems to fix:\n${c.problems.map((p) => `- ${p.where ? `[${p.where}] ` : ""}${p.problem}${p.fix ? ` Fix: ${p.fix}` : ""}`).join("\n") || "- (none listed; raise every score under the bar)"}`,
     "Return the whole set of documents again in the same JSON shape, with every problem fixed. Keep what already works. Do not drop anything the person asked for.",
-  ].join("\n\n");
+    last ? "This is the last round, so nothing may stay open. A problem you cannot fully fix is settled by making the design smaller: a value no origin can really supply leaves the screen, or becomes something the person enters, or a fixed set written out in a rule from the research; a step that depends on it is rewritten without it. What the person asked for by name is never removed: give it its simplest honest form. Say in \"assumptions\" what you cut and why." : "",
+  ].filter(Boolean).join("\n\n");
 }
 
 /** The documents as the Planner reads them. */

@@ -505,6 +505,11 @@ describe("discovery: the idea becomes a designed product before any plan", () =>
     const run = f.start("a coach for one game", { autoApprove: true, autoRetries: 0, maxUsd: 5 });
     await f.wait(run);
     expect(seen.filter((x) => x.station === "design")).toHaveLength(3);
+    // The Critic's second and third calls carry what it asked for; the Designer's last call is told to cut.
+    const crits = seen.filter((x) => x.station === "critique" && !/you check a plan/.test(x.req.prompt));
+    expect(crits[0].req.prompt).not.toMatch(/You judged the version before/);
+    expect(crits[1].req.prompt).toMatch(/You judged the version before[\s\S]*The skill tree is only a list/);
+    expect(seen.filter((x) => x.station === "design").map((x) => /last round, so nothing may stay open/.test(x.req.prompt))).toEqual([false, false, true]);
     const last = events(log, "factory.discovery").at(-1);
     expect(last).toMatchObject({ pass: false, round: 2, settled: "still under the bar after 3 rounds" });
     expect(seen.find((x) => x.station === "plan")!.req.prompt).toMatch(/Today v2/);
@@ -536,12 +541,14 @@ describe("discovery: the idea becomes a designed product before any plan", () =>
 describe("the build loop: one feature per fresh session", () => {
   const write = (cwd: string, fs: { path: string; content: string }[]) => { for (const f of fs) { mkdirSync(dirname(join(cwd, f.path)), { recursive: true }); writeFileSync(join(cwd, f.path), f.content); } };
   /** A fake real crew: each build call does its one feature at the workbench (writes files in the folder). */
-  function featureCrew(onFeature?: (id: string, nth: number, cwd: string, files: { path: string; content: string }[]) => boolean) {
+  function featureCrew(onFeature?: (id: string, nth: number, cwd: string, files: { path: string; content: string }[]) => boolean, finder?: (prompt: string) => string) {
     const mock = new MockRuntime({ plantBug: false });
     const builds: AgentRequest[] = [];
     const seen: Record<string, number> = {};
     const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
       const r = await mock.run(req);
+      // The link search: an agent with web search, asked for the real page of each dead link.
+      if (/This time you only find pages/.test(req.prompt)) { if (!finder) throw new Error("no web search here"); r.text = finder(req.prompt); return r; }
       if (station(req) !== "build") return r;
       builds.push(req);
       const files = parseFileBlocks(r.text);
@@ -598,9 +605,12 @@ describe("the build loop: one feature per fresh session", () => {
     const f1 = events(log, "factory.feature").filter((e) => e.id === "F2" && e.state !== "building");
     expect(f1.map((e) => e.state)).toEqual(["broken", "built"]);
     expect(f1[0].invalid.join("\n")).toMatch(/src\/schema\.js: an entity has no valid name/);
+    // Nobody could search for the real page, so the Builder is told once, with the rule.
     expect(f1[0].deadLinks[0]).toMatch(/rl-wave-dash \(in src\/schema\.js\)/);
+    expect(events(log, "factory.links.search")[0]).toMatchObject({ feature: "F2", asked: 1, real: 0 });
     const again = builds.filter((b) => /Your feature, F2/.test(b.prompt))[1];
     expect(again.prompt).toMatch(/app kit refuses the schema[\s\S]*Never write a link from memory/);
+    expect(again.prompt).not.toMatch(/search the web/);
     expect(asked.flat().filter((u) => /rl-wave-dash/.test(u))).toHaveLength(1);
     const retro = events(log, "factory.retro").at(-1);
     expect(retro.bad.join("\n")).toMatch(/F2 .* reported done while the app could not start/);
@@ -630,6 +640,46 @@ describe("the build loop: one feature per fresh session", () => {
     const schema = readFileSync(join(fin.dir, "src/schema.js"), "utf8");
     expect(schema).not.toMatch(/sample-fast-aerial/);
     expect(schema).toMatch(/video: ""/);
+  });
+
+  it("a search finds the real page for a made-up link; the core opens it first, and empties what no search found (run 4004)", async () => {
+    const log = new EventLog();
+    const asked: string[] = [];
+    const { rt, builds } = featureCrew((id, _nth, cwd, files) => {
+      if (id !== "F2") return false;
+      write(cwd, files.filter((f) => f.path === "src/count.js" || f.path === "src/schema.js").map((f) => f.path !== "src/schema.js" ? f : { path: f.path, content: f.content + '\nexport const demo = [\n  { title: "Fast aerial tutorial",\n    video: "https://www.youtube.com/watch?v=made-up-1" },\n  { title: "Wave dash guide", video: "https://www.youtube.com/watch?v=made-up-2" },\n  { title: "Half flip", video: "https://www.youtube.com/watch?v=made-up-3" },\n];\n' }));
+      return true;
+    }, (prompt) => {
+      asked.push(prompt);
+      return "```json\n" + JSON.stringify({ links: [
+        { dead: "https://www.youtube.com/watch?v=made-up-1", real: "https://www.youtube.com/watch?v=real-aerial" },
+        // A second invention, and a link nobody asked about: neither is used.
+        { dead: "https://www.youtube.com/watch?v=made-up-2", real: "https://www.youtube.com/watch?v=also-made-up" },
+        { dead: "https://elsewhere.test/x", real: "https://www.youtube.com/watch?v=real-aerial" },
+        { dead: "https://www.youtube.com/watch?v=made-up-3", real: null },
+      ] }) + "\n```";
+    });
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.checkLinks = async (urls) => { const dead = urls.filter((u) => /made-up/.test(u)).map((url) => ({ url, ok: false as const, status: 404 })); return { pass: !dead.length, checked: urls.length, dead, unknown: 0 }; };
+    const old = process.env.SF_LINK_CHECK;
+    process.env.SF_LINK_CHECK = "on";
+    try {
+      const run = f.start("count words", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+      await f.wait(run);
+    } finally { process.env.SF_LINK_CHECK = old; }
+    // The finder read the line each link sits on, and the Builder was not asked a second time for links.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatch(/made-up-1\n   in src\/schema\.js: .*Fast aerial tutorial/);
+    expect(builds.filter((b) => /Your feature, F2/.test(b.prompt))).toHaveLength(1);
+    expect(events(log, "factory.feature").filter((e) => e.id === "F2" && e.state !== "building").map((e) => e.state)).toEqual(["built"]);
+    expect(events(log, "factory.links.search")[0]).toMatchObject({ feature: "F2", asked: 3, answered: 2, real: 1 });
+    expect(events(log, "factory.links.found")[0].links).toEqual([{ dead: "https://www.youtube.com/watch?v=made-up-1", real: "https://www.youtube.com/watch?v=real-aerial", file: "src/schema.js" }]);
+    expect(events(log, "factory.links.blanked")[0].links).toHaveLength(2);
+    const fin = events(log, "factory.run.finished").at(-1);
+    const schema = readFileSync(join(fin.dir, "src/schema.js"), "utf8");
+    expect(schema).toMatch(/video: "https:\/\/www\.youtube\.com\/watch\?v=real-aerial"/);
+    expect(schema).not.toMatch(/made-up/);
+    expect(events(log, "factory.retro").at(-1).good.join("\n")).toMatch(/1 made-up link replaced by the real page/);
   });
 
   it("hands a screen that keeps data in the browser's storage back to its builder (run 4004)", async () => {
@@ -747,7 +797,9 @@ describe("the product judge: the running app is judged as a product", () => {
       if (st === "evaluate" && /This is a look at ONE screen/.test(req.prompt)) { r.text = look ? look(req.prompt, ++looks) : lookAnswer(req.prompt); return r; }
       if (st === "evaluate") {
         const v = verdicts[Math.min(n++, verdicts.length - 1)];
-        r.text = block({ requirements: [{ id: "R1", met: true, evidence: "Progress shows 3 bars" }, { id: "R2", met: v.r2, evidence: v.r2 ? "Session log lists 2 sessions" : "There is no session log screen" }], scores: { function: v.r2 ? 4 : 2, design: 4, content: 4 }, problems: v.r2 ? [] : [{ where: "navigation", problem: "The Session log screen is missing.", fix: "Add the log view." }] });
+        // Screen items carried from the build are seen from the judge's second look on.
+        const carried = [...req.prompt.matchAll(/^- (SC\d+): /gm)].map((m) => ({ id: m[1], met: n > 1, evidence: n > 1 ? "Now shown with sample pieces" : "Still only a heading" }));
+        r.text = block({ requirements: [{ id: "R1", met: true, evidence: "Progress shows 3 bars" }, { id: "R2", met: v.r2, evidence: v.r2 ? "Session log lists 2 sessions" : "There is no session log screen" }, ...carried], scores: { function: v.r2 ? 4 : 2, design: 4, content: 4 }, problems: v.r2 ? [] : [{ where: "navigation", problem: "The Session log screen is missing.", fix: "Add the log view." }] });
       }
       return r;
     } };
@@ -823,7 +875,7 @@ describe("the product judge: the running app is judged as a product", () => {
 
   it("a screen still hollow after its retry is not taken on the Builder's word (run 3609)", async () => {
     const log = new EventLog();
-    const { rt: inner } = crewWith([{ r2: true }], (prompt) => lookAnswer(prompt, ["S1"]));
+    const { rt: inner, seen } = crewWith([{ r2: true }], (prompt) => lookAnswer(prompt, ["S1"]));
     const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
       const r = await inner.run(req);
       if (station(req) === "build" && req.cwd) {
@@ -843,6 +895,33 @@ describe("the product judge: the running app is judged as a product", () => {
     expect(feats.map((e) => [e.attempt, e.state])).toEqual([[1, "broken"], [2, "broken"]]);
     const retro = events(log, "factory.retro").at(-1);
     expect(retro.bad.join("\n")).toMatch(/still missed designed items on the second look \(dashboard: 1 of 2/);
+    // Run 4004: the build moved on and nothing held the list. The open item is now one of the judge's
+    // requirements for the whole app, goes to the repair work, and is looked for again.
+    expect(first.open).toEqual(["The Progress screen shows a bar per piece, with real sample content"]);
+    const judged = seen.filter((x) => x.station === "evaluate" && !/This is a look at ONE screen/.test(x.req.prompt));
+    expect(judged[0].req.prompt).toMatch(/- SC1: The Progress screen shows a bar per piece, with real sample content/);
+    const evals = events(log, "factory.evaluation");
+    expect(evals.map((e) => e.pass)).toEqual([false, true]);
+    expect(evals[0].requirements.find((r: any) => r.id === "SC1")).toMatchObject({ met: false, text: "The Progress screen shows a bar per piece, with real sample content" });
+    expect(events(log, "factory.repair")[0].features.map((x: any) => x.title)).toEqual(["Judge: requirements SC1, SC2"]);
+    const j1 = seen.find((x) => x.station === "build" && /Your feature, J1/.test(x.req.prompt))!;
+    expect(j1.req.prompt).toMatch(/SC1: The Progress screen shows a bar per piece[\s\S]*Still only a heading/);
+    expect(retro.bad.join("\n")).toMatch(/2 designed screen items still missing after the Builder's second try went to the judge's list/);
+  });
+
+  it("screen items carried to the judge survive a restart, and a later look that finds them all clears them", async () => {
+    const { restoreState } = await import("../src/factory/loop.js");
+    const { withScreenItems } = await import("../src/factory/evaluate.js");
+    const log = new EventLog();
+    const run = log.append("factory.run.started", { idea: "x" }).id;
+    log.append("factory.screen.look", { run, feature: "F3", screen: "dashboard", attempt: 2, seen: 1, of: 2, open: ["The Progress screen shows a bar per piece, with real sample content"] });
+    log.append("factory.screen.look", { run, feature: "F4", screen: "log", attempt: 1, seen: 0, of: 2, open: ["The Session log screen shows sessions, with real sample content"] });
+    log.append("factory.screen.look", { run, feature: "F4", screen: "log", attempt: 2, seen: 2, of: 2, open: [] });
+    expect(restoreState(log, run).screenOpen).toEqual({ F3: ["The Progress screen shows a bar per piece, with real sample content"] });
+    const d = withScreenItems(docs as never, ["The Progress screen shows a bar per piece, with real sample content", "The Progress screen shows a bar per piece, with real sample content", "A bar per piece against its goal"]);
+    // Said once, never a copy of a requirement the design already has, and the design's own list is untouched.
+    expect(d.requirements.map((r) => r.id)).toEqual(["R1", "R2", "R3", "SC1"]);
+    expect(withScreenItems(docs as never, [])).toBe(docs);
   });
 
   it("finds the designed screen for a view by its name when the Planner renamed its id (run 3609)", async () => {
@@ -915,7 +994,9 @@ describe("the product judge: the running app is judged as a product", () => {
     const { rt: inner, seen } = crewWith([{ r2: false }, { r2: true }]);
     const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
       const r = await inner.run(req);
-      if (station(req) === "review") r.text = block({ verdict: "fix", findings: [{ severity: "high", text: "Needs a look matches are never saved" }], criteria: [{ text: "Research merges keep every item", pass: false, evidence: "merge dropped 3 of 5 items" }] });
+      if (station(req) === "review") r.text = /run ONLY these criteria again/.test(req.prompt)
+        ? block({ verdict: "pass", findings: [], criteria: [{ text: "Research merges keep every item", pass: true, evidence: "merge kept 5 of 5 items" }] })
+        : block({ verdict: "fix", findings: [{ severity: "high", text: "Needs a look matches are never saved" }], criteria: [{ text: "Every piece has a goal", pass: true, evidence: "3 of 3" }, { text: "Research merges keep every item", pass: false, evidence: "merge dropped 3 of 5 items" }] });
       if (station(req) === "build" && req.cwd) {
         const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
         const files = parseFileBlocks(r.text);
@@ -934,6 +1015,55 @@ describe("the product judge: the running app is judged as a product", () => {
     expect(repair.features.map((x: any) => x.title)).toEqual(["Judge: what the Reviewer proved still broken", expect.stringMatching(/^Judge: requirements R2/), "Judge: what a user would notice"]);
     const j0 = seen.find((x) => x.station === "build" && /Your feature, J0/.test(x.req.prompt))!;
     expect(j0.req.prompt).toMatch(/Research merges keep every item[\s\S]*merge dropped 3 of 5[\s\S]*Needs a look matches are never saved/);
+    // After the repair the Reviewer runs only what failed, so the build gate says what is true now.
+    const reviews = events(log, "factory.review");
+    expect(reviews.map((r) => r.verdict)).toEqual(["fix", "fix", "pass"]);
+    expect(reviews[2]).toMatchObject({ recheck: true, round: 3, criteria: [{ text: "Every piece has a goal", pass: true }, { text: "Research merges keep every item", pass: true, evidence: "merge kept 5 of 5 items" }] });
+    const recheck = seen.filter((x) => x.station === "review").at(-1)!;
+    expect(recheck.req.prompt).toMatch(/1\. Research merges keep every item/);
+    expect(recheck.req.prompt).not.toMatch(/Every piece has a goal/);
+    const gateB = events(log, "factory.gate").filter((g) => g.gate === "gateB")[0];
+    expect(gateB.question).not.toMatch(/acceptance criteri/);
+  });
+
+  it("what the Reviewer saw fail is repaired even when the judge passes the screens (run 4004)", async () => {
+    const log = new EventLog();
+    const { rt: inner } = crewWith([{ r2: true }]);
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      // The second run of the criterion still fails: the gate keeps saying so.
+      if (station(req) === "review") r.text = block({ verdict: "fix", findings: [], criteria: [{ text: "Stale items are marked after 30 days", pass: false, evidence: "nothing is marked" }] });
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([FJ]\d+)/)?.[1] ?? "";
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const run = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(run);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    expect(events(log, "factory.evaluation").map((e) => e.pass)).toEqual([true, true]);
+    expect(events(log, "factory.repair")[0].features.map((x: any) => x.title)).toEqual(["Judge: what the Reviewer proved still broken"]);
+    expect(events(log, "factory.review").at(-1)).toMatchObject({ recheck: true, verdict: "fix" });
+    expect(events(log, "factory.gate").filter((g) => g.gate === "gateB")[0].question).toMatch(/1 acceptance criterion not seen working/);
+  });
+
+  it("merges a second run of the failing criteria into the review", async () => {
+    const { mergeRecheck } = await import("../src/factory/loop.js");
+    const before = { verdict: "fix" as const, findings: [{ severity: "low" as const, text: "Long function" }, { severity: "high" as const, text: "Acceptance criterion not met: B (old)" }, { severity: "high" as const, text: "Acceptance criterion not met: C (old)" }],
+      criteria: [{ text: "A", pass: true, evidence: "ok" }, { text: "B", pass: false, evidence: "old" }, { text: "C", pass: false, evidence: "old" }] };
+    const m = mergeRecheck(before, { verdict: "fix", findings: [], criteria: [{ text: "b", pass: true, evidence: "now fine" }, { text: "c", pass: false, evidence: "still wrong" }] });
+    expect(m.verdict).toBe("fix");
+    expect(m.criteria).toEqual([{ text: "A", pass: true, evidence: "ok" }, { text: "B", pass: true, evidence: "now fine" }, { text: "C", pass: false, evidence: "still wrong" }]);
+    expect(m.findings.map((x) => x.text)).toEqual(["Long function", "Acceptance criterion not met: C (still wrong)"]);
+    // An answer for only one of them is matched by its text; the other keeps its old result.
+    const one = mergeRecheck(before, { verdict: "pass", findings: [], criteria: [{ text: "C", pass: true, evidence: "fixed" }] });
+    expect(one.criteria!.map((c) => c.pass)).toEqual([true, false, true]);
+    expect(mergeRecheck(before, { verdict: "pass", findings: [], criteria: [{ text: "x", pass: true, evidence: "" }, { text: "y", pass: true, evidence: "" }] }).verdict).toBe("pass");
   });
 
   it("a run resumed after its build still turns the judge's findings into repair features (run 3185)", async () => {
@@ -1149,6 +1279,31 @@ describe("what run 2898 taught the engine", () => {
     expect(fixed.added).toEqual(["Practice", "Progress"]);
     expect(fixed.plan.views!.map((v) => v.label)).toEqual(names);
     expect(fixed.plan.views![4]!.shows).toContain("The Practice job.");
+    // Run 4004: a full plan with one view the Planner made up had no room for the designed Skill Tree.
+    const full = validatePlan({ ...base, views: six.views!.map((v, i) => (i === 2 ? { id: "manage", label: "Manage", shows: "every record" } : v)) } as never);
+    const swapped = withDesignedScreens(full, docs);
+    expect(swapped.added).toEqual(["Skill Tree"]);
+    expect(swapped.replaced).toEqual(["Manage"]);
+    expect(swapped.plan.views!.map((v) => v.label)).toEqual(names);
+    // A full plan of designed screens only is left alone: nothing is removed to make room.
+    const five = validateDocs({ brief: { who: "a player", promise: "p" }, journeys: [{ moment: "m", steps: ["s"] }], requirements: ["r"], screens: [...docs.screens.slice(0, 5)] });
+    expect(withDesignedScreens(six, five)).toMatchObject({ added: [], replaced: [] });
+  });
+  it("a larger run buys larger build sessions: the feature cap grows with the budget, up to twice the Builder's own", async () => {
+    const { featureCapUsd } = await import("../src/factory/features.js");
+    expect([3, 10, 15, 20, 50].map((run) => featureCapUsd(0.6, run))).toEqual([0.6, 0.6, 0.9, 1.2, 1.2]);
+  });
+  it("the Critic checks what it asked for before it scores again, and the last round cuts what cannot be fixed (buildable stuck at 3 for four runs)", async () => {
+    const { critiquePrompt, revisePrompt, validateDocs } = await import("../src/factory/discovery.js");
+    const d = validateDocs({ brief: { who: "a player", promise: "p" }, journeys: [{ moment: "m", steps: ["s"] }], requirements: ["r"], screens: [{ id: "a", name: "A", purpose: "x", shows: [], actions: [] }, { id: "b", name: "B", purpose: "y", shows: [], actions: [] }] });
+    const before = { scores: { coverage: 4, journey: 4, screens: 4, originality: 4, buildable: 3 }, problems: [{ where: "screens/a", problem: "Agreement counts have no origin.", fix: "Name the rule that computes them." }] };
+    expect(critiquePrompt("an idea", d, 1)).not.toMatch(/You judged the version before/);
+    const second = critiquePrompt("an idea", d, 2, before);
+    expect(second).toMatch(/Your scores then: coverage 4, journey 4, screens 4, originality 4, buildable 3/);
+    expect(second).toMatch(/1\. \[screens\/a\] Agreement counts have no origin\. Fix asked: Name the rule/);
+    expect(second).toMatch(/A score goes up when the problems that held it down are fixed/);
+    expect(revisePrompt("an idea", d, before, 2)).not.toMatch(/last round/);
+    expect(revisePrompt("an idea", d, before, 3, true)).toMatch(/last round, so nothing may stay open[\s\S]*never removed/);
   });
   it("makes a real crew's Designer research before it designs, and asks again when nothing has a source", async () => {
     const mock = new MockRuntime({ plantBug: false });

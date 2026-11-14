@@ -45,6 +45,15 @@ export const FEATURE_LOOP_MIN_USD = 3;
 /** The share of the run's budget the build loop plans with when it sizes each feature's cap. */
 export const BUILD_BUDGET_SHARE = 0.55;
 export const FEATURE_MIN_USD = 0.15;
+/**
+ * The most one feature session may spend: the Builder's own per-call budget, growing with the run up to
+ * twice that. Run 4004 had $20 and spent $10.65: every build call was held to the Builder's fixed $0.60, two
+ * died at it with work half written, and each was picked up by a fresh call that read everything again.
+ * A larger budget now buys larger sessions, not only more of them. Up to $10 nothing changes.
+ */
+export function featureCapUsd(agentUsd: number, runUsd: number): number {
+  return Number((agentUsd * Math.min(2, Math.max(1, runUsd / 10))).toFixed(3));
+}
 
 export function featuresOf(plan: Plan, docs: ProductDocs | null): Feature[] {
   const out: Feature[] = [];
