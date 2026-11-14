@@ -270,6 +270,26 @@ describe("resuming runs", () => {
     expect(events(log, "factory.run.finished").at(-1)).toMatchObject({ run, outcome: "shipped" });
   });
 
+  it("carries out a build-gate send-back the app closed on, instead of asking the gate again (run 4004)", async () => {
+    const log = new EventLog();
+    const projects = tmp("sf-proj-");
+    const first = new Factory(log, new MockRuntime({ plantBug: false }), projects);
+    const run = first.start("count words");
+    for (let i = 0; i < 400 && first.waitingGate(run) !== "gateB"; i++) { if (first.waitingGate(run)) first.decide(run, first.waitingGate(run)!, { approve: true }); await new Promise((r) => setTimeout(r, 20)); }
+    // The person sends it back, and the app closes before the fix starts.
+    log.append("factory.gate", { run, gate: "gateB", state: "rejected", note: "Show the word count in the title too", by: "you" });
+    const rt = new MockRuntime({ plantBug: false });
+    const second = new Factory(log, rt, projects);
+    second.resume(run);
+    await until(() => second.waitingGate(run) === "gateB");
+    expect(events(log, "factory.sentback.resumed")).toMatchObject([{ run, note: "Show the word count in the title too" }]);
+    const fix = rt.calls.find((c) => /Station contract: fix/.test(c.systemPrompt ?? ""));
+    expect(fix?.prompt).toMatch(/Show the word count in the title too/);
+    second.decide(run, "gateB", { approve: true });
+    await second.wait(run);
+    expect(events(log, "factory.run.finished").at(-1)).toMatchObject({ run, outcome: "shipped" });
+  });
+
   it("throws away half-written files from the station that was cut off", async () => {
     const log = new EventLog();
     const projects = tmp("sf-proj-");
