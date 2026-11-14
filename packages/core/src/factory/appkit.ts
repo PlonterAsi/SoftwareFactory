@@ -91,6 +91,21 @@ try {
       } catch (err) { out.problems.push("create, edit or delete of a " + e.name + " fails: " + err.message); }
     }
     if (schema.flows !== undefined && !Array.isArray(schema.flows)) out.problems.push("src/schema.js flows must be a list");
+    // Every feature has its record: what it is for, how the person uses it, and where it is in the app.
+    const feats = Array.isArray(schema.features) ? schema.features : [];
+    if (!feats.length) out.problems.push("src/schema.js lists no features: export const features = [{ name, purpose, flow: [steps], where }], one per thing the app does");
+    const names = new Set(schema.entities.map((e) => e.name));
+    for (const f of feats) {
+      const n = f && typeof f === "object" ? String(f.name || "").trim() : "";
+      if (!n) { out.problems.push("src/schema.js has a feature with no name: each is { name, purpose, flow: [steps], where }"); continue; }
+      const missing = [];
+      if (String(f.purpose || f.description || "").trim().length < 12) missing.push("a purpose (why it exists, one sentence)");
+      if (!Array.isArray(f.flow) || f.flow.filter((x) => String(x || "").trim()).length < 2) missing.push("a flow of at least two steps (what the person does, in order)");
+      const w = String(f.where || "").trim();
+      if (!w) missing.push('where it is in the app ("home", "v/<view id>" or "e/<entity name>")');
+      else if (w.startsWith("e/") && !names.has(w.slice(2))) missing.push("a where that exists (there is no entity " + w.slice(2) + ")");
+      if (missing.length) out.problems.push('the feature "' + n + '" in src/schema.js needs ' + missing.join(", and "));
+    }
   }
 } catch (err) { out.problems.push("src/schema.js does not load in Node: " + (err && err.message || err)); }
 console.log(JSON.stringify(out));

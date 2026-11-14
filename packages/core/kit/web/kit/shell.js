@@ -267,7 +267,8 @@ export async function startApp({ schema, views, root, store }) {
     else if (tab === "entities") body.append(...schema.entities.map(entityPanel));
     else if (tab === "flows") body.append((schema.flows || []).length ? flowsList() : h("p", { class: "kit-muted" }, "This app lists no flows."));
     else if (tab === "features") body.append(h("div", { class: "kit-panel" }, h("ul", { class: "kit-list" },
-      (schema.features || []).map((f) => h("li", {}, h("strong", {}, typeof f === "string" ? f : f.name), typeof f === "object" && f.description ? h("span", { class: "kit-muted" }, " · " + f.description) : null, typeof f === "object" && f.where ? h("a", { href: "#/" + f.where, class: "kit-link" }, " open") : null)),
+      (schema.features || []).map((f) => h("li", {}, h("strong", {}, typeof f === "string" ? f : f.name), typeof f === "object" && (f.purpose || f.description) ? h("span", { class: "kit-muted" }, " · " + (f.purpose || f.description)) : null, typeof f === "object" && f.where ? h("a", { href: "#/" + f.where, class: "kit-link" }, " open") : null,
+        typeof f === "object" && Array.isArray(f.flow) && f.flow.length ? h("ol", { class: "kit-steps" }, f.flow.map((x) => h("li", {}, String(x)))) : null)),
       schema.entities.map((e) => h("li", {}, h("strong", {}, "Manage " + plural(e).toLowerCase()), h("span", { class: "kit-muted" }, " · list, search, sort, create, edit, delete"), h("a", { href: "#/e/" + e.name, class: "kit-link" }, " open"))),
       own.map((v) => h("li", {}, h("strong", {}, v.label || v.id), v.description ? h("span", { class: "kit-muted" }, " · " + v.description) : null, h("a", { href: v.id === "dashboard" ? "#/home" : "#/v/" + v.id, class: "kit-link" }, " open"))))));
     else if (tab === "activity") body.append(h("div", { class: "kit-panel" }, activityList(200)));

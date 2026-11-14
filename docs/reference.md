@@ -95,6 +95,9 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/brain` | Principles, stations, who works each |
 | `GET /api/brain/prompt?station=` | The exact system prompt that station's agent runs with now |
 | `POST /api/brain`, `PUT /api/brain/:id`, `POST /api/brain/:id/reset` | Add, edit, reset a principle |
+| `POST /api/brain/suggestions/:fragment/accept`, `.../dismiss` | Make one of the person's rules a principle, or turn it away |
+| `GET /api/feature-map` | Every feature: its record, its wiring from the code, its proof of life, and what is connected to nothing |
+| `POST /api/feature-map`, `PUT /api/feature-map/:id`, `POST /api/feature-map/:id/reset` | Add a planned feature, edit a record, reset or remove it |
 
 ### Order Engine
 
@@ -173,7 +176,8 @@ Every row of the log is `{ id, ts, type, payload }`. A run's id is the id of its
 | Projects | `project.created`, `project.updated`, `project.linked`, `project.unlinked`, `project.budget` |
 | Tickets | `ticket.opened`, `ticket.requested`, `ticket.keyed`, `ticket.edited`, `ticket.noted`, `ticket.linked`, `ticket.line.moved`, `ticket.step`, `ticket.run`, `ticket.branch`, `ticket.pr` |
 | Agent Bay | `bay.agent.saved`, `bay.agent.retired`, `bay.assign`, `bay.test`, `bay.visual` |
-| Brain | `brain.principle.saved`, `brain.principle.reset` |
+| Brain | `brain.principle.saved`, `brain.principle.reset`, `brain.suggestion.dismissed` |
+| Feature map | `featuremap.record.saved`, `featuremap.record.reset` |
 | Improvement | `improve.session`, `improve.seat`, `improve.proposal`, `improve.proposal.accepted`, `improve.proposal.decided`, `improve.proposal.linked`, `improve.visual` |
 | Imports | `repo.import.started`, `repo.imported`, `repo.import.failed`, `repo.explore.started`, `repo.explore.station`, `repo.explore.finished`, `repo.mapped`, `repo.module.understood`, `repo.suggestion` |
 | Launch | `launch.started`, `launch.url`, `launch.stopped`, `launch.exited` |
@@ -208,6 +212,7 @@ Each group is one projection, rebuilt from the log on demand ([storage.md](stora
 | `council_sessions`, `council_seats`, `reviews` | Council rounds and seats; review results |
 | `bay_agents`, `bay_agent_versions`, `bay_slots`, `bay_tests`, `agent_verdicts` | The Agent Bay |
 | `brain_principles` | The Brain |
+| `feature_records` | The Feature map: records the person edited or added |
 | `recall_fts` | The person's own words, searchable by agents |
 | `order_nodes`, `order_fragments`, `order_conflicts` | The Order Engine |
 | `projects`, `project_links` | Projects and what belongs to each |

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { API, post, type SfEvent } from "./api";
+import { ago } from "./FeatureMap";
 
 /**
  * The Brain (packages/core/src/brain/): SoftwareFactory's principles, written once.
@@ -7,15 +8,26 @@ import { API, post, type SfEvent } from "./api";
  * so an edit here reaches the next call of every loop. The checks in code are listed per
  * principle; the matrix shows who follows what; the prompt viewer shows exactly what an
  * agent reads now.
+ *
+ * It also proves it is alive: the use strip and each card count the agent calls that read the
+ * principles, the history lists every change, and the rules you wrote in Rules and ideas are offered
+ * here, to add with one press (packages/core/src/brain/learn.ts).
  */
 interface Principle {
   id: string; title: string; text: string; stations: string[]; enabled: boolean; enforcedBy?: string[];
   builtin: boolean; edited: boolean; version: number; updatedAt: string | null; by: string | null;
+  source?: { kind: "rule"; fragment: number; node?: string };
 }
-interface BrainState { principles: Principle[]; stations: string[]; crew: Record<string, string[]> }
+interface Use {
+  reads: number; lastReadAt: string | null; changes: number; lastChangeAt: string | null;
+  byPrinciple: Record<string, { reads: number; lastReadAt: string | null }>;
+  history: { id: number; ts: string; what: "saved" | "reset" | "dismissed"; principle: string | null; title: string; by: string; note?: string; fromRule: boolean }[];
+}
+interface Suggestion { fragment: number; text: string; kind: "rule" | "decision"; node: string | null; important: boolean; ts: string; title: string }
+interface BrainState { principles: Principle[]; stations: string[]; crew: Record<string, string[]>; use?: Use; suggestions?: Suggestion[] }
 
 const STATION_NAMES: Record<string, string> = {
-  council: "Council", plan: "Planner", tests: "Tester", build: "Builder", review: "Reviewer", fix: "Fixer",
+  council: "Council", design: "Designer", critique: "Critic", evaluate: "Judge", plan: "Planner", tests: "Tester", build: "Builder", review: "Reviewer", fix: "Fixer",
   order: "Archivist", overseer: "Assistant", improve: "Improvement Council", map: "Cartographer", survey: "Surveyor",
 };
 
@@ -31,7 +43,9 @@ export function BrainPage({ events }: { events: SfEvent[] }) {
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [station, setStation] = useState("plan");
-  const at = events.filter((e) => e.type.startsWith("brain.") || e.type === "bay.assign" || e.type === "bay.agent.saved").at(-1)?.id ?? 0;
+  // Refetch on a change to the Brain, the crew or your rules, and when an agent call ends (a read to count).
+  const at = events.filter((e) => e.type.startsWith("brain.") || e.type === "bay.assign" || e.type === "bay.agent.saved" || e.type === "agent.run.completed" || e.type === "order.fragment").at(-1)?.id ?? 0;
+  const [busy, setBusy] = useState<number | null>(null);
 
   useEffect(() => {
     fetch(`${API}/api/brain`).then((r) => r.json()).then((j) => { setState(j); setErr(null); }).catch((e) => setErr(String(e.message ?? e)));
@@ -39,6 +53,12 @@ export function BrainPage({ events }: { events: SfEvent[] }) {
 
   if (!state) return <section className="br-page"><p className="muted">{err ? `The Brain cannot be read: ${err}` : "Reading the Brain…"}</p></section>;
   const on = state.principles.filter((p) => p.enabled);
+  const use = state.use;
+  const suggestions = state.suggestions ?? [];
+  const act = async (fragment: number, what: "accept" | "dismiss") => {
+    setBusy(fragment); setErr(null);
+    try { setState(await post(`/api/brain/suggestions/${fragment}/${what}`)); } catch (x) { setErr((x as Error).message); } finally { setBusy(null); }
+  };
 
   return (
     <section className="br-page">
@@ -50,6 +70,17 @@ export function BrainPage({ events }: { events: SfEvent[] }) {
         <button className="sm gate" onClick={() => setEditing("new")}>Add a principle</button>
       </header>
       {err && <p className="error" role="alert">{err}</p>}
+
+      {use && (
+        <div className="br-use" aria-label="How the Brain is used">
+          <div><b>{use.reads.toLocaleString()}</b><span className="muted">agent calls read it</span></div>
+          <div><b>{ago(use.lastReadAt)}</b><span className="muted">last read</span></div>
+          <div><b>{use.changes}</b><span className="muted">{use.changes === 1 ? "change" : "changes"} so far</span></div>
+          <p>{use.changes === 0
+            ? "The Brain is wired in: every agent call above carried these principles. It has never changed because, until now, only typing here could change it. The rules you write in Rules and ideas are now offered below, to add with one press."
+            : `Last changed ${ago(use.lastChangeAt)}. Every change reaches the next agent call on the stations it names.`}</p>
+        </div>
+      )}
 
       {editing === "new" && <PrincipleForm stations={state.stations} onCancel={() => setEditing(null)} onSave={async (body) => { setState(await post("/api/brain", body)); setEditing(null); }} />}
 
@@ -63,8 +94,12 @@ export function BrainPage({ events }: { events: SfEvent[] }) {
                 <span className="muted mono">{p.builtin ? (p.edited ? `edited · v${p.version}` : "default") : `yours · v${p.version}`}{p.enabled ? "" : " · off"}</span>
               </header>
               <p>{p.text}</p>
+              {p.source && <span className="br-source">From your rule{p.source.node ? ` on "${p.source.node}"` : ""}</span>}
               <div className="br-stations" aria-label="Who follows it">{p.stations.map((s) => <span key={s} className="br-chip">{STATION_NAMES[s] ?? s}</span>)}</div>
               {!!p.enforcedBy?.length && <ul className="br-enforced">{p.enforcedBy.map((x) => <li key={x}>{x}</li>)}</ul>}
+              {use && p.enabled && <span className="br-reads">{use.byPrinciple[p.id]?.reads
+                ? <>Read by <b>{use.byPrinciple[p.id].reads.toLocaleString()}</b> agent calls{p.version ? " since this version" : ""}, last {ago(use.byPrinciple[p.id].lastReadAt)}</>
+                : p.version ? "No agent call has read this version yet" : "No agent call has read it yet in this base"}</span>}
               <div className="br-actions">
                 <button className="sm ghost" onClick={() => setEditing(p.id)}>Edit</button>
                 <button className="sm ghost" onClick={async () => setState(await put(`/api/brain/${encodeURIComponent(p.id)}`, { ...p, enabled: !p.enabled }))}>{p.enabled ? "Turn off" : "Turn on"}</button>
@@ -73,6 +108,26 @@ export function BrainPage({ events }: { events: SfEvent[] }) {
             </article>
           ))}
       </div>
+
+      <h3 className="br-sub">From your rules ({suggestions.length})</h3>
+      {suggestions.length === 0
+        ? <p className="br-none">Nothing waits. When you write a rule or a decision (in the Assistant, the Helm or Rules and ideas), it appears here, and one press makes it a principle every agent reads.</p>
+        : (
+          <div className="br-suggest">
+            {suggestions.map((s) => (
+              <div key={s.fragment} className="br-sug">
+                <div>
+                  <p>{s.text}</p>
+                  <span className="muted">Your {s.kind}{s.node ? ` on "${s.node}"` : ""}{s.important ? " · marked important" : ""} · {ago(s.ts)}</span>
+                </div>
+                <div className="br-sug-actions">
+                  <button className="sm" disabled={busy === s.fragment} onClick={() => act(s.fragment, "accept")} title="Makes it a principle for the agents that make and judge the product, in every project. You can edit its stations after.">Add to the Brain</button>
+                  <button className="sm ghost" disabled={busy === s.fragment} onClick={() => act(s.fragment, "dismiss")} title="Keeps it as a rule where it is; it is not offered here again.">Not for the Brain</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
       <h3 className="br-sub">Who follows what</h3>
       <div className="br-matrix-wrap">
@@ -91,6 +146,22 @@ export function BrainPage({ events }: { events: SfEvent[] }) {
       </div>
 
       <PromptViewer station={station} setStation={setStation} stations={state.stations} at={at} />
+
+      <h3 className="br-sub">History of changes</h3>
+      {use && use.history.length > 0
+        ? (
+          <ul className="br-history">
+            {use.history.map((h) => (
+              <li key={h.id}>
+                <span className="muted">{ago(h.ts)}</span>
+                <span>{h.what === "saved" ? (h.fromRule ? "Added from a rule" : "Saved") : h.what === "reset" ? "Reset or removed" : "Rule turned away"}</span>
+                <span>{h.title}{h.note ? <span className="muted"> · {h.note}</span> : null}</span>
+                <span className="muted">{h.by}</span>
+              </li>
+            ))}
+          </ul>
+        )
+        : <p className="br-none">No change yet. Every add, edit, reset and rule you turn away will be listed here.</p>}
     </section>
   );
 }

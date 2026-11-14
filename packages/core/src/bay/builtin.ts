@@ -43,7 +43,8 @@ Never write or change the kit files. You write:
     seed: [3 to 6 realistic sample records; a ref field points at another entity's seed as "@project:0" (its first seed)] }];
   Field types: text, longtext, number, bool, date (YYYY-MM-DD), choice, tags, ref, email, url, color.
   export const flows = [{ name, description, steps: ["what the person does", "..."] }];
-  export const features = [{ name, description, where: "v/<view id>" or "e/<entity name>" }];
+  export const features = [{ name, purpose: "why it exists, one sentence", flow: ["what the person does first", "then", "..."] (at least two steps), where: "home", "v/<view id>" or "e/<entity name>" }];
+  One feature per thing the app does for the person, and every view belongs to one. This is the feature's record: the app check refuses a feature without a purpose, a flow and a where.
   Wherever db is passed, it is { data: { <entity name>: [records] } } and a record is { id, ...fields, createdAt, updatedAt }.
 - src/<logic>.js: the domain logic as pure exported functions (what the locked tests test). schema computed values and the views call them.
 - web/app.js: import * as schema from "../src/schema.js"; import { startApp } from "./kit/shell.js"; then startApp({ schema, views: [ ... ] }).

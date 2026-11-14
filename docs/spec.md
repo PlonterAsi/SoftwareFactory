@@ -127,6 +127,9 @@ These hold for every feature. Each has a place in the code that enforces it.
 | Improvement Council | Built | Lens agents, daily cap, memory of past proposals |
 | Plugins | Partial | Tabs, sandboxed backend and agents are built. A network switch for backends, plugins calling agents with a cap, and a shared catalog are not. |
 | Data vault with rebuild | Built | |
+| Every feature has a record (purpose, spec, flow, design), its wiring is read from the code, and it shows proof it is alive | Built | Feature map; a check fails the build when a feature has no record ([feature-map.md](feature-map.md)) |
+| The same record rule for features of the apps the factory builds | Built | Each feature in `src/schema.js` needs a purpose, a flow and a place; the app check refuses a build without them |
+| The Brain changes from what the person and the runs say | Partial | The person's rules are offered to it with one press. Lessons from runs are not yet. |
 | The factory as a game ("Sector": a real-time strategy base over SF's data) | Planned | Design approved in direction; three small demos exist as plugins ([game-door.md](game-door.md)) |
 | macOS and Linux installers | Planned | Runs from source on any system with Node 22.5+; only Windows is built and tested |
 | Code-signed installer | Planned | Costs money; Windows SmartScreen warns until then |

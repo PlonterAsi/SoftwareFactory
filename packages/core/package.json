@@ -6,14 +6,19 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
+    "predev": "node scripts/wiring.mjs",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
+    "prebuild": "node scripts/wiring.mjs",
     "build": "tsc -p tsconfig.json",
+    "pretypecheck": "node scripts/wiring.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "node scripts/wiring.mjs",
     "test": "vitest run",
     "factory": "tsx src/factory-cli.ts",
     "order": "tsx src/order-cli.ts",
-    "kit": "node scripts/kit.mjs"
+    "kit": "node scripts/kit.mjs",
+    "wiring": "node scripts/wiring.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

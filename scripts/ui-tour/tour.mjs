@@ -63,6 +63,8 @@ async function waitForGate(run, gate) {
 
 const problems = [];
 try {
+  // The wiring map is generated, not committed: make it before the core starts from source.
+  await new Promise((done, fail) => spawn(process.execPath, [join(root, "packages/core/scripts/wiring.mjs")], { stdio: "ignore" }).on("exit", (c) => (c ? fail(new Error("wiring.mjs failed")) : done())));
   start(process.execPath, [require.resolve("tsx/cli"), "src/server.ts"], join(root, "packages/core"), { SF_DB: join(data, "factory.db"), SF_PORT: "4317", SF_RUNTIME: "mock", SF_AUTO_RESUME: "0", SF_DROP: join(data, "drop") });
   start(process.execPath, [[join(root, "apps/bridge/node_modules/vite/bin/vite.js"), join(root, "node_modules/vite/bin/vite.js")].find((f) => existsSync(f)), "--strictPort"], join(root, "apps/bridge"));
   await waitFor(CORE + "/api/health", "The core");
@@ -107,7 +109,7 @@ try {
     const panels = await page.$$eval('a[href^="#/p/"]', (as) => [...new Set(as.map((a) => a.getAttribute("href")))]);
     for (const h of panels.filter((h) => h.split("/").length === 4)) await visit(h, `${tag}-${h.split("/")[3]}`);
   }
-  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/bases", "bases"], ["#/runners", "build-runners"], ["#/bridge", "factory-bridge"], ["#/bridge/score", "factory-bridge-score"], ["#/bridge/quarter", "factory-bridge-quarter"], ["#/factory", "all-builds"], ["#/factory/bay", "agents"], ["#/factory/tickets", "tickets"], ["#/factory/order", "rules-and-ideas"], ["#/factory/improve", "improve"], ["#/factory/cycles", "engine-cycles"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
+  for (const [h, n] of [["#/features", "features"], ["#/plugins", "plugins"], ["#/brain", "brain"], ["#/map", "feature-map"], ["#/map/brain", "feature-map-brain"], ["#/bases", "bases"], ["#/runners", "build-runners"], ["#/bridge", "factory-bridge"], ["#/bridge/score", "factory-bridge-score"], ["#/bridge/quarter", "factory-bridge-quarter"], ["#/factory", "all-builds"], ["#/factory/bay", "agents"], ["#/factory/tickets", "tickets"], ["#/factory/order", "rules-and-ideas"], ["#/factory/improve", "improve"], ["#/factory/cycles", "engine-cycles"], ["#/factory/data", "data-vault"], ["#/_kit", "kit"]]) await visit(h, n);
   // A run's Engine tab: the factory's review of its own work (the shipped build has one).
   current = "run-engine";
   await page.goto(`${BRIDGE}/#/factory`);

@@ -25,6 +25,7 @@ const PAGES: { label: string; to: Route; words: string }[] = [
   { label: "Finished apps", to: { page: "features" }, words: "features integrate" },
   { label: "Add-ons", to: { page: "plugins" }, words: "plugins extensions game" },
   { label: "Brain", to: { page: "brain" }, words: "principles rules loops" },
+  { label: "Feature map", to: { page: "map" }, words: "features registry wiring connected spec flow design records alive unused" },
 ];
 
 export function Helm({ open, onClose, projects, projectId, projectName, go, onSystems, onRunStarted }: {
