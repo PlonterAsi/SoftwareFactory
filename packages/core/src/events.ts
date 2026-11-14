@@ -84,6 +84,7 @@ export type EventType =
   | "ticket.pr"
   | "ticket.requested"
   | "ticket.branch"
+  | "ticket.pushed"
   | "ticket.step"
   | "improve.session"
   | "improve.seat"

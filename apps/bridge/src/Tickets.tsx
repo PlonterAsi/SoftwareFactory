@@ -16,7 +16,7 @@ export type TicketStatus = "open" | "ready" | "in_progress" | "built" | "closed"
 export interface TicketView {
   id: number; key: string; number: number | null; level: "epic" | "ticket" | "subtask"; blocked: boolean; children: { total: number; done: number }; kind: TicketKind; title: string; body: string; answers: Record<string, string>; project: number | null; status: TicketStatus;
   priority: string | null; severity: string | null; size: "S" | "M" | "L" | null; assignee: string | null; parentId: number | null; lineOrder: number | null; tags: string[];
-  source: string; openedBy: string; run: number | null; pr: { repo: string; number: number; url: string; state: "open" | "merged" | "closed" } | null; branch: string | null; branchDir: string | null; createdAt: string; updatedAt: string; closedAt: string | null; lastNote: string | null;
+  source: string; openedBy: string; run: number | null; pr: { repo: string; number: number; url: string; state: "open" | "merged" | "closed" } | null; branch: string | null; branchDir: string | null; pushedUrl?: string | null; createdAt: string; updatedAt: string; closedAt: string | null; lastNote: string | null;
 }
 interface NoteView { eventId: number; ts: string; by: string; kind: "note" | "reply" | "status" | "event"; text: string; status: TicketStatus | null; costUsd: number | null }
 interface LinkView { to: number; relation: string; title?: string; status?: TicketStatus; key?: string }
@@ -69,6 +69,7 @@ export const ticketsApi = {
   edit: (id: number, field: string, value: unknown, key?: string) => call<TicketView>("POST", `/api/tickets/${id}/edit`, { field, value, key }),
   say: (id: number, text: string, status?: TicketStatus) => call<TicketView>("POST", `/api/tickets/${id}/say`, { text, status }),
   link: (id: number, to: number | string, relation: string) => call<TicketView>("POST", `/api/tickets/${id}/link`, { to, relation }),
+  send: (id: number) => call<TicketView>("POST", `/api/tickets/${id}/send`, {}),
   linkPr: (id: number, pr: string) => call<TicketView>("POST", `/api/tickets/${id}/pr`, { pr }),
   line: (id: number, dir: "up" | "down") => call<TicketView[]>("POST", `/api/tickets/${id}/line`, { dir }),
   work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number, again?: boolean, route?: "light" | "engine") => call<{ run: number | null; branch?: string; route?: { route: "light" | "engine"; why: string } }>("POST", `/api/tickets/${id}/work`, { maxUsd, where, again, route }),
@@ -429,7 +430,10 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
         <div className="tk-runstrip tk-branch" aria-label="Branch">
           <span className="mono">⑂ {t.branch}</span>
           <span className="muted mono tk-branch-dir" title={t.branchDir ?? ""}>{t.branchDir}</span>
-          <button className="ghost tiny" onClick={() => navigator.clipboard?.writeText(`git fetch "${t.branchDir}" ${t.branch}`)} title="Copy the git command that brings this branch into your own repo">Copy fetch</button>
+          {d.repo?.github && !t.pushedUrl && <button className="primary tiny" disabled={busy === "send"} onClick={() => void act("send", () => ticketsApi.send(id))} title="Sends only this branch, never main. Uses your GitHub token, or this computer's own Git sign-in.">{busy === "send" ? "Sending…" : "Send to GitHub"}</button>}
+          {d.repo?.github && t.pushedUrl && <><span className="muted">on GitHub</span><a className="ghost tiny" href={t.pushedUrl} target="_blank" rel="noreferrer">Open the pull request</a></>}
+          {!d.repo?.github && d.repo && !t.pushedUrl && <button className="primary tiny" disabled={busy === "send"} onClick={() => void act("send", () => ticketsApi.send(id))} title="Adds only this branch to your own folder. Your files and your current branch there do not change.">{busy === "send" ? "Adding…" : "Add to my folder"}</button>}
+          {!d.repo?.github && t.pushedUrl && <span className="muted">in your folder as this branch</span>}
         </div>
       )}
       {showDoc && <pre className="tk-doc">{d.document}</pre>}

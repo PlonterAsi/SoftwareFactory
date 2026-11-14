@@ -228,6 +228,8 @@ export interface TicketView {
   /** The branch the crew made for it in an imported repo's clone, and that clone's folder. */
   branch: string | null;
   branchDir: string | null;
+  /** Set once the branch left the crew's clone on your press: the GitHub address that starts its pull request, or "local" when it was added to your own folder. */
+  pushedUrl: string | null;
   /** The pull request the crew opened for it, and where it stands. */
   pr: { repo: string; number: number; url: string; state: "open" | "merged" | "closed" } | null;
   createdAt: string;
