@@ -608,7 +608,7 @@ class Run {
           initRepo(this.dir);
         }
         // The product documents live in the project: every later agent and the person can read them there.
-        const spec = writeFiles(this.dir, [{ path: "SPEC.md", content: specMarkdown(this.idea, plan) }, ...(this.docs ? docsFiles(this.idea, this.docs, this.docsCritique) : [])], { lockTests: true });
+        const spec = writeFiles(this.dir, [{ path: "SPEC.md", content: specMarkdown(this.idea, plan) }, ...(this.docs ? docsFiles(this.asked, this.docs, this.docsCritique) : [])], { lockTests: true });
         const sha = commitAll(this.dir, `Spec and plan: ${plan.name}`);
         this.log.append("factory.plan", { run: this.id, plan, dir: this.dir, sha, written: spec.written });
       });
