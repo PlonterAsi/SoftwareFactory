@@ -173,7 +173,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
       case "factory.retro": r.retro = { outcome: p.outcome, reason: p.reason ?? "", spentUsd: p.spentUsd ?? 0, maxUsd: p.maxUsd ?? 0, minutes: p.minutes ?? 0, stages: p.stages ?? [], agents: p.agents ?? [], good: p.good ?? [], bad: p.bad ?? [] }; break;
       case "factory.evaluation": r.evaluations.push({ round: p.round, pass: !!p.pass, skipped: p.skipped, bar: p.bar ?? 4, screens: p.screens ?? 0, requirements: p.requirements ?? [], scores: p.scores ?? {}, problems: p.problems ?? [] }); break;
       case "factory.feature": {
-        const f: FeatureView = { id: p.id, title: p.title, state: p.state, attempt: p.attempt ?? 1, index: p.index, of: p.of, passed: p.passed, failed: p.failed, files: p.files, broke: p.broke, crashed: [...(p.invalid ?? []), ...(p.deadLinks ?? []).map((u: string) => `dead link ${u}`), ...(p.hollow ?? []).map((h: string) => `not on the screen: ${h}`), ...(p.crashed ?? [])] };
+        const f: FeatureView = { id: p.id, title: p.title, state: p.state, attempt: p.attempt ?? 1, index: p.index, of: p.of, passed: p.passed, failed: p.failed, files: p.files, broke: p.broke, crashed: [...(p.invalid ?? []), ...(p.deadLinks ?? []).map((u: string) => `dead link ${u}`), ...(p.hollow ?? []).map((h: string) => `not on the screen: ${h}`), ...(p.stored ?? []).map((x: string) => `keeps data in the browser's storage: ${x}`), ...(p.crashed ?? [])] };
         const at = r.features.findIndex((x) => x.id === p.id);
         if (at >= 0) r.features[at] = f; else r.features.push(f);
         break;

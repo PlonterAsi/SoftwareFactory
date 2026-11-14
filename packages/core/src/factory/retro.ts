@@ -100,7 +100,7 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
     const first = ids.filter((id) => { const mine = feats.filter((f) => f.id === id); return mine.length === 1 && mine[0].state === "built"; });
     const notBuilt = ids.filter((id) => feats.filter((f) => f.id === id).at(-1)!.state !== "built");
     (first.length === ids.length ? good : bad).push(`Build loop: ${first.length} of ${plural(ids.length, "feature")} built on the first try, each in its own session.`);
-    for (const f of feats.filter((x) => x.state === "broken")) bad.push(`Build loop: ${f.id} (${f.title}) reported done while ${f.invalid?.length ? `the app could not start: ${String(f.invalid[0]).slice(0, 160)}` : f.deadLinks?.length ? `it held ${plural(f.deadLinks.length, "made-up link")}: ${String(f.deadLinks[0]).slice(0, 120)}` : f.hollow?.length ? `the product judge did not find on its screen ${plural(f.hollow.length, "designed item")}, first: ${String(f.hollow[0]).slice(0, 140)}` : `a screen did not draw: ${String(f.crashed?.[0] ?? "").slice(0, 160)}`}`);
+    for (const f of feats.filter((x) => x.state === "broken")) bad.push(`Build loop: ${f.id} (${f.title}) reported done while ${f.invalid?.length ? `the app could not start: ${String(f.invalid[0]).slice(0, 160)}` : f.stored?.length ? `it kept data in the browser's storage instead of the app's store (${f.stored.slice(0, 3).join(", ")})` : f.deadLinks?.length ? `it held ${plural(f.deadLinks.length, "made-up link")}: ${String(f.deadLinks[0]).slice(0, 120)}` : f.hollow?.length ? `the product judge did not find on its screen ${plural(f.hollow.length, "designed item")}, first: ${String(f.hollow[0]).slice(0, 140)}` : `a screen did not draw: ${String(f.crashed?.[0] ?? "").slice(0, 160)}`}`);
     for (const f of feats.filter((x) => x.state === "regressed")) bad.push(`Build loop: ${f.id} (${f.title}) broke ${plural((f.broke ?? []).length, "test")} that passed before it.`);
     if (notBuilt.length) bad.push(`Build loop: ${notBuilt.join(", ")} did not end built.`);
   }
@@ -117,6 +117,8 @@ export function engineReview(events: SfEvent[], end: { outcome: string; reason: 
     const still = again.filter((l) => (l.missing ?? []).length);
     if (again.length) (still.length ? bad : good).push(`Builder: ${still.length ? `${still.length} of ${plural(again.length, "screen")} sent back still missed designed items on the second look (${still.map((l) => `${l.screen}: ${l.seen} of ${l.of}`).join(", ")})` : `every screen sent back had what was missing on the second look (${plural(again.length, "screen")})`}.`);
   }
+  const blanked = of("factory.links.blanked").flatMap((b) => b.links ?? []);
+  if (blanked.length) bad.push(`Builder: left ${plural(blanked.length, "made-up link")} after being told twice; the core emptied ${blanked.length === 1 ? "it" : "them"} (${String(blanked[0]).slice(0, 120)}).`);
   const unmatched = allLooks.filter((l) => l.skipped);
   if (unmatched.length) bad.push(`Planner: ${plural(unmatched.length, "view")} matched no designed screen, so the judge could not look at ${unmatched.length === 1 ? "it" : "them"} while building (${unmatched.map((l) => l.screen).join(", ")}).`);
   const firstScreens = of("factory.screens")[0];
