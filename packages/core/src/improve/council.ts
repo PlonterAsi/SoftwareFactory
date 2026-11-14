@@ -91,8 +91,6 @@ export class ImproveCouncil {
 
   // ---------- reading ----------
 
-  private events(type: SfEvent["type"]) { return this.log.list({ type, limit: 1e6 }); }
-
   sessions(): Session[] {
     const by = new Map<number, Session>();
     for (const e of this.log.list({ limit: 1e6 }).filter((x) => x.type === "improve.session" || x.type === "improve.seat")) {

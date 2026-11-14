@@ -127,9 +127,6 @@ SF_DB=.sf-data/demo.db npm run dev -w @sf/core   # then open the Bridge to see i
 
 # Run the factory loop headless (real, capped model calls; gates auto-approved)
 SF_RUNTIME=claude-code npm run factory -- "a CLI that renames photos by the date they were taken" --max-usd 1.5   # add --council always to seat the Council
-
-# Re-run the runtime cost spike (makes a few real, capped model calls)
-npm run spike
 ```
 
 `SF_ORDER_MODE=heuristic|agent` picks the Archivist (default: agent on a real runtime, heuristics on the mock) and `SF_ORDER_MAX_USD` its daily cap (default $0.50). `SF_RUNTIME=mock` (the default for the Bridge) runs without any model calls: its crew builds a tiny word counter with a planted bug, so you can watch the whole loop, fix round included, for free. `SF_RUNTIME=claude-code:full` loads every installed plugin.
