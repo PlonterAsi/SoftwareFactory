@@ -1823,3 +1823,11 @@ kbd { font: 500 12px var(--mono); color: var(--ink-2); background: var(--panel-2
 .loop-gate.g-skipped { color: var(--muted); }
 .loop-gate.g-fail, .loop-gate.g-failed { color: var(--bad); }
 .loop-gate-out { margin: 6px 0 0; font: 12.5px var(--mono); white-space: pre-wrap; color: var(--ink-2); }
+
+/* A ticket's harness steps: one chip per step of the crew's latest pass in the repo. */
+.tk-steps { flex-wrap: wrap; gap: 6px 14px; }
+.tk-step { font-size: 12.5px; white-space: nowrap; }
+.tk-step.s-passed { color: var(--good); }
+.tk-step.s-failed { color: var(--bad); }
+.tk-step.s-skipped { color: var(--muted); }
+.tk-step.s-running { color: var(--accent); }

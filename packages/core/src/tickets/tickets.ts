@@ -71,6 +71,7 @@ export interface WaitingItem {
   moves: { to: TicketStatus; label: string }[];
 }
 
+export interface TicketStep { step: string; state: "running" | "passed" | "failed" | "skipped"; note: string; at: string }
 export interface TicketDetail {
   ticket: TicketView;
   notes: NoteView[];
@@ -84,6 +85,8 @@ export interface TicketDetail {
   repo: RepoRef | null;
   /** The Builder is working it in the repo right now. */
   working: boolean;
+  /** The harness steps of its latest pass in the repo (preflight, build, checks, review), each with its state. */
+  steps: TicketStep[];
   /** Where it stands in the ready queue, or why the crew leaves it to you. */
   queue: { position: number | null; why: string | null } | null;
 }
@@ -408,9 +411,26 @@ export class Tickets {
     return {
       ticket: t, notes, links, lines, parent: t.parentId != null ? this.get(t.parentId) ?? null : null,
       moves: nextMoves(t.status, t.kind), document: workDocument(t, notes, links, lines), run,
-      repo: repoOfProject(this.log, t.project), working: this.inRepo.has(id),
+      repo: repoOfProject(this.log, t.project), working: this.inRepo.has(id), steps: this.steps(id),
       queue: t.status === "ready" ? this.spot(t) : null,
     };
+  }
+
+  /** The harness steps of the ticket's latest pass in its repo, in order, each with where it stands. */
+  steps(id: number): TicketStep[] {
+    const rows = this.log.db.prepare("SELECT ts, payload FROM events WHERE type = 'ticket.step' AND json_extract(payload, '$.id') = ? ORDER BY id").all(id) as { ts: string; payload: string }[];
+    let out: TicketStep[] = [];
+    let first: string | null = null;
+    for (const r of rows) {
+      const p = JSON.parse(r.payload) as { step: string; state: TicketStep["state"]; note?: string };
+      first ??= p.step;
+      // The first step running again is a new pass: show that one.
+      if (p.step === first && p.state === "running") out = [];
+      const at = out.find((x) => x.step === p.step);
+      if (at) Object.assign(at, { state: p.state, note: p.note ?? "", at: r.ts });
+      else out.push({ step: p.step, state: p.state, note: p.note ?? "", at: r.ts });
+    }
+    return out;
   }
 
   private spot(t: TicketView): { position: number | null; why: string | null } {
