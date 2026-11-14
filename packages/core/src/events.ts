@@ -134,6 +134,8 @@ export class EventLog extends EventEmitter {
 
   constructor(path = ":memory:") {
     super();
+    // Every part of the core listens to the one log; more than Node's default of 10 is expected, not a leak.
+    this.setMaxListeners(64);
     this.path = path;
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA busy_timeout = 5000");
