@@ -410,7 +410,11 @@ describe("every screen in a real browser", () => {
     await f.wait(run);
     const dir = events(log, "factory.run.finished").at(-1).dir;
     let good: ScreenCheck | null = null;
-    expect((await probeStart(dir, 15_000, async (url) => { good = await checkScreens(url, { browser }); return []; }))).toEqual([]);
+    // A loaded runner's browser can miss its time limit on the first start (the Windows build of PR 88 did):
+    // the check itself calls that "skipped", so the test asks once more before it judges the result.
+    for (let n = 0; n < 2 && (!good || (good as ScreenCheck).skipped === "the browser did not answer"); n++) {
+      expect((await probeStart(dir, 15_000, async (url) => { good = await checkScreens(url, { browser }); return []; }))).toEqual([]);
+    }
     const g = good as unknown as ScreenCheck;
     expect(g.skipped).toBeUndefined();
     expect(g.screens.map((s) => s.route)).toEqual(expect.arrayContaining(["home", "e/piece", "e/piece/new", "system"]));
