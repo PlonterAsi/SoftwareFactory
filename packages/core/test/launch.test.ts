@@ -257,6 +257,9 @@ describe("launch: running a project from the Bridge", () => {
 
     expect((await call(`/api/launch/sessions/${s.id}/stop`, {})).status).toBe(200);
     const end = await until(async () => { const r = (await call(`/api/launch/sessions/${s.id}`)).body; return r.session.state === "stopped" && r; });
+    // Stopped on purpose is not a failure: no exit code from the kill, and no pid of a process that is gone.
+    expect(end.session).toMatchObject({ exitCode: null, pid: null });
+    expect(log.db.prepare("SELECT exit_code FROM launch_sessions WHERE id = ?").get(s.id)).toMatchObject({ exit_code: null });
     expect(end.session.endedAt).toBeTruthy();
     await expect(fetch(live.session.url)).rejects.toThrow();
     expect(log.db.prepare("SELECT url, ended_how FROM launch_sessions WHERE id = ?").get(s.id)).toMatchObject({ url: live.session.url, ended_how: "stopped" });

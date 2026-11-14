@@ -58,7 +58,8 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
   const [actErr, setActErr] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [newDir, setNewDir] = useState("");
-  const [why, setWhy] = useState<string | null>(null);
+  // What the one big Start did, and for which session: the note goes when that session is no longer what it says.
+  const [why, setWhy] = useState<{ session: number; text: string } | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
   // While an app or its pages show, the controls fold away so the app gets the room; one press brings them back.
   const [padPick, setPadPick] = useState<boolean | null>(null);
@@ -86,6 +87,10 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
     void go(best);
   }, [info]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // "Started the app." beside an app that has stopped is wrong (seen on Game Mastery v7, 2026-11-14): the note
+  // stays while its session runs, and after a command-line tool finished its work; it goes when an app stops.
+  const whySession = why ? [...(info?.running ?? []), ...(info?.sessions ?? [])].find((s) => s.id === why.session) : undefined;
+  const whyNow = why && (!whySession || live(whySession) || (whySession.kind === "cli" && whySession.state === "exited")) ? why.text : null;
   const liveByProfile = new Map((info?.running ?? []).filter((s) => s.dir === dir).map((s) => [s.profileId, s]));
   async function start(p: RunProfileView, mode: "inline" | "window" = "inline", run?: ToolRunRequest) {
     setBusy(p.id); setActErr(null);
@@ -100,7 +105,7 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
     setBusy(p?.id ?? "go"); setActErr(null); setWhy(null);
     try {
       const r = await launchApi.go(pid, dir, p?.id);
-      setPicked(r.session.id); setWhy(r.why);
+      setPicked(r.session.id); setWhy(r.why ? { session: r.session.id, text: r.why } : null);
       if (r.made.length) setDataVersion((v) => v + 1);
       reload();
     } catch (x) { setActErr((x as Error).message); } finally { setBusy(null); }
@@ -173,7 +178,7 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
                   <span className="rn-go-sub">{best.label}</span>
                 </button>
               )}
-              {why && <p className="rn-why" role="status">{why}</p>}
+              {whyNow && <p className="rn-why" role="status">{whyNow}</p>}
             </section>
           );
         })()}
@@ -204,7 +209,7 @@ function RunPanel({ ctx }: { ctx: PanelContext }) {
                   <button className={"rn-hist" + (picked === s.id ? " on" : "")} onClick={() => setPicked(s.id)}>
                     <span className={`rn-light st-${s.state}${s.exitCode ? " bad" : ""}`} aria-hidden />
                     <span className="rn-hist-label">{s.label}{s.args ? <span className="muted"> {s.args}</span> : null}</span>
-                    <span className="muted">{live(s) ? s.state : s.mode === "window" ? "own window" : s.exitCode != null ? `exit ${s.exitCode}` : s.state} · {ago(s.startedAt)}</span>
+                    <span className="muted">{live(s) ? s.state : s.mode === "window" ? "own window" : s.exitCode != null && s.state !== "stopped" ? `exit ${s.exitCode}` : s.state} · {ago(s.startedAt)}</span>
                   </button>
                 </li>
               ))}
@@ -295,7 +300,7 @@ function Stage({ id, padOpen, onTogglePad, onStop, recommended, onStart }: { id:
         <button className="ghost tiny" onClick={onTogglePad} aria-expanded={padOpen} title={padOpen ? "Fold the controls away, so the app gets the room" : "Show the controls: other apps, ways to run it, data files"}>{padOpen ? "◂ Hide controls" : "▸ Controls"}</button>
         <span className={`rn-light st-${s.state}${s.exitCode ? " bad" : ""}`} aria-hidden />
         <strong>{s.label}</strong>
-        <span className={`rn-pill st-${s.state}`}>{s.mode === "window" ? "in its own window" : s.state}{s.exitCode != null ? ` · exit ${s.exitCode}` : ""}</span>
+        <span className={`rn-pill st-${s.state}`}>{s.mode === "window" ? "in its own window" : s.state}{s.exitCode != null && s.state !== "stopped" ? ` · exit ${s.exitCode}` : ""}</span>
         <span className="muted mono">{clock(up)}</span>
         <code className="rn-cmd grow" title={s.dir}>{s.command}</code>
         {live(s) && <button className="sm stop" onClick={() => onStop(s.id)}>Stop</button>}
