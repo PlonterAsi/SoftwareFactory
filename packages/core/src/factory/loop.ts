@@ -344,6 +344,8 @@ export class Factory {
 
   /** How many runs are working right now (an update waits for this to reach 0). */
   activeCount(): number { return this.active.size; }
+  /** The runs in flight, each with the gate it is waiting at (null while it is working). */
+  activeRuns(): { run: number; gate: GateId | null }[] { return [...this.active.keys()].map((run) => ({ run, gate: this.waitingGate(run) })); }
   wait(run: number): Promise<void> { return this.active.get(run) ?? Promise.resolve(); }
 
   waitingGate(run: number): GateId | null { return this.pending.get(run)?.gate ?? null; }

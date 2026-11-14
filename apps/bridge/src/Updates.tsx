@@ -72,13 +72,22 @@ export function useUpdates(online: boolean) {
     const s = await shell<UpdateStatus>("update_check");
     if (s) setStatus(s);
   }, [desktop]);
-  const install = useCallback(async () => {
+  // The core is told before every install, so its log says who started it and what was working then (run 4004
+  // lost a build-gate answer to an install 30 s after it, and nothing recorded what had started it). An
+  // install that starts by itself is also the core's to refuse: it knows what is working this second.
+  const version = useRef<string | null>(null);
+  version.current = status?.version ?? null;
+  const install = useCallback(async (by: "auto" | "person" = "person") => {
     setCountdown(null);
+    try {
+      const r = await fetch(`${API}/api/updates/install`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ by, version: version.current }), signal: AbortSignal.timeout(5_000) });
+      if (!r.ok && by === "auto") { loadReport(); return; }
+    } catch { if (by === "auto") { setUnsure(true); return; } /* the person may still install over a core that does not answer */ }
     setStatus((s) => (s ? { ...s, phase: "downloading", downloaded: 0, error: null } : s));
     // On success the app exits inside this call and the new version starts.
     const s = await shell<UpdateStatus>("update_install");
     if (s) setStatus(s);
-  }, []);
+  }, [loadReport]);
   const setAuto = useCallback(async (auto: boolean) => {
     const r = await fetch(`${API}/api/updates`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ auto }) });
     if (r.ok) setReport(await r.json());
@@ -136,12 +145,12 @@ export function useUpdates(online: boolean) {
     // only on its own word that nothing is working.
     loadReport().then((fresh) => {
       if (!fresh) { setUnsure(true); setCountdown(null); return; }
-      if (fresh.auto && !working(fresh)) install();
+      if (fresh.auto && !working(fresh)) install("auto");
     });
   }, [countdown, install, loadReport]);
 
   return {
-    desktop, status, report, countdown, check, install, setAuto, token, setToken,
+    desktop, status, report, countdown, check, install: () => install("person"), setAuto, token, setToken,
     snooze: () => { setSnoozed(status?.version ?? null); setCountdown(null); },
     version: status?.current ?? report?.appVersion ?? null,
   };
@@ -161,6 +170,20 @@ export function VersionChip({ u, onOpen }: { u: Updates; onOpen: () => void }) {
       v{u.version}{ready ? ` → v${s?.version}` : ""}
     </button>
   );
+}
+
+/**
+ * Installing over work in flight takes two presses: the first only arms the button for a few seconds. One
+ * stray click next to a gate button must not close the app under a build.
+ */
+function InstallAnyway({ u, label, className }: { u: Updates; label: string; className?: string }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 6000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return <button className={className} onClick={() => (armed ? u.install() : setArmed(true))}>{armed ? "Press again to install now" : label}</button>;
 }
 
 /** A strip under the top bar while an update is counting down, waiting for idle, or installing. */
@@ -187,13 +210,13 @@ export function UpdateBanner({ u }: { u: Updates }) {
   if (u.report?.auto && u.report.activeRuns > 0) return (
     <div className="update-banner quiet" role="status">
       <span>v{s.version} is ready. It installs by itself when the {u.report.activeRuns === 1 ? "running build finishes" : `${u.report.activeRuns} running builds finish`}.</span>
-      <button className="ghost sm" onClick={u.install}>Install now (the run resumes after)</button>
+      <InstallAnyway u={u} className="ghost sm" label="Install now (the run resumes after)" />
     </div>
   );
   if (u.report?.auto && working(u.report)) return (
     <div className="update-banner quiet" role="status">
       <span>v{s.version} is ready. It installs by itself when the crew finishes what it is working on.</span>
-      <button className="ghost sm" onClick={u.install}>Install now (that work is cut short)</button>
+      <InstallAnyway u={u} className="ghost sm" label="Install now (that work is cut short)" />
     </div>
   );
   return null;
@@ -228,7 +251,7 @@ export function UpdatesSection({ u }: { u: Updates }) {
         {s?.phase === "error" && <p className="setup-blocker">{s.error}</p>}
         {s?.phase === "available" && <>
           {s.notes && <p className="place-hint">{s.notes}</p>}
-          <button onClick={u.install}>Install v{s.version} now</button>
+          {r && working(r) ? <InstallAnyway u={u} label={`Install v${s.version} now`} /> : <button onClick={u.install}>Install v{s.version} now</button>}
           {r && r.activeRuns > 0 && <p className="place-hint">{r.activeRuns} build{r.activeRuns > 1 ? "s are" : " is"} running. Installing now pauses {r.activeRuns > 1 ? "them" : "it"}; {r.activeRuns > 1 ? "they resume" : "it resumes"} from the last finished station when the new version starts.</p>}
           {r && r.activeRuns === 0 && working(r) && <p className="place-hint">The crew is in the middle of {r.agentCalls === 1 ? "an agent call" : `${r.agentCalls} agent calls`} (a ticket, a Council session or a chat answer). Installing now cuts that work short.</p>}
         </>}
