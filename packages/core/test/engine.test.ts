@@ -535,6 +535,14 @@ describe("discovery: the idea becomes a designed product before any plan", () =>
     await f.wait(next);
     expect(seen.filter((x) => x.station === "design").length).toBe(before);
     expect(events(log, "factory.station").some((s) => s.run === next && s.station === "discover" && s.state === "skipped")).toBe(true);
+    // The design travels with the app: a small next version keeps it and adds the ask to its requirements.
+    const kept = events(log, "factory.discovery").filter((d) => d.run === next);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatchObject({ kept: run, pass: true });
+    expect(kept[0].docs.requirements.at(-1)).toEqual({ id: "N1", text: "add a weekly summary", from: "person", must: true });
+    expect(kept[0].docs.screens.map((x: any) => x.name)).toEqual(events(log, "factory.discovery").filter((d) => d.run === run).at(-1).docs.screens.map((x: any) => x.name));
+    const fin = events(log, "factory.run.finished").at(-1);
+    expect(readFileSync(join(fin.dir, "docs/product/REQUIREMENTS.md"), "utf8")).toMatch(/N1 \| add a weekly summary/);
   });
 });
 
@@ -1169,6 +1177,100 @@ describe("the product judge: the running app is judged as a product", () => {
     f.decide(run, "gateB", { approve: true });
     await f.wait(run);
     expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+  });
+
+  it("the next version of a shipped app runs on the same engine: the ask is designed in, built as features, and judged on what it adds", async () => {
+    const log = new EventLog();
+    const { rt: inner, seen } = crewWith([{ r2: true }]);
+    const builds: string[] = [];
+    const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
+      const r = await inner.run(req);
+      // The Designer's next-version answer adds a requirement and a screen, and forgets R2, R3 and the Session log.
+      if (station(req) === "design" && /This product already shipped/.test(req.prompt)) r.text = block({ ...docs,
+        screens: [docs.screens[0], { id: "summary", name: "Weekly summary", purpose: "The week at a glance.", shows: ["words per day"], actions: ["pick a week"] }],
+        requirements: [docs.requirements[0], { id: "R4", text: "A weekly summary of the words written each day", from: "person", must: true }] });
+      if (station(req) === "build" && req.cwd) {
+        const id = req.prompt.match(/Your feature, ([\w.-]+):/)?.[1] ?? "";
+        builds.push(id);
+        const files = parseFileBlocks(r.text);
+        for (const f of id === "F1" || id === "F2" ? files : [{ path: "web/style.css", content: `/* ${id} */\n` + (files.find((x) => x.path === "web/style.css")?.content ?? "") }]) { mkdirSync(dirname(join(req.cwd, f.path)), { recursive: true }); writeFileSync(join(req.cwd, f.path), f.content); }
+        r.text = `Built ${id}.`;
+      }
+      return r;
+    } };
+    const f = new Factory(log, rt, tmp("sf-proj-"));
+    f.readScreens = async () => screens;
+    const first = f.start("a writing desk", { autoApprove: true, autoRetries: 0, maxUsd: 10 });
+    await f.wait(first);
+    expect(events(log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    builds.length = 0;
+    const before = seen.length;
+    const next = f.addFeature(first, "show me a weekly summary", { autoApprove: true, autoRetries: 0, maxUsd: 5 });
+    await f.wait(next);
+    const fin = events(log, "factory.run.finished").at(-1);
+    expect(fin).toMatchObject({ run: next, outcome: "shipped" });
+    const mine = seen.slice(before);
+    // Design: the shipped documents and the ask, no research, and nothing that shipped falls out.
+    const design = mine.find((x) => x.station === "design")!;
+    expect(design.req.prompt).toMatch(/This product already shipped[\s\S]*A session log with date and minutes[\s\S]*show me a weekly summary/);
+    expect(mine.some((x) => /This time you only research/.test(x.req.prompt))).toBe(false);
+    const d = events(log, "factory.discovery").filter((x) => x.run === next).at(-1).docs;
+    expect(d.requirements.map((r: any) => r.id)).toEqual(["R1", "R2", "R3", "R4"]);
+    expect(d.screens.map((x: any) => x.id)).toEqual(["dashboard", "summary", "log"]);
+    // The Critic judges it knowing both the first idea and the ask.
+    expect(mine.find((x) => x.station === "critique" && !/you check a plan/.test(x.req.prompt))!.req.prompt).toMatch(/a writing desk\n\nThe app shipped\. For its next version the person now asks: show me a weekly summary/);
+    // Plan: told what is new, not to plan the whole design again.
+    const plan = mine.find((x) => x.station === "plan")!.req.prompt;
+    expect(plan).toMatch(/This app already shipped/);
+    expect(plan).toMatch(/Product documents of the next version[\s\S]*New in this version:\n- R4: A weekly summary/);
+    expect(plan).not.toMatch(/Implement this design: one view per screen/);
+    // Build: features of this version only, each in its own session, with ids the shipped list does not hold.
+    expect(builds.slice(0, 2)).toEqual(["v0.2.0-1", "v0.2.0-2"]);
+    const b1 = mine.find((x) => x.station === "build")!.req.prompt;
+    expect(b1).toMatch(/This app already shipped and the person uses it\. They now ask: show me a weekly summary/);
+    expect(b1).not.toMatch(/Current code:/);
+    expect(JSON.parse(readFileSync(join(fin.dir, "features.json"), "utf8")).features[0]).toMatchObject({ id: "v0.2.0-1", state: "built" });
+    // Judge: only what this version adds; the repair work is this version's too.
+    const evals = events(log, "factory.evaluation").filter((e) => e.run === next);
+    expect(evals[0].requirements.map((r: any) => r.id)).toEqual(["R4"]);
+    const judge = mine.find((x) => x.station === "evaluate")!.req.prompt;
+    expect(judge).toMatch(/The must-have requirements:\n- R4: A weekly summary/);
+    expect(judge).not.toMatch(/- R1: /);
+    expect(events(log, "factory.repair").filter((e) => e.run === next)[0].features[0].title).toBe("Judge: requirements R4");
+    expect(readFileSync(join(fin.dir, "docs/product/SCREENS.md"), "utf8")).toMatch(/Weekly summary/);
+    // A third version finds the design of the second.
+    const { shippedDesign } = await import("../src/factory/loop.js");
+    expect(shippedDesign(log, next)).toMatchObject({ idea: "a writing desk" });
+    expect(shippedDesign(log, next).docs!.requirements.map((r) => r.id)).toEqual(["R1", "R2", "R3", "R4"]);
+  }, 60000);
+
+  it("next-version helpers: the ask as a requirement, what is new, and the features a version adds", async () => {
+    const { withAsk, mergeNextDocs, newRequirements } = await import("../src/factory/discovery.js");
+    const { nextFeaturesOf } = await import("../src/factory/features.js");
+    const base = docs as never as import("../src/factory/discovery.js").ProductDocs;
+    const full = { ...base, rules: [{ name: "Goal", rule: "A piece is done at its goal." }] };
+    const asked = withAsk(full, "export my pieces as a file");
+    expect(asked.requirements.at(-1)).toEqual({ id: "N1", text: "export my pieces as a file", from: "person", must: true });
+    expect(withAsk(asked, "export my pieces as a file")).toBe(asked);
+    expect(withAsk(asked, "and print them").requirements.at(-1)!.id).toBe("N2");
+    expect(newRequirements(full, asked).map((r) => r.id)).toEqual(["N1"]);
+    // An answer that reuses a shipped id for something new gets an id of its own; shipped rules come back.
+    const merged = mergeNextDocs(full, { ...full, rules: [], requirements: [{ id: "R1", text: "Export as a file", from: "person", must: true }] });
+    expect(merged.requirements.map((r) => r.id)).toEqual(["R1", "R2", "R3", "N4"]);
+    expect(merged.requirements[0].text).toBe("A bar per piece against its goal");
+    expect(merged.rules).toHaveLength(1);
+    const plan0 = { name: "Desk", slug: "desk", summary: "s", interface: "countWords(text)", acceptance: ["a"], tasks: [], app: true,
+      entities: [{ name: "piece", label: "Piece", fields: [{ name: "title", type: "text" }] }],
+      views: [{ id: "dashboard", label: "Progress", shows: "a bar per piece" }, { id: "log", label: "Session log", shows: "sessions" }] } as never as import("../src/factory/loop.js").Plan;
+    const plan1 = { ...plan0, entities: [{ name: "piece", label: "Piece", fields: [{ name: "title", type: "text" }, { name: "exportedAt", type: "date" }] }, { name: "export", label: "Export", fields: [{ name: "file", type: "text" }] }],
+      views: [plan0.views![0], { id: "log", label: "Session log", shows: "sessions, with an Export button" }, { id: "exports", label: "Exports", shows: "every export made" }] } as never as import("../src/factory/loop.js").Plan;
+    const feats = nextFeaturesOf(plan0, plan1, full, "export my pieces as a file", "v0.3.0");
+    expect(feats.map((x) => [x.id, x.title])).toEqual([["v0.3.0-1", "The next version's model and logic"], ["v0.3.0-2", "Screen: Session log"], ["v0.3.0-3", "Screen: Exports"]]);
+    expect(feats[0].what).toMatch(/piece gains: exportedAt \(optional[\s\S]*New entity export: file/);
+    expect(feats[1].what).toMatch(/^The view "log" in web\/app\.js already exists[\s\S]*Keep everything it does today/);
+    expect(feats[2].what).toMatch(/^The view "exports" in web\/app\.js, new in this version/);
+    // A plan that changed no view still puts the ask on a screen.
+    expect(nextFeaturesOf(plan0, plan0, full, "faster counting", "v0.3.0").map((x) => x.title)).toEqual(["The next version's model and logic", "Screen: where the ask shows"]);
   });
 
   it("no browser, no verdict: the judge is skipped and says so, it never guesses", async () => {

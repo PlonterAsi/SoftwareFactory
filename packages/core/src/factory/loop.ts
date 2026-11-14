@@ -13,8 +13,8 @@ import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
-import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mustRequirements, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
-import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featureCapUsd, featurePrompt, featuresFile, featuresOf, progressEntry, type Feature } from "./features.js";
+import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mergeNextDocs, mustRequirements, newRequirements, nextVersionPrompt, withAsk, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
+import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featureCapUsd, featurePrompt, featuresFile, featuresOf, nextFeaturesOf, progressEntry, type Feature } from "./features.js";
 import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, withScreenItems, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
@@ -381,6 +381,11 @@ class Run {
   private docsCritique: Critique | null = null;
   /** A feature run: the plan that shipped, which the next version builds on. */
   private basePlan: Plan | null = null;
+  /** A next version: the product documents the app shipped with, and the idea its first version was built from. */
+  private baseDocs: ProductDocs | null = null;
+  private firstIdea = "";
+  /** What the person asked for, as the Critic and the judge read it: for a next version, the first idea and then the ask. */
+  private get asked(): string { return this.baseDocs && this.firstIdea ? `${this.firstIdea}\n\nThe app shipped. For its next version the person now asks: ${this.idea}` : this.idea; }
 
   constructor(
     private f: Factory, private log: EventLog, private runtime: AgentRuntime,
@@ -396,6 +401,9 @@ class Run {
         const base = restoreState(this.log, this.screen.baseRun);
         this.basePlan = base.plan ?? null;
         if (!this.dir) this.dir = base.dir ?? "";
+        const shipped = shippedDesign(this.log, this.screen.baseRun);
+        this.baseDocs = shipped.docs;
+        this.firstIdea = shipped.idea;
       }
       const done = from?.done ?? new Set<string>();
       if (!done.has("intake")) await this.station("intake", async () => { captureSignal(this.log, this.idea, "factory"); });
@@ -489,32 +497,43 @@ class Run {
    */
   private async discoverLoop() {
     // The next version of a shipped app keeps the design it has: its plan is the base.
-    if (this.screen) { this.mark("discover", "skipped", undefined, "The next version of a shipped app keeps its design"); return; }
+    const base = this.screen?.kind === "feature" ? this.baseDocs : null;
+    if (this.screen && !base) { this.mark("discover", "skipped", undefined, "The next version of a shipped app keeps its design"); return; }
+    // A next version starts from the design the app shipped with. A small one (or the practice crew) keeps it
+    // and adds the ask as one more requirement; a product-sized one has the Designer design the ask in.
+    if (base && !(this.bench && this.o.maxUsd >= FEATURE_LOOP_MIN_USD)) {
+      this.docs = withAsk(base, this.idea);
+      this.log.append("factory.discovery", { run: this.id, round: 1, docs: this.docs, critique: null, pass: true, bar: PASS_SCORE, kept: this.screen!.baseRun });
+      this.mark("discover", "skipped", undefined, "The shipped design is kept, with what you asked for added to its requirements");
+      return;
+    }
+    const rounds = base ? NEXT_VERSION_ROUNDS : MAX_DISCOVERY_ROUNDS;
     let best: { docs: ProductDocs; critique: Critique | null; round: number } | null = null;
     let last: { docs: ProductDocs; critique: Critique | null } | null = null;
     let why = "";
     let found: Finding[] | null = null;
-    for (let round = 1; round <= MAX_DISCOVERY_ROUNDS; round++) {
+    for (let round = 1; round <= rounds; round++) {
       const got = await this.station("discover", async () => {
         const designer = this.one("design");
         // Design is worth a real share of the run, but a small run cannot afford much research: say so up front.
         const designCap = Math.min(designer.budgetUsd, this.o.maxUsd * 0.25);
-        const searches = round > 1 ? 0 : designCap >= 0.3 ? 6 : designCap >= 0.12 ? 2 : 0;
+        const searches = round > 1 || base ? 0 : designCap >= 0.3 ? 6 : designCap >= 0.12 ? 2 : 0;
         // Research is a step of its own, not a suggestion: in run 2898 the Designer was offered six searches,
         // answered in one turn without any, and designed a research product from memory.
         if (searches && this.bench && !found) found = await this.research(designer, searches, designCap);
         const prompt = (last?.critique
-          ? revisePrompt(this.idea, last.docs, last.critique, round, round === MAX_DISCOVERY_ROUNDS)
+          ? revisePrompt(this.asked, last.docs, last.critique, round, round === rounds)
+          : base ? `${nextVersionPrompt(this.idea, base)}${this.brief ? `\n\n${briefText(this.brief)}` : ""}`
           : `Idea: ${this.idea}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}`)
           + (found?.length ? `\n\n${researchForDesigner(found)}` : "")
           + `\n\n${found ? "Do not search the web on this call: the research above is what was found." : searches ? `You can afford at most ${searches} web searches on this call.` : "Do not search the web on this call: work from what you know and what is above."}`;
         let docs: ProductDocs;
-        try { docs = validateDocs(parseJsonBlock(await this.ask(designer, prompt, { round }, { capUsd: designCap }))); }
+        try { docs = validateDocs(parseJsonBlock(await this.ask(designer, prompt, { round }, { capUsd: designCap }))); if (base) docs = mergeNextDocs(base, docs); }
         catch (e) { if (!(e instanceof StopRun)) this.verdict(designer, "design", false, round, (e as Error).message); throw e; }
         // A separate agent judges: an agent asked to grade its own design praises it.
         const critic = this.one("critique");
         let critique: Critique | null = null;
-        try { critique = validateCritique(parseJsonBlock(await this.ask(critic, critiquePrompt(this.idea, docs, round, last?.critique ?? undefined), { round }, { capUsd: Math.max(0.05, this.o.maxUsd * 0.1) }))); }
+        try { critique = validateCritique(parseJsonBlock(await this.ask(critic, critiquePrompt(this.asked, docs, round, last?.critique ?? undefined), { round }, { capUsd: Math.max(0.05, this.o.maxUsd * 0.1) }))); }
         catch (e) { if (e instanceof StopRun) throw e; this.verdict(critic, "critique", false, round, (e as Error).message); }
         const pass = !!critique && critiquePasses(critique);
         if (critique) this.verdict(designer, "design", pass, round, pass ? undefined : critique.problems[0]?.problem);
@@ -525,7 +544,7 @@ class Run {
       if (!best || (got.critique ? critiqueTotal(got.critique) : 0) >= (best.critique ? critiqueTotal(best.critique) : 0)) best = { ...got, round };
       if (got.pass) break;
       if (!got.critique) { why = "the Critic gave no usable scores"; break; }
-      if (round === MAX_DISCOVERY_ROUNDS) { why = `still under the bar after ${round} rounds`; break; }
+      if (round === rounds) { why = `still under the bar after ${round} rounds`; break; }
       if (this.spent >= this.o.maxUsd * DISCOVERY_BUDGET_SHARE) { why = "discovery used its share of the budget"; break; }
     }
     this.docs = best!.docs;
@@ -561,7 +580,7 @@ class Run {
         const onTop = this.basePlan
           ? `This app already shipped. Its approved plan:\n${JSON.stringify(this.basePlan, null, 2)}\n\nThe person now asks to add: ${this.idea}\n\nWrite the plan for its next version in the same JSON shape: keep the same name and slug, and every existing entity, field, view, flow and exported function (they still work and their tests stay locked); add what the ask needs. New fields on existing entities are optional, so records already saved still load. In "acceptance", list ONLY the new criteria: the old ones stay as they are.`
           : `Idea: ${this.idea}`;
-        const text = await this.ask(this.one("plan"), `${onTop}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${this.docs ? `\n\n${docsForPlanner(this.docs)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
+        const text = await this.ask(this.one("plan"), `${onTop}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}${this.docs ? `\n\n${docsForPlanner(this.docs, this.basePlan && this.baseDocs ? { added: newRequirements(this.baseDocs, this.docs) } : undefined)}` : ""}${feedback ? `\n\nThe person reviewed your last plan and said: ${feedback}\nRevise the plan accordingly.` : ""}`);
         let plan = validatePlan(parseJsonBlock<Plan>(text));
         // Nothing the person asked for may fall out of the plan (run 2623's plan dropped the skill tree, the
         // practice plan, the session log and the genre shapes). A second agent lists what the plan misses; the
@@ -652,22 +671,21 @@ class Run {
     if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
     this.builder = this.one("build");
     // A real crew with a product-sized budget builds one feature per fresh session (features.ts).
-    if (this.bench && this.plan.app && !this.screen && this.o.maxUsd >= FEATURE_LOOP_MIN_USD) return this.buildByFeature();
+    // The next version of a shipped app is built the same way: what it adds, one feature per session.
+    if (this.bench && this.plan.app && (!this.screen || (this.screen.kind === "feature" && this.basePlan)) && this.o.maxUsd >= FEATURE_LOOP_MIN_USD) return this.buildByFeature();
     const text = await this.askBench(this.builder, this.screen?.kind === "feature"
       ? [
         `This app already shipped and its locked acceptance tests pass. Build its next version on top of the existing code: add what the spec adds (new entities, fields, views and logic) and keep everything that works.`,
         `Keep every existing export, entity, view and file working; records the person already saved must still load, so new fields are optional. All locked tests, old and new, must pass. Return only the files you add or change, each in full.`,
         `Spec of the next version:\n${JSON.stringify(this.plan, null, 2)}`,
-        `Locked acceptance tests (read only):\n${this.testsText()}`,
-        `Current code:\n${this.codeText()}`,
+        ...this.codeForBuilder(),
       ].join("\n\n")
       : this.screen
       ? [
         `This project already shipped and its locked acceptance tests pass, but it is a script, not a program. Turn it into a real app on the app kit (already in the folder), on top of the existing code: write src/schema.js (the entities it works on and keeps, such as its inputs, settings and a history of its results, each with sample records), web/app.js with views that run its logic through forms and draw the results, index.html and web/style.css.`,
         `Keep every existing export, file and command working (the CLI too, if there is one). If the logic the app needs lives in a module that imports node: modules, move the pure part into a browser-safe module under src/ and have the old module import it from there; work that truly needs the disk goes in api.js. The locked tests must still pass. Return only the files you add or change, each in full, and update README.md to say the app opens from the Run tab's Start.`,
         `Spec:\n${JSON.stringify(this.plan, null, 2)}`,
-        `Locked acceptance tests (read only):\n${this.testsText()}`,
-        `Current code:\n${this.codeText()}`,
+        ...this.codeForBuilder(),
       ].join("\n\n")
       : `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nLocked acceptance tests:\n${this.testsText()}`);
     const res = this.takeWork(text);
@@ -686,7 +704,8 @@ class Run {
   private async buildByFeature(more: Feature[] = [], pool?: number) {
     const builder = this.builder!;
     const path = join(this.dir, "features.json");
-    let features = featuresOf(this.plan, this.docs);
+    const next = this.screen?.kind === "feature" && this.basePlan ? this.screen : null;
+    let features = next ? nextFeaturesOf(this.basePlan!, this.plan, this.docs, this.idea, next.tag) : featuresOf(this.plan, this.docs);
     try {
       // Picked up again after a failed call: what is built stays built.
       const kept = (JSON.parse(readFileSync(path, "utf8")).features ?? []) as { id: string; state: string }[];
@@ -698,6 +717,8 @@ class Run {
     if (!existsSync(progress)) writeFileSync(progress, `# Progress\n\nOne entry per feature, written by SoftwareFactory after each build session.\n\n`);
     const buildStart = this.spent;
     let passing = new Set<string>();
+    // A next version starts on an app whose tests pass: a shipped test its first feature breaks is caught too.
+    if (next && !more.length) { try { passing = new Set((await runTests(this.dir)).cases.filter((c) => c.pass).map((c) => `${c.file}::${c.name}`)); } catch { /* judged from the first feature on */ } }
     let wroteAny = features.some((f) => f.state === "built");
     for (let i = 0; i < features.length; i++) {
       const f = features[i];
@@ -1142,7 +1163,12 @@ class Run {
   /** Per screen feature, the designed items its last look did not find. They join the judge's requirements. */
   private screenOpen = new Map<string, string[]>();
   /** The product documents as the judge reads them: the design, plus what the screens still lacked when built. */
-  private judgeDocs(): ProductDocs | null { return this.docs ? withScreenItems(this.docs, [...this.screenOpen.values()].flat()) : null; }
+  private judgeDocs(): ProductDocs | null {
+    if (!this.docs) return null;
+    // A next version is judged on what it adds: the rest was judged when it shipped, and its tests are locked.
+    const docs = this.baseDocs ? { ...this.docs, requirements: newRequirements(this.baseDocs, this.docs) } : this.docs;
+    return withScreenItems(docs, [...this.screenOpen.values()].flat());
+  }
   /** The judge's look at one screen just built: what of its design a person would not find. [] when it all shows or the look cannot run. */
   private async lookAtScreen(f: Feature, attempt = 1): Promise<string[]> {
     const id = f.what.match(/^The view "([^"]+)"/)?.[1];
@@ -1153,7 +1179,7 @@ class Run {
     if (!shots?.length) return [];
     const mine = shots.filter((s) => s.route === id || s.route.startsWith(`${id}/`));
     try {
-      const e = validateEvaluation(parseJsonBlock(await this.ask(this.one("evaluate"), screenLookPrompt(this.idea, docs, mine.length ? mine : shots), { round: 0 }, { capUsd: SCREEN_LOOK_USD })), docs);
+      const e = validateEvaluation(parseJsonBlock(await this.ask(this.one("evaluate"), screenLookPrompt(this.asked, docs, mine.length ? mine : shots), { round: 0 }, { capUsd: SCREEN_LOOK_USD })), docs);
       const req = (rid: string) => docs.requirements.find((r) => r.id === rid)?.text ?? rid;
       const unmet = e.requirements.filter((r) => !r.met);
       const out = unmet.map((r) => `${req(r.id)} (the judge saw: ${r.evidence})`);
@@ -1166,7 +1192,8 @@ class Run {
 
   private async evaluateLoop() {
     const skip = (why: string) => { this.mark("evaluate", "skipped", undefined, why); };
-    if (!this.docs || !this.plan.app || this.screen) return skip("No product design to judge this build against");
+    if (!this.docs || !this.plan.app || (this.screen && !this.baseDocs)) return skip("No product design to judge this build against");
+    if (!this.judgeDocs()!.requirements.some((r) => r.must)) return skip("This version adds no requirement of its own to judge");
     for (let round = 1; round <= MAX_EVALUATION_ROUNDS; round++) {
       const screens = await this.f.readScreens(this.dir).catch(() => null);
       if (!screens?.length) {
@@ -1177,7 +1204,7 @@ class Run {
       const ev = await this.station("evaluate", async () => {
         const judge = this.one("evaluate");
         let e: Evaluation;
-        try { e = validateEvaluation(parseJsonBlock(await this.ask(judge, evaluationPrompt(this.idea, docs, screens, round), { round }, { capUsd: Math.max(0.1, this.o.maxUsd * 0.08) })), docs); }
+        try { e = validateEvaluation(parseJsonBlock(await this.ask(judge, evaluationPrompt(this.asked, docs, screens, round), { round }, { capUsd: Math.max(0.1, this.o.maxUsd * 0.08) })), docs); }
         catch (err) { if (!(err instanceof StopRun)) this.verdict(judge, "evaluate", false, round, (err as Error).message); throw err; }
         const pass = evaluationPasses(e);
         this.verdict(judge, "evaluate", true, round);
@@ -1317,7 +1344,7 @@ class Run {
     const round = 1 + this.log.list({ type: "factory.evaluation", limit: 1e6 }).filter((e) => (e.payload as { run: number }).run === this.id).length;
     const judge = this.one("evaluate");
     try {
-      const e = validateEvaluation(parseJsonBlock(await this.ask(judge, evaluationPrompt(this.idea, docs, screens, round), { round }, { capUsd: Math.max(0.1, this.o.maxUsd * 0.08) })), docs);
+      const e = validateEvaluation(parseJsonBlock(await this.ask(judge, evaluationPrompt(this.asked, docs, screens, round), { round }, { capUsd: Math.max(0.1, this.o.maxUsd * 0.08) })), docs);
       const pass = evaluationPasses(e);
       this.verdict(judge, "evaluate", true, round);
       this.log.append("factory.evaluation", { run: this.id, round, pass, bar: PRODUCT_PASS_SCORE, screens: screens.length, ...e });
@@ -1414,6 +1441,16 @@ class Run {
   }
 
   /** The project's code (not the locked tests, not the spec) as file blocks. */
+  /**
+   * The shipped code and tests for a Builder working on top of them. At the workbench they are in its folder:
+   * pasting a whole shipped app into the prompt was paid for again on every step of the call, and for an app
+   * the size of a product it did not fit at all. Without a workbench the text is all the agent has.
+   */
+  private codeForBuilder(): string[] {
+    if (this.bench) return ["The shipped code and its locked acceptance tests (test/, read only) are in your folder. Read SPEC.md, PROGRESS.md if there is one, src/schema.js and web/app.js first, then only the files the change touches, in one command."];
+    return [`Locked acceptance tests (read only):\n${this.testsText()}`, `Current code:\n${this.codeText()}`];
+  }
+
   private codeText() {
     // The kit is the same in every app and the agents may not change it: they get its API in their contract, not its source.
     return Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md" && !isKitFile(p) && !p.startsWith("data/"))
@@ -1765,6 +1802,28 @@ export function specMarkdown(idea: string, p: Plan): string {
     "## Tasks", "", ...p.tasks.map((t) => `- **${t.id}** ${t.title}${t.dependsOn.length ? ` (after ${t.dependsOn.join(", ")})` : ""}`), "",
     "Built by SoftwareFactory. The tests in `test/` were written from this spec before the code and were locked.", "",
   ].join("\n");
+}
+
+/** A next version's design is a change to documents that already passed: one revision is enough. */
+export const NEXT_VERSION_ROUNDS = 2;
+
+/**
+ * The design a shipped app carries: the product documents of the run that shipped it, or of the nearest
+ * version before it that has any (a version built before designs travelled has none of its own), and the
+ * idea its first version was built from.
+ */
+export function shippedDesign(log: EventLog, run: number): { docs: ProductDocs | null; idea: string } {
+  let docs: ProductDocs | null = null;
+  let idea = "";
+  for (let id: number | undefined = run, n = 0; id != null && n < 50; n++) {
+    const started = log.get(id);
+    if (started?.type !== "factory.run.started") break;
+    const p = started.payload as { idea?: string; screen?: { baseRun?: number } };
+    docs ??= restoreState(log, id).docs;
+    idea = String(p.idea ?? "");
+    id = p.screen?.baseRun;
+  }
+  return { docs, idea };
 }
 
 /** How many times one run is resumed on its own before it waits for the Resume button. */
