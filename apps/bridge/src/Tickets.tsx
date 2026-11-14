@@ -25,6 +25,8 @@ interface Detail {
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
   repo: { source: string; dir: string; branch: string | null; github?: { owner: string; name: string } } | null;
   working: boolean;
+  /** In a project that lives in a repo: the route Work it takes when you do not choose, and why. */
+  route?: { route: "light" | "engine"; why: string } | null;
   steps?: { step: string; state: "running" | "passed" | "failed" | "skipped"; note: string; at: string }[];
   queue: { position: number | null; why: string | null } | null;
 }
@@ -69,7 +71,7 @@ export const ticketsApi = {
   link: (id: number, to: number | string, relation: string) => call<TicketView>("POST", `/api/tickets/${id}/link`, { to, relation }),
   linkPr: (id: number, pr: string) => call<TicketView>("POST", `/api/tickets/${id}/pr`, { pr }),
   line: (id: number, dir: "up" | "down") => call<TicketView[]>("POST", `/api/tickets/${id}/line`, { dir }),
-  work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number, again?: boolean) => call<{ run: number | null; branch?: string }>("POST", `/api/tickets/${id}/work`, { maxUsd, where, again }),
+  work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number, again?: boolean, route?: "light" | "engine") => call<{ run: number | null; branch?: string; route?: { route: "light" | "engine"; why: string } }>("POST", `/api/tickets/${id}/work`, { maxUsd, where, again, route }),
   ask: (id: number, agent?: string) => call<{ reply?: string; error?: string }>("POST", `/api/tickets/${id}/ask`, { agent }),
 };
 
@@ -314,15 +316,16 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   };
   const edit = (field: string, value: unknown, key?: string) => act("edit", () => ticketsApi.edit(id, field, value, key));
   // The factory builds one idea once a day: when this one is already built or building, say so and offer both ways on.
-  const work = async (where: "auto" | "repo" = "auto", again = false) => {
+  const work = async (where: "auto" | "repo" = "auto", again = false, route?: "light" | "engine") => {
     setBusy("work"); setDup(null);
-    try { await ticketsApi.work(id, where, undefined, again); setD(await ticketsApi.get(id)); }
+    try { await ticketsApi.work(id, where, undefined, again, route); setD(await ticketsApi.get(id)); }
     catch (e) {
       const b = (e as { body?: { duplicateOf?: number } }).body;
       if (b?.duplicateOf != null) setDup({ run: b.duplicateOf, error: (e as Error).message }); else onError((e as Error).message);
     } finally { setBusy(null); }
   };
   const closed = t.status === "closed" || t.status === "rejected";
+  const engineFirst = d.route?.route === "engine";
   const stationAt = d.run?.station ? STATION_ORDER.indexOf(d.run.station) : -1;
   return (
     <aside className="tk-page" aria-label={`Ticket ${t.key}`}>
@@ -346,12 +349,24 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
       {d.parent && <div className="muted tk-parent">{t.level === "subtask" ? "Subtask of" : "Part of epic"} <button className="link" onClick={() => onSelect(d.parent!.id)}>{d.parent.key} {d.parent.title}</button></div>}
 
       <div className="tk-crew">
-        {d.repo ? (
-          <button disabled={closed || busy != null || d.working} onClick={() => work("repo")}
-            title={`The Builder works it on a new branch of a clone of ${d.repo.source}. The original repo is not touched and nothing is pushed.`}>
-            {busy === "work" ? "Starting…" : d.working ? "Builder at work in the repo" : t.branch ? "Work it again in the repo" : "Work it in the repo"}
-          </button>
-        ) : (
+        {d.repo ? (() => {
+          // Two routes in a repo: one Builder session, or the whole engine. The suggested one is the main button; the other is one press away.
+          const running = !!d.run && !d.run.outcome;
+          const off = closed || busy != null || d.working || running;
+          const light = (
+            <button key="light" className={engineFirst ? "ghost" : undefined} disabled={off} onClick={() => work("repo", false, "light")}
+              title={`One Builder session on a new branch of a clone of ${d.repo.source}, then the checks and a Reviewer on the diff. Up to $0.60. The original repo is not touched.`}>
+              {busy === "work" ? "Starting…" : d.working ? "Builder at work in the repo" : engineFirst ? "One session instead" : t.branch ? "Work it again in the repo" : "Work it in the repo"}
+            </button>
+          );
+          const engine = d.route ? (
+            <button key="engine" className={engineFirst ? undefined : "ghost"} disabled={off} onClick={() => work("repo", false, "engine")}
+              title={`The whole engine on a new branch of a clone of ${d.repo.source}: the change is designed and criticised, planned for your approval, built feature by feature, reviewed and judged on the running site. Up to this project's limit for a next version ($1.50 unless you set one). The original repo is not touched.`}>
+              {busy === "work" ? "Starting…" : running ? "Engine at work" : engineFirst ? (t.branch ? "Work it again on the engine" : "Work it on the engine") : "On the engine instead"}
+            </button>
+          ) : null;
+          return engineFirst ? [engine, light] : [light, engine];
+        })() : (
           <button disabled={closed || busy != null} onClick={() => work()} title="The factory loop builds it: Council, plan, locked tests, build, review, fix, ship. The run writes back here.">
             {busy === "work" ? "Starting…" : d.run && !d.run.outcome ? "Crew at work" : "Work it with the crew"}
           </button>
@@ -361,6 +376,11 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
         </button>
         <button className="ghost" onClick={() => setShowDoc((s) => !s)}>{showDoc ? "Hide" : "Work document"}</button>
       </div>
+      {d.repo && d.route && (t.status === "open" || t.status === "ready") && !d.working && !(d.run && !d.run.outcome) && (
+        <div className="tk-queue tk-route" role="note">
+          Suggested: {d.route.route === "engine" ? "the whole engine (design, plan, build, review, judge)" : "one Builder session"}. Why: {d.route.why}.
+        </div>
+      )}
       {d.queue && (
         <div className={`tk-queue ${d.queue.position != null ? "in-line" : ""}`} role="status">
           {d.queue.position != null

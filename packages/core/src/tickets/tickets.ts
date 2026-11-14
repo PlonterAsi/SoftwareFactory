@@ -9,6 +9,9 @@ import { projectOf, registerProjectFacet } from "../projects/service.js";
 import { EDITABLE } from "./tables.js";
 import { branchFor, harnessChecks, repoOfProject, workInRepo, type RepoRef } from "./repowork.js";
 import { hideTokens, parseGitHubRepo, type GitHub, type MergedPr } from "./github.js";
+import { routeWork, type Routed, type WorkRoute } from "../factory/route.js";
+import { REPO_ENGINE_MIN_USD, type RepoRuns } from "../factory/reporun.js";
+import { DEFAULT_NEXT_USD, buildAllowance } from "../projects/budget.js";
 import { selfProject } from "./intake.js";
 import {
   FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS,
@@ -83,6 +86,8 @@ export interface TicketDetail {
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
   /** The imported repo this ticket's project came from: "Work it" works there, on a branch of a clone. */
   repo: RepoRef | null;
+  /** In a repo project: the route "Work it" takes when you do not choose (one session, or the whole engine), with why. */
+  route: Routed | null;
   /** The Builder is working it in the repo right now. */
   working: boolean;
   /** The harness steps of its latest pass in the repo (preflight, build, checks, review), each with its state. */
@@ -170,6 +175,8 @@ export class Tickets {
     github?: GitHub;
     /** Why the crew may not open PRs right now (the practice crew never does), or null. */
     canShip?: () => string | null;
+    /** The engine in an existing codebase: feature-sized tickets of a repo project go there. */
+    repoRuns?: RepoRuns;
   } = {}) {
     log.on("event", (e: SfEvent) => {
       try { this.react(e); } catch (err) { console.error("tickets: reacting to", e.type, "failed:", err); }
@@ -408,10 +415,11 @@ export class Tickets {
       const sp = st ? JSON.parse(st.payload) : null;
       run = { id: t.run, outcome: r?.outcome ?? null, station: sp?.station ?? null, state: sp?.state ?? null, spentUsd: r?.total_usd ?? sp?.spentUsd ?? null };
     }
+    const repo = repoOfProject(this.log, t.project);
     return {
       ticket: t, notes, links, lines, parent: t.parentId != null ? this.get(t.parentId) ?? null : null,
       moves: nextMoves(t.status, t.kind), document: workDocument(t, notes, links, lines), run,
-      repo: repoOfProject(this.log, t.project), working: this.inRepo.has(id), steps: this.steps(id),
+      repo, route: repo && this.opts.repoRuns ? this.routeOf(t, {}) : null, working: this.inRepo.has(id), steps: this.steps(id),
       queue: t.status === "ready" ? this.spot(t) : null,
     };
   }
@@ -579,12 +587,20 @@ export class Tickets {
    * work document, the ticket moves to in progress, and the run writes back
    * onto the ticket when it ends (see react()).
    */
-  work(id: number, o: { maxUsd?: number; autoApprove?: boolean; where?: "auto" | "repo" | "new"; by?: string; again?: boolean } = {}): { ticket: TicketView; run: number | null; branch?: string } {
+  work(id: number, o: { maxUsd?: number; autoApprove?: boolean; where?: "auto" | "repo" | "new"; by?: string; again?: boolean; /** In a repo project: one session ("light") or the whole engine. Not given, the ticket's kind and size decide. */ route?: WorkRoute } = {}): { ticket: TicketView; run: number | null; branch?: string; route?: Routed } {
     const t = this.must(id);
     if (isClosed(t.status)) throw new Error("This ticket is closed; reopen it first.");
     const repo = o.where === "new" ? null : repoOfProject(this.log, t.project);
     if (o.where === "repo" && !repo) throw new Error("This ticket's project has no imported repo to work in.");
-    if (repo) return this.workRepo(t, repo, o.maxUsd);
+    if (repo) {
+      // Intake: a bug, a task or a small ask is one session in the clone; a feature gets the whole engine there.
+      const routed = this.routeOf(t, o);
+      if (routed.route === "engine") {
+        const started = this.workEngine(t, o, routed);
+        if (started) return started;
+      }
+      return { ...this.workRepo(t, repo, o.maxUsd), route: routed.route === "light" ? routed : { route: "light", why: "the engine could not take it (see the ticket's thread)" } };
+    }
     const factory = this.opts.factory;
     if (!factory) throw new Error("The factory is not running in this core.");
     if (t.run != null && factory.isActive(t.run)) throw new Error(`Run #${t.run} is already working this ticket.`);
@@ -715,6 +731,53 @@ export class Tickets {
 
   /** Wait for a ticket's repo work to finish (tests, the CLI). */
   waitRepo(id: number): Promise<void> { return this.inRepo.get(id) ?? Promise.resolve(); }
+
+  /** Which way this ticket goes in its repo: what was chosen, else its kind, size and words (factory/route.ts). */
+  private routeOf(t: TicketView, o: { route?: WorkRoute; maxUsd?: number }): Routed {
+    if (!this.opts.repoRuns || !this.opts.factory) return { route: "light", why: "this core has no engine for repos" };
+    // The fullest telling of the ask (the body often repeats the title and the first answer; counting them twice would make every ask look large).
+    const text = [t.title, t.body, Object.values(t.answers ?? {}).join("\n")].sort((a, b) => b.length - a.length)[0];
+    return routeWork({ kind: t.kind, size: t.size, text, asked: o.route ?? null, maxUsd: o.maxUsd, engineMinUsd: REPO_ENGINE_MIN_USD });
+  }
+
+  /**
+   * An ask said in a project that lives in a repo (its page's idea box, the Assistant's "Build it"): it becomes
+   * a request ticket there, and the ticket takes its route. So every piece of work in a repo has a thread, a
+   * branch and a pull request to follow, whichever door it came through. Null when the project has no repo.
+   */
+  askInRepo(project: number, text: string, o: { maxUsd?: number; route?: WorkRoute; autoApprove?: boolean; by?: string } = {}): { ticket: TicketView; run: number | null; branch?: string; route?: Routed } | null {
+    if (!repoOfProject(this.log, project)) return null;
+    const t = this.open({ kind: "request", body: text, project, by: o.by ?? "you", source: "project" });
+    return this.work(t.id, { maxUsd: o.maxUsd, route: o.route, autoApprove: o.autoApprove, where: "repo", by: o.by });
+  }
+
+  /**
+   * The engine route: the whole engine runs in a clone of the ticket's repo (design, a plan you approve, a
+   * build feature by feature, a review, a judge on the running site), on a branch of its own. Returns null,
+   * after saying why on the thread, when the engine cannot take it and nobody chose it: the light route does.
+   */
+  private workEngine(t: TicketView, o: { maxUsd?: number; autoApprove?: boolean; by?: string }, routed: Routed): { ticket: TicketView; run: number; branch: string; route: Routed } | null {
+    const { factory, repoRuns } = this.opts;
+    const no = (why: string): null => {
+      if (routed.chosen) throw new Error(why);
+      this.log.append("ticket.noted", { id: t.id, by: "factory", kind: "event", text: `Not on the engine (${why}), so one Builder session takes it in the repo.` });
+      return null;
+    };
+    if (!factory || !repoRuns || t.project == null) return no("this core has no engine for repos");
+    if (t.run != null && factory.isActive(t.run)) throw new Error(`Run #${t.run} is already working this ticket.`);
+    if (this.inRepo.has(t.id)) throw new Error("The Builder is already working this ticket in the repo.");
+    const allow = buildAllowance(this.log, t.project, "next", o.maxUsd);
+    if ("error" in allow) return no(allow.error);
+    const maxUsd = allow.maxUsd ?? DEFAULT_NEXT_USD;
+    if (maxUsd < REPO_ENGINE_MIN_USD) return no(`an engine run needs at least $${REPO_ENGINE_MIN_USD.toFixed(2)} and this one may spend $${maxUsd.toFixed(2)}`);
+    const { run, branch } = repoRuns.start(t.project, ideaFromTicket(t, this.document(t.id)), { maxUsd, autoApprove: o.autoApprove, ticket: { id: t.id, key: t.key, title: t.title } });
+    this.log.append("ticket.run", { id: t.id, run, by: o.by ?? "you" });
+    this.log.append("ticket.noted", {
+      id: t.id, by: "factory", status: t.status === "in_progress" ? undefined : "in_progress",
+      text: `The crew took it on the engine (${routed.why}): run #${run} designs the change, plans it for your approval, builds it on branch ${branch} of a clone, reviews it and judges it on the running site. Up to $${maxUsd.toFixed(2)}.${allow.note ? ` ${allow.note}` : ""}`,
+    });
+    return { ticket: this.get(t.id)!, run, branch, route: routed };
+  }
 
   /**
    * The ticket's project is an imported repo: the Builder works it on a new
@@ -883,6 +946,17 @@ export class Tickets {
     }
     const tests = this.log.db.prepare("SELECT payload FROM events WHERE type = 'factory.tests' AND json_extract(payload, '$.run') = ? ORDER BY id DESC LIMIT 1").get(run) as { payload: string } | undefined;
     const tp = tests ? JSON.parse(tests.payload) as { passed: number; failed: number } : null;
+    if (p.repo?.branch) {
+      // An engine run in the ticket's repo: its branch (and its draft PR) go onto the ticket, which waits for your look.
+      // It never closes by the QA rule: the change is not in the repo until its branch is merged.
+      const r = p.repo as { source: string; branch: string; base?: string; sha?: string; files?: string[]; pr?: { number: number; url: string; repo: string }; kept?: string };
+      this.log.append("ticket.branch", { id: t.id, by: "factory", source: r.source, dir: p.dir, branch: r.branch, base: r.base, sha: r.sha, files: r.files ?? [], costUsd: Number(p.totalUsd ?? 0) });
+      if (r.pr) this.log.append("ticket.pr", { id: t.id, by: "factory", repo: r.pr.repo, number: r.pr.number, url: r.pr.url, branch: r.branch, state: "open" });
+      const checked = tp ? `${tp.passed} checks green${tp.failed ? `, ${tp.failed} red` : ""} (the repo's own tests, no secrets, no test removed)` : "no test report";
+      const where = r.pr ? `Opened draft PR #${r.pr.number}: ${r.pr.url}. When it merges, this ticket moves on by itself.` : `${r.kept ?? "The branch stays on this computer."} To take it into your repo: git fetch "${p.dir}" ${r.branch}, then review and merge it yourself.`;
+      this.log.append("ticket.noted", { id: t.id, by: "factory", kind: "reply", costUsd: Number(p.totalUsd ?? 0), status: t.status === "built" ? undefined : "built", text: `Run #${run} built it on branch ${r.branch}: ${r.files?.length ?? 0} file(s) changed, ${checked}, $${Number(p.totalUsd ?? 0).toFixed(4)}.\n\n${where}` });
+      return;
+    }
     const green = !!tp && tp.passed > 0 && tp.failed === 0;
     const where = p.dir ? ` in ${p.dir}` : "";
     const say = `Run #${run} shipped${where}${p.sha ? ` at ${String(p.sha).slice(0, 7)}` : ""}: ${tp ? `${tp.passed} tests green${tp.failed ? `, ${tp.failed} red` : ""}` : "no test report"}, $${Number(p.totalUsd ?? 0).toFixed(4)}.`;

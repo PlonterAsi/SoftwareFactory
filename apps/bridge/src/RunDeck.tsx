@@ -36,6 +36,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
         {run?.dir && <span className="muted mono deck-dir" title={run.dir}>{run.dir.split(/[\\/]/).slice(-1)[0]}</span>}
       </header>
       <div className="deck-body">
+        {run?.repo && <RepoStrip run={run} />}
         {!run && <div className="empty">Start a run to see its plan as a task graph, its tests as a grid and its files as a heat map.</div>}
         {run && tab === "plan" && (run.plan ? <Blueprint run={run} /> : <TaskGraph run={run} />)}
         {run && tab === "tests" && <TestGrid run={run} />}
@@ -50,6 +51,36 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
         {run && tab === "review" && <ReviewView run={run} />}
       </div>
     </section>
+  );
+}
+
+/**
+ * A run in a codebase that already exists: which repo, which branch, what was found there, and where
+ * the branch went. Always on top of the deck, so it is never mistaken for a build from scratch.
+ */
+export function RepoStrip({ run }: { run: FactoryRunView }) {
+  const r = run.repo!;
+  const done = run.finished?.outcome === "shipped";
+  return (
+    <div className={`repo-strip${r.pr ? " has-pr" : ""}`} role="note" aria-label="This run works in an existing repo">
+      <div className="repo-strip-main">
+        <span className="repo-strip-k">In the repo</span>
+        <strong>{r.name}</strong>
+        <span className="mono repo-strip-branch" title={`Branch ${r.branch}${r.base ? `, from ${r.base.slice(0, 7)}` : ""}. The main line and your own copy are never written to.`}>{r.branch}</span>
+        {r.ticket && <span className="mono muted">{r.ticket.key}</span>}
+        {r.pr
+          ? <a className="repo-strip-pr" href={r.pr.url} target="_blank" rel="noreferrer">Draft PR #{r.pr.number}</a>
+          : done ? <span className="repo-strip-kept">Branch kept on this computer</span> : null}
+      </div>
+      <div className="repo-strip-facts muted">
+        {!!r.stack?.length && <span>{r.stack.join(", ")}</span>}
+        <span>{r.tests ? `tests: ${r.tests}` : r.stack ? "no tests it can run here" : "setting up the clone…"}</span>
+        {r.baseline && <span>before the change: {r.baseline.passed} pass{r.baseline.failed ? `, ${r.baseline.failed} already failed` : ""}</span>}
+        {r.starts && <span>starts with: {r.starts}</span>}
+      </div>
+      {!!r.notes?.length && <p className="repo-strip-note">Not set up on this computer: {r.notes.join("; ")}</p>}
+      {done && !r.pr && <p className="repo-strip-note">{r.kept} To take it into your repo: <code>git fetch "{r.dir ?? run.dir}" {r.branch}</code></p>}
+    </div>
   );
 }
 
@@ -103,7 +134,9 @@ export function TaskGraph({ run }: { run: FactoryRunView }) {
 }
 
 export function TestGrid({ run }: { run: FactoryRunView }) {
-  if (!run.tests.length) return <div className="empty">{run.stations.tests ? "Tests are locked; waiting for the first build." : "The Tester writes acceptance tests after you approve the plan."}</div>;
+  if (!run.tests.length) return <div className="empty">{run.repo
+    ? (run.repo.baseline ? `The repo's own tests ran before the change: ${run.repo.baseline.passed} pass${run.repo.baseline.failed ? `, ${run.repo.baseline.failed} already failed (not held against this run)` : ""}. They run again after every feature.` : run.stations.tests ? "This repo has no tests SoftwareFactory can run here. Each feature brings tests for what it adds." : "After you approve the plan, the repo's own tests run once before anything changes: that is the baseline.")
+    : run.stations.tests ? "Tests are locked; waiting for the first build." : "The Tester writes acceptance tests after you approve the plan."}</div>;
   const names = [...new Set(run.tests.flatMap((t) => t.cases.map((c) => c.name)))];
   return (
     <div className="testgrid" style={{ gridTemplateColumns: `minmax(140px, max-content) repeat(${run.tests.length}, 26px)` }}>
@@ -260,7 +293,7 @@ export function JudgeView({ run }: { run: FactoryRunView }) {
 
 /** The build loop, drawn: one row per feature, in build order, with the locked tests passing after it. */
 export function BuildView({ run }: { run: FactoryRunView }) {
-  if (!run.features.length) return <div className="empty">{run.stations.build?.state ? "This build was written in one call. Product-sized runs (from $3) are built one feature at a time, and each feature shows here." : "After the plan is approved, the app is built one feature at a time: the model and shell, the logic, then each screen."}</div>;
+  if (!run.features.length) return <div className="empty">{run.repo ? "After the plan is approved, the change is built on the branch, one feature per session for larger runs, with the repo's own tests after each." : run.stations.build?.state ? "This build was written in one call. Product-sized runs (from $3) are built one feature at a time, and each feature shows here." : "After the plan is approved, the app is built one feature at a time: the model and shell, the logic, then each screen."}</div>;
   const LABEL = { building: "building now", built: "built", empty: "nothing changed", regressed: "broke a passing test", broken: "a screen did not draw" } as const;
   return (
     <ol className="feat-list">
@@ -269,7 +302,7 @@ export function BuildView({ run }: { run: FactoryRunView }) {
         return (
           <li key={f.id} className={`feat ${f.state}`}>
             <div className="feat-head"><span className="mono muted">{f.id}</span> <strong>{f.title}</strong> <span className="feat-state">{LABEL[f.state]}{f.attempt > 1 ? ` · try ${f.attempt}` : ""}</span></div>
-            {total > 0 && <div className="score"><span className="score-k">locked tests</span><span className="score-bar"><i style={{ width: `${((f.passed ?? 0) / total) * 100}%` }} /></span><span className="mono">{f.passed}/{total}</span></div>}
+            {total > 0 && <div className="score"><span className="score-k">{run.repo ? "repo's tests" : "locked tests"}</span><span className="score-bar"><i style={{ width: `${((f.passed ?? 0) / total) * 100}%` }} /></span><span className="mono">{f.passed}/{total}</span></div>}
             {!!f.files?.length && <div className="loop-files">{f.files.slice(0, 8).join(", ")}{f.files.length > 8 ? ` +${f.files.length - 8}` : ""}</div>}
             {!!f.broke?.length && <div className="loop-dispute">Broke: {f.broke.slice(0, 3).map((x) => x.split("::")[1] ?? x).join("; ")}</div>}
             {!!f.crashed?.length && <div className="loop-dispute">Caught by the check: {f.crashed.slice(0, 3).join("; ")}</div>}

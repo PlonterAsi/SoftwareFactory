@@ -79,7 +79,7 @@ const list = (x: unknown, max: number, each = 300) => (Array.isArray(x) ? x : []
 const slug = (x: unknown) => str(x, 40).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 /** The Designer's answer, checked and trimmed. Throws when it is not a usable set of documents. */
-export function validateDocs(j: unknown): ProductDocs {
+export function validateDocs(j: unknown, o: { /** The documents of a change to an existing product (reporun.ts): it may touch one screen, or none. */ change?: boolean } = {}): ProductDocs {
   const d = (j ?? {}) as Record<string, any>;
   const b = d.brief ?? {};
   const docs: ProductDocs = {
@@ -92,8 +92,8 @@ export function validateDocs(j: unknown): ProductDocs {
     assumptions: list(d.assumptions, 8),
   };
   if (!docs.brief.who || !docs.brief.promise) throw new Error("the product brief does not say who it is for and what it promises");
-  if (!docs.journeys.length) throw new Error("the product documents have no journey");
-  if (docs.screens.length < 2) throw new Error("the product documents need at least two screens of their own");
+  if (!docs.journeys.length && !o.change) throw new Error("the product documents have no journey");
+  if (docs.screens.length < 2 && !o.change) throw new Error("the product documents need at least two screens of their own");
   if (!docs.requirements.length) throw new Error("the product documents list no requirements");
   if (new Set(docs.screens.map((s) => s.id)).size !== docs.screens.length) throw new Error("two screens share an id");
   return docs;

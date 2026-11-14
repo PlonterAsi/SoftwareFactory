@@ -16,13 +16,17 @@ import { NameTaken, createProject, linkToProject, listProjects, mergeProject, pr
  *   POST /api/projects/:id/links          { kind, ref }   move a thing into this project
  *   POST /api/projects/:id/unlink         { kind, ref }
  *   POST /api/projects/:id/runs           { idea, maxUsd?, again? }   start a factory run in this project (409 + duplicateOf when it repeats one, unless again)
+ *                                         in a project that lives in a repo: { idea, maxUsd?, route? } opens a ticket and works it in the repo
+ *                                         ({ inRepo, ticket, run, branch, route }); { newApp: true } builds a new app from scratch instead
  *   POST /api/projects/:id/merge          { into }   move everything of this project into another; this one goes away (or is archived if you made it)
  *   GET  /api/projects/:id/budget         the project's money: total, defaults per version, spent, left, one line per version
  *   POST /api/projects/:id/budget         { totalUsd?, firstUsd?, nextUsd? }   null or 0 clears one; a build started without maxUsd takes the default
  *   POST /api/projects/:id/screen         { baseRun?, maxUsd? }   give a shipped build (default: the newest) a screen (a page), same folder, next version
  */
 export async function projectsRoute(
-  ctx: { log: EventLog; order: OrderEngine; factory: Factory; readJson: (req: IncomingMessage) => Promise<Record<string, unknown>>; canBuild?: () => string | null },
+  ctx: { log: EventLog; order: OrderEngine; factory: Factory; readJson: (req: IncomingMessage) => Promise<Record<string, unknown>>; canBuild?: () => string | null;
+    /** An ask in a project that lives in a repo: a ticket there, on the route that fits it. Null when the project has no repo. */
+    repoAsk?: (projectId: number, idea: string, o: { maxUsd?: number; route?: "light" | "engine" }) => Record<string, unknown> | null },
   req: IncomingMessage,
   url: URL,
 ): Promise<[number, unknown] | null> {
@@ -75,6 +79,15 @@ export async function projectsRoute(
     if (!projectDetail(log, id)) return [404, { error: `No project #${id}` }];
     const blocked = ctx.canBuild?.();
     if (blocked) return [409, { error: blocked }];
+    // A project that lives in a repo is worked in that repo: the ask becomes a ticket there, and intake sends it
+    // down the light route or the engine (factory/route.ts). A new app next to the repo is asked for by name.
+    if (!body.newApp && !body.onTop && ctx.repoAsk) {
+      const idea = String(body.idea ?? "").trim();
+      try {
+        const r = idea ? ctx.repoAsk(id, idea, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, route: body.route === "light" || body.route === "engine" ? body.route : undefined }) : null;
+        if (r) return [202, { projectId: id, inRepo: true, ...r }];
+      } catch (e) { return [409, { error: (e as Error).message, inRepo: true }]; }
+    }
     // What this build may spend: what was asked, else the project's default for this kind of version, and
     // never more than the project's budget has left.
     const allow = buildAllowance(log, id, body.onTop ? "next" : "first", typeof body.maxUsd === "number" ? body.maxUsd : undefined);
@@ -117,6 +130,8 @@ export async function projectsRoute(
 /** The newest factory build of this project that shipped (or the one asked for), or null. */
 function newestShipped(log: EventLog, id: number, baseRun?: unknown): number | null {
   const base = log.list({ type: "factory.run.finished", limit: 1e6 }).map((e) => e.payload as { run: number; outcome: string })
-    .filter((p) => p.outcome === "shipped" && projectOf(log, { kind: "factory_run", ref: String(p.run) }) === id && (baseRun == null || p.run === Number(baseRun))).at(-1);
+    .filter((p) => p.outcome === "shipped" && projectOf(log, { kind: "factory_run", ref: String(p.run) }) === id && (baseRun == null || p.run === Number(baseRun)))
+    // A run that worked in an existing repo left a branch in a clone, not an app of the factory's own to build on.
+    .filter((p) => (log.get(p.run)?.payload as { kind?: string } | undefined)?.kind !== "repo").at(-1);
   return base?.run ?? null;
 }

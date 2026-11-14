@@ -33,7 +33,7 @@ export function visualCheck(log: EventLog, run: number, station: StationId, roun
   if (station === "evaluate") need(`evaluate: the judge's requirement checks and scores (round ${round ?? 1})`, of("factory.evaluation", sameRound).length > 0);
   if (station === "discover") {
     const d = of("factory.discovery", sameRound).at(-1)?.payload as any;
-    need(`discover: product documents and their scores (round ${round ?? 1})`, !!d?.docs?.screens?.length);
+    need(`discover: product documents and their scores (round ${round ?? 1})`, !!d?.docs?.screens?.length || !!d?.docs?.requirements?.length);
   }
   if (station === "council") {
     const c = of("factory.council", sameRound).at(-1)?.payload as any;

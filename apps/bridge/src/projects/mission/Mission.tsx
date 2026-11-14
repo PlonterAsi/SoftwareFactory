@@ -3,6 +3,8 @@ import { duplicateOf, projectsApi, resumeRun, type DuplicateRun, type FactoryRun
 import { DuplicateNotice } from "../../DuplicateNotice";
 import { AskBanner } from "../../Intake";
 import { GateActions } from "../../GateActions";
+import { showTicket } from "../../BugReport";
+import { RepoStrip } from "../../RunDeck";
 import { ago, describe } from "../builtin";
 import { inProject, projectSets, registerProjectPanel, type PanelContext } from "../panels";
 import { MissionTrack } from "./MissionTrack";
@@ -23,7 +25,9 @@ function minutes(from: string, to?: string) {
  */
 function Mission(ctx: PanelContext) {
   // A project that lives in its own repo and has no builds is worked by tickets and pull requests, not on the idea track.
-  const repo = ctx.project.runIds.length === 0 ? workedRepo(ctx.project) : null;
+  // An imported repo keeps that home when the engine has run in it too: its runs are listed there, and one opens as a mission when picked.
+  const w = workedRepo(ctx.project);
+  const repo = w && (ctx.project.runIds.length === 0 || (w.imported && ctx.pickedRun == null)) ? w : null;
   return repo ? <RepoWork ctx={ctx} repo={repo} /> : <BuildMission {...ctx} />;
 }
 
@@ -63,6 +67,12 @@ function BuildMission(ctx: PanelContext) {
         </div>
         {run && <Fuel run={run} />}
       </section>
+      {run?.repo && (
+        <div className="ms-repo">
+          <RepoStrip run={run} />
+          <button className="ghost sm" onClick={() => ctx.go("overview")}>Back to the repo's work</button>
+        </div>
+      )}
       <MissionTrack stops={stops} selected={sel} onSelect={setPicked} />
       <section className="ms-stage">
         <div className="ms-card ms-main" key={`${run?.run}:${sel}`}><StageView id={sel} run={run} /></div>
@@ -130,7 +140,9 @@ function NextIdea({ project: p, showRun }: PanelContext) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState<DuplicateRun | null>(null);
-  const hasApp = p.rollup.shipped > 0;
+  // A project that lives in a repo: the ask is work in that repo, not a new app.
+  const inRepo = !!workedRepo(p);
+  const hasApp = !inRepo && p.rollup.shipped > 0;
   const [asNew, setAsNew] = useState(false);
   const onTop = hasApp && !asNew;
   async function build(e?: FormEvent, again = false) {
@@ -138,19 +150,25 @@ function NextIdea({ project: p, showRun }: PanelContext) {
     if (!idea.trim() || busy) return;
     setBusy(true);
     setDup(null);
-    try { const { run } = await projectsApi.build(p.id, idea.trim(), undefined, again, onTop); setIdea(""); setErr(null); showRun(run); }
+    try {
+      const w = await projectsApi.build(p.id, idea.trim(), undefined, again, onTop, hasApp && asNew);
+      setIdea(""); setErr(null);
+      // In a repo a small ask is one Builder session with no run: its ticket is where it reports.
+      if (w.run != null) showRun(w.run); else if (w.ticket) showTicket(w.ticket.id, p.id);
+    }
     catch (x) { const d = duplicateOf(x); if (d) setDup(d); else setErr((x as Error).message); }
     finally { setBusy(false); }
   }
   return (
     <form className="ms-card ms-next" onSubmit={build}>
-      <h4>{onTop ? "Add to this app" : p.runIds.length ? "Build another idea" : "Build your first idea"}</h4>
-      <textarea value={idea} rows={2} onChange={(e) => setIdea(e.target.value)} placeholder={onTop ? `Add something to ${p.name}…` : `One line is enough…`} aria-label="Idea to build in this project"
+      <h4>{inRepo ? "Ask for the next change" : onTop ? "Add to this app" : p.runIds.length ? "Build another idea" : "Build your first idea"}</h4>
+      <textarea value={idea} rows={2} onChange={(e) => setIdea(e.target.value)} placeholder={inRepo ? `What should change in ${p.name}?` : onTop ? `Add something to ${p.name}…` : `One line is enough…`} aria-label="Idea to build in this project"
         onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) build(); }} />
       <div className="row">
-        <button type="submit" disabled={!idea.trim() || busy}>{busy ? "Starting…" : onTop ? "Add it" : "Build it"}</button>
+        <button type="submit" disabled={!idea.trim() || busy}>{busy ? "Starting…" : inRepo ? "Start it" : onTop ? "Add it" : "Build it"}</button>
         {hasApp && <label className="muted small"><input type="checkbox" checked={asNew} onChange={(e) => setAsNew(e.target.checked)} /> as a new app</label>}
       </div>
+      {inRepo && <p className="muted small">It becomes a ticket in the repo. A fix or a small ask takes one Builder session (up to $0.60); a feature gets the whole engine (up to this project's limit for a next version, $1.50 unless you set one). Both work on a branch of a clone.</p>}
       {err && <p className="error" role="alert">{err}</p>}
       {dup && <DuplicateNotice dup={dup} busy={busy} onShow={showRun} onDismiss={() => setDup(null)} onAgain={() => build(undefined, true)} />}
     </form>

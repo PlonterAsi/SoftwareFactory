@@ -58,9 +58,16 @@ export function projectFolders(log: EventLog, projectId: number): ProjectFolder[
       const plan = log.db.prepare("SELECT payload FROM events WHERE type = 'factory.plan' AND json_extract(payload, '$.run') = ? ORDER BY id DESC LIMIT 1").get(Number(r.id)) as { payload: string } | undefined;
       try { const s = plan ? JSON.parse(plan.payload)?.plan?.summary : null; if (typeof s === "string") summaries.set(Number(r.id), s); } catch { /* an odd payload: no summary */ }
     }
+    // A run in an existing repo works in a clone on a branch of its own: its folder is that branch, to try before you take it.
+    const branchOf = (id: number): string | null => {
+      const st = log.db.prepare("SELECT payload FROM events WHERE id = ?").get(id) as { payload: string } | undefined;
+      try { const p = st ? JSON.parse(st.payload) : null; return p?.kind === "repo" && p.repo?.branch ? String(p.repo.branch) : null; } catch { return null; }
+    };
     const entry = (r: Record<string, any>, own: boolean): Omit<ProjectFolder, "exists"> => {
       const name = r.plan_name ? String(r.plan_name) : `Build #${r.id}`;
       const state = r.outcome === "shipped" ? "" : ` (${r.outcome ?? "in progress"})`;
+      const branch = branchOf(Number(r.id));
+      if (branch) return { dir: r.dir, source: "run", ref: Number(r.id), name, idea: String(r.idea ?? ""), own: false, summary: summaries.get(Number(r.id)), label: `${name}${state} · the change on branch ${branch} (run #${r.id}), to try before you take it` };
       return {
         dir: r.dir, source: "run", ref: Number(r.id), name, idea: String(r.idea ?? ""), own, summary: summaries.get(Number(r.id)),
         app: isDir(r.dir) ? appKind(r.dir) : undefined,
