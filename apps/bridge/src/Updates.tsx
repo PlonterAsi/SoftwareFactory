@@ -8,8 +8,10 @@ import { API, shell } from "./api";
  *
  * - a check 5 s after the window opens, then every 30 minutes, and on the button;
  * - with "Install updates by themselves" on (the default), an update found while
- *   no factory run is working installs after a 15 s countdown you can stop;
- *   one found mid-run waits until the factory is idle;
+ *   nothing is working installs after a 15 s countdown you can stop; one found
+ *   while a build or any agent call is in flight waits until the factory is idle.
+ *   The core is asked again at the moment the countdown ends: a report from before
+ *   a run started, or a core that does not answer, never lets an install through;
  * - with it off, the update waits for the Install button.
  *
  * Installing stops the core (the database stays where it is), the installer
@@ -26,7 +28,10 @@ export interface UpdateStatus {
   error: string | null;
   checkedAt: string | null;
 }
-export interface UpdatesReport { auto: boolean; appVersion: string | null; activeRuns: number; history: { ts: string; from: string | null; to: string }[] }
+export interface UpdatesReport { auto: boolean; appVersion: string | null; activeRuns: number; agentCalls?: number; history: { ts: string; from: string | null; to: string }[] }
+
+/** Work an update that installs by itself must wait for: builds (one waiting for your answer too) and agent calls in flight. */
+export const working = (r: UpdatesReport | null | undefined) => (r?.activeRuns ?? 0) > 0 || (r?.agentCalls ?? 0) > 0;
 
 export interface TokenState { set: boolean; hint: string | null }
 
@@ -47,10 +52,19 @@ export function useUpdates(online: boolean) {
   const [report, setReport] = useState<UpdatesReport | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [snoozed, setSnoozed] = useState<string | null>(null);
+  // The core did not answer when the countdown ended: no install by itself until it answers again.
+  const [unsure, setUnsure] = useState(false);
   const [token, setTokenState] = useState<TokenState | null>(null);
 
   const loadReport = useCallback(async () => {
-    try { setReport(await (await fetch(`${API}/api/updates`)).json()); } catch { /* core down: CoreDown speaks */ }
+    try {
+      const r = await fetch(`${API}/api/updates`, { signal: AbortSignal.timeout(5_000) });
+      if (!r.ok) return null;
+      const fresh = await r.json() as UpdatesReport;
+      setReport(fresh);
+      setUnsure(false);
+      return fresh;
+    } catch { return null; /* core down: CoreDown speaks */ }
   }, []);
   const check = useCallback(async () => {
     if (!desktop) return;
@@ -106,7 +120,7 @@ export function useUpdates(online: boolean) {
   }, [waiting, online, loadReport]);
 
   // Automatic install: when idle, count down, then go.
-  const autoGo = !!(waiting && report?.auto && report.activeRuns === 0 && status?.version && snoozed !== status.version);
+  const autoGo = !!(waiting && report?.auto && !working(report) && !unsure && status?.version && snoozed !== status.version);
   const fired = useRef(false);
   useEffect(() => {
     if (!autoGo) { setCountdown(null); return; }
@@ -116,8 +130,15 @@ export function useUpdates(online: boolean) {
     return () => clearInterval(t);
   }, [autoGo]);
   useEffect(() => {
-    if (countdown != null && countdown <= 0 && !fired.current) { fired.current = true; install(); }
-  }, [countdown, install]);
+    if (countdown == null || countdown > 0 || fired.current) return;
+    fired.current = true;
+    // The report on screen can be older than a run that has started since. Ask the core now, and install
+    // only on its own word that nothing is working.
+    loadReport().then((fresh) => {
+      if (!fresh) { setUnsure(true); setCountdown(null); return; }
+      if (fresh.auto && !working(fresh)) install();
+    });
+  }, [countdown, install, loadReport]);
 
   return {
     desktop, status, report, countdown, check, install, setAuto, token, setToken,
@@ -169,6 +190,12 @@ export function UpdateBanner({ u }: { u: Updates }) {
       <button className="ghost sm" onClick={u.install}>Install now (the run resumes after)</button>
     </div>
   );
+  if (u.report?.auto && working(u.report)) return (
+    <div className="update-banner quiet" role="status">
+      <span>v{s.version} is ready. It installs by itself when the crew finishes what it is working on.</span>
+      <button className="ghost sm" onClick={u.install}>Install now (that work is cut short)</button>
+    </div>
+  );
   return null;
 }
 
@@ -203,6 +230,7 @@ export function UpdatesSection({ u }: { u: Updates }) {
           {s.notes && <p className="place-hint">{s.notes}</p>}
           <button onClick={u.install}>Install v{s.version} now</button>
           {r && r.activeRuns > 0 && <p className="place-hint">{r.activeRuns} build{r.activeRuns > 1 ? "s are" : " is"} running. Installing now pauses {r.activeRuns > 1 ? "them" : "it"}; {r.activeRuns > 1 ? "they resume" : "it resumes"} from the last finished station when the new version starts.</p>}
+          {r && r.activeRuns === 0 && working(r) && <p className="place-hint">The crew is in the middle of {r.agentCalls === 1 ? "an agent call" : `${r.agentCalls} agent calls`} (a ticket, a Council session or a chat answer). Installing now cuts that work short.</p>}
         </>}
       </>}
       {u.desktop && <TokenField u={u} />}
