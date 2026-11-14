@@ -100,6 +100,8 @@ export interface RunnerManagerOptions {
   /** Restart waits in ms: first, and the most. Tests shorten them. */
   backoff?: { first: number; max: number; settled: number };
   platform?: NodeJS.Platform;
+  /** Whether this PC can run a disposable Windows Sandbox. Tests pass their own. */
+  sandbox?: () => boolean;
 }
 
 const MAX_LINES = 2000;
@@ -112,6 +114,11 @@ const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 export const SF_LABEL = "sf-build";
 /** The repository variable a workflow reads to choose its machine: set = this PC, deleted = GitHub's machines. */
 export const ROUTE_VARIABLE = "CI_WINDOWS";
+/**
+ * The same for jobs that must not run in your own Windows account (a test that reinstalls an app):
+ * the workflow runs those inside a disposable Windows Sandbox, so it is set only when this PC has one.
+ */
+export const ISOLATED_VARIABLE = "CI_SMOKE";
 
 const isLive = (s: RunnerState) => s === "starting" || s === "idle" || s === "busy";
 const now = () => new Date().toISOString();
@@ -454,6 +461,12 @@ export class RunnerManager {
     }
   }
 
+  /** Windows Sandbox is turned on here, so jobs that need an isolated Windows can run on this PC. */
+  hasSandbox(): boolean {
+    if (this.o.sandbox) return this.o.sandbox();
+    return this.platform === "win32" && existsSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsSandbox.exe"));
+  }
+
   // ----- GitHub -----
 
   private tokenAt: { at: number; t: string | null } | null = null;
@@ -613,16 +626,18 @@ export class RunnerManager {
   async github(repo: string): Promise<{
     repo: string; private: boolean | null;
     runners: { name: string; status: string; busy: boolean; labels: string[] }[];
-    route: { variable: string; value: string | null };
+    route: { variable: string; value: string | null; isolatedVariable: string; isolated: string | null; sandbox: boolean };
     runs: { id: number; name: string; title: string; event: string; branch: string | null; status: string; conclusion: string | null; createdAt: string; url: string; jobs: { name: string; status: string; conclusion: string | null; runner: string | null; here: boolean | null; startedAt: string | null; endedAt: string | null }[] }[];
   }> {
     const g = parseGitHubRepo(repo);
     if (!g) throw Object.assign(new Error("Give the repository as owner/name."), { status: 400 });
     const base = `/repos/${g.owner}/${g.name}`;
-    const [info, rs, variable, runs] = await Promise.all([
+    const readVar = (name: string) => this.gh<{ value?: string }>("GET", `${base}/actions/variables/${name}`).catch((e) => { if ((e as { github?: number }).github === 404) return { value: undefined }; throw e; });
+    const [info, rs, variable, isolated, runs] = await Promise.all([
       this.gh<{ private?: boolean }>("GET", base).catch(() => ({} as { private?: boolean })),
       this.gh<{ runners?: any[] }>("GET", `${base}/actions/runners`),
-      this.gh<{ value?: string }>("GET", `${base}/actions/variables/${ROUTE_VARIABLE}`).catch((e) => { if ((e as { github?: number }).github === 404) return { value: undefined }; throw e; }),
+      readVar(ROUTE_VARIABLE),
+      readVar(ISOLATED_VARIABLE),
       this.gh<{ workflow_runs?: any[] }>("GET", `${base}/actions/runs?per_page=8`),
     ]);
     const mine = new Set((rs.runners ?? []).map((r) => String(r.name)));
@@ -631,7 +646,7 @@ export class RunnerManager {
     return {
       repo: `${g.owner}/${g.name}`, private: info.private ?? null,
       runners: (rs.runners ?? []).map((r) => ({ name: String(r.name), status: String(r.status), busy: !!r.busy, labels: (r.labels ?? []).map((x: any) => String(x.name)) })),
-      route: { variable: ROUTE_VARIABLE, value: variable.value ?? null },
+      route: { variable: ROUTE_VARIABLE, value: variable.value ?? null, isolatedVariable: ISOLATED_VARIABLE, isolated: isolated.value ?? null, sandbox: this.hasSandbox() },
       runs: list.map((r, i) => ({
         id: Number(r.id), name: String(r.name ?? ""), title: String(r.display_title ?? ""), event: String(r.event ?? ""), branch: r.head_branch ?? null,
         status: String(r.status), conclusion: r.conclusion ?? null, createdAt: String(r.created_at), url: String(r.html_url),
@@ -665,18 +680,30 @@ export class RunnerManager {
    * Send a repository's builds to this PC, or back to GitHub's machines: sets or deletes the
    * repository variable its workflows read in `runs-on`. Turning it on needs a runner here.
    */
-  async route(id: string, on: boolean): Promise<{ variable: string; value: string | null; note?: string | null }> {
+  async route(id: string, on: boolean): Promise<{ variable: string; value: string | null; isolated: string | null; note?: string | null }> {
     const l = this.get(id);
     const g = parseGitHubRepo(l.cfg.repo) as GitHubRepo;
     const base = `/repos/${g.owner}/${g.name}/actions/variables`;
+    const drop = (name: string) => this.gh("DELETE", `${base}/${name}`).catch((e) => { if ((e as { github?: number }).github !== 404) throw e; });
+    const put = async (name: string, value: string) => {
+      try { await this.gh("PATCH", `${base}/${name}`, { name, value }); }
+      catch (e) { if ((e as { github?: number }).github !== 404) throw e; await this.gh("POST", base, { name, value }); }
+    };
     if (!on) {
-      await this.gh("DELETE", `${base}/${ROUTE_VARIABLE}`).catch((e) => { if ((e as { github?: number }).github !== 404) throw e; });
-      return { variable: ROUTE_VARIABLE, value: null };
+      await drop(ROUTE_VARIABLE);
+      await drop(ISOLATED_VARIABLE);
+      return { variable: ROUTE_VARIABLE, value: null, isolated: null };
     }
     if (!this.registered(l.cfg.dir)) throw Object.assign(new Error("Set this runner up first: with no runner, builds sent here would wait forever."), { status: 409 });
     const value = JSON.stringify(this.view(l).runsOn);
-    try { await this.gh("PATCH", `${base}/${ROUTE_VARIABLE}`, { name: ROUTE_VARIABLE, value }); }
-    catch (e) { if ((e as { github?: number }).github !== 404) throw e; await this.gh("POST", base, { name: ROUTE_VARIABLE, value }); }
-    return { variable: ROUTE_VARIABLE, value, note: await this.guardPublic(g) };
+    await put(ROUTE_VARIABLE, value);
+    // Jobs that need an isolated Windows come here only when this PC can give them one.
+    const sandbox = this.hasSandbox();
+    if (sandbox) await put(ISOLATED_VARIABLE, value); else await drop(ISOLATED_VARIABLE);
+    const notes = [
+      await this.guardPublic(g),
+      sandbox ? null : "Windows Sandbox is not turned on on this PC, so tests that need an isolated Windows (the smoke test) stay on GitHub's machines. Turn it on in Windows features, then press this button again.",
+    ].filter(Boolean);
+    return { variable: ROUTE_VARIABLE, value, isolated: sandbox ? value : null, note: notes.join(" ") || null };
   }
 }

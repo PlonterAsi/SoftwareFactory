@@ -16,7 +16,8 @@
 #   your own (set and removed from the app: Build runners, "Send builds to this PC"). Then the build
 #   and the publish run on that PC, free. A pull request from a fork never goes to your PC.
 #   The smoke test reinstalls the app and moves its data folder, so it never runs in a person's own
-#   Windows account: it stays on GitHub's machines until CI_SMOKE names an isolated machine. See docs/runners.md.
+#   Windows account: with CI_SMOKE naming your runner it runs there inside a disposable Windows Sandbox
+#   (scripts/smoke/sandbox-smoke.mjs); without it, on GitHub's machines. See docs/runners.md.
 name: Windows build
 
 on:
@@ -166,8 +167,19 @@ jobs:
           name: smoke-update
           path: smoke-update
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Smoke test the installed app
+        if: runner.environment != 'self-hosted'
         run: node scripts/smoke/windows-smoke.mjs --installer out/SoftwareFactory-setup.exe --portable out/SoftwareFactory-portable.zip --old-installer smoke-update/SoftwareFactory-old-setup.exe --update-sig smoke-update/SoftwareFactory-setup.exe.testsig --version ${{ env.SF_VERSION }} --out smoke-out
+
+      # On a runner on someone's own PC the test never runs in their Windows account (it reinstalls the app
+      # and moves its data folder): it runs inside a disposable Windows Sandbox. See docs/runners.md.
+      - name: Smoke test the installed app, inside a Windows Sandbox
+        if: runner.environment == 'self-hosted'
+        run: node scripts/smoke/sandbox-smoke.mjs --installer out/SoftwareFactory-setup.exe --portable out/SoftwareFactory-portable.zip --old-installer smoke-update/SoftwareFactory-old-setup.exe --update-sig smoke-update/SoftwareFactory-setup.exe.testsig --version ${{ env.SF_VERSION }} --out smoke-out
 
       - uses: actions/upload-artifact@v4
         if: always()

@@ -20,8 +20,8 @@ flowchart LR
 |---|---|
 | **Add a runner** | You give a repository. The name, labels and folder are filled in. SF downloads GitHub's runner program, checks it against the checksum GitHub publishes, asks GitHub for a one-time registration token with your sign-in on this PC, registers the runner, and starts it. Nothing to copy or paste. |
 | **Start**, **Stop**, **Restart** | Stop ends the runner and everything it started, and it stays off. If a job is running, SF asks first: stopping cuts the job off and GitHub shows it as failed. |
-| **Send builds to this PC** | Sets the repository variable `CI_WINDOWS` to this runner's labels. Workflows that read it land here. On a public repository SF also tells GitHub to hold every outside contributor's workflow for your approval. |
-| **Send builds back to GitHub** | Deletes the variable. The same workflows run on GitHub's machines again. |
+| **Send builds to this PC** | Sets the repository variable `CI_WINDOWS` to this runner's labels (and `CI_SMOKE`, when this PC has Windows Sandbox). Workflows that read it land here. On a public repository SF also tells GitHub to hold every outside contributor's workflow for your approval. |
+| **Send builds back to GitHub** | Deletes the variables. The same workflows run on GitHub's machines again. |
 | **Remove** | Stops it, takes its registration off GitHub, forgets it. Its folder stays on disk. |
 
 The page also shows, per runner: its state, the job it is running, the runs waiting and done on GitHub **with the machine each job ran on** (this PC or GitHub's), the jobs this runner took, and its live log.
@@ -51,9 +51,16 @@ The PC needs what the job needs. For SoftwareFactory's own build: Visual Studio'
 
 A pull request can carry its own workflow file, so on a public repository a stranger could ask for your runner. Two guards: the workflow sends fork pull requests to GitHub's machines, and "Send builds to this PC" turns on GitHub's rule that holds outside contributors' workflows until you approve them. A private repository has no outside contributors.
 
-## The smoke test is different
+## The smoke test runs in a Windows Sandbox
 
-`scripts/smoke/windows-smoke.mjs` installs and uninstalls the app, moves the data folder aside and uses the app's own port. Run in your own Windows account it would break your installed SoftwareFactory. So it has its own variable, `CI_SMOKE`, and stays on GitHub's machines until that names an isolated machine. **Planned:** run it inside a disposable Windows Sandbox started by the job.
+`scripts/smoke/windows-smoke.mjs` installs and uninstalls the app, moves the data folder aside and uses the app's own port. Run in your own Windows account it would break your installed SoftwareFactory. So on a runner of your own the workflow runs `scripts/smoke/sandbox-smoke.mjs` instead:
+
+1. It puts the installers, the scripts and Node.js into one shared folder, and shares Git from the PC read-only. The sandbox gets no network.
+2. It opens a Windows Sandbox: a clean, throwaway Windows with its own files, registry and ports. A window opens on your desktop; nothing in it needs a click.
+3. The sandbox runs the same smoke test at sign-in. Its console comes back live through the shared folder, then its report, logs and screenshots.
+4. The sandbox is closed and everything in it is gone. The job ends with the test's own result.
+
+This has its own repository variable, `CI_SMOKE`. "Send builds to this PC" sets it only when Windows Sandbox is turned on (Windows 10/11 Pro, Windows features, Windows Sandbox); otherwise the smoke test stays on GitHub's machines and the page says so. One sandbox runs at a time, and someone must be signed in at the PC.
 
 ## Files
 
@@ -76,7 +83,6 @@ Answered by the app itself, before a base's own routes.
 
 ## Not built yet
 
-- The smoke test in a Windows Sandbox (above).
 - Linux runners inside WSL.
 - Keeping the build's `target` folder between runs (each run restores GitHub's cache instead).
 - A tray icon and starting with Windows: today builds wait while SoftwareFactory is closed.
