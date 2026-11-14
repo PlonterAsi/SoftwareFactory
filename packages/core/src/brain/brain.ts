@@ -15,7 +15,11 @@ import { registerProjection, type Projection } from "../store/projections.js";
  * or reset one to its default from the Bridge's Brain page; every change is an event:
  *   brain.principle.saved { id, title, text, stations, enabled, note?, by }
  *   brain.principle.reset { id, by }   back to the default (or removed, for one you added)
+ *   brain.suggestion.dismissed { fragment, by }   one of the person's rules is not for the Brain (learn.ts)
+ * A principle made from one of the person's rules carries `source` { kind: "rule", fragment, node? }.
  */
+export interface PrincipleSource { kind: "rule"; fragment: number; node?: string }
+
 export interface Principle {
   id: string;
   title: string;
@@ -34,6 +38,8 @@ export interface PrincipleView extends Principle {
   version: number;
   updatedAt: string | null;
   by: string | null;
+  /** Where it came from, when it was made from one of the person's rules. */
+  source?: PrincipleSource;
 }
 
 const MAKERS: Slot[] = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "improve", "overseer", "survey"];
@@ -69,7 +75,7 @@ export const DEFAULT_PRINCIPLES: Principle[] = [
   },
 ];
 
-type Saved = { id: string; title: string; text: string; stations: Slot[]; enabled: boolean; note?: string; by?: string };
+type Saved = { id: string; title: string; text: string; stations: Slot[]; enabled: boolean; note?: string; by?: string; source?: PrincipleSource };
 
 /** The principles as they stand now: the defaults with every saved change applied, in order. */
 export function principles(log?: EventLog | null): PrincipleView[] {
@@ -88,6 +94,7 @@ export function principles(log?: EventLog | null): PrincipleView[] {
     views.set(p.id, {
       id: p.id, title: p.title, text: p.text, stations: cleanStations(p.stations), enabled: p.enabled !== false,
       enforcedBy: def?.enforcedBy, builtin: !!def, edited: !!def, version: (cur?.version ?? 0) + 1, updatedAt: e.ts, by: p.by ?? "you",
+      source: p.source ?? cur?.source,
     });
   }
   return [...views.values()];
@@ -107,7 +114,7 @@ export function brainBlock(slot: Slot, list: Principle[] = DEFAULT_PRINCIPLES): 
   ].join("\n");
 }
 
-export interface PrincipleInput { title: string; text: string; stations: string[]; enabled?: boolean; note?: string }
+export interface PrincipleInput { title: string; text: string; stations: string[]; enabled?: boolean; note?: string; source?: PrincipleSource }
 
 /** Save a principle (a new one, or a new version of one). Returns its id. */
 export function savePrinciple(log: EventLog, id: string | null, input: PrincipleInput, by = "you"): string {
@@ -124,7 +131,7 @@ export function savePrinciple(log: EventLog, id: string | null, input: Principle
     pid = base;
     for (let n = 2; taken.has(pid); n++) pid = `${base}-${n}`;
   } else if (!principles(log).some((p) => p.id === pid)) throw new Error(`No principle "${pid}"`);
-  log.append("brain.principle.saved", { id: pid, title, text, stations, enabled: input.enabled !== false, note: input.note?.trim() || undefined, by });
+  log.append("brain.principle.saved", { id: pid, title, text, stations, enabled: input.enabled !== false, note: input.note?.trim() || undefined, by, source: input.source });
   return pid;
 }
 

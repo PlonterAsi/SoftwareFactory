@@ -149,3 +149,7 @@ These come from Assaf's standing decisions for the project.
 | `examples/` | A sample conversation for the Order Engine; one app the factory built |
 | `skills/visualize-everything/` | The visualizeEverything skill as a Claude Code skill |
 | `docs/` | This folder |
+
+## Adding a feature: its record comes with it
+
+Every source file and API area belongs to a feature record in `packages/core/src/featuremap/records.ts`, and `npm test` fails when one does not. After adding or moving code: add or extend the record, run `npm run wiring -w @sf/core`, then `npm test`. Details: [feature-map.md](feature-map.md).

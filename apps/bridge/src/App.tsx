@@ -1,4 +1,5 @@
 import { BrainPage } from "./Brain";
+import { FeatureMapPage } from "./FeatureMap";
 import { KitPage } from "./Kit";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API, setupApi, useBay, useChatRoutes, useFactory, useOrder, useProjects, type SinceView } from "./api";
@@ -160,6 +161,8 @@ export function App() {
     ? <KitPage />
     : route.page === "brain"
     ? <BrainPage events={f.events} />
+    : route.page === "map"
+    ? <FeatureMapPage events={f.events} id={route.id} go={(id) => go({ page: "map", id })} />
     : route.page === "plugins"
     ? <PluginsPage events={f.events} list={plugins.data} err={plugins.err} refresh={plugins.refresh} id={route.id} panel={route.panel} />
     : route.page === "features"

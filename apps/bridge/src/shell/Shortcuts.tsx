@@ -14,6 +14,7 @@ const GO: Record<string, { label: string; to: Route }> = {
   l: { label: "Finished apps (Library)", to: { page: "features" } },
   o: { label: "Add-ons", to: { page: "plugins" } },
   b: { label: "Brain", to: { page: "brain" } },
+  m: { label: "Feature map", to: { page: "map" } },
 };
 
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));

@@ -62,7 +62,8 @@ All under `packages/core/src/`.
 | `order/` | The Order Engine: Archivist, model, precedence rules, sweep, briefing | [history.md](history.md) (milestone 3) |
 | `factory/` | The engine: the run loop and every station | [engine.md](engine.md) |
 | `bay/` | The Agent Bay: agent files, versions, slots, tests, the built-in crew, per-agent kits | |
-| `brain/` | The principles added to every agent's instructions; recall of the person's own words | [apps.md](apps.md) |
+| `brain/` | The principles added to every agent's instructions, their use and the suggestions from the person's rules; recall of the person's own words | [apps.md](apps.md) |
+| `featuremap/` | One record per feature, the wiring generated from the code, and the map that folds both with the event log | [feature-map.md](feature-map.md) |
 | `safety/` | Fast checks (syntax, types, lint, secrets), the secret scan hook, the locked-test guard | [engine.md](engine.md) |
 | `projects/` | Projects, links, adoption of old data, money limits | [projects.md](projects.md) |
 | `chat/` | Which chat an item belongs to (General or a project) | [projects.md](projects.md) |

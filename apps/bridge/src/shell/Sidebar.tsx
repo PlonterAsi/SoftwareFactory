@@ -55,6 +55,7 @@ export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0,
         <Item to={{ page: "features" }} on={at("features")} icon={<Ico d="M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z" />}>Finished apps</Item>
         <Item to={{ page: "plugins" }} on={at("plugins")} icon={<Ico d="M6 2v3M10 2v3M4 5h8v4a4 4 0 0 1-8 0zM8 13v1.5" />}>Add-ons</Item>
         <Item to={{ page: "brain" }} on={at("brain")} icon={<Ico d="M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 5v3l2 1.5" />}>Brain</Item>
+        <Item to={{ page: "map" }} on={at("map")} icon={<Ico d="M3 4.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 0 0-3 0zM10 11.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 0 0-3 0zM10 4.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 0 0-3 0zM6 4.5h4M5.6 5.6l4.8 4.8" />}>Feature map</Item>
       </div>
       <div className="sb-foot">{children}</div>
     </nav>

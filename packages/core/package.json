@@ -13,7 +13,8 @@
     "test": "vitest run",
     "factory": "tsx src/factory-cli.ts",
     "order": "tsx src/order-cli.ts",
-    "kit": "node scripts/kit.mjs"
+    "kit": "node scripts/kit.mjs",
+    "wiring": "node scripts/wiring.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
