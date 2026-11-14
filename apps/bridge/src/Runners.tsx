@@ -9,7 +9,8 @@ export interface RunnerView {
   job: string | null; version: string | null; registered: boolean; runsOn: string[]; log: string; lines: number;
 }
 interface LocalJob { runner: string; repo: string; name: string; startedAt: string; endedAt: string | null; result: string | null }
-interface Report { runners: RunnerView[]; jobs: LocalJob[]; busy: number }
+interface PcLoad { cpuBusy: number | null; cores: number; memFreeGb: number; memTotalGb: number }
+interface Report { runners: RunnerView[]; jobs: LocalJob[]; busy: number; pc?: PcLoad }
 interface GhStep { number: number; name: string; status: string; conclusion: string | null; startedAt: string | null; endedAt: string | null }
 interface GhJob { name: string; status: string; conclusion: string | null; runner: string | null; here: boolean | null; startedAt: string | null; endedAt: string | null; url?: string | null; steps?: GhStep[] }
 interface GhRun { id: number; name: string; title: string; event: string; branch: string | null; status: string; conclusion: string | null; createdAt: string; url: string; jobs: GhJob[] }
@@ -84,7 +85,7 @@ export function RunnersPage() {
                 </button>
               ))}
             </div>
-            {cur && <RunnerDetail key={cur.id} r={cur} jobs={(rep.jobs ?? []).filter((j) => j.runner === cur.name && j.repo === cur.repo)} act={act} onRemoved={() => setSel(null)} />}
+            {cur && <RunnerDetail key={cur.id} r={cur} jobs={(rep.jobs ?? []).filter((j) => j.runner === cur.name && j.repo === cur.repo)} act={act} pc={rep.pc} onRemoved={() => setSel(null)} />}
           </div>
         )}
       {adding && <AddRunner onClose={() => setAdding(false)} onAdded={(id) => { setAdding(false); setSel(id); refresh(); }} />}
@@ -92,7 +93,7 @@ export function RunnersPage() {
   );
 }
 
-function RunnerDetail({ r, jobs, act, onRemoved }: { r: RunnerView; jobs: LocalJob[]; act: (f: () => Promise<unknown>) => Promise<void>; onRemoved: () => void }) {
+function RunnerDetail({ r, jobs, act, pc, onRemoved }: { r: RunnerView; jobs: LocalJob[]; pc?: PcLoad; act: (f: () => Promise<unknown>) => Promise<void>; onRemoved: () => void }) {
   const [tab, setTab] = useState<"jobs" | "log">("jobs");
   const [confirm, setConfirm] = useState<"stop" | "remove" | null>(null);
   const [removed, setRemoved] = useState<string | null>(null);
@@ -143,7 +144,7 @@ function RunnerDetail({ r, jobs, act, onRemoved }: { r: RunnerView; jobs: LocalJ
       )}
       {removed && <p className="rn-note warn">{removed}</p>}
 
-      <Now r={r} gh={gh} />
+      <Now r={r} gh={gh} pc={pc} />
       <div className="rn-route">
         <div>
           <b>Where {r.repo}'s builds run</b>
@@ -181,7 +182,7 @@ function stepName(n: string): string {
  * The job this runner is working on right now, step by step: which step runs, for how long,
  * what is done and what is still to come. Nothing to guess.
  */
-function Now({ r, gh }: { r: RunnerView; gh: GitHubSide | null }) {
+function Now({ r, gh, pc }: { r: RunnerView; gh: GitHubSide | null; pc?: PcLoad }) {
   const [, tick] = useState(0);
   const [open, setOpen] = useState(true);
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, []);
@@ -212,6 +213,12 @@ function Now({ r, gh }: { r: RunnerView; gh: GitHubSide | null }) {
         {steps.length ? <>Step <b>{Math.min(done + 1, steps.length)}</b> of <b>{steps.length}</b>{cur ? <>: <b>{stepName(cur.name)}</b>, for {took(cur.startedAt ?? job.startedAt ?? run.createdAt, null)}</> : done === steps.length ? ": finishing up" : ": starting the next step"}</> : "GitHub has not listed the steps yet."}
         {failed && <span className="rn-bad"> A step failed: {stepName(failed.name)}.</span>}
       </p>
+      {pc && pc.cpuBusy != null && (
+        <p className={`rn-pc${pc.cpuBusy >= 90 ? " hot" : ""}`}>
+          This PC: processor {pc.cpuBusy}% busy ({pc.cores} cores), {pc.memFreeGb} of {pc.memTotalGb} GB memory free.
+          {pc.cpuBusy >= 90 && " The processor is full. That is normal while a build compiles, but if other heavy programs run at the same time they share it and the build takes longer."}
+        </p>
+      )}
       {open && steps.length > 0 && (
         <ol className="rn-steps">
           {steps.map((s) => (

@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { cpus, freemem, homedir, totalmem } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { hideTokens, parseGitHubRepo, type GitHubRepo } from "../tickets/github.js";
 
@@ -262,6 +262,24 @@ export class RunnerManager {
   one(id: string): RunnerView { return this.view(this.get(id)); }
   recentJobs(limit = 50): RunnerJob[] { return this.jobs.slice(-limit).reverse(); }
   /** Jobs running on this PC right now. The app does not update itself over them. */
+  private cpuSeen: { idle: number; total: number; at: number; busy: number | null } = { idle: 0, total: 0, at: 0, busy: null };
+  /**
+   * How busy this PC is right now: the share of its processor in use since the last look (all
+   * programs together, not only the build), its cores and its free memory. A build is slow
+   * when the PC does other heavy work at the same time, and the page says so.
+   */
+  pcLoad(): { cpuBusy: number | null; cores: number; memFreeGb: number; memTotalGb: number } {
+    const cs = cpus();
+    let idle = 0, total = 0;
+    for (const c of cs) { idle += c.times.idle; total += c.times.idle + c.times.user + c.times.sys + c.times.irq + c.times.nice; }
+    const t = Date.now();
+    // Looks closer together than a second say little, so the last answer stands.
+    if (this.cpuSeen.at && t - this.cpuSeen.at >= 1000 && total > this.cpuSeen.total) {
+      this.cpuSeen = { idle, total, at: t, busy: Math.round(100 * (1 - (idle - this.cpuSeen.idle) / (total - this.cpuSeen.total))) };
+    } else if (!this.cpuSeen.at) this.cpuSeen = { idle, total, at: t, busy: null };
+    const gb = (n: number) => Math.round(n / 1024 ** 3 * 10) / 10;
+    return { cpuBusy: this.cpuSeen.busy, cores: cs.length, memFreeGb: gb(freemem()), memTotalGb: gb(totalmem()) };
+  }
   busyCount(): number { return [...this.live.values()].filter((l) => l.state === "busy").length; }
   linesAfter(id: string, after = 0): RunnerLine[] { return this.get(id).out.filter((x) => x.n > after); }
   suggest(repo: string) {
