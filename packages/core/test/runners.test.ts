@@ -70,7 +70,7 @@ function fakeGitHub(o: { archive?: Buffer; sha?: string; variable?: string | nul
     if (u.pathname.endsWith("/actions/variables") && method === "POST") { if (body.name === ISOLATED_VARIABLE) state.isolated = body.value; else state.variable = body.value; return ok({}, 201); }
     if (u.pathname.endsWith("/actions/runners")) return ok({ runners: [{ name: "sf-app", status: "online", busy: false, labels: [{ name: "self-hosted" }, { name: "sf-build" }] }] });
     if (u.pathname.endsWith("/actions/runs")) return ok({ workflow_runs: [{ id: 7, name: "Windows build", display_title: "A change", event: "push", head_branch: "main", status: "completed", conclusion: "success", created_at: "2026-11-14T12:00:00Z", html_url: "https://github.com/o/app/actions/runs/7" }] });
-    if (u.pathname.endsWith("/actions/runs/7/jobs")) return ok({ jobs: [{ name: "build", status: "completed", conclusion: "success", runner_name: "sf-app" }, { name: "publish", status: "completed", conclusion: "success", runner_name: "GitHub Actions 12" }] });
+    if (u.pathname.endsWith("/actions/runs/7/jobs")) return ok({ jobs: [{ name: "build", status: "completed", conclusion: "success", runner_name: "sf-app", steps: [{ number: 1, name: "Set up job", status: "completed", conclusion: "success", started_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:01:00Z" }] }, { name: "publish", status: "completed", conclusion: "success", runner_name: "GitHub Actions 12" }] });
     if (u.pathname.endsWith("/actions/permissions/fork-pr-contributor-approval") && method === "PUT") return ok({}, 204);
     if (/^\/repos\/[^/]+\/[^/]+$/.test(u.pathname)) return ok({ private: false });
     return ok({ message: "Not Found" }, 404);
