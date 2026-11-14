@@ -732,9 +732,15 @@ class Run {
         // research was there. Both are checked the moment a feature is written, by the session that wrote it.
         // (A schema that imports logic a later feature writes is not a fault yet; the check after the build has it.)
         let invalid: string[] = [];
+        let stored: string[] = [];
         let deadLinks: string[] = [];
         if (files.length && !broke.length && this.plan.app && existsSync(join(this.dir, "src/schema.js"))) {
           try { invalid = checkApp(this.dir).problems.filter((x) => /^src\/schema\.js/.test(x) && !/imports .* which does not exist|does not load in Node/.test(x)); } catch { /* the check after the build still runs */ }
+          // Run 4004: the plan, added topics and settings the person entered lived in the browser's
+          // localStorage, so they never reached the app's data file and every check of the store missed them.
+          for (const p of files.filter((x) => /^(web|src)\/.*\.m?js$/.test(x) && !isKitFile(x))) {
+            try { if (/\blocalStorage\b|\bsessionStorage\b/.test(readFileSync(join(this.dir, p), "utf8"))) stored.push(p); } catch { /* unreadable: the check after the build has it */ }
+          }
           invalid = [...new Set(invalid)].slice(0, 10);
           if (process.env.SF_LINK_CHECK !== "off") {
             const where = linkFiles(this.dir, (x) => isLockedTest(x) || isKitFile(x));
@@ -767,13 +773,14 @@ class Run {
         let hollow: string[] = [];
         if ((attempt === 1 || wasHollow) && files.length && !broke.length && !invalid.length && !crashed.length && this.docs && /^Screen: /.test(f.title)) hollow = await this.lookAtScreen(f, attempt);
         if (attempt === 1) wasHollow = hollow.length > 0;
-        f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length || invalid.length || deadLinks.length || hollow.length ? "broken" : "built";
+        f.state = !files.length ? "empty" : broke.length ? "regressed" : crashed.length || invalid.length || stored.length || deadLinks.length || hollow.length ? "broken" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, workbench: true }); }
-        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}), ...(invalid.length ? { invalid } : {}), ...(deadLinks.length ? { deadLinks } : {}), ...(hollow.length ? { hollow } : {}) });
+        this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t.passed, failed: t.failed, ...(broke.length ? { broke: broke.slice(0, 10) } : {}), ...(crashed.length ? { crashed: crashed.slice(0, 10) } : {}), ...(invalid.length ? { invalid } : {}), ...(stored.length ? { stored } : {}), ...(deadLinks.length ? { deadLinks } : {}), ...(hollow.length ? { hollow } : {}) });
         if (f.state === "broken" && attempt === 1) {
           const sources = [...new Set((this.docs?.research ?? []).map((r) => r.source).filter((u): u is string => !!u))].slice(0, 12);
           retry = [
             invalid.length ? `The app kit refuses the schema you left, so the app cannot start:\n${invalid.join("\n")}\n\nFix src/schema.js: every field needs a lowerCamelCase "name" (letters and digits only, like "bandOverride"), a known type, and options for a choice.` : "",
+            stored.length ? `These files keep data in the browser's localStorage or sessionStorage: ${stored.join(", ")}.\n\nEverything the person enters or changes (plans, settings, added items) is a record in the app's store: add the entity or field to src/schema.js and read and write it through the store the views get, never through the browser's storage.` : "",
             deadLinks.length ? `The core opened every link you wrote and these do not exist:\n${deadLinks.join("\n")}\n\n${sources.length ? `Addresses the research found, which do exist:\n${sources.join("\n")}\n\n` : ""}Never write a link from memory. Use only addresses listed in docs/product/BRIEF.md (the research), or search the web for the real page and use the address the search returned. If you cannot find the real one, leave the link empty: an empty link is right, a made-up one is a defect.` : "",
             hollow.length ? `A product judge opened the running app after your call and did not find these on the screen you built:\n${hollow.map((h) => `- ${h}`).join("\n")}\n\nMake each one real on that screen: shown with sample records from the seed, and every action a control that changes the data through the store.` : "",
             crashed.length ? `The core opened the app in a real browser after your call, and these screens did not draw:\n${crashed.slice(0, 10).join("\n").slice(0, 1500)}\n\nFix the cause in the page code (a value read before it exists, a wrong import, a missing record) and make sure every screen draws with the sample records and with none.` : "",
@@ -1548,7 +1555,7 @@ export function journeyTestRule(plan: Plan): string {
     "This is an app, so besides the logic tests write test/journeys.test.js: what a person does, through the app's own data layer, exactly as the running app does it.",
     "- Import the app's model with `import * as schema from \"../src/schema.js\"` and the kit's data layer with `import { seedDb, createRecord, updateRecord, deleteRecord, query } from \"../web/kit/db.js\"` (it exists already; the server runs these same functions, and a record they refuse is refused in the app too).",
     "- Start each journey from `seedDb(schema)`, the sample records the person sees on first open, and do the person's action with createRecord / updateRecord and the src/ functions the screens will call. Then assert what the person would see in the data afterwards.",
-    `- One journey per acceptance criterion that is about something the person does (adds, edits, refreshes, plans, picks, logs), named after the criterion.${ents.length ? ` The entities are ${ents.join(", ")}.` : ""}`,
+    `- One journey per acceptance criterion that is about something the person does (adds, edits, refreshes, plans, picks, logs), named after the criterion. Where the criterion or the spec gives numbers, examples or limits (a cap, a ladder, a score, "never twice in a day"), assert exactly those values: a journey that only checks that something happened lets a wrong rule pass.${ents.length ? ` The entities are ${ents.join(", ")}.` : ""}`,
     "- Also one test that every sample record in seedDb(schema) passes the kit's validation (createRecord of a copy of it does not throw), and that every kind of thing the person named has sample records.",
   ].join("\n");
 }
