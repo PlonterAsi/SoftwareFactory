@@ -384,6 +384,18 @@ export function LoopView({ run }: { run: FactoryRunView }) {
             </li>
           );
         }
+        if (l.kind === "gates") {
+          const failed = l.gates.filter((g) => g.state === "fail" || g.state === "failed");
+          return (
+            <li key={i} className={`loop-item gates ${failed.length ? "bad" : "ok"}`}>
+              <div className="loop-head"><b>Fast checks</b> <span className="muted">{l.round ? `after fix round ${l.round}` : "after the build"} · free, no agent</span></div>
+              <div className="loop-gates">
+                {l.gates.map((g) => <span key={g.gate} className={`loop-gate g-${g.state}`} title={g.note ?? g.state}>{g.state === "pass" || g.state === "passed" ? "✓" : g.state === "skipped" ? "–" : "✕"} {g.gate}{g.state === "skipped" && g.note ? ` (${g.note})` : ""}</span>)}
+              </div>
+              {failed.map((g) => g.messages.length > 0 && <pre key={g.gate} className="loop-gate-out">{g.messages.slice(0, 8).join("\n")}</pre>)}
+            </li>
+          );
+        }
         if (l.kind === "ladder") return <li key={i} className="loop-item ladder"><b>{RUNG[l.to] ?? l.to}</b> <span className="muted">{l.reason}</span></li>;
         if (l.kind === "relocked") return <li key={i} className="loop-item relocked"><b>Locked tests corrected and locked again</b> <span className="muted">{l.files.join(", ")}</span><p className="loop-said">{l.reason}</p></li>;
         return <li key={i} className="loop-item kept"><b>The locked tests stand</b><p className="loop-said">{l.said || l.evidence}</p></li>;
