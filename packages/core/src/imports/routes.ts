@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import type { EventLog } from "../events.js";
 import { projectOf, registerProjectFacet } from "../projects/service.js";
-import { registerImproveContext } from "../improve/council.js";
+import { registerImproveChange, registerImproveContext } from "../improve/council.js";
 import { codeMapSummary, importDetail, importOf, latestMap, listImports, suggestionsOf, type RepoExplorer } from "./explorer.js";
 
 /**
@@ -11,6 +11,7 @@ import { codeMapSummary, importDetail, importOf, latestMap, listImports, suggest
  *   POST /api/imports                     { source, name?, maxUsd? }   a git URL, owner/name, or a folder path
  *   GET  /api/imports/:projectId          the import, newest code map, module notes, suggestions, exploration log
  *   POST /api/imports/:projectId/explore  { maxUsd? }   explore again (pull, rescan, map what changed)
+ *   POST /api/imports/follow              { on }   keep imported repos current on their own (on by default)
  */
 export async function importsRoute(
   ctx: { log: EventLog; explorer: RepoExplorer; readJson: (req: IncomingMessage) => Promise<Record<string, unknown>>; canImport?: () => string | null },
@@ -19,7 +20,14 @@ export async function importsRoute(
 ): Promise<[number, unknown] | null> {
   const { log, explorer } = ctx;
   const path = url.pathname;
-  if (req.method === "GET" && path === "/api/imports") return [200, { imports: listImports(log), maxUsd: explorer.maxUsd, mode: explorer.mode() }];
+  if (req.method === "GET" && path === "/api/imports") return [200, { imports: listImports(log), maxUsd: explorer.maxUsd, mode: explorer.mode(), follow: followView(explorer) }];
+  if (req.method === "POST" && path === "/api/imports/follow") {
+    const body = await ctx.readJson(req);
+    if (typeof body.on !== "boolean") return [400, { error: "Say { on: true } or { on: false }." }];
+    explorer.follow.on = body.on;
+    log.append("settings.changed", { key: "importsFollow", value: body.on });
+    return [200, followView(explorer)];
+  }
   if (req.method === "POST" && path === "/api/imports") {
     const blocked = ctx.canImport?.();
     if (blocked) return [409, { error: blocked }];
@@ -33,7 +41,7 @@ export async function importsRoute(
   const id = Number(m[1]);
   if (req.method === "GET" && !m[2]) {
     const d = importDetail(log, id);
-    return d ? [200, { ...d, busy: explorer.busy(id), maxUsd: explorer.maxUsd, mode: explorer.mode() }] : [404, { error: `Project #${id} was not imported from a repo` }];
+    return d ? [200, { ...d, busy: explorer.busy(id), maxUsd: explorer.maxUsd, mode: explorer.mode(), follow: followView(explorer) }] : [404, { error: `Project #${id} was not imported from a repo` }];
   }
   if (req.method === "POST" && m[2] === "explore") {
     if (!importOf(log, id)) return [404, { error: `Project #${id} was not imported from a repo` }];
@@ -43,6 +51,8 @@ export async function importsRoute(
   }
   return null;
 }
+
+const followView = (x: RepoExplorer) => ({ ...x.follow, spentTodayUsd: x.followSpentUsd() });
 
 // Every imported project's detail carries its code facts.
 registerProjectFacet({
@@ -65,4 +75,12 @@ registerProjectFacet({
 registerImproveContext("code-map", (log, t) => {
   if (t.kind !== "project" || t.id == null) return null;
   return codeMapSummary(log, Number(t.id)) ?? (() => { const p = projectOf(log, { kind: "order_node", ref: t.id }); return p == null ? null : codeMapSummary(log, p); })();
+});
+
+// A new understanding of the code (an exploration that mapped something) counts as a change, so the
+// Council looks at an imported project again after its repo moved, not only every two weeks.
+registerImproveChange("code-map", (log, projectId) => {
+  const r = log.db.prepare(`SELECT max(ts) AS t FROM events WHERE type = 'repo.explore.finished'
+    AND json_extract(payload, '$.projectId') = ? AND json_extract(payload, '$.outcome') IN ('done', 'partial')`).get(projectId) as { t: string | null } | undefined;
+  return r?.t ?? null;
 });

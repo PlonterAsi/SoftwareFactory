@@ -116,8 +116,22 @@ export function importDetail(log: EventLog, projectId: number) {
   return { import: imp, map: m, notes: Object.fromEntries(notes), suggestions: suggestionsOf(log, projectId), explores: explores.reverse() };
 }
 
+/** How SoftwareFactory keeps an imported repo current on its own. */
+export interface FollowOptions {
+  on: boolean;
+  /** Hours between looks at each repo's source. The look itself is free (one git question). */
+  everyHours: number;
+  /** Cap for one automatic exploration, USD. */
+  maxUsd: number;
+  /** Cap for all automatic explorations in 24 hours, USD. */
+  dailyUsd: number;
+}
+
 export class RepoExplorer {
   private running = new Map<number, Promise<ExploreResult>>();
+  private looked = new Map<number, number>();
+  /** Following: when a repo's source has new commits, explore it again without being asked. */
+  follow: FollowOptions = { on: true, everyHours: 12, maxUsd: 0.15, dailyUsd: 0.5 };
 
   constructor(
     private log: EventLog,
@@ -185,6 +199,47 @@ export class RepoExplorer {
 
   busy(projectId: number) { return this.running.has(projectId); }
 
+  /** What automatic explorations spent in the last 24 hours. */
+  followSpentUsd(now = Date.now()): number {
+    const since = new Date(now - 86_400_000).toISOString();
+    const r = this.log.db.prepare(`SELECT coalesce(sum(json_extract(f.payload, '$.spentUsd')), 0) AS usd FROM events f
+      WHERE f.type = 'repo.explore.finished' AND f.ts >= ? AND json_extract(f.payload, '$.explore') IN
+        (SELECT s.id FROM events s WHERE s.type = 'repo.explore.started' AND s.ts >= ? AND json_extract(s.payload, '$.trigger') = 'auto')`).get(since, since) as { usd: number };
+    return Number(r.usd ?? 0);
+  }
+
+  /** The newest commit at an import's source, asked without changing anything. Null when it cannot be read. */
+  async sourceHead(imp: ImportRow): Promise<string | null> {
+    try {
+      if (imp.local) return (await gitOut(["rev-parse", "HEAD"], imp.dir, 20_000)).trim() || null;
+      const out = await gitOut(["ls-remote", "origin", imp.branch ? `refs/heads/${imp.branch}` : "HEAD"], imp.dir, 60_000);
+      return out.split(/\s+/)[0] || null;
+    } catch { return null; }
+  }
+
+  /**
+   * The follow loop's tick: look at each imported repo that is due, and explore again the ones
+   * whose source moved. Unchanged modules stay cached, so only what changed is paid for, inside
+   * the follow caps. Returns the projects it explored.
+   */
+  async followTick(now = Date.now()): Promise<number[]> {
+    if (!this.follow.on) return [];
+    const out: number[] = [];
+    for (const row of listImports(this.log)) {
+      if (row.status !== "ready" || this.running.has(row.projectId)) continue;
+      if (now - (this.looked.get(row.projectId) ?? 0) < this.follow.everyHours * 3_600_000) continue;
+      this.looked.set(row.projectId, now);
+      const head = await this.sourceHead(row);
+      const known = row.mappedHead ?? row.head;
+      if (!head || !known || head === known) continue;
+      if (this.mode() === "agent" && this.followSpentUsd(now) + this.follow.maxUsd > this.follow.dailyUsd + 1e-9) continue;
+      this.log.append("repo.moved", { projectId: row.projectId, from: known, to: head, source: row.source });
+      await this.guard(row.projectId, () => this.exploreNow(row.projectId, { maxUsd: this.follow.maxUsd, auto: true }));
+      out.push(row.projectId);
+    }
+    return out;
+  }
+
   /** Wait for every exploration in flight (tests, shutdown). */
   async idle() { while (this.running.size) await Promise.allSettled([...this.running.values()]); }
 
@@ -202,12 +257,12 @@ export class RepoExplorer {
     this.log.append("repo.explore.station", { projectId, explore, station, state, ...(note ? { note } : {}), ...extra });
   }
 
-  private async exploreNow(projectId: number, o: { maxUsd?: number; fetched?: boolean }): Promise<ExploreResult> {
+  private async exploreNow(projectId: number, o: { maxUsd?: number; fetched?: boolean; auto?: boolean }): Promise<ExploreResult> {
     const imp = importOf(this.log, projectId);
     if (!imp) throw new Error(`Project #${projectId} was not imported from a repo`);
     const cap = o.maxUsd ?? this.maxUsd;
     const mode = this.mode();
-    const start = this.log.append("repo.explore.started", { projectId, mode, capUsd: cap, source: imp.source });
+    const start = this.log.append("repo.explore.started", { projectId, mode, capUsd: cap, source: imp.source, trigger: o.auto ? "auto" : "manual" });
     const ex = start.id;
 
     // 1. Fetch: a clone is brought up to date; a local folder is read as it is.
@@ -351,6 +406,19 @@ export function normalizeSource(input: string): { local: boolean; ref: string; u
 function headOf(dir: string): { head: string | null; branch: string | null } {
   const run = (args: string[]) => { try { return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim(); } catch { return null; } };
   return { head: run(["rev-parse", "HEAD"]), branch: run(["rev-parse", "--abbrev-ref", "HEAD"]) };
+}
+
+/** git that answers: its stdout. Never prompts, like `git` below. */
+function gitOut(args: string[], cwd: string, timeoutMs: number): Promise<string> {
+  return new Promise((ok, fail) => {
+    const child = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+    let out = ""; let err = "";
+    const t = setTimeout(() => { child.kill(); fail(new Error(`git ${args[0]} took too long`)); }, timeoutMs);
+    child.stdout.on("data", (d) => { out += d; });
+    child.stderr.on("data", (d) => { err += d; });
+    child.on("error", (e) => { clearTimeout(t); fail(e); });
+    child.on("close", (code) => { clearTimeout(t); code === 0 ? ok(out) : fail(new Error(err.trim() || `git ${args[0]} exited ${code}`)); });
+  });
 }
 
 function git(args: string[], cwd: string, timeoutMs: number): Promise<void> {

@@ -142,6 +142,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     autoGate: () => ((runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime)) === "real" ? null : "the practice crew only answers when you press Look now; switch to the real crew in Systems for automatic sessions"),
   }).listen();
   improve.auto = settings.improveAuto ?? true;
+  explorer.follow.on = settings.importsFollow ?? true;
   // Finished projects run from their own folders; the Bridge shows their output and pages.
   const launcher = new Launcher(log);
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
@@ -540,7 +541,7 @@ function selfGitHub(log: EventLog) {
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
 export function readSettings(log: EventLog): {
-  crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean;
+  crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean; importsFollow?: boolean;
   ticketsAutoWork?: boolean; ticketsAutoMaxUsd?: number; ticketsAutoDailyUsd?: number; ticketsWip?: number;
   maxRunMinutes?: number;
 } {
@@ -796,6 +797,10 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
   sweepIfDue();
   timers.push(setInterval(sweepIfDue, 3_600_000).unref());
   // The Improvement Council looks again on its own (real crew only, within its caps): first a few minutes after start, then every 15 minutes it checks if a look is due.
+  // Imported repos are kept current: a free look at each source, and a capped exploration when it moved.
+  const followTick = () => { core.explorer.followTick().catch((e) => console.error("following imported repos failed:", e)); };
+  setTimeout(followTick, 3 * 60_000).unref();
+  timers.push(setInterval(followTick, 30 * 60_000).unref());
   const improveTick = () => { core.improve.tick().catch((e) => { console.error("improve tick failed:", e); core.fault("improvement council tick", e); }); };
   timers.push(setTimeout(improveTick, 3 * 60_000).unref());
   timers.push(setInterval(improveTick, 15 * 60_000).unref());
