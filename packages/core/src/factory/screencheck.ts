@@ -126,22 +126,29 @@ export async function checkScreens(baseUrl: string, o: { browser?: string | null
 }
 
 /**
+ * What one page shows, as a person would read it: its text and the labels of its controls. For an app on the
+ * kit, the main area only (the navigation is the kit's); for any other page, everything but scripts and styles.
+ */
+export function pageText(dom: string, kit = false): { text: string; controls: string[] } {
+  const main = (kit ? dom.match(/<main[^>]*class="kit-main"[^>]*>([\s\S]*?)<\/main>/)?.[1] : undefined)
+    ?? dom.replace(kit ? /<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<nav[\s\S]*?<\/nav>/g : /<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<head[\s\S]*?<\/head>|<!--[\s\S]*?-->/g, " ");
+  // Each kind on its own pass: a button inside a link or a table row is still a control.
+  const controls = [
+    ...[...main.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map((m) => strip(m[1]).slice(0, 40)),
+    ...[...main.matchAll(/<a\b[^>]*href=[^>]*>([\s\S]*?)<\/a>/g)].map((m) => strip(m[1]).slice(0, 40)),
+    ...[...main.matchAll(/<(input|textarea|select)\b([^>]*)>/g)].map((m) => `${m[1]}: ${m[2].match(/(?:placeholder|aria-label|name)="([^"]*)"/)?.[1] ?? m[2].match(/type="([^"]*)"/)?.[1] ?? "field"}`),
+  ].filter(Boolean);
+  return { text: strip(main).slice(0, 2500), controls: [...new Set(controls)].slice(0, 30) };
+}
+
+/**
  * What each of the app's screens shows, as the person would read it: the text of its main area and the
  * labels of its controls. For the product judge (evaluate.ts). null when no browser can be read.
  */
 export async function readScreens(baseUrl: string, o: { browser?: string | null; max?: number } = {}): Promise<{ route: string; text: string; controls: string[] }[] | null> {
   const browser = o.browser === undefined ? findBrowser() : o.browser;
   if (!browser) return null;
-  const read = (dom: string) => {
-    const main = dom.match(/<main[^>]*class="kit-main"[^>]*>([\s\S]*?)<\/main>/)?.[1] ?? dom.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<nav[\s\S]*?<\/nav>/g, " ");
-    // Each kind on its own pass: a button inside a link or a table row is still a control.
-    const controls = [
-      ...[...main.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map((m) => strip(m[1]).slice(0, 40)),
-      ...[...main.matchAll(/<a\b[^>]*href=[^>]*>([\s\S]*?)<\/a>/g)].map((m) => strip(m[1]).slice(0, 40)),
-      ...[...main.matchAll(/<(input|textarea|select)\b([^>]*)>/g)].map((m) => `${m[1]}: ${m[2].match(/(?:placeholder|aria-label|name)="([^"]*)"/)?.[1] ?? m[2].match(/type="([^"]*)"/)?.[1] ?? "field"}`),
-    ].filter(Boolean);
-    return { text: strip(main).slice(0, 2500), controls: [...new Set(controls)].slice(0, 30) };
-  };
+  const read = (dom: string) => pageText(dom, true);
   const home = await dumpScreen(browser, `${baseUrl}/#/home`);
   if (!home.dom.trim() || !/class="kit-app"/.test(home.dom)) return null;
   const out = [{ route: "home", ...read(home.dom) }];

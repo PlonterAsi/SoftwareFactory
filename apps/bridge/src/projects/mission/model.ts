@@ -92,7 +92,7 @@ export function stopsFor(run?: FactoryRunView): Stop[] {
     },
     {
       id: "plan", label: "Plan", state: by.plan,
-      sub: R?.plan ? `${R.plan.tasks.length} tasks · ${R.plan.acceptance.length} checks` : by.plan === "live" ? "writing…" : "Planner",
+      sub: R?.plan ? `${R.plan.repo ? `${R.plan.features?.length ?? R.plan.tasks.length} feature${(R.plan.features?.length ?? R.plan.tasks.length) === 1 ? "" : "s"}` : `${R.plan.tasks.length} tasks`} · ${R.plan.acceptance.length} checks` : by.plan === "live" ? "writing…" : "Planner",
     },
     { id: "ok1", label: "Your OK", sub: gateSub("ok1"), state: by.ok1, gate: true },
     {
@@ -103,17 +103,17 @@ export function stopsFor(run?: FactoryRunView): Stop[] {
     },
     {
       id: "check", label: "Test and fix", state: by.check,
-      sub: lastTest ? `${lastTest.passed}/${lastTest.passed + lastTest.failed} tests pass` : "locked tests",
+      sub: lastTest ? `${lastTest.passed}/${lastTest.passed + lastTest.failed} tests pass` : R?.repo ? "the repo's own tests" : "locked tests",
       note: attempts.length ? `${attempts.length} fix round${attempts.length > 1 ? "s" : ""}` : undefined,
       beads: attempts.length ? attempts.map((a) => (a.after === 0 ? "done" : a.after < a.before ? "live" : "fail") as Bead) : undefined,
     },
     {
       id: "judge", label: "Judge", state: by.judge,
-      sub: lastEval ? `${lastEval.requirements.filter((q) => q.met).length}/${lastEval.requirements.length} seen working` : by.judge === "skip" ? "not judged" : "uses the running app",
+      sub: lastEval ? `${lastEval.requirements.filter((q) => q.met).length}/${lastEval.requirements.length} seen working` : by.judge === "skip" ? "not judged" : R?.repo ? "reads the running site" : "uses the running app",
       beads: R?.evaluations.filter((e) => !e.skipped).map((e) => (e.pass ? "done" : "fail") as Bead),
     },
     { id: "ok2", label: "Your OK", sub: gateSub("ok2"), state: by.ok2, gate: true },
-    { id: "ship", label: "Ship", sub: R?.finished?.outcome === "shipped" ? "shipped" : "tagged release", state: R?.finished?.outcome === "shipped" ? "done" : by.ship },
+    { id: "ship", label: R?.repo ? "Hand over" : "Ship", sub: R?.repo ? (R.repo.pr ? `draft PR #${R.repo.pr.number}` : R.finished?.outcome === "shipped" ? "branch ready" : "branch or pull request") : R?.finished?.outcome === "shipped" ? "shipped" : "tagged release", state: R?.finished?.outcome === "shipped" ? "done" : by.ship },
   ];
   for (const s of stops) if (s.beads && !s.beads.length) delete s.beads;
   return stops;
@@ -134,6 +134,7 @@ export function headline(run: FactoryRunView | undefined, stops: Stop[]): { text
     return { text: run.waiting.question, tone: "gate" };
   }
   if (run.finished) {
+    if (run.finished.outcome === "shipped" && run.repo) return { text: run.repo.pr ? `Done. The change is draft pull request #${run.repo.pr.number}; merging it is your call.` : "Done. The change is on its branch, ready for you to take.", tone: "done" };
     if (run.finished.outcome === "shipped") return { text: "Shipped. The app is ready to use.", tone: "done" };
     return { text: run.finished.reason || `The run ${run.finished.outcome}.`, tone: "fail" };
   }
@@ -150,7 +151,7 @@ export function headline(run: FactoryRunView | undefined, stops: Stop[]): { text
     case "build": return building
       ? { who: "The Builder", text: `is building ${building.id}: ${building.title} (${building.index ?? run.features.indexOf(building) + 1} of ${building.of ?? run.features.length}).`, tone: "live" }
       : { who: "The Builder", text: "is writing the app.", tone: "live" };
-    case "test": return { text: "Running the locked tests.", tone: "live" };
+    case "test": return { text: run.repo ? "Running the repo's own tests." : "Running the locked tests.", tone: "live" };
     case "fix": return { who: "The Fixer", text: `is on fix round ${a.round ?? run.fixRounds}.`, tone: "live" };
     case "review": return { who: "The Reviewer", text: "is checking the build against the plan.", tone: "live" };
     case "evaluate": return { who: "The Product Judge", text: "is using the running app, screen by screen.", tone: "live" };

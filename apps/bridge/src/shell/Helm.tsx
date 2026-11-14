@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { captureSignal, startFactoryRun, type ProjectSummary } from "../api";
+import { showTicket } from "../BugReport";
 import type { Route } from "../projects/router";
 import { shortName } from "../projects/shortName";
 
@@ -65,7 +66,12 @@ export function Helm({ open, onClose, projects, projectId, projectName, go, onSy
     setBusy(true); setMsg(null);
     try {
       if (r.kind === "note") { await captureSignal(t, projectId); setMsg({ ok: true, text: `Filed${projectName ? ` in ${projectName}` : ""}. The Order Engine sorts it in a moment.` }); setText(""); }
-      else { const run = await startFactoryRun(t, undefined, projectId); setText(""); onClose(); onRunStarted(run, projectId); }
+      else {
+        const w = await startFactoryRun(t, undefined, projectId);
+        setText(""); onClose();
+        // In a project that lives in a repo, a small ask is a ticket worked in one session: no run to show.
+        if (w.run != null) onRunStarted(w.run, projectId); else if (w.ticket) showTicket(w.ticket.id, projectId);
+      }
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message });
     } finally { setBusy(false); }

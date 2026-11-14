@@ -53,6 +53,8 @@ export type EventType =
   | "factory.feature"
   | "factory.evaluation"
   | "factory.budget"
+  | "factory.repo"
+  | "factory.branch"
   | "order.node"
   | "order.fragment"
   | "order.fragment.moved"

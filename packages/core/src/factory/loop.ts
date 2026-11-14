@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
 import { fastGates } from "../safety/gates.js";
 import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
@@ -70,6 +70,14 @@ export interface Plan {
   acceptance: string[];
   tasks: { id: string; title: string; dependsOn: string[] }[];
   files: string[];
+  /**
+   * A change to an existing codebase (factory/reporun.ts), not an app on the kit: its features, each built in a
+   * session of its own on a branch, how the change is tested in the repo's own setup, and what could break.
+   */
+  repo?: boolean;
+  features?: { id: string; title: string; what: string; files: string[]; done: string }[];
+  testing?: string;
+  risks?: string[];
 }
 
 export interface RunOptions {
@@ -118,6 +126,12 @@ interface GateOpts { neverAuto?: boolean; action?: string; kind?: "retry" | "cou
 
 export class StopRun extends Error {}
 
+/** The options a run works with, once the defaults are filled in. */
+export type RunSettings = Required<Omit<RunOptions, "models" | "projectId">> & { models: Record<string, string> };
+/** How a run of another kind is made: from its started event's payload, for a start and for a resume. */
+export type RunMaker = (x: { factory: Factory; log: EventLog; runtime: AgentRuntime; id: number; idea: string; o: RunSettings; started: Record<string, unknown> }) => Run;
+
+
 interface Pending { gate: GateId; resolve: (d: GateDecision) => void }
 
 export class Factory {
@@ -148,6 +162,14 @@ export class Factory {
     await probeStart(dir, 15_000, async (url) => { out = await readScreens(url); return []; });
     return out;
   };
+
+  /**
+   * Other kinds of run, by the `kind` their started event carries (factory/reporun.ts adds "repo": a run that
+   * works in an existing codebase). A kind says how its Run object is made, for a start and for a resume.
+   */
+  readonly kinds = new Map<string, RunMaker>();
+  /** Where runs in existing codebases keep their clones (one folder per run). */
+  get repoWorkDir() { return join(dirname(this.projectsDir), "repo-work"); }
 
   /** Wall-clock limit per run in minutes (the `maxRunMinutes` setting). */
   maxRunMinutes: number | undefined;
@@ -234,7 +256,10 @@ export class Factory {
   resume(run: number, opts: { auto?: boolean } = {}): number {
     const ok = this.resumable(run);
     if (!ok.ok) throw new Error(`Run #${run} cannot resume: ${ok.why}`);
-    const started = this.log.get(run)!.payload as { idea: string; maxUsd?: number; maxFixRounds?: number; autoApprove?: boolean; autoRetries?: number; runtime?: string; council?: "auto" | "always" | "never"; review?: boolean; models?: Record<string, string>; screen?: ScreenRun };
+    const started = this.log.get(run)!.payload as { idea: string; maxUsd?: number; maxFixRounds?: number; autoApprove?: boolean; autoRetries?: number; runtime?: string; council?: "auto" | "always" | "never"; review?: boolean; models?: Record<string, string>; screen?: ScreenRun; kind?: string };
+    // A run of a kind this core does not know is refused before anything about it is touched.
+    const make = started.kind ? this.kinds.get(started.kind) : undefined;
+    if (started.kind && !make) throw new Error(`Run #${run} is a "${started.kind}" run, which this core cannot continue.`);
     const st = restoreState(this.log, run);
     // A run keeps the crew it started with: a practice run stays on the free mock crew.
     const current = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
@@ -246,7 +271,7 @@ export class Factory {
       try { git(st.dir, "reset", "-q", "--hard"); git(st.dir, "clean", "-fdq"); } catch { /* a repo with no commit yet: the plan station runs again */ }
     }
     this.log.append("factory.run.resumed", { run, from: st.from, auto: !!opts.auto, spentUsd: Number(st.spent.toFixed(6)), runtime: runtime.name });
-    const r = new Run(this, this.log, runtime, run, started.idea, o, started.screen ?? null);
+    const r = make ? make({ factory: this, log: this.log, runtime, id: run, idea: started.idea, o, started }) : new Run(this, this.log, runtime, run, started.idea, o, started.screen ?? null);
     const done = r.go(st).finally(() => this.active.delete(run));
     this.active.set(run, done);
     return run;
@@ -324,6 +349,24 @@ export class Factory {
     return ev.id;
   }
 
+  /**
+   * Start a run of another kind (see `kinds`). `extra` goes on its started event, which is all a resume has
+   * to build the run again from. Returns the run id at once; the work goes on in the background.
+   */
+  launch(kind: string, idea: string, extra: Record<string, unknown>, opts: RunOptions = {}): number {
+    const make = this.kinds.get(kind);
+    if (!make) throw new Error(`This core has no "${kind}" runs.`);
+    const text = idea.trim();
+    if (!text) throw new Error("Say what to build.");
+    const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: opts.review !== false };
+    const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
+    const started = { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, kind, ...extra, ...(opts.projectId != null ? { projectId: opts.projectId } : {}) };
+    const ev = this.log.append("factory.run.started", started);
+    const done = make({ factory: this, log: this.log, runtime, id: ev.id, idea: text, o, started }).go().finally(() => this.active.delete(ev.id));
+    this.active.set(ev.id, done);
+    return ev.id;
+  }
+
   /** The next version of a shipped run: refuses a folder that is gone, busy or has your own changes. */
   private onTopOf(baseRun: number, kind: ScreenRun["kind"], what: string): ScreenRun {
     const fin = this.log.list({ type: "factory.run.finished", sinceId: baseRun - 1, limit: 1e6 }).map((e) => e.payload as { run: number; outcome: string }).filter((p) => p.run === baseRun).at(-1);
@@ -365,35 +408,35 @@ export class Factory {
   }
 }
 
-class Run {
-  private spent = 0;
-  private calls = 0;
-  private dir = "";
-  private plan!: Plan;
-  private lockedHash = "";
+export class Run {
+  protected spent = 0;
+  protected calls = 0;
+  protected dir = "";
+  protected plan!: Plan;
+  protected lockedHash = "";
   /** The commit the tests were locked in, and how many cases the suite showed first (SF-24). Not kept across a resume. */
-  private lockedSha = "";
-  private lockedCases: number | undefined;
-  private fixRounds = 0;
+  protected lockedSha = "";
+  protected lockedCases: number | undefined;
+  protected fixRounds = 0;
   /** Links a feature session wrote that already opened: each is fetched once during the build. */
-  private linksSeen = new Set<string>();
-  private brief: CouncilBrief | null = null;
+  protected linksSeen = new Set<string>();
+  protected brief: CouncilBrief | null = null;
   /** The product documents discovery settled on, and the Critic's last word on them. */
-  private docs: ProductDocs | null = null;
-  private docsCritique: Critique | null = null;
+  protected docs: ProductDocs | null = null;
+  protected docsCritique: Critique | null = null;
   /** A feature run: the plan that shipped, which the next version builds on. */
-  private basePlan: Plan | null = null;
+  protected basePlan: Plan | null = null;
   /** A next version: the product documents the app shipped with, and the idea its first version was built from. */
-  private baseDocs: ProductDocs | null = null;
-  private firstIdea = "";
+  protected baseDocs: ProductDocs | null = null;
+  protected firstIdea = "";
   /** What the person asked for, as the Critic and the judge read it: for a next version, the first idea and then the ask. */
-  private get asked(): string { return this.baseDocs && this.firstIdea ? `${this.firstIdea}\n\nThe app shipped. For its next version the person now asks: ${this.idea}` : this.idea; }
+  protected get asked(): string { return this.baseDocs && this.firstIdea ? `${this.firstIdea}\n\nThe app shipped. For its next version the person now asks: ${this.idea}` : this.idea; }
 
   constructor(
-    private f: Factory, private log: EventLog, private runtime: AgentRuntime,
-    private id: number, private idea: string,
-    private o: Required<Omit<RunOptions, "models" | "projectId">> & { models: Record<string, string> },
-    private screen: ScreenRun | null = null,
+    protected f: Factory, protected log: EventLog, protected runtime: AgentRuntime,
+    protected id: number, protected idea: string,
+    protected o: RunSettings,
+    protected screen: ScreenRun | null = null,
   ) {}
 
   async go(from?: RestoredState) {
@@ -430,7 +473,7 @@ class Run {
   }
 
   /** Put back what the log says this run already had. */
-  private restore(st: RestoredState) {
+  protected restore(st: RestoredState) {
     this.spent = st.spent;
     this.calls = st.calls;
     this.fixRounds = st.fixRounds;
@@ -451,7 +494,7 @@ class Run {
   // ---------- stations ----------
 
   /** The seats look at the idea; a second round only when no majority wants to build. */
-  private async councilLoop() {
+  protected async councilLoop() {
     const size = isSmallJob(this.idea);
     if (this.o.council === "never" || (this.o.council === "auto" && size.small)) {
       this.mark("council", "skipped", undefined, this.o.council === "never" ? "Council turned off for this run" : size.why);
@@ -464,7 +507,7 @@ class Run {
       const prev = seats.filter((x) => x.round === round - 1);
       brief = await this.station("council", async () => {
         const results = await Promise.all(crew.map(async (m, seat) => {
-          const prompt = `Idea: ${this.idea}${round === 1 && this.recalled() ? `\n\n${this.recalled()}` : ""}${round > 1 ? `\n\nRound ${round}. The other seats said:\n${othersText(prev, m.id)}\nAnswer again: keep what still holds, change what they convinced you of.` : ""}`;
+          const prompt = `Idea: ${this.idea}${this.background() ? `\n\n${this.background()}` : ""}${round === 1 && this.recalled() ? `\n\n${this.recalled()}` : ""}${round > 1 ? `\n\nRound ${round}. The other seats said:\n${othersText(prev, m.id)}\nAnswer again: keep what still holds, change what they convinced you of.` : ""}`;
           const res: SeatResult = { agent: m.id, name: m.name, version: m.version, round, costUsd: 0 };
           try {
             const text = await this.ask(m, prompt, { seat, round });
@@ -497,7 +540,7 @@ class Run {
    * It ends when every score reaches the bar, or after MAX_DISCOVERY_ROUNDS, or when discovery has used its
    * share of the budget; the best-scored documents go on, and their scores are shown at the plan gate.
    */
-  private async discoverLoop() {
+  protected async discoverLoop() {
     // The next version of a shipped app keeps the design it has: its plan is the base.
     const base = this.screen?.kind === "feature" ? this.baseDocs : null;
     if (this.screen && !base) { this.mark("discover", "skipped", undefined, "The next version of a shipped app keeps its design"); return; }
@@ -526,16 +569,16 @@ class Run {
         const prompt = (last?.critique
           ? revisePrompt(this.asked, last.docs, last.critique, round, round === rounds)
           : base ? `${nextVersionPrompt(this.idea, base)}${this.brief ? `\n\n${briefText(this.brief)}` : ""}`
-          : `Idea: ${this.idea}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}`)
+          : this.designPrompt())
           + (found?.length ? `\n\n${researchForDesigner(found)}` : "")
           + `\n\n${found ? "Do not search the web on this call: the research above is what was found." : searches ? `You can afford at most ${searches} web searches on this call.` : "Do not search the web on this call: work from what you know and what is above."}`;
         let docs: ProductDocs;
-        try { docs = validateDocs(parseJsonBlock(await this.ask(designer, prompt, { round }, { capUsd: designCap }))); if (base) docs = mergeNextDocs(base, docs); }
+        try { docs = this.readDocs(parseJsonBlock(await this.ask(designer, prompt, { round }, { capUsd: designCap }))); if (base) docs = mergeNextDocs(base, docs); }
         catch (e) { if (!(e instanceof StopRun)) this.verdict(designer, "design", false, round, (e as Error).message); throw e; }
         // A separate agent judges: an agent asked to grade its own design praises it.
         const critic = this.one("critique");
         let critique: Critique | null = null;
-        try { critique = validateCritique(parseJsonBlock(await this.ask(critic, critiquePrompt(this.asked, docs, round, last?.critique ?? undefined), { round }, { capUsd: Math.max(0.05, this.o.maxUsd * 0.1) }))); }
+        try { critique = validateCritique(parseJsonBlock(await this.ask(critic, this.critiqueFor(docs, round, last?.critique ?? undefined), { round }, { capUsd: Math.max(0.05, this.o.maxUsd * 0.1) }))); }
         catch (e) { if (e instanceof StopRun) throw e; this.verdict(critic, "critique", false, round, (e as Error).message); }
         const pass = !!critique && critiquePasses(critique);
         if (critique) this.verdict(designer, "design", pass, round, pass ? undefined : critique.problems[0]?.problem);
@@ -559,7 +602,7 @@ class Run {
    * finding with the page it came from. The core counts the sourced findings; with none it asks once more.
    * A research call that fails does not stop the run: the design then says it was not researched.
    */
-  private async research(designer: CrewMember, searches: number, designCap: number): Promise<Finding[]> {
+  protected async research(designer: CrewMember, searches: number, designCap: number): Promise<Finding[]> {
     let findings: Finding[] = [];
     let error = "";
     for (let attempt = 1; attempt <= 2 && !findings.some((f) => f.source); attempt++) {
@@ -573,7 +616,7 @@ class Run {
     return findings;
   }
 
-  private async planLoop(written = false) {
+  protected async planLoop(written = false) {
     let feedback = "";
     for (;;) {
       // Resumed at the plan gate: the plan is already written, ask again.
@@ -622,7 +665,7 @@ class Run {
     }
   }
 
-  private async writeTests() {
+  protected async writeTests() {
     // Tests are locked once written, so they must at least parse: one quiet retry with the error before escalating.
     let feedback = "";
     // Run 3609: 8 locked files and 186 passing tests, and the Reviewer then found 9 of 12 acceptance criteria
@@ -668,7 +711,7 @@ class Run {
     this.log.append("factory.tests.locked", { run: this.id, hash: this.lockedHash, files: res.written.map((w) => w.path), sha });
   }
 
-  private async build() {
+  protected async build() {
     // The app kit goes in first, so the Builder writes the model and views on top of it.
     if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
     this.builder = this.one("build");
@@ -703,7 +746,7 @@ class Run {
    * still failing at the end goes to the test and fix loop as before. A retried build picks up at the first
    * feature not built yet.
    */
-  private async buildByFeature(more: Feature[] = [], pool?: number) {
+  protected async buildByFeature(more: Feature[] = [], pool?: number) {
     const builder = this.builder!;
     const path = join(this.dir, "features.json");
     const next = this.screen?.kind === "feature" && this.basePlan ? this.screen : null;
@@ -828,7 +871,7 @@ class Run {
    * When the search answered, or this is the Builder's second try, the rest are emptied. Returns the links
    * still dead in the files (only when nobody could search on the first try: the Builder then gets one more).
    */
-  private async settleDeadLinks(f: Feature, dead: string[], where: Record<string, string>, attempt: number): Promise<string[]> {
+  protected async settleDeadLinks(f: Feature, dead: string[], where: Record<string, string>, attempt: number): Promise<string[]> {
     const read = (file: string) => { try { return readFileSync(join(this.dir, file), "utf8"); } catch { return ""; } };
     let found: Record<string, string> | null = null;
     if (attempt === 1 && this.bench && this.o.maxUsd - this.spent >= FIND_LINKS_USD * 2) {
@@ -866,20 +909,58 @@ class Run {
   }
 
   /** A real crew works at the workbench (factory/workbench.ts): it runs the tests itself and fixes until they pass. */
-  private get bench() { return hasWorkbench(this.runtime); }
-  private benchContract(extra?: string) {
+  protected get bench() { return hasWorkbench(this.runtime); }
+  protected benchContract(extra?: string) {
     return workbenchContract({ test: "node --test", protect: ["anything under test/ (the locked acceptance tests)", "web/kit/ and server.js (the app kit)"], extra: [
       this.plan?.app ? "After the tests pass, the core also checks the app: it starts server.js, loads index.html and every module it imports, loads src/schema.js and tries create, edit and delete on every entity. Make sure `node -e \"import('./src/schema.js').then(m=>console.log(Object.keys(m)))\"` and `node --check` on every file in web/ and src/ succeed before you finish." : "",
       extra ?? "",
     ].filter(Boolean).join("\n") });
   }
 
+  // ---------- what another kind of run changes (factory/reporun.ts works in an existing codebase) ----------
+
+  /** An agent's system prompt on this run: its own role and, at the workbench, the workbench's contract. */
+  protected roleOf(m: CrewMember, bench: boolean): string { return bench ? `${m.role}\n\n${this.benchContract()}` : m.role; }
+  /** The shell commands a workbench agent may run in this run's folder. */
+  protected benchCommands(): string[] { return WORKBENCH_COMMANDS; }
+  /** Extra request fields for a workbench call (a run in a codebase with its own tools puts their folder first on the PATH). */
+  protected benchEnv(): { pathFirst?: string[] } { return {}; }
+  /** An agent that gets the file-reading tools in this run's folder whatever its own kit says (a codebase must be read to be designed for). */
+  protected readsFolder(_m: CrewMember): boolean { return false; }
+  /** Files no agent may change in this run's folder: the core puts them back. */
+  protected isProtected(p: string): boolean { return isLockedTest(p) || isKitFile(p); }
+  /** What the Council, the Designer and the Planner are told besides the idea. Nothing for a new app. */
+  protected background(): string { return ""; }
+  /** The Designer's first prompt of a discovery. */
+  protected designPrompt(): string { return `Idea: ${this.idea}${this.recalled() ? `\n\n${this.recalled()}` : ""}${this.brief ? `\n\n${briefText(this.brief)}` : ""}`; }
+  /** The Designer's answer as product documents, checked. */
+  protected readDocs(j: unknown): ProductDocs { return validateDocs(j); }
+  /** What the Critic is asked about one round's documents. */
+  protected critiqueFor(docs: ProductDocs, round: number, before?: Critique): string { return critiquePrompt(this.asked, docs, round, before); }
+  /** A fingerprint of every file an agent may change, so the stop rules see a fix that only put an old version back. */
+  protected fileHashes(): Record<string, string> {
+    return Object.fromEntries(Object.entries(readTree(this.dir)).filter(([p]) => !this.isProtected(p)).map(([p, c]) => [p, createHash("sha256").update(c).digest("hex")]));
+  }
+  /** What the Fixer is told about the product and where things are. */
+  protected fixBrief(): { spec: string; where: string } {
+    return { spec: `Spec:\n${JSON.stringify(this.plan, null, 2)}`, where: this.bench ? "The project is the current folder: SPEC.md, the locked tests in test/, the code. Read what you need." : `Locked tests (read only):\n${this.testsText()}` };
+  }
+  /** What the Reviewer reads, and how it is told to verify when it has the workbench. */
+  protected reviewBrief(): { prompt: string; verify: string } {
+    const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md" && !isKitFile(p) && !p.startsWith("data/")).map(([p, c]) => `<<<FILE ${p}\n${c.length > 12000 ? c.slice(0, 12000) + "\n...(cut: file continues)\n" : c}FILE>>>`).join("\n");
+    return { prompt: `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 48000)}`, verify: VERIFY_CONTRACT };
+  }
+  /** What the build gate asks. */
+  protected acceptWord(): string { return "Accept the build"; }
+  /** More for the run's last event (a run in a codebase says its branch and pull request). */
+  protected finishExtra(): Record<string, unknown> { return {}; }
+
   /**
    * What an agent left after its call: with the workbench, the files it changed on disk (anything locked put
    * back first); always, any whole files it answered as text blocks (the practice crew, or an agent whose
    * tools failed). The result has the shape of writeFiles, for the heat map.
    */
-  private takeWork(text: string): ReturnType<typeof writeFiles> {
+  protected takeWork(text: string): ReturnType<typeof writeFiles> {
     const restored = this.bench ? restoreProtected(this.dir, (p) => isLockedTest(p) || isKitFile(p)) : [];
     if (restored.some(isKitFile)) installKit(this.dir);
     const blocks = parseFileBlocks(text);
@@ -892,12 +973,12 @@ class Run {
     return res;
   }
 
-  private builder: CrewMember | null = null;
-  private startedAt = Date.now();
-  private lastFixFiles: Record<string, string> = {};
-  private lastFixBefore: Record<string, string> = {};
+  protected builder: CrewMember | null = null;
+  protected startedAt = Date.now();
+  protected lastFixFiles: Record<string, string> = {};
+  protected lastFixBefore: Record<string, string> = {};
 
-  private async testFixLoop(extraFeedback = "", rerun = false) {
+  protected async testFixLoop(extraFeedback = "", rerun = false) {
     let run = await this.station("test", () => this.runSuite(0));
     if (!rerun && this.builder) this.verdict(this.builder, "build", run.failed === 0, 0, run.failed ? `${run.failed} failing` : undefined);
     let history: RoundRecord[] = [];
@@ -978,7 +1059,7 @@ class Run {
     }
   }
 
-  private async fix(run: TestRun, round: number, note: string): Promise<CrewMember> {
+  protected async fix(run: TestRun, round: number, note: string): Promise<CrewMember> {
     const failures = run.cases.filter((c) => !c.pass).map((c) => `- ${c.name} (${c.file}): ${(c.error ?? "failed").slice(0, 1200)}`).join("\n");
     const deeper = this.ladder === "deeper";
     const fixer = this.one("fix");
@@ -987,8 +1068,9 @@ class Run {
     const up = strongerModel(this.modelOf(fixer));
     if (deeper && !model && up !== this.modelOf(fixer)) this.log.append("factory.ladder", { run: this.id, from: "deeper", to: "deeper", reason: `kept ${this.modelOf(fixer)}: $${(this.o.maxUsd - this.spent).toFixed(2)} left is below what ${up} needs ($${modelFloorUsd(up).toFixed(2)})`, round });
     this.lastFixModel = model ?? this.modelOf(fixer);
+    const brief = this.fixBrief();
     const prompt = [
-      `Spec:\n${JSON.stringify(this.plan, null, 2)}`,
+      brief.spec,
       // Only the lines that say what failed and where (SF-16), at most 100.
       failures ? `Failing tests (the core's own run):\n${failures}\n\nTest output (failure lines):\n${failureLines(run.output, 100, 2500) || "(none: run the failing file with node yourself to see the raw error)"}` : "All tests pass.",
       note ? `The reviewer of the build asked for: ${note}` : "",
@@ -996,12 +1078,11 @@ class Run {
       this.keptReason ? `A locked test was questioned and the Tester kept it: ${this.keptReason}` : "",
       deeper ? "The fixes so far did not move the failures. Step back before you edit: write down two or three different explanations of the root cause, check each one by running code (not by reading only), then fix the one the evidence supports. If the evidence says a locked test itself is wrong, say so with the TEST_WRONG line instead of working around it." : "",
       // At the workbench the agent reads what it needs; without it, it gets the whole project as text.
-      this.bench ? `The project is the current folder: SPEC.md, the locked tests in test/, the code. Read what you need.` : `Locked tests (read only):\n${this.testsText()}`,
+      brief.where,
       this.bench ? "" : `Current code:\n${this.codeText()}`,
     ].filter(Boolean).join("\n\n");
     // What each file held before this round, so the stop rules (SF-25) see a revert to the build's version.
-    const hashes = () => Object.fromEntries(Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && !isKitFile(p)).map(([p, c]) => [p, createHash("sha256").update(c).digest("hex")]));
-    const beforeAll = hashes();
+    const beforeAll = this.fileHashes();
     const text = await this.askBench(fixer, prompt, { round }, { model });
     const res = this.takeWork(text);
     this.lastFixBefore = Object.fromEntries(res.written.map((w) => [w.path, beforeAll[w.path]]).filter(([, h]) => h));
@@ -1016,37 +1097,37 @@ class Run {
   }
 
   /** What every fix round so far tried and what came of it (H5): the next round must not repeat a failed approach. */
-  private attempts: { round: number; agent: string; model: string; before: number; after: number; files: string[]; said: string; dispute?: string }[] = [];
-  private lastFixSaid = "";
-  private lastDispute: { file: string; evidence: string } | null = null;
+  protected attempts: { round: number; agent: string; model: string; before: number; after: number; files: string[]; said: string; dispute?: string }[] = [];
+  protected lastFixSaid = "";
+  protected lastDispute: { file: string; evidence: string } | null = null;
   /** The escalation ladder (H6): a normal fix, then a deeper one on a stronger model, then the locked test is questioned, then you. */
-  private ladder: "normal" | "deeper" | "dispute" | "person" = "normal";
-  private disputed = false;
-  private lastFixModel = "";
+  protected ladder: "normal" | "deeper" | "dispute" | "person" = "normal";
+  protected disputed = false;
+  protected lastFixModel = "";
   /** Why the Tester kept a questioned test: the Fixer works from it. */
-  private keptReason = "";
+  protected keptReason = "";
 
   /** One step up in model for a deeper fix, if what is left of the run's budget can pay for it; else none. */
-  private deeperModel(m: CrewMember): string | undefined {
+  protected deeperModel(m: CrewMember): string | undefined {
     const cur = this.modelOf(m);
     const up = strongerModel(cur);
     if (up === cur) return undefined;
     return this.o.maxUsd - this.spent >= modelFloorUsd(up) ? up : undefined;
   }
 
-  private attemptsText(): string {
+  protected attemptsText(): string {
     if (!this.attempts.length) return "";
     return "What was already tried in this run (do not repeat an approach that did not work):\n" + this.attempts.slice(-6).map((a) =>
       `- Round ${a.round} (${a.agent}, ${a.model}): ${a.files.length ? `changed ${a.files.slice(0, 6).join(", ")}` : "changed nothing"}; failing ${a.before} → ${a.after}.${a.said ? ` It said: ${a.said.replace(/\n/g, " ").slice(0, 300)}` : ""}${a.dispute ? ` It disputed a test: ${a.dispute.slice(0, 200)}` : ""}`).join("\n");
   }
 
-  private modelOf(m: CrewMember) { return this.o.models[m.id] ?? this.o.models[m.station] ?? m.model; }
+  protected modelOf(m: CrewMember) { return this.o.models[m.id] ?? this.o.models[m.station] ?? m.model; }
 
   /**
    * The locked test is questioned (ladder step 3): the Tester sees the dispute and the evidence and either
    * corrects the test file (the suite is locked again, on the record) or keeps it. At most once per run.
    */
-  private async disputeTests(run: TestRun): Promise<boolean> {
+  protected async disputeTests(run: TestRun): Promise<boolean> {
     this.disputed = true;
     // A file that failed as a whole although tests in it passed: what broke runs outside any test (run 2366).
     // A file with no passing test failed to load, which is as likely the code's fault: no evidence against the test.
@@ -1078,7 +1159,7 @@ class Run {
   }
 
   /** What the person asked for that the plan leaves out, as short phrases; [] when it covers everything or the check fails. */
-  private async planGaps(plan: Plan): Promise<string[]> {
+  protected async planGaps(plan: Plan): Promise<string[]> {
     const reqs = this.docs ? mustRequirements(this.docs) : [];
     if (!reqs.length && this.idea.trim().split(/[.!?\n]+/).filter((x) => x.trim().length > 12).length < 3) return [];
     try {
@@ -1098,15 +1179,15 @@ class Run {
   }
 
   /** The Reviewer reads the green build against the spec. High findings go to the Fixer once; the rest ride to the build gate. */
-  private reviewNotes: ReviewResult | null = null;
-  private async reviewLoop() {
+  protected reviewNotes: ReviewResult | null = null;
+  protected async reviewLoop() {
     if (!this.o.review) { this.mark("review", "skipped", undefined, "review turned off for this run"); return; }
     for (let round = 1; round <= 2; round++) {
       const r = await this.station("review", async () => {
         const m = this.one("review");
-        const src = Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md" && !isKitFile(p) && !p.startsWith("data/")).map(([p, c]) => `<<<FILE ${p}\n${c.length > 12000 ? c.slice(0, 12000) + "\n...(cut: file continues)\n" : c}FILE>>>`).join("\n");
-        const verify = this.bench ? `\n\n${VERIFY_CONTRACT}\nThe acceptance criteria:\n${this.plan.acceptance.map((a, i) => `${i + 1}. ${a}`).join("\n")}` : "";
-        const reviewPrompt = `Spec:\n${JSON.stringify(this.plan, null, 2)}\n\nCode (the locked tests pass):\n${src.slice(0, 48000)}`;
+        const rb = this.reviewBrief();
+        const verify = this.bench ? `\n\n${rb.verify}\nThe acceptance criteria:\n${this.plan.acceptance.map((a, i) => `${i + 1}. ${a}`).join("\n")}` : "";
+        const reviewPrompt = rb.prompt;
         // Run 3185: verifying 12 criteria of a $10 product at the workbench ran past the Reviewer's fixed $0.20 and
         // the run stopped with no verdict. The cap grows with the run, and a Reviewer that still runs out gives its
         // verdict from reading the code instead of leaving the person a Retry that would die the same way.
@@ -1161,18 +1242,18 @@ class Run {
    * judges it against the product documents. The core decides from its answers. What fails goes to the fix
    * loop as work and is judged once more; what is still open then is shown at the build gate.
    */
-  private evaluation: Evaluation | null = null;
+  protected evaluation: Evaluation | null = null;
   /** Per screen feature, the designed items its last look did not find. They join the judge's requirements. */
-  private screenOpen = new Map<string, string[]>();
+  protected screenOpen = new Map<string, string[]>();
   /** The product documents as the judge reads them: the design, plus what the screens still lacked when built. */
-  private judgeDocs(): ProductDocs | null {
+  protected judgeDocs(): ProductDocs | null {
     if (!this.docs) return null;
     // A next version is judged on what it adds: the rest was judged when it shipped, and its tests are locked.
     const docs = this.baseDocs ? { ...this.docs, requirements: newRequirements(this.baseDocs, this.docs) } : this.docs;
     return withScreenItems(docs, [...this.screenOpen.values()].flat());
   }
   /** The judge's look at one screen just built: what of its design a person would not find. [] when it all shows or the look cannot run. */
-  private async lookAtScreen(f: Feature, attempt = 1): Promise<string[]> {
+  protected async lookAtScreen(f: Feature, attempt = 1): Promise<string[]> {
     const id = f.what.match(/^The view "([^"]+)"/)?.[1];
     const docs = id && this.docs ? screenLookDocs(this.docs, id, f.title.replace(/^Screen: /, "")) : null;
     if (id && !docs) this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, attempt, skipped: "no designed screen matches this view" });
@@ -1192,7 +1273,7 @@ class Run {
     } catch (e) { if (e instanceof StopRun) throw e; return []; }
   }
 
-  private async evaluateLoop() {
+  protected async evaluateLoop() {
     const skip = (why: string) => { this.mark("evaluate", "skipped", undefined, why); };
     if (!this.docs || !this.plan.app || (this.screen && !this.baseDocs)) return skip("No product design to judge this build against");
     if (!this.judgeDocs()!.requirements.some((r) => r.must)) return skip("This version adds no requirement of its own to judge");
@@ -1254,8 +1335,8 @@ class Run {
   }
 
   /** A build-gate send-back the run had not acted on when the app closed; it is carried out before the gate asks again. */
-  private pendingSendBack: string | null = null;
-  private async acceptLoop() {
+  protected pendingSendBack: string | null = null;
+  protected async acceptLoop() {
     if (this.pendingSendBack) {
       const note = this.pendingSendBack;
       this.pendingSendBack = null;
@@ -1268,7 +1349,7 @@ class Run {
       const judged = this.evaluation && !evaluationPasses(this.evaluation) ? ` (the product judge: ${open ? `${open} of ${this.evaluation.requirements.length} requirements not seen working` : "scores under the bar"}; read the Judge tab first)` : "";
       const notes = judged ? judged : unmet ? ` (${unmet} acceptance criteri${unmet > 1 ? "a" : "on"} not seen working; read the review first)`
         : this.reviewNotes?.findings.length ? ` (the Reviewer left ${this.reviewNotes.findings.length} note${this.reviewNotes.findings.length > 1 ? "s" : ""})` : "";
-      const d = await this.gate("gateB", `Accept the build${notes}`);
+      const d = await this.gate("gateB", `${this.acceptWord()}${notes}`);
       if (d.approve) return;
       if (!d.note) throw new StopRun("You rejected the build.");
       await this.sendBack(d.note);
@@ -1280,7 +1361,7 @@ class Run {
    * this loop": it points at what the judge and the Reviewer found, so those go with it. With a real crew and
    * a product budget the work is built as features in fresh sessions (the note first), then judged again.
    */
-  private async sendBack(note: string) {
+  protected async sendBack(note: string) {
     const docs = this.judgeDocs();
     const open = this.evaluation && docs && !evaluationPasses(this.evaluation) ? this.evaluation : null;
     const features = join(this.dir, "features.json");
@@ -1315,7 +1396,7 @@ class Run {
    * After a repair of what the Reviewer saw fail, it runs those criteria again, and only those, so the build
    * gate says what is true now. Without this the gate kept the old count however well the repair went.
    */
-  private async recheckReview() {
+  protected async recheckReview() {
     const r = this.reviewNotes;
     const failing = (r?.criteria ?? []).filter((c) => !c.pass);
     if (!r || r.verdict !== "fix" || !failing.length || !this.bench) return;
@@ -1324,7 +1405,7 @@ class Run {
     if (cap < 0.1) return;
     const round = 1 + this.log.list({ type: "factory.review", limit: 1e6 }).filter((e) => (e.payload as { run: number }).run === this.id).length;
     try {
-      const text = await this.ask(m, `Spec:\n${JSON.stringify({ name: this.plan.name, interface: this.plan.interface }, null, 2)}\n\n${VERIFY_CONTRACT}\n\nThese acceptance criteria failed when you ran them on an earlier review, and the code was repaired since. Read only the code they touch, run ONLY these criteria again, and answer with your JSON: "findings" empty unless one of these still fails, and one "criteria" entry per criterion below, in this order.\n${failing.map((c, i) => `${i + 1}. ${c.text}`).join("\n")}`, { round }, { capUsd: cap, raiseCap: true });
+      const text = await this.ask(m, `Spec:\n${JSON.stringify({ name: this.plan.name, interface: this.plan.interface }, null, 2)}\n\n${this.reviewBrief().verify}\n\nThese acceptance criteria failed when you ran them on an earlier review, and the code was repaired since. Read only the code they touch, run ONLY these criteria again, and answer with your JSON: "findings" empty unless one of these still fails, and one "criteria" entry per criterion below, in this order.\n${failing.map((c, i) => `${i + 1}. ${c.text}`).join("\n")}`, { round }, { capUsd: cap, raiseCap: true });
       try { restoreFromHead(this.dir, changedFiles(this.dir)); } catch { /* nothing to put back */ }
       const again = mergeRecheck(r, parseReview(text));
       this.verdict(m, "review", true, round);
@@ -1338,7 +1419,7 @@ class Run {
   }
 
   /** One more look by the product judge, so the build gate shows where the product stands now. */
-  private async judgeOnce() {
+  protected async judgeOnce() {
     const docs = this.judgeDocs();
     if (!docs || !this.plan.app) return;
     const screens = await this.f.readScreens(this.dir).catch(() => null);
@@ -1354,7 +1435,7 @@ class Run {
     } catch (err) { if (err instanceof StopRun) throw err; this.verdict(judge, "evaluate", false, round, (err as Error).message); }
   }
 
-  private async ship(): Promise<string> {
+  protected async ship(): Promise<string> {
     // Ready-to-run inputs for the Run tab, so nobody has to guess the arguments.
     // Apps start with one press and need none; a CLI the idea asked for keeps its examples.
     const examples = this.plan.app && !this.plan.cli ? [] : (this.plan.examples ?? []).filter((x) => x && x.args != null).slice(0, 5);
@@ -1369,7 +1450,7 @@ class Run {
 
   // ---------- plumbing ----------
 
-  private async runSuite(round: number): Promise<TestRun> {
+  protected async runSuite(round: number): Promise<TestRun> {
     if (testsHash(this.dir) !== this.lockedHash) throw new Error("The locked acceptance tests were changed. Refusing to run.");
     // Fast gates (SF-26): free checks on what the last commit changed, before the slower suite. A failure goes straight to the fixer.
     let changed: string[] = [];
@@ -1448,24 +1529,24 @@ class Run {
    * pasting a whole shipped app into the prompt was paid for again on every step of the call, and for an app
    * the size of a product it did not fit at all. Without a workbench the text is all the agent has.
    */
-  private codeForBuilder(): string[] {
+  protected codeForBuilder(): string[] {
     if (this.bench) return ["The shipped code and its locked acceptance tests (test/, read only) are in your folder. Read SPEC.md, PROGRESS.md if there is one, src/schema.js and web/app.js first, then only the files the change touches, in one command."];
     return [`Locked acceptance tests (read only):\n${this.testsText()}`, `Current code:\n${this.codeText()}`];
   }
 
-  private codeText() {
+  protected codeText() {
     // The kit is the same in every app and the agents may not change it: they get its API in their contract, not its source.
     return Object.entries(readTree(this.dir)).filter(([p]) => !isLockedTest(p) && p !== "SPEC.md" && !isKitFile(p) && !p.startsWith("data/"))
       .map(([p, c]) => `<<<FILE ${p}\n${c}FILE>>>`).join("\n");
   }
 
-  private testsText() {
+  protected testsText() {
     return Object.entries(readTree(this.dir)).filter(([p]) => isLockedTest(p)).map(([p, c]) => `<<<FILE ${p}\n${c}FILE>>>`).join("\n");
   }
 
-  private recallText: string | null = null;
+  protected recallText: string | null = null;
   /** The person's past notes and decisions closest to this idea (SF-22), worked out once per run and logged. */
-  private recalled(): string {
+  protected recalled(): string {
     if (this.recallText === null) {
       // Only the person's own words (notes, tickets). Past plans and Council decisions anchored every new build
       // of an idea to the first, weakest one (Assaf, 2026-11-13: "every next version is based on the first").
@@ -1477,14 +1558,14 @@ class Run {
   }
 
   /** The one agent working a single-seat station right now. */
-  private one(slot: Slot): CrewMember {
+  protected one(slot: Slot): CrewMember {
     const m = this.f.crew.crewFor(slot)[0];
     if (!m) throw new Error(`Nobody works the ${slot} station`);
     return m;
   }
 
   /** The verifier's verdict on one agent's work: what the Agent Bay's pass rate is made of. */
-  private verdict(m: CrewMember, station: string, pass: boolean, round?: number, note?: string) {
+  protected verdict(m: CrewMember, station: string, pass: boolean, round?: number, note?: string) {
     this.log.append("agent.verdict", { agent: m.id, version: m.version, station, run: this.id, round, pass, note: note?.slice(0, 300) });
   }
 
@@ -1494,13 +1575,13 @@ class Run {
    * cap and left files in the folder, the work goes on by itself: a fresh call reads what is there and finishes
    * it, at most twice, while the run's own budget allows. Anything else fails as before.
    */
-  private async askBench(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; capUsd?: number; raiseCap?: boolean } = {}): Promise<string> {
+  protected async askBench(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; capUsd?: number; raiseCap?: boolean } = {}): Promise<string> {
     try { return await this.ask(m, prompt, meta, x); }
     catch (e) {
       if (!this.bench || !/max_budget/i.test(String((e as Error).message))) throw e;
       let last = e;
       for (let n = 1; n <= 2; n++) {
-        const landed = changedFiles(this.dir).filter((p) => !isLockedTest(p) && !isKitFile(p));
+        const landed = changedFiles(this.dir).filter((p) => !this.isProtected(p));
         if (!landed.length || this.o.maxUsd - this.spent < 0.05) throw last;
         this.log.append("factory.continued", { run: this.id, station: m.station, agent: m.id, round: meta.round, attempt: n, files: landed.slice(0, 40), reason: "the call ran out of its budget with work in progress" });
         try {
@@ -1517,10 +1598,10 @@ class Run {
 
   /** One agent call, inside both its own cap and what is left of the run's cap. */
   /** The CLI session of the last successful call, so a follow-up can continue it. */
-  private lastSession: string | undefined;
+  protected lastSession: string | undefined;
   /** Time this run spent waiting at gates for the person. */
-  private waitedMs = 0;
-  private async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number; /** The cap may go above the agent's own per-call budget (it stays inside the run's). */ raiseCap?: boolean } = {}): Promise<string> {
+  protected waitedMs = 0;
+  protected async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number; /** The cap may go above the agent's own per-call budget (it stays inside the run's). */ raiseCap?: boolean } = {}): Promise<string> {
     if (this.o.maxUsd - this.spent < 0.01) {
       // Council seats ask at the same time: one question, and the others see the answer.
       await this.gateTurn(async () => {
@@ -1547,13 +1628,14 @@ class Run {
     // The Reviewer verifies at the workbench too, but read and run only: no Edit or Write.
     const verifier = !x.noTools && this.bench && m.station === "review" && !!this.dir && existsSync(this.dir);
     const kit = kitArgs(m);
+    const reads = this.readsFolder(m);
     const r = await runAgent(this.log, this.runtime, m.id, {
-      prompt, model: x.model ?? this.modelOf(m), systemPrompt: bench ? `${m.role}\n\n${this.benchContract()}` : m.role, budgetUsd: Number(cap.toFixed(4)),
+      prompt, model: x.model ?? this.modelOf(m), systemPrompt: this.roleOf(m, bench), budgetUsd: Number(cap.toFixed(4)),
       ...kit,
       // An agent that reads files reads this project's folder, once there is one.
-      ...(this.dir && existsSync(this.dir) && m.tools.some((t) => READ_TOOLS.includes(t)) ? { cwd: this.dir } : {}),
-      ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: WORKBENCH_COMMANDS, timeoutMs: 25 * 60_000, noMemory: true, ownKitOnly: true } : {}),
-      ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: WORKBENCH_COMMANDS, timeoutMs: 15 * 60_000, noMemory: true } : {}),
+      ...(this.dir && existsSync(this.dir) && (reads || m.tools.some((t) => READ_TOOLS.includes(t))) ? { cwd: this.dir, ...(reads ? { tools: [...new Set([...(kit.tools ?? []), ...READ_TOOLS])] } : {}) } : {}),
+      ...(bench ? { cwd: this.dir, tools: [...new Set([...WORKBENCH_TOOLS, ...(kit.tools ?? [])])], commands: this.benchCommands(), timeoutMs: 25 * 60_000, noMemory: true, ownKitOnly: true, ...this.benchEnv() } : {}),
+      ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: this.benchCommands(), timeoutMs: 15 * 60_000, noMemory: true, ...this.benchEnv() } : {}),
       ...(x.resume ? { resume: x.resume } : {}),
       ...(x.noTools ? { tools: [] } : {}),
     }, { factoryRun: this.id, station: m.station, agentVersion: m.version, ...meta, ...(bench ? { workbench: true } : {}) });
@@ -1565,7 +1647,7 @@ class Run {
   }
 
   /** Run one station: mark it active, do the work, require its visuals, mark it passed. Failures escalate once. */
-  private async station<T>(id: StationId, work: () => Promise<T> | T, round?: number): Promise<T> {
+  protected async station<T>(id: StationId, work: () => Promise<T> | T, round?: number): Promise<T> {
     let attempt = 1;
     let lastError = "";
     for (;;) {
@@ -1600,27 +1682,27 @@ class Run {
     }
   }
 
-  private mark(station: StationId, state: "active" | "pass" | "fail" | "incomplete" | "waiting" | "skipped", round?: number, note?: string) {
+  protected mark(station: StationId, state: "active" | "pass" | "fail" | "incomplete" | "waiting" | "skipped", round?: number, note?: string) {
     this.log.append("factory.station", { run: this.id, station, state, round, note, spentUsd: Number(this.spent.toFixed(6)), maxUsd: this.o.maxUsd });
   }
 
-  private autoRetriesUsed = 0;
-  private budgetRefused = false;
-  private hint: { station: StationId; note: string; error: string } | null = null;
-  private gateQueue: Promise<unknown> = Promise.resolve();
+  protected autoRetriesUsed = 0;
+  protected budgetRefused = false;
+  protected hint: { station: StationId; note: string; error: string } | null = null;
+  protected gateQueue: Promise<unknown> = Promise.resolve();
 
   /** One question at a time per run: parallel work (Council seats) waits its turn instead of overwriting a waiting gate. */
-  private gateTurn<T>(fn: () => Promise<T>): Promise<T> {
+  protected gateTurn<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.gateQueue.then(fn, fn);
     this.gateQueue = next.catch(() => undefined);
     return next;
   }
 
-  private gate(gate: GateId, question: string, opts: GateOpts = {}, queued = false): Promise<GateDecision> {
+  protected gate(gate: GateId, question: string, opts: GateOpts = {}, queued = false): Promise<GateDecision> {
     return queued ? this.askGate(gate, question, opts) : this.gateTurn(() => this.askGate(gate, question, opts));
   }
 
-  private async askGate(gate: GateId, question: string, opts: GateOpts): Promise<GateDecision> {
+  protected async askGate(gate: GateId, question: string, opts: GateOpts): Promise<GateDecision> {
     const station: StationId = gate === "escalation" ? "fix" : gate;
     if (gate !== "escalation") this.mark(station, "waiting");
     const { neverAuto: _n, ...info } = opts;
@@ -1640,7 +1722,7 @@ class Run {
     return d;
   }
 
-  private finish(outcome: "shipped" | "stopped" | "failed", reason: string, sha?: string) {
+  protected finish(outcome: "shipped" | "stopped" | "failed", reason: string, sha?: string) {
     // A screen run that does not ship leaves the shipped project exactly as it was.
     if (this.screen && outcome !== "shipped" && this.dir && existsSync(join(this.dir, ".git"))) {
       try { git(this.dir, "reset", "-q", "--hard", this.screen.baseSha); git(this.dir, "clean", "-fdq"); reason += ` The folder is back at ${this.screen.baseSha.slice(0, 7)}, as it shipped.`; } catch { /* leave it; the reason says what happened */ }
@@ -1652,7 +1734,7 @@ class Run {
     } catch { /* a review that cannot be written never stops a run from ending */ }
     this.log.append("factory.run.finished", {
       run: this.id, outcome, reason, dir: this.dir || null, sha: sha ?? null, plan: this.plan?.name ?? null,
-      totalUsd: Number(this.spent.toFixed(6)), agentCalls: this.calls, fixRounds: this.fixRounds,
+      totalUsd: Number(this.spent.toFixed(6)), agentCalls: this.calls, fixRounds: this.fixRounds, ...this.finishExtra(),
     });
   }
 }

@@ -12,6 +12,7 @@ import { captureSignal, listSignals } from "./signals.js";
 import { costSummary, runAgent } from "./agents.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { duplicateReply, Factory, type GateId } from "./factory/loop.js";
+import { enableRepoRuns, githubShipper } from "./factory/reporun.js";
 import { OrderEngine, type OrderOptions } from "./order/engine.js";
 import { canonFor, type NodeKind } from "./order/model.js";
 import { AgentBay } from "./bay/bay.js";
@@ -108,11 +109,19 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       wip: st.ticketsWip ?? AUTO_WORK_DEFAULT.wip,
     };
   };
+  const canShip = () => (crewMode() === "real" ? null : "the practice crew never opens a PR; switch to the real crew in Systems for that");
+  // The engine also runs in codebases it did not write: imported repos get the same stations, on a branch of a clone.
+  const repoRuns = enableRepoRuns(factory, log, { github, ship: githubShipper(github, canShip) });
   const tickets = new Tickets(log, {
     runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1), workRoot: join(dirname(projectsDir), "ticket-work"),
     autoWork, canWork: () => (gitReady() ? null : "Git is not installed"),
-    github, canShip: () => (crewMode() === "real" ? null : "the practice crew never opens a PR; switch to the real crew in Systems for that"),
+    github, canShip, repoRuns,
   });
+  /** An ask in a project that lives in a repo: a ticket there, sent down the route that fits (the reply both doors share). */
+  const repoAsk = (projectId: number, idea: string, o: { maxUsd?: number; route?: "light" | "engine"; autoApprove?: boolean }) => {
+    const r = tickets.askInRepo(projectId, idea, o);
+    return r && { ticket: { id: r.ticket.id, key: r.ticket.key, title: r.ticket.title }, run: r.run, branch: r.branch ?? null, route: r.route ?? null };
+  };
   // Every fault becomes a bug ticket by itself (docs/tickets.md, "Errors become bugs").
   // SoftwareFactory's own project: the home of asks about the app and of the errors it catches. Made when first needed.
   const ensureSelf = () => ensureSelfProject(log, (name) => order.createNode("project", name));
@@ -310,6 +319,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (req.method === "POST" && url.pathname === "/api/factory/runs") {
         const body = await readJson(req);
         if (!gitReady()) return json(res, 409, { error: "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again." });
+        // Said inside a project that lives in a repo: it is work in that repo (a ticket, on the route that fits), not a new app.
+        if (typeof body.projectId === "number" && !body.newApp && String(body.idea ?? "").trim()) {
+          try {
+            const r = repoAsk(body.projectId, String(body.idea).trim(), { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, route: body.route === "light" || body.route === "engine" ? body.route : undefined, autoApprove: body.autoApprove === true });
+            if (r) return json(res, 202, { projectId: body.projectId, inRepo: true, ...r });
+          } catch (e) { return json(res, 409, { error: (e as Error).message, inRepo: true }); }
+        }
         const dup = duplicateReply(factory, String(body.idea ?? ""), body.again);
         if (dup) return json(res, dup[0], dup[1]);
         const run = factory.start(String(body.idea ?? ""), {
@@ -357,7 +373,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (url.pathname === "/api/projects" || url.pathname.startsWith("/api/projects/")) {
         const canBuild = () => gitReady() ? null : "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again.";
-        const r = await projectsRoute({ log, order, factory, readJson, canBuild }, req, url);
+        const r = await projectsRoute({ log, order, factory, readJson, canBuild, repoAsk }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (req.method === "POST" && url.pathname === "/api/tickets/capture") {
@@ -633,7 +649,7 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
     case "work":
       if (!gitReady()) return [409, { error: "Git is not installed, so the crew has nowhere to keep what it builds. Install Git for Windows (git-scm.com/download/win), then press Work it again." }];
       try {
-        return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true, again: body.again === true, where: body.where === "repo" || body.where === "new" ? body.where : "auto" })];
+        return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true, again: body.again === true, where: body.where === "repo" || body.where === "new" ? body.where : "auto", route: body.route === "light" || body.route === "engine" ? body.route : undefined })];
       } catch (e) {
         const dup = (e as { duplicate?: Record<string, unknown> }).duplicate;
         if (dup) return [409, { error: (e as Error).message, ...dup }];

@@ -54,8 +54,15 @@ export async function startFactoryRun(idea: string, maxUsd?: number, projectId?:
   const r = await fetch(`${API}/api/factory/runs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idea, maxUsd, projectId, ...(again ? { again } : {}) }) });
   const j = await r.json();
   if (!r.ok) throw Object.assign(new Error(j.error ?? "could not start the run"), { data: j });
-  return j.run as number;
+  return { run: j.run ?? null, inRepo: !!j.inRepo, ticket: j.ticket, route: j.route ?? undefined, branch: j.branch ?? undefined } as StartedWork;
 }
+
+/**
+ * What an ask started. In a project made from scratch it is a factory run. In a project that lives in a
+ * repo it is a ticket there, worked on the route that fits: one Builder session (no run) or the whole
+ * engine (a run).
+ */
+export interface StartedWork { run: number | null; inRepo?: boolean; ticket?: { id: number; key: string; title: string }; route?: { route: "light" | "engine"; why: string }; branch?: string }
 
 export async function resumeRun(run: number) {
   const r = await fetch(`${API}/api/factory/runs/${run}/resume`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
@@ -112,6 +119,27 @@ export interface FactoryRunView {
   finished?: { outcome: "shipped" | "stopped" | "failed"; reason: string; totalUsd: number | null; agentCalls?: number; sha?: string; resumable?: boolean };
   /** Picked up again after the app closed: from which station, how many times, and whether on its own. */
   resumed?: { from: string; auto: boolean; count: number; at: string };
+  /** Set when the run works in a codebase that already exists (an imported repo), on a branch of a clone. */
+  repo?: RepoRunView;
+}
+
+/** An engine run in an existing codebase: where it works, what it found there, and where its branch went. */
+export interface RepoRunView {
+  source: string; name: string; branch: string;
+  ticket?: { id: number; key: string };
+  base?: string; dir?: string; stack?: string[];
+  /** How the repo's own tests run, or null when it has none SoftwareFactory can run. */
+  tests?: string | null;
+  /** How its site starts, or null. */
+  starts?: string | null;
+  /** What could not be set up on this computer. */
+  notes?: string[];
+  /** The repo's tests before anything changed. */
+  baseline?: { passed: number; failed: number } | null;
+  sha?: string; files?: string[];
+  pr?: { number: number; url: string; repo: string };
+  /** Why the branch stayed in the clone instead of becoming a pull request. */
+  kept?: string;
 }
 
 export interface EvaluationView { round: number; pass: boolean; skipped?: string; bar: number; screens: number; requirements: { id: string; met: boolean; evidence: string; /** Set for a screen item carried from the build: it is in no product document. */ text?: string }[]; scores: Record<string, number>; problems: { where: string; problem: string; fix: string }[] }
@@ -120,6 +148,8 @@ export interface PlanView {
   name: string; summary: string; acceptance: string[];
   tasks: { id: string; title: string; dependsOn: string[] }[];
   interface?: string; ui?: string; files?: string[];
+  /** A plan for a change to an existing codebase: its features in build order, how it is tested, what could break. */
+  repo?: boolean; features?: { id: string; title: string; what: string; files: string[]; done: string }[]; testing?: string; risks?: string[];
   entities?: { name: string; label?: string; fields: { name: string; type?: string; required?: boolean; options?: string[]; to?: string }[] }[];
   flows?: { name: string; steps: string[] }[];
   views?: { id: string; label: string; shows: string }[];
@@ -156,7 +186,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
   for (const e of events) {
     const p = e.payload ?? {};
     if (e.type === "factory.run.started") {
-      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], discovery: [], features: [], reviews: [], evaluations: [], loop: [] });
+      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], discovery: [], features: [], reviews: [], evaluations: [], loop: [], ...(p.kind === "repo" && p.repo ? { repo: { source: p.repo.source, name: p.repo.name, branch: p.repo.branch, ticket: p.repo.ticket } } : {}) });
       continue;
     }
     const r = runs.get(p.run ?? p.factoryRun);
@@ -170,6 +200,8 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         if (p.station === "fix" && p.round) r.fixRounds = Math.max(r.fixRounds, p.round);
         break;
       case "factory.plan": r.plan = p.plan; r.dir = p.dir; break;
+      case "factory.repo": if (r.repo) Object.assign(r.repo, { base: p.base, dir: p.dir, stack: p.stack ?? [], tests: p.tests ?? null, starts: p.starts ?? null, notes: p.notes ?? [] }); r.dir = p.dir; break;
+      case "factory.branch": if (r.repo) Object.assign(r.repo, { sha: p.sha, files: p.files ?? [], pr: p.pr, kept: p.kept }); break;
       case "factory.plan.gaps": (r.planGaps ??= []).push({ missing: p.missing ?? [], added: p.added !== false }); break;
       case "factory.council": r.council.push({ round: p.round, seats: p.seats, brief: p.brief }); break;
       case "factory.retro": r.retro = { outcome: p.outcome, reason: p.reason ?? "", spentUsd: p.spentUsd ?? 0, maxUsd: p.maxUsd ?? 0, minutes: p.minutes ?? 0, stages: p.stages ?? [], agents: p.agents ?? [], good: p.good ?? [], bad: p.bad ?? [] }; break;
@@ -192,7 +224,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
         break;
       }
       case "factory.ladder": r.loop.push({ kind: "ladder", at: e.ts, from: p.from, to: p.to, reason: p.reason, round: p.round }); break;
-      case "factory.tests.locked": if (p.relocked) r.loop.push({ kind: "relocked", at: e.ts, files: p.files ?? [], reason: p.reason ?? "" }); break;
+      case "factory.tests.locked": if (p.kept === "repo" && r.repo) r.repo.baseline = p.baseline ?? null; if (p.relocked) r.loop.push({ kind: "relocked", at: e.ts, files: p.files ?? [], reason: p.reason ?? "" }); break;
       case "factory.tests.disputed": r.loop.push({ kind: "kept", at: e.ts, evidence: p.evidence ?? "", said: p.said ?? "" }); break;
       case "factory.tests": r.tests.push({ round: p.round, passed: p.passed, failed: p.failed, cases: p.cases }); break;
       case "factory.files":
@@ -467,7 +499,7 @@ export const projectsApi = {
   link: (id: number, kind: string, ref: string | number) => post(`/api/projects/${id}/links`, { kind, ref: String(ref) }) as Promise<ProjectDetail>,
   unlink: (id: number, kind: string, ref: string | number) => post(`/api/projects/${id}/unlink`, { kind, ref: String(ref) }) as Promise<ProjectDetail>,
   /** onTop: add the idea to the app this project already shipped (next version, same folder and data) instead of a new app. */
-  build: (id: number, idea: string, maxUsd?: number, again?: boolean, onTop?: boolean) => post(`/api/projects/${id}/runs`, { idea, maxUsd, ...(again ? { again } : {}), ...(onTop ? { onTop } : {}) }) as Promise<{ run: number; projectId: number }>,
+  build: (id: number, idea: string, maxUsd?: number, again?: boolean, onTop?: boolean, newApp?: boolean) => post(`/api/projects/${id}/runs`, { idea, maxUsd, ...(again ? { again } : {}), ...(onTop ? { onTop } : {}), ...(newApp ? { newApp } : {}) }) as Promise<StartedWork & { projectId: number }>,
   /** Move everything of this project into another; this one goes away (archived if you made it). */
   merge: (id: number, into: number) => post(`/api/projects/${id}/merge`, { into }) as Promise<ProjectDetail>,
 };

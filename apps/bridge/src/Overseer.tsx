@@ -144,7 +144,9 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
     setErr(null);
     setDup(null);
     try {
-      onRunStarted(await startFactoryRun(t, undefined, project, again), project);
+      const w = await startFactoryRun(t, undefined, project, again);
+      // In a project that lives in a repo the ask became a ticket there; a small one has no run, so its ticket opens.
+      if (w.run != null) onRunStarted(w.run, project); else if (w.ticket) showTicket(w.ticket.id, project);
       if (!idea) setText("");
     } catch (x) {
       const d = duplicateOf(x);

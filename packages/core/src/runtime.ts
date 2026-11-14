@@ -44,6 +44,8 @@ export interface AgentRequest {
   noMemory?: boolean;
   /** Continue this CLI session instead of starting fresh: the agent still has everything it saw and said. */
   resume?: string;
+  /** Folders put first on the agent's PATH (a codebase's own tools, such as its Python environment), so its shell finds them. */
+  pathFirst?: string[];
 }
 
 export interface AgentResult {
@@ -162,7 +164,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     // An agent that only reads a project's files is still a station agent: its contract, not the person's memory.
     // A factory build agent edits a folder SF made, which has no memory of its own: the person's CLAUDE.md is
     // written for them, not for a station agent (run 2623's Builder ended with "Assaf, press Start").
-    return edits(req) && !req.noMemory ? base : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
+    const env = edits(req) && !req.noMemory ? { ...base } : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
+    return req.pathFirst?.length ? withPathFirst(env, req.pathFirst) : env;
   }
 
   run(req: AgentRequest): Promise<AgentResult> {
@@ -189,6 +192,12 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       });
     });
   }
+}
+
+/** An environment with these folders first on its PATH. Windows names the variable "Path": the name it already has is kept. */
+export function withPathFirst(env: NodeJS.ProcessEnv, dirs: string[], platform = process.platform): NodeJS.ProcessEnv {
+  const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  return { ...env, [key]: [...dirs, env[key] ?? ""].filter(Boolean).join(platform === "win32" ? ";" : ":") };
 }
 
 /** Parse the JSON that `claude -p --output-format json` prints. */
@@ -266,8 +275,9 @@ const MOCK = {
   repo: (prompt: string) => {
     // The work document starts "# SF-4 Title" (a project's key and number) or "# #4 Title".
     const head = prompt.match(/^# (?:#|[A-Z][A-Z0-9]*-)(\d+) (.*)$/m);
-    const id = head?.[1] ?? "0";
-    const title = head?.[2] ?? "the ticket";
+    // An engine run in a repo names its ticket in the ask ("... (ticket LP-3)") and its plan in the first line.
+    const id = head?.[1] ?? prompt.match(/\(ticket (?:#|[A-Z][A-Z0-9]*-)(\d+)\)/)?.[1] ?? "0";
+    const title = head?.[2] ?? prompt.match(/^You are building "([^"]+)"/)?.[1] ?? "the ticket";
     return [
       `<<<FILE docs/softwarefactory/ticket-${id}.md`,
       `# Ticket #${id}: ${title}`, "", "Practice crew: this note stands in for the change. Switch to the real crew in Systems to have the Builder edit the code.", "FILE>>>",

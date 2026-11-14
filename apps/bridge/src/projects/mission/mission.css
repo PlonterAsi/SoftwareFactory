@@ -243,3 +243,24 @@
 .rw-fact p { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
 .rw-fact p em { font-style: normal; color: var(--ink); font-weight: 600; }
 .rw-go { font-size: 13px; color: var(--accent); }
+
+/* A repo run opened as a mission: the repo strip, and the way back to the repo's work. */
+.ms-repo { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; }
+.ms-repo .repo-strip { margin: 0; }
+@media (max-width: 760px) { .ms-repo { grid-template-columns: 1fr; } }
+
+/* The engine's runs on an imported repo's home. */
+.rw-runs ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.rw-run { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 6px; min-width: 0; }
+.rw-run.tone-gate { border-color: var(--gate); background: var(--gate-dim); }
+.rw-run-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; min-width: 0; }
+.rw-run-head i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-3); flex: none; align-self: center; }
+.rw-run.tone-gate .rw-run-head i { background: var(--gate); }
+.rw-run.tone-work .rw-run-head i { background: var(--accent); }
+.rw-run.tone-done .rw-run-head i { background: var(--good); }
+.rw-run.tone-fail .rw-run-head i { background: var(--bad); }
+.rw-run-name { flex: 1 1 140px; min-width: 0; text-align: left; font-size: 14.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rw-run-name .mono { color: var(--muted); font-size: 12.5px; margin-right: 4px; }
+.rw-run-word { font-size: 13.5px; color: var(--ink-2); }
+.rw-run.tone-gate .rw-run-word { color: var(--gate); font-weight: 600; }
+.rw-run-branch { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
