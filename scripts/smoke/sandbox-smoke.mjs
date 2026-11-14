@@ -166,7 +166,20 @@ async function main() {
   if (process.env.GITHUB_STEP_SUMMARY && existsSync(join(OUT, "report.md"))) {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Ran inside a Windows Sandbox on this PC.\n\n${readFileSync(join(OUT, "report.md"), "utf8")}\n`);
   }
-  if (!args["keep-share"]) { try { rmSync(share, { recursive: true, force: true }); } catch { /* the sandbox may hold it a moment longer */ } }
+  // Each run's share holds the installers (about 250 MB). The sandbox lets go of the folder a little after it
+  // closes, so try for half a minute; shares that older runs could not remove go now too.
+  if (!args["keep-share"]) {
+    const stale = [share];
+    try { for (const f of readdirSync(dirname(share))) if (/^sf-sandbox-\d+$/.test(f) && join(dirname(share), f) !== share) stale.push(join(dirname(share), f)); } catch { /* nothing to sweep */ }
+    for (const dir of stale) {
+      for (let i = 0; i < 10; i++) {
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* still held */ }
+        if (!existsSync(dir) || dir !== share) break;
+        await sleep(3000);
+      }
+    }
+    if (existsSync(share)) log(`could not remove ${share} yet; the next run removes it`);
+  }
 
   if (code === null) fail(seenSandbox ? `The test did not finish inside the sandbox within ${Math.round(TIMEOUT_MS / 60_000)} minutes, or the sandbox was closed. Its console so far is above.` : "The Windows Sandbox did not start within 4 minutes. Is someone signed in at this PC's desktop?");
   log(`the smoke test ended with code ${code}`);
