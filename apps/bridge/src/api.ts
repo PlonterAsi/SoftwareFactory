@@ -387,9 +387,9 @@ export function useOrder(events: SfEvent[]) {
 
 // ---- Agent Bay (milestone 4) ----
 
-export const SLOTS = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "order", "overseer", "improve", "map", "survey"] as const;
+export const SLOTS = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "order", "overseer", "improve", "map", "survey", "inspect", "verdict"] as const;
 export type Slot = (typeof SLOTS)[number];
-export const SLOT_LABEL: Record<Slot, string> = { council: "Council", design: "Product design", critique: "Design critic", plan: "Spec and plan", tests: "Acceptance tests", build: "Build", review: "Review", evaluate: "Product judge", fix: "Fix", order: "Order Engine", overseer: "Assistant", improve: "Improvement Council", map: "Code map", survey: "Code survey" };
+export const SLOT_LABEL: Record<Slot, string> = { council: "Council", design: "Product design", critique: "Design critic", plan: "Spec and plan", tests: "Acceptance tests", build: "Build", review: "Review", evaluate: "Product judge", fix: "Fix", order: "Order Engine", overseer: "Assistant", improve: "Improvement Council", map: "Code map", survey: "Code survey", inspect: "Repo inspection", verdict: "Repo verdict" };
 export interface AgentDef { id: string; name: string; avatar: string; description: string; station: Slot | "none"; model: string; budgetUsd: number; plugins: string[]; skills: string[]; tools: string[]; mcp?: string[]; sample: string; prompt: string }
 /** What an agent's settings can choose from (core: bay/kits.ts). */
 export interface BayLibrary { skills: { name: string; description: string; source: "bundled" | "yours" }[]; tools: { name: string; note: string }[]; mcp: { name: string; command: string; note?: string; source?: "bundled" | "yours" }[]; mcpFile: string | null }

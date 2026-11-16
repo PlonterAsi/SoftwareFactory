@@ -193,6 +193,20 @@ flowchart LR
 
 One import has a money cap (`SF_IMPORT_MAX_USD`). The original repository is never written to.
 
+A repository imported for the first time is then reviewed by itself ([review.md](review.md)):
+
+```mermaid
+flowchart LR
+  map["Mapped"] --> copy["A copy of its own"]
+  copy --> run["Free: read routes and services,<br/>install, run tests, start it, check packages"]
+  run --> inspect["Inspector: what the app is"]
+  inspect --> verdict["Assessor: scores, keep / refactor / rewrite,<br/>stack advice, gaps, next steps, questions"]
+  verdict --> page["Review tab and the brief file"]
+  page -->|"you approve a next step"| ticket["A ticket"]
+  page -->|"Interview me, or Not right?"| said["What you said"]
+  said -->|"Update the verdict"| verdict
+```
+
 ## 10. Improvement
 
 ```mermaid

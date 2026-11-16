@@ -5,6 +5,7 @@ import type { EventLog } from "../events.js";
 import type { Slot } from "../bay/agentfile.js";
 import { captureSignal } from "../signals.js";
 import { codeMapSummary } from "../imports/explorer.js";
+import { reviewBrief } from "../imports/review.js";
 import { mapText } from "../imports/crew.js";
 import { scanRepo } from "../imports/scan.js";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
@@ -276,6 +277,8 @@ export class RepoRun extends Run {
     return [
       `This is a change to a codebase that already exists, not a new app: "${this.info.name}" (${this.info.source}). The work happens on branch ${this.info.branch} of a clone; the folder you can read is that clone.`,
       `Its stack: ${this.env.stack.join(", ") || "not recognised"}. ${site ? `It starts with: ${site.command}.` : "SoftwareFactory found no way to start it as a site."} ${this.env.testHint ? `Its own tests run with: ${this.env.testHint}.` : "It has no tests SoftwareFactory can run."}${this.env.notes.length ? ` Not set up here: ${this.env.notes.join("; ")}.` : ""}`,
+      // What the deep review found the app to be (imports/review.ts): its purpose, its features and what its owner said.
+      reviewBrief(this.log, this.info.projectId, 2200).trim(),
       map ? `The code map:\n${map}` : "",
       repoGuidance(this.dir, 3000).trim(),
     ].filter(Boolean).join("\n\n");

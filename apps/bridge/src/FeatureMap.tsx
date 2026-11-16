@@ -36,7 +36,7 @@ const STATE: Record<State, { status: Status; word: string; hint: string }> = {
 };
 const STATION_NAMES: Record<string, string> = {
   council: "Council", design: "Designer", critique: "Critic", plan: "Planner", tests: "Tester", build: "Builder", review: "Reviewer", evaluate: "Judge", fix: "Fixer",
-  order: "Archivist", overseer: "Assistant", improve: "Improvement Council", map: "Cartographer", survey: "Surveyor",
+  order: "Archivist", overseer: "Assistant", improve: "Improvement Council", map: "Cartographer", survey: "Surveyor", inspect: "Inspector", verdict: "Assessor",
 };
 const STATIONS = Object.keys(STATION_NAMES);
 

@@ -11,6 +11,7 @@ import { validatePlan, parseReview, type Plan } from "../factory/loop.js";
 import { archivistPrompt, parseArchivistPlan } from "../order/archivist.js";
 import { foldOrder } from "../order/model.js";
 import { parseModuleNotes, parseSuggestions } from "../imports/crew.js";
+import { parseUnderstanding, parseVerdict } from "../imports/reviewcrew.js";
 import { parseLensAnswer } from "../improve/lenses.js";
 import { MODELS, SLOTS, normalizeAgent, parseAgentFile, serializeAgent, slugify, type AgentDef, type HomeStation, type Slot } from "./agentfile.js";
 import { BUILTIN_AGENTS, DEFAULT_SLOTS, SLOT_SEATS, systemPromptFor } from "./builtin.js";
@@ -373,6 +374,8 @@ export function verify(station: HomeStation, text: string): { label: string; pas
     case "order": return [check("fragments filed under nodes (Archivist format)", () => !!parseArchivistPlan(text, foldOrder([])))];
     case "map": return [check("a purpose for each module (map format)", () => !!parseModuleNotes(text)?.length)];
     case "survey": return [check("suggestions with severity and files (survey format)", () => !!parseSuggestions(text)?.length)];
+    case "inspect": return [check("what the app is: a purpose, features and a flow (inspect format)", () => !!parseUnderstanding(text))];
+    case "verdict": return [check("scores, a recommendation and next steps (verdict format)", () => !!parseVerdict(text))];
     case "improve": return [check("proposals with impact and effort (improve format)", () => Array.isArray(parseLensAnswer(text)))];
     default: return [check("a non-empty answer", () => text.trim().length > 0)];
   }
@@ -392,7 +395,7 @@ export function heuristicDraft(text: string): AgentDef {
   const model = /\b(opus|best|deepest)\b/.test(t) ? "opus" : /\b(sonnet|strong|smart|careful|senior|deep)\b/.test(t) ? "sonnet" : "haiku";
   const words = text.replace(/[^A-Za-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 2 && !/^(the|and|for|that|who|which|with|agent|an|a|my|our|this)$/i.test(w));
   const name = (named ?? words.slice(0, 2).map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ")) || "New Agent";
-  const avatar = ({ council: "✶", plan: "◇", tests: "⊘", build: "▣", review: "◎", fix: "⚒", order: "❖", overseer: "◈", improve: "✧", map: "⌖", survey: "⌕", none: "◆" } as const)[station];
+  const avatar = ({ council: "✶", plan: "◇", tests: "⊘", build: "▣", review: "◎", fix: "⚒", order: "❖", overseer: "◈", improve: "✧", map: "⌖", survey: "⌕", inspect: "⊙", verdict: "⚖", none: "◆" } as const)[station];
   return normalizeAgent({
     name, avatar, station, model, budgetUsd: model === "haiku" ? 0.05 : model === "sonnet" ? 0.3 : 0.6,
     description: text.slice(0, 300), sample: BUILTIN_AGENTS.find((b) => b.station === station)?.sample ?? "",
