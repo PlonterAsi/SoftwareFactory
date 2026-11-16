@@ -11,6 +11,8 @@ import {
   heuristicUnderstanding, heuristicVerdict, briefMarkdown, parseUnderstanding, parseVerdict, scanRepo, BRIEF_PATH,
   type EvidenceTools, type RepoEnv,
 } from "../src/index.js";
+import { declaredArgs } from "../src/factory/repoenv.js";
+import { validateUnderstanding } from "../src/imports/reviewcrew.js";
 
 const tmp = (p = "sf-review-") => mkdtempSync(join(tmpdir(), p));
 const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -357,4 +359,32 @@ describe("the review API", () => {
       expect((await fetch(`${base}/api/imports/999999/review`)).status).toBe(404);
     } finally { server.close(); }
   }, 30_000);
+});
+
+describe("what the first real review taught (LandingPage, 2026-11-16)", () => {
+  it("starts a program with the arguments the repo's own Dockerfile or Procfile gives it", () => {
+    const d = tmp();
+    writeFileSync(join(d, "Dockerfile"), 'FROM python:3.12\nCOPY . .\nCMD ["python", "app.py", "0"]\n');
+    expect(declaredArgs(d, "app.py")).toEqual(["0"]);
+    expect(declaredArgs(d, "other.py")).toEqual([]);
+    writeFileSync(join(d, "Dockerfile"), "FROM python:3.12\nCMD python -u ./app.py 0 --quiet\n");
+    expect(declaredArgs(d, "app.py")).toEqual(["0", "--quiet"]);
+    writeFileSync(join(d, "Dockerfile"), "FROM python:3.12\nCMD python app.py $(rm -rf /)\n");
+    expect(declaredArgs(d, "app.py")).toEqual([]); // nothing a shell would act on
+    const p = tmp();
+    writeFileSync(join(p, "Procfile"), "web: python server.py 8080\n");
+    expect(declaredArgs(p, "server.py")).toEqual(["8080"]);
+    expect(declaredArgs(tmp(), "app.py")).toEqual([]);
+  });
+
+  it("never cuts a text mid-word: over its limit it ends at a whole sentence or a whole word", () => {
+    const long = "The contract form posts to the submit route and the signed agreement is emailed as a PDF to the trainer and the client, and nothing is saved on the server after that at all";
+    const u = validateUnderstanding({ purpose: "A site.", flow: { steps: [{ id: "a", name: "Home" }, { id: "b", name: "Contract" }], links: [{ from: "a", to: "b", label: long }] }, data: [{ name: "Agreement", what: `${"First sentence that is long enough to fill the space. ".repeat(8)}And a last one that will not fit in`, where: "" }] });
+    const label = u.flow.links[0].label!;
+    expect(label.length).toBeLessThanOrEqual(121);
+    expect(label.endsWith("…")).toBe(true);
+    expect(long.startsWith(label.slice(0, -1))).toBe(true);
+    expect(long[label.length - 1]).toMatch(/[ ,]/); // the cut is at a word boundary
+    expect(u.data[0].what.endsWith("space.")).toBe(true);
+  });
 });
