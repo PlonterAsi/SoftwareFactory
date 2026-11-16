@@ -134,7 +134,7 @@ describe("tickets: agents and the loop", () => {
     const said = t.notes(bug.id).map((n) => `${n.by}: ${n.text}`);
     expect(said.some((s) => /^factory: Run #\d+ shipped/.test(s))).toBe(true);
     expect(said.at(-1)).toMatch(/^qa-rule: Closed by the QA rule/);
-  }, 30_000);
+  }, 90_000);
 
   it("goes through the factory's duplicate check: a rework of its own run is fine, someone else's build of the same idea needs 'again'", async () => {
     const log = new EventLog();
@@ -158,7 +158,7 @@ describe("tickets: agents and the loop", () => {
     try { t.work(b.id); } catch (e) { err = e; }
     expect(err?.duplicate).toMatchObject({ duplicateOf: other, state: "shipped" });
     expect(t.work(b.id, { again: true, autoApprove: true }).run).toBeGreaterThan(other);
-  }, 30_000);
+  }, 90_000); // three whole factory runs: under 4 s alone, over 30 s on a loaded Windows runner
 
   it("a request or a ticket with the hand brake stays built for your look", async () => {
     const log = new EventLog();
@@ -179,7 +179,7 @@ describe("tickets: agents and the loop", () => {
     t.say(req.id, "Good", { status: "closed" });
     log.append("factory.run.finished", { run: r1, outcome: "shipped", reason: "again" });
     expect(t.get(req.id)!.status).toBe("closed");
-  }, 30_000);
+  }, 90_000);
 
   it("asking an agent puts its reply on the thread, capped, and may mark it ready", async () => {
     const log = new EventLog();
@@ -243,7 +243,7 @@ describe("tickets: inside projects", () => {
     const other = createProject(log, { name: "Elsewhere" });
     t.edit(a.id, "project", other);
     expect(projectOf(log, { kind: "ticket", ref: a.id })).toBe(other);
-  }, 30_000);
+  }, 90_000);
 });
 
 describe("tickets: working inside an imported repo", () => {
@@ -302,7 +302,7 @@ describe("tickets: working inside an imported repo", () => {
     expect(t.get(a.id)!.branchDir).toBe(clone);
     // "new" still builds a fresh repo through the factory.
     expect(t.work(a.id, { where: "new", autoApprove: true }).run).toBeGreaterThan(0);
-  }, 30_000);
+  }, 90_000);
 
   it("finds the repo of a project imported by the repo explorer, and works its ticket in a clone", async () => {
     const log = new EventLog();
@@ -323,7 +323,7 @@ describe("tickets: working inside an imported repo", () => {
     expect(t.get(a.id)!.branch).toMatch(/^sf\/[A-Z][A-Z0-9]*-1-say-hello-louder$/);
     expect(git(src, "status", "--porcelain")).toBe("");
     expect(git(src, "branch", "--list")).toBe("* main");
-  }, 30_000);
+  }, 90_000);
 });
 
 describe("tickets: the real runtime in a working copy", () => {

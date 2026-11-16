@@ -71,7 +71,7 @@ function sh(file: string, args: string[], o: { cwd: string; shell?: boolean; tim
   return new Promise((resolve) => {
     let out = "";
     let child: ReturnType<typeof spawn>;
-    try { child = spawn(file, args, { cwd: o.cwd, shell: !!o.shell, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }); }
+    try { child = spawn(file, args, { cwd: o.cwd, shell: !!o.shell, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: projectEnv(o.cwd, process.execPath, null) }); }
     catch (e) { return resolve({ status: 1, out: (e as Error).message }); }
     const timer = setTimeout(() => { out += `\n(stopped after ${Math.round(o.timeoutMs / 1000)} s)`; killTree(child, true); }, o.timeoutMs);
     child.stdout!.on("data", (x) => { out += x; });

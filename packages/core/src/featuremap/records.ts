@@ -322,6 +322,15 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}imports/`, `${B}CodeMap.tsx`], api: ["/api/imports"],
   },
   {
+    id: "repo-review", name: "Deep review of an imported repository", group: "Work",
+    purpose: "When a repository is first imported the crew runs it, reads it and judges it without asking the person anything: what the app is, whether to keep, refactor or rewrite it, advice on the stack, and next steps to approve.",
+    spec: ["A first import is reviewed by itself; after that a review runs only when pressed.", "It works in a copy: installs, runs the repo's tests, starts the site, opens its pages and looks its packages up.", "The Inspector says what the app is; the Assessor scores it and recommends keep, refactor or rewrite.", "Next steps become tickets only when the person approves them.", "The person can be interviewed or correct any point; Update the verdict rewrites it with what they said.", "The review is also one Markdown brief that can be put in the repo on a branch.", "Spend is capped per review, $1.50 unless changed."],
+    flow: ["A repo is imported and mapped", "A copy is installed, tested, started and scanned", "The Inspector reads the code", "The Assessor gives the verdict and next steps", "The person approves steps, answers questions or corrects points", "Update the verdict rewrites it"],
+    design: "The Review tab of an imported project: the stations strip, the verdict with three dials, the app flow drawn step by step, next steps to approve, Interview me, and the brief.",
+    screens: ["/p/ID/review"], docs: ["docs/review.md", "docs/flows.md"], stations: ["inspect", "verdict"],
+    files: [`${C}imports/review.ts`, `${C}imports/reviewcrew.ts`, `${C}imports/reviewTables.ts`, `${C}imports/evidence.ts`, `${B}RepoReview.tsx`], api: [],
+  },
+  {
     id: "runners", name: "Build runners", group: "Work",
     purpose: "SoftwareFactory's own manager for GitHub runners on this PC, so a repository's checks and builds run here instead of on GitHub's machines.",
     spec: ["Add, start, stop, restart and remove a runner.", "Show where a repository's builds run, the jobs waiting and done, and a live log.", "The core keeps runners running and closes what it started.", "It belongs to the app, not to a base."],

@@ -59,6 +59,7 @@ flowchart LR
 | [projects.md](projects.md) | The project model, project chats, money limits | current |
 | [tickets.md](tickets.md) | Tickets, the ready queue, crew pull requests | current |
 | [improve.md](improve.md) | The Improvement Council | current |
+| [review.md](review.md) | Deep review of an imported repo: run it, read it, verdict, next steps, interview | current |
 | [run.md](run.md) | Running a finished project from the app (the Use tab) | current |
 | [integrations.md](integrations.md) | Adding a finished project into SF (Finished apps) | current |
 | [plugins.md](plugins.md) | Add-ons: the plugin format, permissions, sandbox | current |

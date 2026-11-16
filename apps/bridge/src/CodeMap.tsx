@@ -58,7 +58,8 @@ export function ImportRepo() {
     try {
       const r = await importsApi.start(source.trim());
       setSource("");
-      location.hash = href({ page: "project", id: r.projectId, panel: "code" });
+      // A repo seen for the first time opens on its review, which starts by itself; a known one on its map.
+      location.hash = href({ page: "project", id: r.projectId, panel: r.existing ? "code" : "review" });
     } catch (x) { setMsg((x as Error).message); }
     setBusy(false);
   };
@@ -67,7 +68,7 @@ export function ImportRepo() {
       <span className="cm-import-label">Import a repo</span>
       <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="https://github.com/owner/repo, owner/repo, or C:\path\to\folder" aria-label="Repo URL or folder" />
       <button type="submit" disabled={busy || !source.trim()}>{busy ? "Importing…" : "Import"}</button>
-      <span className="muted small">The crew maps it and suggests fixes. Read-only: nothing in the repo changes.</span>
+      <span className="muted small">The crew maps it, runs it in a copy, and gives a verdict with next steps. Nothing in the repo changes. Its code runs on this computer, without your keys, so import only a repo you trust.</span>
       {msg && <span className="cm-import-err small" role="alert">{msg}</span>}
     </form>
   );

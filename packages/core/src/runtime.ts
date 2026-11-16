@@ -253,6 +253,8 @@ export class MockRuntime implements AgentRuntime {
     else if (station === "repo") text = MOCK.repo(req.prompt);
     else if (station === "map") text = MOCK.map(req.prompt);
     else if (station === "survey") text = MOCK.survey(req.prompt);
+    else if (station === "inspect") text = MOCK.inspect(req.prompt);
+    else if (station === "verdict") text = MOCK.verdict(req.prompt);
     else if (station === "improve") text = MOCK.improve(role, req.prompt);
     return { text, costUsd: role ? 0.0001 : 0, durationMs: this.opts.delayMs ?? 1, models: ["mock"], runtime: this.name, contextTokens: 0 };
   }
@@ -297,6 +299,29 @@ const MOCK = {
       { title: `Add tests for ${mod}`, body: `${mod} is the largest module and has no direct tests.`, kind: "improvement", lens: "tests", severity: "high", effort: "medium", files: [mod] },
       { title: "Document how to run the project", body: "The README does not say how to start it.", kind: "improvement", lens: "docs", severity: "low", effort: "small", files: ["README.md"] },
     ] }) + "\n```";
+  },
+  // The practice Inspector and Assessor: canned answers in the right shape, built from the routes the evidence names.
+  inspect: (prompt: string) => {
+    const routes = [...prompt.matchAll(/^\s+(GET|POST|PUT|DELETE|ANY) (\/\S*)\s+\[([^\]:]+)/gm)].slice(0, 6);
+    const steps = routes.map((m, i) => ({ id: `s${i + 1}`, name: `${m[1]} ${m[2]}`, kind: m[1] === "GET" ? "page" : "api", route: m[2], what: `Mock: handled in ${m[3]}.`, state: "code-only" }));
+    return "```json\n" + JSON.stringify({
+      purpose: "Mock purpose: an app read by the practice Inspector.", users: "Mock users.", usage: "Mock usage.", stack: "Mock stack.",
+      features: steps.map((x) => ({ id: x.id, name: x.name, what: x.what, where: [], state: "unknown" })),
+      flow: { steps, links: steps.slice(1).map((x) => ({ from: steps[0].id, to: x.id })) }, data: [], integrations: [], unsure: ["Mock: what it is really for."],
+    }) + "\n```";
+  },
+  verdict: (prompt: string) => {
+    const v = {
+      headline: "Mock verdict: keep it and fix the short list.",
+      scores: { codeHealth: { score: 60, why: "Mock." }, goalFit: { score: 70, why: "Mock." }, costToFix: { score: 30, why: "Mock." } },
+      recommendation: { call: "keep", confidence: "low", why: "Mock reasons.", ifKeep: "Fix the list.", ifRewrite: "Carry the features over." },
+      stack: { call: "keep", advice: "Mock: keep the stack.", suite: "Mock: fits." }, gaps: [{ title: "Mock gap", detail: "A step the purpose needs is missing.", level: "medium" }], strengths: ["Mock strength."],
+      nextSteps: [{ title: "Add a test for the main flow", body: "Mock: nothing checks the main flow.", kind: "improvement", lens: "tests", severity: "medium", effort: "small", files: [] }],
+      questions: /TASK: revise/.test(prompt) ? [] : [{ id: "Q1", question: "Who uses this app?", why: "It decides how careful a change must be.", guess: "Mock users." }],
+    };
+    if (!/TASK: revise/.test(prompt)) return "```json\n" + JSON.stringify(v) + "\n```";
+    const said = prompt.match(/the owner (?:answered|corrects): (.+)$/m)?.[1] ?? "what the owner said";
+    return "```json\n" + JSON.stringify({ understanding: { purpose: `Mock purpose, revised: ${said}`, users: said, usage: "Mock usage.", stack: "Mock stack.", features: [], flow: { steps: [], links: [] }, data: [], integrations: [], unsure: [] }, verdict: { ...v, headline: "Mock verdict, revised with what the owner said." } }) + "\n```";
   },
   // The practice Overseer cannot think, but it can read the status digest back and offer the Build button.
   overseer: (prompt: string) => {

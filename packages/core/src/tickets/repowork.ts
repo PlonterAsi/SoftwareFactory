@@ -7,6 +7,7 @@ import type { AgentRuntime } from "../runtime.js";
 import type { AgentBay } from "../bay/bay.js";
 import { commitAll, git, parseFileBlocks, writeFiles } from "../factory/workspace.js";
 import { importOf, moduleNotes } from "../imports/explorer.js";
+import { reviewBrief } from "../imports/review.js";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
 import { fastGates } from "../safety/gates.js";
 import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
@@ -298,7 +299,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
   // The Builder runs the tests itself, so the clone's dependencies go in before it starts (once; skipped when present).
   if (o.checks) { const why = ensureDeps(dir); if (why) step("install", "skipped", why); }
   step("orient", "passed", "repo rules and code map added to the prompt");
-  const first = await build(`${o.document}\n\nYou are on branch ${branch} of a clone of ${o.repo.source}.${repoGuidance(dir)}${overviewBlock(log, o.projectId)}`, o.maxUsd * 0.5, "build");
+  const first = await build(`${o.document}\n\nYou are on branch ${branch} of a clone of ${o.repo.source}.${repoGuidance(dir)}${reviewBrief(log, o.projectId)}${overviewBlock(log, o.projectId)}`, o.maxUsd * 0.5, "build");
   if (first.error) return fail(first.error);
   const summary = first.text.replace(/<<<\s*FILE[\s\S]*?(?:FILE\s*>>>|$)/g, "").trim().split("\n").filter(Boolean).slice(-6).join("\n");
 

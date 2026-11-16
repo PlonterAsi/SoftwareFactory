@@ -25,6 +25,7 @@ import { extraAllowance } from "./projects/budget.js";
 import { chatRoutes, projectHome } from "./chat/routes.js";
 import { RepoExplorer } from "./imports/explorer.js";
 import { importsRoute } from "./imports/routes.js";
+import { RepoReviewer } from "./imports/review.js";
 import { Launcher } from "./launch/launcher.js";
 import { launchRoute } from "./launch/routes.js";
 import { Integrations } from "./integrations/service.js";
@@ -143,6 +144,11 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   }).listen();
   improve.auto = settings.improveAuto ?? true;
   explorer.follow.on = settings.importsFollow ?? true;
+  // A repo imported for the first time is reviewed by itself: run, read, judged, with next steps to approve (docs/review.md).
+  const reviewer = new RepoReviewer(log, runtime, explorer, bay, { maxUsd: settings.importReviewMaxUsd, github, canShip });
+  // Under the test runner nothing installs or starts a fixture repo unless a test asks for a review.
+  reviewer.auto = settings.importReviewAuto ?? !process.env.VITEST;
+  reviewer.homeStack = settings.importHomeStack ?? "";
   // Finished projects run from their own folders; the Bridge shows their output and pages.
   const launcher = new Launcher(log);
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
@@ -430,7 +436,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (url.pathname === "/api/imports" || url.pathname.startsWith("/api/imports/")) {
         const canImport = () => gitReady() ? null : "Git is not installed, so a repo cannot be imported. Install Git for Windows (git-scm.com/download/win), then import again.";
-        const r = await importsRoute({ log, explorer, readJson, canImport }, req, url);
+        const r = await importsRoute({ log, explorer, reviewer, readJson, canImport }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname.startsWith("/api/launch/") || url.pathname.startsWith("/preview/")) {
@@ -490,7 +496,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { github, factory, order, bay, drop, tickets, improve, explorer, launcher, integrations, plugins, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, errors, fault, ensureSelf });
 }
 
 /**
@@ -542,6 +548,7 @@ function selfGitHub(log: EventLog) {
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
 export function readSettings(log: EventLog): {
   crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean; importsFollow?: boolean;
+  importReviewMaxUsd?: number; importReviewAuto?: boolean; importHomeStack?: string;
   ticketsAutoWork?: boolean; ticketsAutoMaxUsd?: number; ticketsAutoDailyUsd?: number; ticketsWip?: number;
   maxRunMinutes?: number;
 } {
