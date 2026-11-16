@@ -237,7 +237,7 @@ export async function withSite<T>(dir: string, o: { pathFirst?: string[]; timeou
   }
   const port = await freePort();
   const env = { ...withPathFirst(projectEnv(dir, process.execPath, port), o.pathFirst ?? []), FLASK_RUN_PORT: String(port), FLASK_DEBUG: "0" };
-  const exec = profile.exec!;
+  const exec = withDeclaredArgs(dir, profile.exec!);
   const child = "shell" in exec
     ? spawn(exec.shell, { cwd: dir, shell: true, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" })
     : spawn(exec.file === "node" ? process.execPath : ownPython(exec.file, o.pathFirst), exec.args, { cwd: dir, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
@@ -260,6 +260,40 @@ export async function withSite<T>(dir: string, o: { pathFirst?: string[]; timeou
   } finally {
     killTree(child, true);
   }
+}
+
+/**
+ * The arguments the repo itself starts its program with. A Dockerfile's CMD or a Procfile's web line that runs
+ * the same script with more arguments ("python app.py 0") is how its authors start it, and a program that
+ * reads sys.argv stops without them.
+ */
+export function declaredArgs(dir: string, script: string): string[] {
+  const lines: string[][] = [];
+  const split = (x: string) => x.trim().split(/\s+/).map((t) => t.replace(/^["']|["']$/g, ""));
+  try {
+    const docker = readFileSync(join(dir, "Dockerfile"), "utf8").replace(/\\\r?\n/g, " ");
+    for (const m of docker.matchAll(/^\s*(?:CMD|ENTRYPOINT)\s+(.+)$/gim)) {
+      const body = m[1].trim();
+      if (body.startsWith("[")) { try { lines.push((JSON.parse(body) as unknown[]).map(String)); } catch { /* not JSON form */ } }
+      else lines.push(split(body));
+    }
+  } catch { /* no Dockerfile */ }
+  try { for (const m of readFileSync(join(dir, "Procfile"), "utf8").matchAll(/^web:\s*(.+)$/gim)) lines.push(split(m[1])); } catch { /* no Procfile */ }
+  const same = (t: string) => t.replace(/^\.\//, "").replace(/\\/g, "/") === script.replace(/^\.\//, "").replace(/\\/g, "/");
+  for (const l of lines.reverse()) {
+    if (!/^(python[\d.]*|py|node)(\.exe)?$/i.test(l[0] ?? "")) continue;
+    const at = l.findIndex(same);
+    const rest = at > 0 ? l.slice(at + 1) : [];
+    if (rest.length && rest.length <= 8 && rest.every((a) => /^[\w@%+=:,./-]+$/.test(a))) return rest;
+  }
+  return [];
+}
+
+function withDeclaredArgs(dir: string, exec: NonNullable<RunProfile["exec"]>): NonNullable<RunProfile["exec"]> {
+  if ("shell" in exec) return exec;
+  const script = exec.args.filter((a) => !a.startsWith("-"));
+  if (script.length !== 1 || exec.args[exec.args.length - 1] !== script[0]) return exec;
+  return { ...exec, args: [...exec.args, ...declaredArgs(dir, script[0])] };
 }
 
 /** The codebase's own Python (its environment under .sf/) when the command asks for Python, else the command as it is. */

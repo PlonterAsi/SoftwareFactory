@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { EventLog } from "../events.js";
 import type { AgentRuntime } from "../runtime.js";
@@ -190,12 +190,13 @@ export class RepoReviewer {
     const shown = rows.find((r) => r.verdict) ?? null;
     const notes = reviewNotes(this.log, projectId);
     const ids = new Set((shown?.verdict?.nextSteps ?? []).map((n) => n.suggestionId));
+    const steps = suggestionsOf(this.log, projectId).filter((s) => ids.has(s.id));
     const saved = this.log.db.prepare("SELECT payload FROM events WHERE type = 'repo.review.brief.saved' AND json_extract(payload, '$.projectId') = ? ORDER BY id DESC LIMIT 1").get(projectId) as { payload: string } | undefined;
     return {
       import: imp, current, shown,
       history: rows.map((r) => ({ id: r.id, ts: r.ts, trigger: r.trigger, mode: r.mode, status: r.status, spentUsd: r.spentUsd, capUsd: r.capUsd, call: r.verdict?.recommendation.call ?? null, head: r.head })),
       notes, pending: notes.filter((n) => n.applied == null).length,
-      steps: suggestionsOf(this.log, projectId).filter((s) => ids.has(s.id)),
+      steps, waiting: steps.filter((s) => s.status === "proposed" || s.status === "pending").length,
       briefPath: BRIEF_PATH, briefSaved: saved ? JSON.parse(saved.payload) : null,
       busy: this.busy(projectId), mode: this.mode(), settings: this.settings(),
     };
@@ -244,6 +245,12 @@ export class RepoReviewer {
     return done(repo, gh.compareUrl(github, base, branch));
   }
 
+  /** What installing left in the copy (packages, a Python environment) is large and only the running needed it. The code stays for the next review. */
+  private tidyCopy(projectId: number) {
+    const dir = this.copyDir(projectId);
+    for (const heavy of [join(dir, ".sf", "venv"), join(dir, "node_modules")]) { try { rmSync(heavy, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); } catch { /* in use: the next review clears it */ } }
+  }
+
   // ---------------- one review ----------------
 
   private guard(projectId: number, trigger: ReviewTrigger, capIn: number, fn: (review: number, cap: number) => Promise<number>): Promise<RepoReviewResult> {
@@ -260,7 +267,7 @@ export class RepoReviewer {
       spent = Number((e as { spentUsd?: number }).spentUsd ?? spent);
       this.log.append("repo.review.finished", { projectId, review: start.id, outcome: "failed", error, spentUsd: Number(spent.toFixed(6)) });
       return { projectId, review: start.id, outcome: "failed", spentUsd: spent, error } as RepoReviewResult;
-    }).finally(() => { if (this.running.get(projectId) === p) this.running.delete(projectId); });
+    }).finally(() => { if (this.running.get(projectId) === p) this.running.delete(projectId); this.tidyCopy(projectId); });
     this.running.set(projectId, p);
     return p;
   }

@@ -63,7 +63,16 @@ export interface RepoVerdict {
 /** Something the owner told the review: an answer to one of its questions, or a correction of one point. */
 export interface OwnerNote { id: number; kind: "answer" | "correction"; about: string; question: string; text: string; ts: string; applied: number | null }
 
-const s = (x: unknown, max = 400) => String(x ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+/** One line of text within a size limit. Text over the limit ends at its last whole sentence, else its last whole word, never mid-word. */
+const s = (x: unknown, max = 400) => {
+  const t = String(x ?? "").replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  if (end >= max * 0.5) return cut.slice(0, end + 1);
+  const word = cut.lastIndexOf(" ");
+  return `${(word >= max * 0.5 ? cut.slice(0, word) : cut).replace(/[\s,;:(-]+$/, "")}…`;
+};
 const arr = (x: unknown): Record<string, unknown>[] => (Array.isArray(x) ? x.filter((y) => y && typeof y === "object") as Record<string, unknown>[] : []);
 const strs = (x: unknown, n: number, max = 200) => (Array.isArray(x) ? x.map((y) => s(y, max)).filter(Boolean).slice(0, n) : []);
 const one = <T extends string>(x: unknown, all: readonly T[], d: T): T => ((all as readonly string[]).includes(String(x)) ? (x as T) : d);
@@ -85,9 +94,9 @@ export function validateUnderstanding(j: unknown): Understanding {
   return {
     purpose, users: s(u.users, 400), usage: s(u.usage, 600), stack: s(u.stack, 400),
     features: arr(u.features).filter((x) => s(x.name)).slice(0, 24).map((x, i) => ({ id: s(x.id, 40) || slugId(s(x.name), i), name: s(x.name, 80), what: s(x.what, 300), where: strs(x.where, 6, 160), state: one(x.state, FEATURE_STATES, "unknown") })),
-    flow: { steps, links: arr(u.flow?.links).map((x) => ({ from: s(x.from, 40), to: s(x.to, 40), ...(s(x.label, 60) ? { label: s(x.label, 60) } : {}) })).filter((l) => ids.has(l.from) && ids.has(l.to) && l.from !== l.to).slice(0, 48) },
-    data: arr(u.data).filter((x) => s(x.name)).slice(0, 16).map((x) => ({ name: s(x.name, 80), what: s(x.what, 240), where: s(x.where, 160) })),
-    integrations: arr(u.integrations).filter((x) => s(x.name)).slice(0, 16).map((x) => ({ name: s(x.name, 80), what: s(x.what, 240), state: one(x.state, ["used", "configured", "dead"] as const, "used") })),
+    flow: { steps, links: arr(u.flow?.links).map((x) => ({ from: s(x.from, 40), to: s(x.to, 40), ...(s(x.label, 120) ? { label: s(x.label, 120) } : {}) })).filter((l) => ids.has(l.from) && ids.has(l.to) && l.from !== l.to).slice(0, 48) },
+    data: arr(u.data).filter((x) => s(x.name)).slice(0, 16).map((x) => ({ name: s(x.name, 80), what: s(x.what, 400), where: s(x.where, 160) })),
+    integrations: arr(u.integrations).filter((x) => s(x.name)).slice(0, 16).map((x) => ({ name: s(x.name, 80), what: s(x.what, 400), state: one(x.state, ["used", "configured", "dead"] as const, "used") })),
     unsure: strs(u.unsure, 8, 300),
   };
 }
@@ -137,7 +146,7 @@ export function ownerFacts(notes: OwnerNote[]): string {
 }
 
 export function inspectPrompt(repo: string, mapTextBlock: string, ev: Evidence, notes: OwnerNote[]): string {
-  return `Repo: ${repo}\nThe current folder is a copy of it: read the code before you answer.\n\nCODE MAP (from a static scan and the Cartographer):\n${mapTextBlock}\n\nEVIDENCE (what installing it, running its tests, starting it and scanning it showed):\n${evidenceText(ev)}${ownerFacts(notes)}`;
+  return `Repo: ${repo}\nThe current folder is a copy of it: read the code before you answer. Open the page the site serves at / (its template or static index file) and the pages it links to. Only say a link, page or feature is missing or unconfirmed after you opened the file where it would be; what you did not open is not a gap.\n\nCODE MAP (from a static scan and the Cartographer):\n${mapTextBlock}\n\nEVIDENCE (what installing it, running its tests, starting it and scanning it showed):\n${evidenceText(ev)}${ownerFacts(notes)}`;
 }
 
 const understandingText = (u: Understanding, maxChars = 6000) => {
