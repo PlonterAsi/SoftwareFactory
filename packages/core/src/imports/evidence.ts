@@ -2,7 +2,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { prepareEnv, readPages, runRepoTests, siteProfile, withSite, type RepoEnv } from "../factory/repoenv.js";
-import { killTree } from "../launch/launcher.js";
+import { killTree, projectEnv } from "../launch/launcher.js";
 import { findSecrets } from "../safety/secrets.js";
 
 /**
@@ -292,7 +292,7 @@ function sh(file: string, args: string[], o: { cwd: string; shell?: boolean; tim
   return new Promise((resolve) => {
     let out = "";
     let child: ReturnType<typeof spawn>;
-    try { child = spawn(file, args, { cwd: o.cwd, shell: !!o.shell, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }); }
+    try { child = spawn(file, args, { cwd: o.cwd, shell: !!o.shell, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: projectEnv(o.cwd, process.execPath, null) }); }
     catch (e) { return resolve({ status: 1, out: (e as Error).message }); }
     const timer = setTimeout(() => { killTree(child, true); }, o.timeoutMs);
     child.stdout!.on("data", (x) => { if (out.length < 4_000_000) out += x; });
