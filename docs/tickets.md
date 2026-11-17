@@ -19,6 +19,8 @@ Questions are data in `packages/core/src/tickets/model.ts` (`FORMS`): adding one
 
 **Statuses**: open → ready → in progress → built (for your look) → closed, or rejected. The page offers only the next moves: from built, "Close, I saw it, good" or "Reopen, not good yet"; from closed, "Reopen". A move carries a note in the same step.
 
+**One timeline** (2026-11-17): a ticket's page shows one append-only timeline, oldest first: what people said, every status move, and what the crew did for it: each step of its runs (passed, failed, skipped), every agent call with its model, time and cost, the decisions at the gates and the questions put to you, retries and fix rounds, the run starting and ending, its branch, push and pull request. Filters show everything, only what was said, the crew at work, decisions, or branch and PR. It is derived from the event log (`ticket_notes` for the thread, `ticket_trace` for the crew's part, linked by `ticket_runs`), so it can be rebuilt and never loses a line.
+
 **Who may close**: requests, ideas, plans and questions are taste, so only you close them. Agents and rules leave them built for your look. A closed ticket never moves by itself; a late run or agent reply only adds a line to the thread.
 
 **Links**: related, duplicate of (closes the duplicate), derived from ("a new ticket from this one"), blocks. A link shows on both tickets.
@@ -100,7 +102,7 @@ GET  /api/tickets?project=&view=open|look|agents|plans|closed|all&kind=&q=   lis
 GET  /api/tickets/waiting?project=     what waits on you: look, answer, decide, with the moves that answer it
 GET  /api/tickets/key/:key             a ticket by its key (SF-42) or #id
 GET  /api/tickets/meta                 kinds with their questions, statuses, priorities, severities, relations
-GET  /api/tickets/:id                  ticket, thread, links, plan lines, next moves, work document, its run
+GET  /api/tickets/:id                  ticket, thread, timeline, links, plan lines, next moves, work document, its run
 GET  /api/tickets/:id/document         the work document as Markdown
 POST /api/tickets                      { kind, title?, body?, answers?, project?, priority?, severity?, assignee?, parent?, tags? }
 POST /api/tickets/:id/edit             { field, value, key? }   one field; field "answer" with key for a question

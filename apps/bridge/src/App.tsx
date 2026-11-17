@@ -1,5 +1,6 @@
 import { BrainPage } from "./Brain";
 import { FeatureMapPage } from "./FeatureMap";
+import { FlowsPage } from "./Flows";
 import { KitPage } from "./Kit";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API, setupApi, useBay, useChatRoutes, useFactory, useOrder, useProjects, type SinceView } from "./api";
@@ -140,6 +141,7 @@ export function App() {
       ) : view === "bay" ? <div className="fpage"><AgentBay bay={bay} /></div>
         : view === "tickets" ? <div className="fpage"><Tickets events={f.events} onShowRun={showRun}
             crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))} /></div>
+        : view === "flows" ? <FlowsPage />
         : view === "cycles" ? <Cycles onShowRun={showRun} tick={f.factoryRuns.filter((r) => r.finished).length + f.factoryRuns.length} />
         : view === "improve" ? <div className="fpage"><ImproveDeck improve={improve} crew={bay.agents} onRunStarted={showRun} /></div>
         : view === "order" ? (

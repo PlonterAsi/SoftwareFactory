@@ -1,4 +1,4 @@
-import type { FactoryRunView, StationState } from "../../api";
+import type { FactoryRunView, FlowView, StationState } from "../../api";
 
 /**
  * A run as a mission: ten stops on one track, in the order the engine works. Some stops fold
@@ -26,6 +26,23 @@ const PARTS: Record<StopId, string[]> = {
 };
 export const ORDER: StopId[] = ["idea", "council", "design", "plan", "ok1", "build", "check", "judge", "ok2", "ship"];
 
+/**
+ * The track's stops and the engine stations behind each, read from the run's flow: every step names its
+ * stop, and the stops come in the order of their first step. Without a flow, the built-in track.
+ */
+export function trackOf(flow?: FlowView | null): { order: StopId[]; parts: Record<StopId, string[]> } {
+  if (!flow) return { order: ORDER, parts: PARTS };
+  const order: StopId[] = [];
+  const parts = {} as Record<StopId, string[]>;
+  for (const step of flow.steps) {
+    const stop = step.stop as StopId;
+    if (!ORDER.includes(stop)) continue; // a stop this track cannot draw yet
+    if (!order.includes(stop)) { order.push(stop); parts[stop] = []; }
+    parts[stop].push(...(step.stations ?? [step.id]));
+  }
+  return order.length ? { order, parts } : { order: ORDER, parts: PARTS };
+}
+
 const rank: Record<StopState, number> = { live: 5, gate: 4, fail: 3, done: 2, skip: 1, todo: 0 };
 function one(s?: StationState): StopState {
   switch (s) {
@@ -43,7 +60,8 @@ const CRIT = ["coverage", "journey", "screens", "originality", "buildable"];
 export function designRounds(run: FactoryRunView) { return run.discovery.filter((d) => !d.settled); }
 export function scoreLine(scores: Record<string, number>) { return CRIT.filter((k) => k in scores).map((k) => scores[k]).join("·"); }
 
-export function stopsFor(run?: FactoryRunView): Stop[] {
+export function stopsFor(run?: FactoryRunView, flow?: FlowView | null): Stop[] {
+  const { order: ORDER, parts: PARTS } = trackOf(flow ?? run?.flow);
   const st = run?.stations ?? {};
   const started = (id: StopId) => PARTS[id].some((p) => st[p] && st[p].state !== "idle");
   const raw = ORDER.map((id) => {
@@ -65,6 +83,7 @@ export function stopsFor(run?: FactoryRunView): Stop[] {
   if (run?.finished?.outcome === "shipped") raw.forEach((s) => { if (s.state === "todo") s.state = "skip"; });
   if (run && !Object.keys(st).length && !run.finished) raw[0].state = "live";
   const by = Object.fromEntries(raw.map((r) => [r.id, r.state])) as Record<StopId, StopState>;
+  const inFlow = new Set<StopId>(ORDER);
   const R = run;
   const rounds = R ? designRounds(R) : [];
   const best = rounds.at(-1);
@@ -116,7 +135,8 @@ export function stopsFor(run?: FactoryRunView): Stop[] {
     { id: "ship", label: R?.repo ? "Hand over" : "Ship", sub: R?.repo ? (R.repo.pr ? `draft PR #${R.repo.pr.number}` : R.finished?.outcome === "shipped" ? "branch ready" : "branch or pull request") : R?.finished?.outcome === "shipped" ? "shipped" : "tagged release", state: R?.finished?.outcome === "shipped" ? "done" : by.ship },
   ];
   for (const s of stops) if (s.beads && !s.beads.length) delete s.beads;
-  return stops;
+  // Only the stops the flow has, in its order.
+  return ORDER.map((id) => stops.find((s) => s.id === id)!).filter((s) => s && inFlow.has(s.id));
 }
 
 /** The stop the run is at now (or ended on); the first stop for a run that has not started. */

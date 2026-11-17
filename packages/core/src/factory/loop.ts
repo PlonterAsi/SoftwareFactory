@@ -13,6 +13,8 @@ import { MockRuntime, READ_TOOLS, type AgentRuntime } from "../runtime.js";
 import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
+import { FlowLibrary, flowOfRun } from "../flows/library.js";
+import { roundsOf, stepsToRun, type FlowDef, type FlowStep } from "../flows/flow.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mergeNextDocs, mustRequirements, newRequirements, nextVersionPrompt, withAsk, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featureCapUsd, featurePrompt, featuresFile, featuresOf, nextFeaturesOf, progressEntry, type Feature } from "./features.js";
 import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, withScreenItems, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
@@ -96,6 +98,8 @@ export interface RunOptions {
   review?: boolean;
   /** The project this run belongs to. Without one, the run becomes a project of its own. */
   projectId?: number;
+  /** The flow to follow, by id (flows/library.ts). Default: the built-in flow of the run's kind. */
+  flow?: string;
 }
 
 /**
@@ -127,7 +131,7 @@ interface GateOpts { neverAuto?: boolean; action?: string; kind?: "retry" | "cou
 export class StopRun extends Error {}
 
 /** The options a run works with, once the defaults are filled in. */
-export type RunSettings = Required<Omit<RunOptions, "models" | "projectId">> & { models: Record<string, string> };
+export type RunSettings = Required<Omit<RunOptions, "models" | "projectId" | "flow">> & { models: Record<string, string> };
 /** How a run of another kind is made: from its started event's payload, for a start and for a resume. */
 export type RunMaker = (x: { factory: Factory; log: EventLog; runtime: AgentRuntime; id: number; idea: string; o: RunSettings; started: Record<string, unknown> }) => Run;
 
@@ -179,7 +183,11 @@ export class Factory {
    */
   extraBudget: (run: number, wantUsd: number) => number = (_run, want) => want;
 
+  /** The flows runs follow (flows/library.ts): each run keeps a copy of its flow on its started event. */
+  readonly flows: FlowLibrary;
+
   constructor(private log: EventLog, private runtime: AgentRuntime, readonly projectsDir: string, readonly crew: CrewSource = builtinCrew) {
+    this.flows = new FlowLibrary(log);
     // Agent calls cut off by the restart would otherwise pulse as "running" forever.
     const ended = new Set([...log.list({ type: "agent.run.completed", limit: 1e6 }), ...log.list({ type: "agent.run.failed", limit: 1e6 })].map((e) => (e.payload as { runId: number }).runId));
     for (const e of log.list({ type: "agent.run.started", limit: 1e6 })) {
@@ -284,7 +292,8 @@ export class Factory {
     const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: opts.review !== false };
     // A run keeps the crew it started with, even if you switch Practice/Real meanwhile.
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
-    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, ...(opts.projectId != null ? { projectId: opts.projectId } : {}) });
+    const flow = this.flows.forRun(undefined, opts.flow);
+    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
     const done = new Run(this, this.log, runtime, ev.id, text, o).go().finally(() => this.active.delete(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
@@ -313,7 +322,7 @@ export class Factory {
     const idea = `Turn ${plan.name} into an app`;
     const o = { maxUsd: opts.maxUsd ?? 1, maxFixRounds: 4, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: "never" as const, review: true };
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
-    const ev = this.log.append("factory.run.started", { idea, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}) });
+    const ev = this.log.append("factory.run.started", { idea, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow: this.flows.forRun() });
     const id = ev.id;
     // What is kept from the shipped run is on the floor too, so the run reads whole.
     const kept = `kept from run #${baseRun}`;
@@ -343,7 +352,8 @@ export class Factory {
     const screen = this.onTopOf(baseRun, "feature", "add a feature to");
     const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: true };
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
-    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}) });
+    const flow = this.flows.forRun();
+    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
     const done = new Run(this, this.log, runtime, ev.id, text, o, screen).go().finally(() => this.active.delete(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
@@ -360,7 +370,7 @@ export class Factory {
     if (!text) throw new Error("Say what to build.");
     const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: opts.review !== false };
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
-    const started = { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, kind, ...extra, ...(opts.projectId != null ? { projectId: opts.projectId } : {}) };
+    const started = { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, kind, ...extra, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow: this.flows.forRun(kind, opts.flow) };
     const ev = this.log.append("factory.run.started", started);
     const done = make({ factory: this, log: this.log, runtime, id: ev.id, idea: text, o, started }).go().finally(() => this.active.delete(ev.id));
     this.active.set(ev.id, done);
@@ -439,38 +449,76 @@ export class Run {
     protected screen: ScreenRun | null = null,
   ) {}
 
+  private flowDef: FlowDef | null = null;
+  /** The flow this run follows: the copy on its started event (flows/library.ts). */
+  protected get flow(): FlowDef { return (this.flowDef ??= flowOfRun(this.log, this.id)); }
+
+  /**
+   * Carry out the run's flow: each step in its order, by the engine action it names. A step whose milestone
+   * the log already shows (a resume) is not done again. The built-in flows carry out exactly the fixed
+   * pipeline this replaced: intake, council, design, plan with gate A, tests, build, test and fix, review,
+   * the product judge, gate B, ship.
+   */
   async go(from?: RestoredState) {
     try {
       if (from) this.restore(from);
-      if (this.screen?.kind === "feature") {
-        const base = restoreState(this.log, this.screen.baseRun);
-        this.basePlan = base.plan ?? null;
-        if (!this.dir) this.dir = base.dir ?? "";
-        const shipped = shippedDesign(this.log, this.screen.baseRun);
-        this.baseDocs = shipped.docs;
-        this.firstIdea = shipped.idea;
-      }
+      const steps = stepsToRun(this.flow);
+      // Nothing here may wait before the first step starts: the step marks itself active at once, before
+      // whoever started the run writes its next event (a ticket notes its run right after the start).
+      this.beforeFlow();
       const done = from?.done ?? new Set<string>();
-      if (!done.has("intake")) await this.station("intake", async () => { captureSignal(this.log, this.idea, "factory"); });
-      if (!done.has("council")) await this.councilLoop();
-      if (!done.has("discover")) await this.discoverLoop();
-      if (!done.has("plan")) await this.planLoop(done.has("planWritten"));
-      if (!done.has("tests")) await this.station("tests", () => this.writeTests());
-      if (!done.has("build")) await this.station("build", () => this.build());
-      // On a resume the suite runs again first (free): it proves the repo is where the log says.
-      if (!done.has("reviewed")) {
-        await this.testFixLoop("", !!from && from.done.has("build"));
-        await this.reviewLoop();
-        await this.evaluateLoop();
-      } else if (!done.has("accepted")) await this.testFixLoop("", true);
-      if (!done.has("accepted")) await this.acceptLoop();
-      const sha = await this.station("ship", () => this.ship());
-      this.finish("shipped", `Shipped ${this.plan.name} to ${this.dir}`, sha);
+      let sha: string | undefined;
+      for (const step of steps) {
+        if (step.resumeKey && done.has(step.resumeKey)) { const kept = this.keptOnResume(step); if (kept) await kept; continue; }
+        const out = await this.doStep(step, from, done);
+        if (step.action === "ship") sha = out as string;
+      }
+      this.shipped(sha!);
     } catch (e) {
       const stopped = e instanceof StopRun;
       this.finish(stopped ? "stopped" : "failed", (e as Error).message);
     }
   }
+
+  /** Before the first step: the next version of a shipped app reads what shipped. */
+  protected beforeFlow() {
+    if (this.screen?.kind === "feature") {
+      const base = restoreState(this.log, this.screen.baseRun);
+      this.basePlan = base.plan ?? null;
+      if (!this.dir) this.dir = base.dir ?? "";
+      const shipped = shippedDesign(this.log, this.screen.baseRun);
+      this.baseDocs = shipped.docs;
+      this.firstIdea = shipped.idea;
+    }
+  }
+
+  /** One step of the flow, by its action. */
+  protected async doStep(step: FlowStep, from: RestoredState | undefined, done: Set<string>): Promise<unknown> {
+    switch (step.action) {
+      case "intake": return this.intakeStep();
+      case "council": return this.councilLoop();
+      case "discover": return this.discoverLoop();
+      case "plan": return this.planLoop(done.has("planWritten"));
+      case "tests": return this.testsStep();
+      case "build": return this.station("build", () => this.build());
+      // On a resume the suite runs again first (free): it proves the repo is where the log says.
+      case "testFix": return this.testFixLoop("", done.has("reviewed") || (!!from && from.done.has("build")));
+      case "review": return this.reviewLoop();
+      case "evaluate": return this.evaluateLoop();
+      case "accept": return this.acceptLoop();
+      case "ship": return this.station("ship", () => this.ship());
+      default: throw new Error(`The flow "${this.flow.name}" asks for "${step.action}", which this engine cannot do.`);
+    }
+  }
+
+  /** A step a resume does not do again: most need nothing. Returns a promise only when it has work to wait for. */
+  protected keptOnResume(_step: FlowStep): Promise<void> | void { /* nothing to put back */ }
+
+  protected async intakeStep() { await this.station("intake", async () => { captureSignal(this.log, this.idea, "factory"); }); }
+  protected async testsStep() { await this.station("tests", () => this.writeTests()); }
+
+  /** The flow reached its end. */
+  protected shipped(sha: string) { this.finish("shipped", `Shipped ${this.plan.name} to ${this.dir}`, sha); }
 
   /** Put back what the log says this run already had. */
   protected restore(st: RestoredState) {
@@ -502,7 +550,8 @@ export class Run {
     }
     const seats: SeatResult[] = [];
     let brief!: CouncilBrief;
-    for (let round = 1; round <= MAX_COUNCIL_ROUNDS; round++) {
+    const maxRounds = roundsOf(this.flow, "council", MAX_COUNCIL_ROUNDS);
+    for (let round = 1; round <= maxRounds; round++) {
       const crew = this.f.crew.crewFor("council");
       const prev = seats.filter((x) => x.round === round - 1);
       brief = await this.station("council", async () => {
@@ -523,7 +572,7 @@ export class Run {
         if (answered < 2) throw new Error(`only ${answered} of ${crew.length} Council seats gave a usable take`);
         return b;
       }, round);
-      if (majority(votesOf(seats, round)) === "build" || round === MAX_COUNCIL_ROUNDS) break;
+      if (majority(votesOf(seats, round)) === "build" || round === maxRounds) break;
     }
     if (brief.outcome === "drop") {
       const why = brief.concerns.concat(brief.agreed).slice(0, 3).join("; ");
@@ -552,7 +601,7 @@ export class Run {
       this.mark("discover", "skipped", undefined, "The shipped design is kept, with what you asked for added to its requirements");
       return;
     }
-    const rounds = base ? NEXT_VERSION_ROUNDS : MAX_DISCOVERY_ROUNDS;
+    const rounds = base ? NEXT_VERSION_ROUNDS : roundsOf(this.flow, "discover", MAX_DISCOVERY_ROUNDS);
     let best: { docs: ProductDocs; critique: Critique | null; round: number } | null = null;
     let last: { docs: ProductDocs; critique: Critique | null } | null = null;
     let why = "";
@@ -1277,7 +1326,8 @@ export class Run {
     const skip = (why: string) => { this.mark("evaluate", "skipped", undefined, why); };
     if (!this.docs || !this.plan.app || (this.screen && !this.baseDocs)) return skip("No product design to judge this build against");
     if (!this.judgeDocs()!.requirements.some((r) => r.must)) return skip("This version adds no requirement of its own to judge");
-    for (let round = 1; round <= MAX_EVALUATION_ROUNDS; round++) {
+    const looks = roundsOf(this.flow, "evaluate", MAX_EVALUATION_ROUNDS);
+    for (let round = 1; round <= looks; round++) {
       const screens = await this.f.readScreens(this.dir).catch(() => null);
       if (!screens?.length) {
         this.log.append("factory.evaluation", { run: this.id, round, pass: false, skipped: "the app's screens could not be read in a browser on this computer" });
@@ -1299,7 +1349,7 @@ export class Run {
       // What the Reviewer proved still broken (by running it) is repaired even when the judge passes: the
       // judge only sees screens (run 4004 went to the build gate with 3 criteria the Reviewer saw fail).
       const left = round === 1 && this.reviewNotes?.verdict === "fix" ? reviewRepair(this.reviewNotes) : null;
-      if ((ev.pass && !left) || round === MAX_EVALUATION_ROUNDS) return;
+      if ((ev.pass && !left) || round === looks) return;
       // Not worth starting a fix it cannot finish: the person sees what is open at the build gate.
       if (this.o.maxUsd - this.spent < 0.3) return;
       // What the judge found goes back to the build loop as features, each in a fresh session (run 2898: one

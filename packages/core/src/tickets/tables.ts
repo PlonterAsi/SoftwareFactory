@@ -18,9 +18,9 @@ export const EDITABLE: Record<string, string> = {
 
 export const ticketsProjection: Projection = {
   name: "tickets",
-  version: 6,
-  tables: ["tickets", "ticket_notes", "ticket_links", "ticket_keys"],
-  describe: "Tickets: units of work per project, their append-only thread (notes, agent replies, status moves, events) and links",
+  version: 7,
+  tables: ["tickets", "ticket_notes", "ticket_links", "ticket_keys", "ticket_runs", "ticket_trace"],
+  describe: "Tickets: units of work per project, their append-only timeline (notes, agent replies, status moves, agent steps, decisions, retries, branches and PRs) and links",
   migrate(db) {
     db.exec(`CREATE TABLE IF NOT EXISTS tickets (
       id          INTEGER PRIMARY KEY,
@@ -72,9 +72,25 @@ export const ticketsProjection: Projection = {
       kind      TEXT NOT NULL CHECK (kind IN ('note', 'reply', 'status', 'event')),
       text      TEXT NOT NULL,
       status    TEXT,
-      cost_usd  REAL
+      cost_usd  REAL,
+      cat       TEXT NOT NULL DEFAULT 'event'
     );
     CREATE INDEX IF NOT EXISTS ticket_notes_ticket ON ticket_notes(ticket_id, event_id);
+    CREATE TABLE IF NOT EXISTS ticket_runs (
+      run       INTEGER PRIMARY KEY,
+      ticket_id INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS ticket_trace (
+      event_id  INTEGER PRIMARY KEY,
+      ticket_id INTEGER NOT NULL,
+      ts        TEXT NOT NULL,
+      by_name   TEXT NOT NULL,
+      cat       TEXT NOT NULL,
+      text      TEXT NOT NULL,
+      run       INTEGER,
+      cost_usd  REAL
+    );
+    CREATE INDEX IF NOT EXISTS ticket_trace_ticket ON ticket_trace(ticket_id, event_id);
     CREATE TABLE IF NOT EXISTS ticket_links (
       from_id  INTEGER NOT NULL,
       to_id    INTEGER NOT NULL,
@@ -85,9 +101,9 @@ export const ticketsProjection: Projection = {
   },
   apply(db, e) {
     const p = e.payload as P;
-    const note = (kind: string, text: string, status: string | null = null, cost: number | null = null) => {
-      db.prepare("INSERT OR REPLACE INTO ticket_notes (event_id, ticket_id, ts, by_name, kind, text, status, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(e.id, Number(p.id), e.ts, String(p.by ?? "you"), kind, text, status, cost);
+    const note = (kind: string, text: string, status: string | null = null, cost: number | null = null, cat: TimelineCat = kind === "note" || kind === "reply" ? "said" : kind === "status" ? "status" : "event") => {
+      db.prepare("INSERT OR REPLACE INTO ticket_notes (event_id, ticket_id, ts, by_name, kind, text, status, cost_usd, cat) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(e.id, Number(p.id), e.ts, String(p.by ?? "you"), kind, text, status, cost, cat);
       db.prepare("UPDATE tickets SET updated_at = ?, last_note = ? WHERE id = ?").run(e.ts, text.slice(0, 200), Number(p.id));
     };
     // A ticket's number inside its project: given by the service, or the next one (older events had none).
@@ -139,7 +155,8 @@ export const ticketsProjection: Projection = {
       if (status) {
         db.prepare("UPDATE tickets SET status = ?, closed_at = CASE WHEN ? IN ('closed', 'rejected') THEN ? ELSE NULL END WHERE id = ?").run(status, status, e.ts, Number(p.id));
       }
-      note(status ? "status" : String(p.kind ?? "note") === "reply" ? "reply" : String(p.kind ?? "note") === "event" ? "event" : "note", String(p.text ?? ""), status, num(p.costUsd));
+      const kind = status ? "status" : String(p.kind ?? "note") === "reply" ? "reply" : String(p.kind ?? "note") === "event" ? "event" : "note";
+      note(kind, String(p.text ?? ""), status, num(p.costUsd), p.step ? "step" : undefined);
     } else if (e.type === "ticket.linked") {
       const from = Number(p.id), to = Number(p.to), rel = String(p.relation);
       if (p.removed) db.prepare("DELETE FROM ticket_links WHERE from_id = ? AND to_id = ? AND relation = ?").run(from, to, rel);
@@ -147,19 +164,21 @@ export const ticketsProjection: Projection = {
       note("event", `${p.removed ? "Unlinked" : "Linked"} ${rel.replace("_", " ")} ${said(to)}`);
     } else if (e.type === "ticket.run") {
       db.prepare("UPDATE tickets SET run = ? WHERE id = ?").run(Number(p.run), Number(p.id));
-      note("event", `Factory run #${p.run} started on this ticket`);
+      // From here on, what the run does lands on this ticket's timeline too (traceOf below).
+      db.prepare("INSERT OR REPLACE INTO ticket_runs (run, ticket_id) VALUES (?, ?)").run(Number(p.run), Number(p.id));
+      note("event", `Factory run #${p.run} started on this ticket`, null, null, "run");
     } else if (e.type === "ticket.branch") {
       // New work on the branch: what was sent before is behind, so the ticket offers to send again.
       db.prepare("UPDATE tickets SET branch = ?, branch_dir = ?, pushed_url = CASE WHEN ? THEN NULL ELSE pushed_url END WHERE id = ?").run(String(p.branch), String(p.dir), p.sha ? 1 : 0, Number(p.id));
-      note("event", p.sha ? `Branch ${p.branch} at ${String(p.sha).slice(0, 7)}: ${(p.files ?? []).length} file(s) changed in ${p.dir}.` : `Branch ${p.branch} in ${p.dir}: nothing changed.`);
+      note("event", p.sha ? `Branch ${p.branch} at ${String(p.sha).slice(0, 7)}: ${(p.files ?? []).length} file(s) changed in ${p.dir}.` : `Branch ${p.branch} in ${p.dir}: nothing changed.`, null, null, "git");
     } else if (e.type === "ticket.pushed") {
       // The branch is on GitHub (sent on your press, with this PC's own Git sign-in); `url` starts its pull request.
       db.prepare("UPDATE tickets SET pushed_url = ?, updated_at = ? WHERE id = ?").run(p.url ? String(p.url) : "local", e.ts, Number(p.id));
-      note("event", p.url ? `Branch ${p.branch} sent to ${p.repo} on GitHub` : `Branch ${p.branch} added to ${p.repo}`);
+      note("event", p.url ? `Branch ${p.branch} sent to ${p.repo} on GitHub` : `Branch ${p.branch} added to ${p.repo}`, null, null, "git");
     } else if (e.type === "ticket.pr") {
       // The ticket's pull request: opened by the crew, then merged or closed on GitHub.
       db.prepare("UPDATE tickets SET pr_repo = ?, pr_number = ?, pr_url = ?, pr_state = ?, updated_at = ? WHERE id = ?").run(String(p.repo), Number(p.number), String(p.url), String(p.state), e.ts, Number(p.id));
-      note("event", p.state === "open" ? `PR #${p.number} opened on ${p.repo}` : `PR #${p.number} ${p.state}`);
+      note("event", p.state === "open" ? `PR #${p.number} opened on ${p.repo}` : `PR #${p.number} ${p.state}`, null, null, "git");
     } else if (e.type === "ticket.keyed") {
       // A project's ticket key ("SF"), given once; it stays when the project is renamed.
       db.prepare("INSERT OR IGNORE INTO ticket_keys (project, key) VALUES (?, ?)").run(Number(p.project), String(p.key));
@@ -172,8 +191,79 @@ export const ticketsProjection: Projection = {
       if (!nb) return;
       db.prepare("UPDATE tickets SET line_order = ? WHERE id = ?").run(nb.line_order, Number(p.id));
       db.prepare("UPDATE tickets SET line_order = ? WHERE id = ?").run(t.line_order, nb.id);
+    } else {
+      // What the crew does for a ticket: the steps of its run, agent calls, decisions, retries, its branch.
+      const tr = traceOf(e.type, p, (run) => (db.prepare("SELECT ticket_id FROM ticket_runs WHERE run = ?").get(run) as { ticket_id: number } | undefined)?.ticket_id ?? null);
+      if (tr) db.prepare("INSERT OR REPLACE INTO ticket_trace (event_id, ticket_id, ts, by_name, cat, text, run, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(e.id, tr.ticket, e.ts, tr.by, tr.cat, tr.text, tr.run, tr.cost);
     }
   },
 };
+
+/**
+ * What a timeline row is about: what people said, a status move, a step the crew took, an agent call, a
+ * decision (a gate or a question to you), a retry, the run starting or ending, git (branch, push, PR), or
+ * anything else that happened to the ticket.
+ */
+export const TIMELINE_CATS = ["said", "status", "step", "agent", "decision", "retry", "run", "git", "event"] as const;
+export type TimelineCat = (typeof TIMELINE_CATS)[number];
+
+const STATION_WORD: Record<string, string> = {
+  intake: "Intake", council: "Council", discover: "Design loop", plan: "Plan", gateA: "Your OK on the plan", tests: "Tests", build: "Build",
+  test: "Test", fix: "Fix", review: "Review", evaluate: "Product judge", gateB: "Your OK on the build", ship: "Ship",
+};
+const STATE_WORD: Record<string, string> = { pass: "passed", fail: "failed", incomplete: "stopped unfinished", skipped: "skipped" };
+const clip = (v: unknown, n = 300) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, n);
+
+/**
+ * The timeline row an engine or agent event adds to a ticket, or null. `ticketOfRun` says which ticket a
+ * factory run works (from ticket.run). Plain, so the tests read it without a database.
+ */
+export function traceOf(type: string, p: P, ticketOfRun: (run: number) => number | null): { ticket: number; by: string; cat: TimelineCat; text: string; run: number | null; cost: number | null } | null {
+  if (type === "ticket.step") {
+    // The light route's harness steps: what failed or was skipped is already noted on the thread.
+    if (p.state !== "passed" || p.id == null) return null;
+    return { ticket: Number(p.id), by: "factory", cat: "step", text: `${p.step}: passed`, run: null, cost: null };
+  }
+  if (type.startsWith("agent.run.")) {
+    if (type !== "agent.run.completed" && type !== "agent.run.failed") return null;
+    const run = num(p.factoryRun);
+    const ticket = num(p.ticket) ?? (run != null ? ticketOfRun(run) : null);
+    if (ticket == null) return null;
+    const model = Array.isArray(p.models) && p.models.length ? String(p.models[0]).replace(/^claude-/, "").replace(/-\d.*$/, "") : p.model ? String(p.model) : null;
+    const at = p.station ? ` at ${STATION_WORD[String(p.station)]?.toLowerCase() ?? p.station}${p.round ? `, round ${p.round}` : ""}` : "";
+    const text = type === "agent.run.completed"
+      ? `${p.agent} answered${at}${model ? ` · ${model}` : ""}${typeof p.durationMs === "number" ? ` · ${(p.durationMs / 1000).toFixed(1)}s` : ""}`
+      : `${p.agent} failed${at}: ${clip(p.error, 240)}`;
+    return { ticket, by: String(p.agent ?? "agent"), cat: "agent", text, run, cost: num(p.costUsd) };
+  }
+  if (!type.startsWith("factory.")) return null;
+  const run = num(p.run);
+  const ticket = run != null ? ticketOfRun(run) : null;
+  if (ticket == null || run == null) return null;
+  const row = (cat: TimelineCat, text: string, by = "factory") => ({ ticket, by, cat, text, run, cost: null });
+  const where = STATION_WORD[String(p.station)] ?? String(p.station ?? "");
+  switch (type) {
+    case "factory.station": {
+      const word = STATE_WORD[String(p.state)];
+      if (!word) return null; // active and waiting: the step's end, or the gate, says it
+      return row("step", `${where}${p.round ? ` round ${p.round}` : ""} ${word}${p.note ? `: ${clip(p.note, 240)}` : ""}`);
+    }
+    case "factory.gate": {
+      const gate = p.gate === "gateA" ? "Your OK on the plan" : p.gate === "gateB" ? "Your OK on the build" : "A question to you";
+      if (p.state === "waiting") return row("decision", `${gate}: waiting${p.question ? ` (${clip(p.question, 240)})` : ""}`);
+      if (p.kind === "retry") return row("retry", `${where || "A step"} ${p.state === "approved" ? `tried again${p.attempt ? ` (attempt ${Number(p.attempt) + 1})` : ""}` : "not tried again"} by ${p.by ?? "you"}${p.note ? `: ${clip(p.note, 200)}` : ""}`, String(p.by ?? "you"));
+      return row("decision", `${gate}: ${p.state === "approved" ? "approved" : "sent back"} by ${p.by ?? "you"}${p.note ? `: ${clip(p.note, 240)}` : ""}`, String(p.by ?? "you"));
+    }
+    case "factory.attempt": return row("retry", `Fix round ${p.round ?? "?"}: ${p.before ?? "?"} failing before, ${p.after ?? "?"} after${p.ladder && p.ladder !== "same" ? ` (${p.ladder})` : ""}`);
+    case "factory.ladder": return row("retry", `The fix loop stepped up from ${p.from} to ${p.to}: ${clip(p.reason, 200)}`);
+    case "factory.continued": return row("retry", `${where} continued: ${clip(p.reason, 240)}`);
+    case "factory.run.resumed": return row("run", `Run #${run} picked up again at ${STATION_WORD[String(p.from)] ?? p.from}${p.auto ? " by itself" : ""}`);
+    case "factory.run.finished": return row("run", `Run #${run} ${p.outcome}${p.reason ? `: ${clip(p.reason, 300)}` : ""}`);
+    case "factory.repo": return row("git", `Working on branch ${p.branch} from ${String(p.base ?? "").slice(0, 7)} in a clone of ${p.name ?? p.source}`);
+    case "factory.branch": return row("git", `Branch ${p.branch} ready${p.pr && typeof p.pr === "object" ? `, draft PR #${(p.pr as P).number}` : ""}`);
+    default: return null;
+  }
+}
 
 registerProjection(ticketsProjection);

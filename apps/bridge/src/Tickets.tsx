@@ -19,9 +19,11 @@ export interface TicketView {
   source: string; openedBy: string; run: number | null; pr: { repo: string; number: number; url: string; state: "open" | "merged" | "closed" } | null; branch: string | null; branchDir: string | null; pushedUrl?: string | null; createdAt: string; updatedAt: string; closedAt: string | null; lastNote: string | null;
 }
 interface NoteView { eventId: number; ts: string; by: string; kind: "note" | "reply" | "status" | "event"; text: string; status: TicketStatus | null; costUsd: number | null }
+type TimelineCat = "said" | "status" | "step" | "agent" | "decision" | "retry" | "run" | "git" | "event";
+interface TimelineEntry { eventId: number; ts: string; by: string; cat: TimelineCat; text: string; costUsd: number | null; status: TicketStatus | null; run: number | null }
 interface LinkView { to: number; relation: string; title?: string; status?: TicketStatus; key?: string }
 interface Detail {
-  ticket: TicketView; notes: NoteView[]; links: LinkView[]; lines: TicketView[]; parent: TicketView | null; moves: { to: TicketStatus; label: string }[]; document: string;
+  ticket: TicketView; notes: NoteView[]; timeline?: TimelineEntry[]; links: LinkView[]; lines: TicketView[]; parent: TicketView | null; moves: { to: TicketStatus; label: string }[]; document: string;
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
   repo: { source: string; dir: string; branch: string | null; github?: { owner: string; name: string } } | null;
   working: boolean;
@@ -484,14 +486,16 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
         </form>
       </div>
 
-      <ol className="tk-thread" aria-label="Thread">
-        {d.notes.map((n) => (
-          <li key={n.eventId} className={`tk-note n-${n.kind}`}>
-            <span className="tk-note-head mono muted">{n.by} · {ago(n.ts)}{n.costUsd ? ` · $${n.costUsd.toFixed(4)}` : ""}{n.status ? ` · → ${STATUS_LABEL[n.status]}` : ""}</span>
-            <span className="tk-note-text">{n.text}</span>
-          </li>
-        ))}
-      </ol>
+      {d.timeline ? <TicketTimeline rows={d.timeline} onShowRun={onShowRun} /> : (
+        <ol className="tk-thread" aria-label="Thread">
+          {d.notes.map((n) => (
+            <li key={n.eventId} className={`tk-note n-${n.kind}`}>
+              <span className="tk-note-head mono muted">{n.by} · {ago(n.ts)}{n.costUsd ? ` · $${n.costUsd.toFixed(4)}` : ""}{n.status ? ` · → ${STATUS_LABEL[n.status]}` : ""}</span>
+              <span className="tk-note-text">{n.text}</span>
+            </li>
+          ))}
+        </ol>
+      )}
       <form className="tk-composer" onSubmit={(e) => { e.preventDefault(); if (say.trim()) act("say", () => ticketsApi.say(id, say)).then(() => setSay("")); }}>
         <textarea rows={2} placeholder={'Say something on the thread. "Needs a look" or "don\'t close" stops the QA rule from closing it.'} value={say} onChange={(e) => setSay(e.target.value)} aria-label="Note" />
         <div className="composer-row">
@@ -632,5 +636,43 @@ function AutoToggle({ last, onError }: { last: number; onError: (m: string) => v
         : "The crew only starts a ticket when you press Work it. Press to let it pick up ready bugs and tasks by itself."}>
       <span className="tk-auto-dot" aria-hidden /> Crew picks up: {rule.on ? "on" : "off"}
     </button>
+  );
+}
+
+const CAT_GLYPH: Record<TimelineCat, string> = { said: "✎", status: "→", step: "▸", agent: "◆", decision: "◇", retry: "↻", run: "●", git: "⑂", event: "·" };
+const TIMELINE_FILTERS: [string, string, TimelineCat[] | null][] = [
+  ["all", "Everything", null],
+  ["talk", "Said", ["said", "status"]],
+  ["crew", "Crew at work", ["step", "agent", "retry", "run"]],
+  ["decisions", "Decisions", ["decision"]],
+  ["git", "Branch and PR", ["git"]],
+];
+
+/**
+ * The ticket's one timeline, oldest first: what people said and every status move, and what the crew did
+ * for it (each step of its runs, agent calls, decisions at the gates, retries, the branch and its PR).
+ */
+function TicketTimeline({ rows, onShowRun }: { rows: TimelineEntry[]; onShowRun?: (run: number) => void }) {
+  const [filter, setFilter] = useState("all");
+  const cats = TIMELINE_FILTERS.find(([k]) => k === filter)?.[2] ?? null;
+  const shown = cats ? rows.filter((r) => cats.includes(r.cat)) : rows;
+  const count = (c: TimelineCat[] | null) => (c ? rows.filter((r) => c.includes(r.cat)).length : rows.length);
+  return (
+    <section className="tk-timeline" aria-label="Timeline">
+      <div className="tk-tl-filters" role="tablist" aria-label="Show on the timeline">
+        {TIMELINE_FILTERS.map(([k, label, c]) => (
+          <button key={k} type="button" role="tab" aria-selected={filter === k} className={`tk-tl-filter${filter === k ? " on" : ""}`} onClick={() => setFilter(k)}>{label} <span className="mono muted">{count(c)}</span></button>
+        ))}
+      </div>
+      <ol className="tk-thread" aria-label="Thread">
+        {shown.map((n) => (
+          <li key={n.eventId} className={`tk-note c-${n.cat}${n.cat === "said" ? " n-note" : ""}`}>
+            <span className="tk-note-head mono muted"><span className="tk-cat" title={n.cat} aria-label={n.cat}>{CAT_GLYPH[n.cat] ?? "·"}</span> {n.by} · {ago(n.ts)}{n.costUsd ? ` · $${n.costUsd.toFixed(4)}` : ""}{n.status ? ` · → ${STATUS_LABEL[n.status]}` : ""}{n.run != null && onShowRun ? <> · <button type="button" className="link tiny" onClick={() => onShowRun(n.run as number)}>run #{n.run}</button></> : null}</span>
+            <span className="tk-note-text">{n.text}</span>
+          </li>
+        ))}
+        {shown.length === 0 && <li className="tk-note muted">Nothing of this kind yet.</li>}
+      </ol>
+    </section>
   );
 }

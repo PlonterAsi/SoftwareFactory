@@ -27,6 +27,17 @@ one line
 
 The code is `Run.go()` in `packages/core/src/factory/loop.ts`. Station ids, in order: `intake`, `council`, `discover`, `plan`, `gateA`, `tests`, `build`, `test`, `fix`, `review`, `evaluate`, `gateB`, `ship`.
 
+### The pipeline is a flow (2026-11-17)
+
+The pipeline above is no longer fixed code. It is the built-in **New project** flow, stored as data in `packages/core/src/flows/flow.ts`: each step names its kind (step, loop or gate), the engine action that carries it out, the crew slots that work it, its loop rule (goal, observer, passes when, stops anyway, round limit), when it is skipped, the milestone that skips it on a resume, the stop on the project track it belongs to, and where the canvas draws it. Imported repositories follow the built-in **Change in a repo** flow, the same steps with the repo's own intake, tests and hand-over.
+
+- `Run.go()` reads the flow the run started with and carries out its steps in order, one engine action each (`intake`, `council`, `discover`, `plan`, `tests`, `build`, `testFix`, `review`, `evaluate`, `accept`, `ship`). Gate A and the Fixer are drawn as their own boxes but carried out inside the plan loop and the test loop (`within`).
+- Every run copies its flow onto its `factory.run.started` event, so an edit never changes a run already going and a resume follows the same flow. Runs from before flows follow the built-in of their kind.
+- Flows are saved as `flow.saved` events (every version kept, `flows` table). A flow is checked before it is saved or run: known actions, each once, required ones present (intake, plan, tests, build, test and fix, your OK on the build, ship) and in an order that works, agents that are crew slots, loop limits from 1 to 6. The council, design, review and judge steps can be left out.
+- The engine reads the round limits of the council, design and judge loops from the flow.
+- The factory floor, the project's Mission track and the Flows page (`#/factory/flows`) draw the flow. API: `GET /api/flows`, `GET /api/flows/:id`, `PUT /api/flows/:id`, `POST /api/flows/:id/reset`, `POST /api/flows/check`.
+- Proof of no change: the four practice-crew runs (default, council always, no planted bug, Agent Bay crew) write the same events, in the same order, before and after; every existing test passes.
+
 ### Each loop: goal, observer, stop
 
 A loop needs a goal that can be measured, an observer other than the agent that did the work, and state on disk so each round starts from what the last one learned.

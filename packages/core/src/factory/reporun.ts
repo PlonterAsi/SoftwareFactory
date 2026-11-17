@@ -13,6 +13,7 @@ import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
 import { hideTokens, parseGitHubRepo, type GitHub } from "../tickets/github.js";
 import { harnessChecks, prepareClone, repoGuidance, repoOfProject, type RepoRef } from "../tickets/repowork.js";
 import type { CrewMember } from "./crew.js";
+import { roundsOf, type FlowStep } from "../flows/flow.js";
 import { critiquePrompt, docsFiles, mustRequirements, validateDocs, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation } from "./evaluate.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featureCapUsd, featuresFile, progressEntry, type Feature } from "./features.js";
@@ -211,32 +212,20 @@ export class RepoRun extends Run {
 
   protected get asked(): string { return `In the existing product "${this.info.name}" (${this.info.source}) the person asks for this change: ${this.idea}`; }
 
-  async go(from?: RestoredState) {
-    try {
-      if (from) this.restore(from);
-      const done = from?.done ?? new Set<string>();
-      if (!done.has("intake")) await this.station("intake", async () => { captureSignal(this.log, this.idea, "factory"); await this.prepare(); });
-      else await this.prepare();
-      if (!done.has("council")) await this.councilLoop();
-      if (!done.has("discover")) await this.discoverLoop();
-      if (!done.has("plan")) await this.planLoop(done.has("planWritten"));
-      if (!done.has("tests")) await this.baselineTests();
-      else this.failingBefore = new Set(((this.lastOf("factory.tests.locked")?.failingBefore ?? []) as string[]).map(String));
-      if (!done.has("build")) await this.station("build", () => this.build());
-      if (!done.has("reviewed")) {
-        await this.testFixLoop("", !!from && from.done.has("build"));
-        await this.reviewLoop();
-        await this.evaluateLoop();
-      } else if (!done.has("accepted")) await this.testFixLoop("", true);
-      if (!done.has("accepted")) await this.acceptLoop();
-      const sha = await this.station("ship", () => this.ship());
-      const pr = this.handed.pr as { number: number; url: string } | undefined;
-      // Kept on this computer: the ticket has the button that takes it (Tickets.send). A run with no ticket gets the one git line.
-      const take = this.info.ticket ? `Press ${this.ref.github ? "Send to GitHub" : "Add to my folder"} on ticket ${this.info.ticket.key} when you want it there.` : `To take it into your repo: git fetch "${this.dir}" ${this.info.branch}`;
-      this.finish("shipped", pr ? `The change is on branch ${this.info.branch}, as draft pull request #${pr.number}: ${pr.url}` : `The change is on branch ${this.info.branch} in ${this.dir}. ${this.handed.kept ?? ""} ${take}`.replace(/\s+/g, " "), sha);
-    } catch (e) {
-      this.finish(e instanceof StopRun ? "stopped" : "failed", (e as Error).message);
-    }
+  // The run follows the "Change in a repo" flow (flows/flow.ts) through Run.go; these are the steps that
+  // differ in a repo: intake clones and reads it, tests runs the repo's own suite before anything changes.
+  protected async intakeStep() { await this.station("intake", async () => { captureSignal(this.log, this.idea, "factory"); await this.prepare(); }); }
+  protected async testsStep() { await this.baselineTests(); }
+  protected keptOnResume(step: FlowStep): Promise<void> | void {
+    if (step.action === "intake") return this.prepare();
+    if (step.action === "tests") this.failingBefore = new Set(((this.lastOf("factory.tests.locked")?.failingBefore ?? []) as string[]).map(String));
+  }
+
+  protected shipped(sha: string) {
+    const pr = this.handed.pr as { number: number; url: string } | undefined;
+    // Kept on this computer: the ticket has the button that takes it (Tickets.send). A run with no ticket gets the one git line.
+    const take = this.info.ticket ? `Press ${this.ref.github ? "Send to GitHub" : "Add to my folder"} on ticket ${this.info.ticket.key} when you want it there.` : `To take it into your repo: git fetch "${this.dir}" ${this.info.branch}`;
+    this.finish("shipped", pr ? `The change is on branch ${this.info.branch}, as draft pull request #${pr.number}: ${pr.url}` : `The change is on branch ${this.info.branch} in ${this.dir}. ${this.handed.kept ?? ""} ${take}`.replace(/\s+/g, " "), sha);
   }
 
   private lastOf(type: string): Record<string, any> | undefined {
@@ -550,7 +539,8 @@ export class RepoRun extends Run {
     const skip = (why: string) => { this.mark("evaluate", "skipped", undefined, why); };
     const docs = this.docs;
     if (!docs || !mustRequirements(docs).length) return skip("No design of the change to judge it against");
-    for (let round = 1; round <= MAX_EVALUATION_ROUNDS; round++) {
+    const looks = roundsOf(this.flow, "evaluate", MAX_EVALUATION_ROUNDS);
+    for (let round = 1; round <= looks; round++) {
       if (this.o.maxUsd - this.spent < 0.1) return round === 1 ? skip("Not enough of the budget left for the product judge") : undefined;
       const site = await this.tools.readSite(this.dir, { pathFirst: this.env.pathFirst }).catch((e) => ({ skipped: String((e as Error).message) }));
       if ("skipped" in site) {
@@ -569,7 +559,7 @@ export class RepoRun extends Run {
         return { e, pass };
       }, round);
       this.evaluation = ev.e;
-      if (ev.pass || round === MAX_EVALUATION_ROUNDS) return;
+      if (ev.pass || round === looks) return;
       // Not worth starting a fix it cannot finish: the person sees what is open at the build gate.
       if (this.o.maxUsd - this.spent < 0.3) return;
       await this.testFixLoop(evaluationFeedback(ev.e, docs).replace("docs/product/", `${SF_DIR}/product/`), true);

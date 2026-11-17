@@ -32,6 +32,8 @@ export * from "./projects/service.js";
 export * from "./projects/routes.js";
 export * from "./tickets/model.js";
 export * from "./tickets/tables.js";
+export * from "./flows/flow.js";
+export * from "./flows/library.js";
 export * from "./tickets/tickets.js";
 export * from "./tickets/repowork.js";
 export * from "./tickets/github.js";

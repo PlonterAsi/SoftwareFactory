@@ -268,7 +268,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
   const step = (name: string, state: "running" | "passed" | "failed" | "skipped", note = "") => {
     log.append("ticket.step", { id: o.id, key: o.key, step: name, state, note: note.slice(0, 500) });
     // The ticket's own timeline on the Bridge shows what did not pass.
-    if (state === "failed" || state === "skipped") log.append("ticket.noted", { id: o.id, by: "factory", kind: "event", text: `${name}: ${state}${note ? `. ${note.split("\n").slice(0, 3).join(" ").slice(0, 300)}` : ""}` });
+    if (state === "failed" || state === "skipped") log.append("ticket.noted", { id: o.id, by: "factory", kind: "event", step: name, text: `${name}: ${state}${note ? `. ${note.split("\n").slice(0, 3).join(" ").slice(0, 300)}` : ""}` });
   };
   const fail = (error: string, files: string[] = []): RepoWorkResult => ({ ok: false, dir, branch, base, sha: null, files, costUsd: spent, summary: "", error, checks: passed });
   const passed: string[] = [];
@@ -287,7 +287,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
       cwd: dir,
       commands: WORKBENCH_COMMANDS,
       timeoutMs: 25 * 60_000,
-    }, { agentVersion: b?.version, station: "repo", workbench: true });
+    }, { agentVersion: b?.version, station: "repo", workbench: true, ticket: o.id });
     spent += run.result?.costUsd ?? 0;
     if (run.error || !run.result) { step(name, "failed", run.error ?? "no reply"); return { text: "", error: run.error ?? "no reply" }; }
     const blocks = parseFileBlocks(run.result.text);
@@ -349,7 +349,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
       model: rv?.model ?? "sonnet",
       systemPrompt: `You are the Reviewer. Read the diff for bugs, missed requirements and risks, and for gaming the tests: deleted, skipped or weakened tests, tests changed to match wrong output, or expected values hard-coded in the source (each of these is high).\n\nStation contract: review. Answer only with JSON: { "verdict": "pass"|"fail", "findings": [{ "severity": "high"|"medium"|"low", "text": "..." }] }. High means it must be fixed before merge.`,
       budgetUsd: Math.min(left(), o.maxUsd * 0.2, rv?.budgetUsd ?? o.maxUsd),
-    }, { agentVersion: rv?.version, station: "review" });
+    }, { agentVersion: rv?.version, station: "review", ticket: o.id });
     spent += rr.result?.costUsd ?? 0;
     const high = rr.result ? highFindings(rr.result.text) : [];
     if (rr.error) step("review", "skipped", rr.error);
