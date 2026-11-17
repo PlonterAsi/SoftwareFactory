@@ -223,6 +223,8 @@ export class Tickets {
     canShip?: () => string | null;
     /** The engine in an existing codebase: feature-sized tickets of a repo project go there. */
     repoRuns?: RepoRuns;
+    /** What the monthly budgets leave for work on a project (watch/spend.ts); leftUsd null: no monthly limit. */
+    monthLeft?: (project: number | null) => { leftUsd: number | null; why: string | null };
   } = {}) {
     log.on("event", (e: SfEvent) => {
       try { this.react(e); } catch (err) { console.error("tickets: reacting to", e.type, "failed:", err); }
@@ -264,8 +266,16 @@ export class Tickets {
     const ready = this.list({ view: "all", status: "ready", project: project ?? undefined, limit: 500 })
       .sort((a, b) => pri(a.priority) - pri(b.priority) || a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
     const place = new Map<string, number>();
+    const cap = this.autoWork().maxUsd;
+    const money = new Map<string, string | null>();
+    // The queue fits the monthly budgets: a ticket waits while its month has less left than one start may spend.
+    const short = (p: number | null): string | null => {
+      const k = String(p);
+      if (!money.has(k)) { const m = this.opts.monthLeft?.(p); money.set(k, m && m.leftUsd != null && m.leftUsd + 1e-9 < cap ? `Waits for money: ${m.why}, less than the $${cap.toFixed(2)} one start may spend.` : null); }
+      return money.get(k)!;
+    };
     return ready.map((t) => {
-      const why = this.stuck.get(t.id) ?? autoWorkRefusal(t, this.handBrake(t.id));
+      const why = this.stuck.get(t.id) ?? autoWorkRefusal(t, this.handBrake(t.id)) ?? short(t.project);
       if (why) return { ticket: t, position: null, why };
       const k = String(t.project);
       const n = (place.get(k) ?? 0) + 1;
@@ -657,6 +667,14 @@ export class Tickets {
   work(id: number, o: { maxUsd?: number; autoApprove?: boolean; where?: "auto" | "repo" | "new"; by?: string; again?: boolean; /** In a repo project: one session ("light") or the whole engine. Not given, the ticket's flow, kind and size decide. */ route?: WorkRoute; /** Run the check before money first, and refuse (with its questions) when it asks. */ check?: boolean } = {}): { ticket: TicketView; run: number | null; branch?: string; route?: Routed; flow?: { id: string; name: string } } {
     const t = this.must(id);
     if (isClosed(t.status)) throw new Error("This ticket is closed; reopen it first.");
+    // A monthly budget that is used up holds every paid start, yours too (watch/spend.ts). A start never gets more than is left.
+    const month = this.opts.monthLeft?.(t.project);
+    if (month && month.leftUsd != null) {
+      if (month.leftUsd < 0.05) throw new Error(`No money left this month: ${month.why}. Raise the monthly budget on the project's Money tab, or wait for the new month.`);
+      // Not given, the start takes its route's own cap (at most DEFAULT_NEXT_USD): only less, when less is left.
+      const want = o.maxUsd ?? (month.leftUsd < DEFAULT_NEXT_USD ? month.leftUsd : undefined);
+      if (want != null && want > month.leftUsd - 1e-9) o = { ...o, maxUsd: Number(month.leftUsd.toFixed(2)) };
+    }
     if (o.check) {
       const c = this.check(id);
       this.recordCheck(id, c, o.by ?? "you");

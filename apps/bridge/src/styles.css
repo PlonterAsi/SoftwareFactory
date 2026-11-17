@@ -2308,3 +2308,24 @@ button.fm-wire-node .muted { font: 12px/1.2 var(--mono); white-space: nowrap; }
 .fi-runs tr.risk-high td { color: var(--bad, #e06c6c); }
 .fi-past { display: flex; flex-direction: column; gap: 2px; }
 @media (max-width: 700px) { .fi-cols { grid-template-columns: 1fr; } .fi-words { flex-direction: column; } }
+
+/* Phase 6: this month's money and the watchers */
+.month-block { border: 1px solid var(--line, rgba(255,255,255,.08)); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+.month-block.compact { padding: 6px 10px; margin: 6px 0 10px; }
+.mb-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+.mb-head .warn, .month-block .warn { color: var(--warn, #e0a84f); }
+.mb-edit { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.mb-edit label { display: flex; flex-direction: column; gap: 4px; }
+.mb-days { display: flex; align-items: flex-end; gap: 2px; height: 46px; }
+.mb-days i { flex: 1; min-width: 3px; background: color-mix(in srgb, var(--accent, #7aa2ff) 70%, transparent); border-radius: 2px 2px 0 0; }
+.watchers { display: flex; flex-direction: column; gap: 10px; }
+.watcher-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.watcher { border: 1px solid var(--line, rgba(255,255,255,.08)); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+.watcher.off { opacity: .6; }
+.watcher header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.watcher header .switch { display: flex; align-items: center; gap: 6px; margin-right: auto; }
+.watcher p { margin: 0; }
+.watcher .warn { color: var(--warn, #e0a84f); }
+.mb-meter { height: 6px; border-radius: 3px; background: color-mix(in srgb, currentColor 12%, transparent); overflow: hidden; flex: none; }
+.mb-meter i { display: block; height: 100%; background: var(--accent, #4f8cff); }
+.mb-days { flex: none; }

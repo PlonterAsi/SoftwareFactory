@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { API } from "../api";
+import { API, type MonthView } from "../api";
+import { MonthBlock } from "./monthBlock";
 import { EmptyState } from "../ui";
 import { registerProjectPanel, type PanelContext } from "./panels";
 
@@ -37,6 +38,7 @@ function Money({ project, showRun }: PanelContext) {
   const top = Math.max(1e-9, ...b.versions.map((v) => Math.max(v.maxUsd, v.spentUsd)));
   return (
     <div className="pj-money">
+      <MonthBlock projectId={project.id} initial={project.facets?.month as MonthView | undefined} />
       <div className="money-head">
         <div><span className="muted">Spent</span><b>{usd(b.spentUsd)}</b></div>
         {b.heldUsd > 0 && <div><span className="muted">Held by a running build</span><b>{usd(b.heldUsd)}</b></div>}
@@ -74,6 +76,6 @@ function Money({ project, showRun }: PanelContext) {
 registerProjectPanel({
   id: "money", section: "build", title: "Money", order: 25,
   render: (c) => <Money key={c.project.id} {...c} />,
-  badge: (c) => { const b = c.project.facets?.budget as Budget | undefined; return b?.leftUsd != null ? `${usd(b.leftUsd)} left` : null; },
-  alert: (c) => { const b = c.project.facets?.budget as Budget | undefined; return b?.leftUsd != null && b.leftUsd < 0.25; },
+  badge: (c) => { const m = c.project.facets?.month as MonthView | undefined; const b = c.project.facets?.budget as Budget | undefined; return m?.leftUsd != null ? `${usd(m.leftUsd)} left this month` : b?.leftUsd != null ? `${usd(b.leftUsd)} left` : null; },
+  alert: (c) => { const m = c.project.facets?.month as MonthView | undefined; const b = c.project.facets?.budget as Budget | undefined; return (m?.leftUsd != null && m.leftUsd < 0.6) || (b?.leftUsd != null && b.leftUsd < 0.25); },
 });

@@ -264,6 +264,34 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}bay/memory.ts`], api: [],
   },
   {
+    id: "watchers", name: "Watchers", group: "Work",
+    purpose: "Scheduled looks at each project that only open tickets: code debt, security, dependencies and flaky tests. They never change code, start the crew or spend money.",
+    spec: [
+      "Four watchers per project, each on its own schedule (security and flaky tests daily, debt and dependencies weekly, as shipped), each with an on/off switch.",
+      "Every look is plain code: the project's folder (long files, TODO piles, secrets and risky code, a .env git does not ignore, npm audit and unpinned Python packages) or its builds' test records (a test that passed and then failed again in one build, in two builds).",
+      "A finding becomes an open ticket, once: each has a fingerprint, so the same finding is never filed twice. A look files at most five; the rest wait for the next look.",
+      "A ticket a watcher opens is open, not ready, so the crew does not pick it up until the person makes it ready. A secret's value is never copied into a ticket.",
+    ],
+    flow: ["A watcher's time comes round", "It looks at the folder or the records", "Each new finding opens one ticket", "The person makes the ones worth doing ready"],
+    design: "A Watchers tab on each project (Improve): one card per watcher with its switch, how often it looks, Look now, its last look and the tickets it opened.",
+    screens: ["/p/ID/watchers"], docs: ["docs/watchers.md"], stations: [],
+    files: [`${C}watch/watchers.ts`, `${C}watch/routes.ts`], api: ["/api/watchers"],
+  },
+  {
+    id: "monthly-budgets", name: "Monthly budgets and burn rate", group: "Projects",
+    purpose: "A monthly budget for each project and one for everything, read from the agent calls actually paid, with the burn rate and where the month ends at that rate. The crew's queue fits them.",
+    spec: [
+      "Each paid agent call is charged to the project it was made for (its ticket's, its build's, or the one it names); the rest counts toward the overall month only.",
+      "The burn rate is the average spend per day over the last seven days; the month's end is projected from it, with the day the budget runs out when that is sooner.",
+      "On the real crew, a ready ticket waits in the queue while its month has less left than one start may spend, and says so; it starts by itself when money is there again (the new month, or a higher budget).",
+      "A start the person presses gets no more than the month has left, and is refused when nothing is left.",
+    ],
+    flow: ["Set a monthly budget", "Every paid call counts against it", "See the burn rate and where the month ends", "The queue waits when the month runs low"],
+    design: "This month at the top of each project's Money tab (budget, spent, burn per day, where the month ends, a bar per day) and, for all projects, a strip on Home.",
+    screens: ["/p/ID/money", "/"], docs: ["docs/watchers.md"], stations: [],
+    files: [`${C}watch/spend.ts`], api: ["/api/budget"],
+  },
+  {
     id: "brain", name: "Brain (principles)", group: "Agents",
     purpose: "SoftwareFactory's principles, written once and put in front of every agent's instructions on every call, so a rule about what the factory makes is said in one place and followed everywhere.",
     spec: [
