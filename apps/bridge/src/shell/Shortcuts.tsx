@@ -7,7 +7,7 @@ import type { Route } from "../projects/router";
  */
 const GO: Record<string, { label: string; to: Route }> = {
   n: { label: "Needs you", to: { page: "needs" } },
-  p: { label: "Projects", to: { page: "home" } },
+  p: { label: "Projects", to: { page: "projects" } },
   a: { label: "Agents", to: { page: "factory", view: "bay" } },
   f: { label: "All builds", to: { page: "factory", view: "factory" } },
   d: { label: "Factory Bridge (dashboard)", to: { page: "bridge", mode: "loom" } },

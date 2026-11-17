@@ -91,8 +91,9 @@ export interface FlowStepView {
   gate?: { asks: string; auto: string }; skippedWhen?: string; stop: string; at: { x: number; y: number };
 }
 export interface FlowEdgeView { from: string; to: string; kind: "next" | "back" | "branch"; label?: string; fromSide?: string; toSide?: string }
-export interface FlowView { id: string; name: string; purpose: string; version: number; builtIn: boolean; steps: FlowStepView[]; edges: FlowEdgeView[] }
-export interface FlowSummaryView { id: string; name: string; purpose: string; version: number; builtIn: boolean; steps: number; savedBy: string | null; savedAt: string | null }
+export type FlowRunnerView = "engine" | "session" | "answer" | "door";
+export interface FlowView { id: string; name: string; purpose: string; version: number; builtIn: boolean; runner?: FlowRunnerView; kinds?: string[]; brief?: string; door?: string; steps: FlowStepView[]; edges: FlowEdgeView[] }
+export interface FlowSummaryView { id: string; name: string; purpose: string; version: number; builtIn: boolean; runner: FlowRunnerView; kinds: string[]; door: string | null; steps: number; savedBy: string | null; savedAt: string | null }
 
 export interface FactoryRunView {
   run: number;

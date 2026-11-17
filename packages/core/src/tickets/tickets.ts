@@ -16,6 +16,11 @@ import { routeWork, type Routed, type WorkRoute } from "../factory/route.js";
 import { REPO_ENGINE_MIN_USD, type RepoRuns } from "../factory/reporun.js";
 import { DEFAULT_NEXT_USD, buildAllowance } from "../projects/budget.js";
 import { selfProject } from "./intake.js";
+import { FlowLibrary } from "../flows/library.js";
+import { runnerOf, type FlowDef } from "../flows/flow.js";
+import { pickFlow, routeOfFlow, type FlowPick } from "./flowpick.js";
+import { answerTicket } from "./research.js";
+import { checkTicket, type TicketCheck } from "./precheck.js";
 import {
   FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS,
   SIZES, autoWorkRefusal, ideaFromTicket, isClosed, keyFromName, keyText, nextMoves, refuseMove, refuseParent, titleFrom, workDocument,
@@ -67,6 +72,25 @@ export const WAITING_ON_YOU = `t.status NOT IN ('closed', 'rejected') AND (
   OR (t.kind = 'question')
   OR (t.kind IN ('idea', 'request') AND t.status = 'open' AND t.opened_by != 'you'))`;
 
+export type BoardLane = "needs" | "running" | "review" | "done";
+export interface BoardCard {
+  id: number; key: string; title: string; kind: string; status: TicketStatus; project: number | null; projectName: string | null;
+  flow: { id: string; name: string; runner: string } | null; run: number | null; pr: { number: number; url: string; state: string } | null; updatedAt: string;
+  /** In Needs you: what it needs (check: questions before money; gate: a run waits for your OK; look, answer, decide). */
+  need?: "check" | "gate" | "look" | "answer" | "decide"; say?: string; questions?: number;
+  /** While it runs: the flow step it is on (an engine station, or a session flow's step id), and whether the crew is on it now. */
+  step?: string | null; stepName?: string | null; live?: boolean;
+}
+
+/** The session flow step a light-route harness step belongs to (tickets/repowork.ts names them). */
+export function stepOfSession(name: string): string {
+  if (name === "install" || name === "orient") return "orient";
+  if (name === "build") return "build";
+  if (/^fix\b/.test(name) || ["secrets", "gates", "test integrity", "tests"].includes(name)) return "checks";
+  if (name === "review" || name === "review fix") return "review";
+  return name;
+}
+
 export interface WaitingItem {
   ticket: TicketView;
   projectName: string | null;
@@ -95,6 +119,8 @@ export interface TicketDetail {
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
   /** The imported repo this ticket's project came from: "Work it" works there, on a branch of a clone. */
   repo: RepoRef | null;
+  /** The flow it follows if worked now (flows/flow.ts), and why. */
+  flow: { id: string; name: string; runner: string; why: string; chosen: boolean } | null;
   /** In a repo project: the route "Work it" takes when you do not choose (one session, or the whole engine), with why. */
   route: Routed | null;
   /** The Builder is working it in the repo right now. */
@@ -124,7 +150,7 @@ const toView = (r: Row): TicketView => ({
   id: Number(r.id), key: keyText(r.project_key ?? null, r.number == null ? null : Number(r.number), Number(r.id)), number: r.number == null ? null : Number(r.number),
   level: r.kind === "plan" ? "epic" : r.parent_id == null || r.parent_kind === "plan" ? "ticket" : "subtask",
   blocked: !!r.is_blocked, children: { total: Number(r.n_children ?? 0), done: Number(r.n_done ?? 0) }, kind: r.kind, title: r.title, body: r.body ?? "", answers: JSON.parse(r.answers ?? "{}"), project: r.project == null ? null : Number(r.project),
-  status: r.status, priority: r.priority ?? null, severity: r.severity ?? null, size: r.size ?? null, assignee: r.assignee ?? null, parentId: r.parent_id == null ? null : Number(r.parent_id),
+  status: r.status, priority: r.priority ?? null, severity: r.severity ?? null, size: r.size ?? null, flow: r.flow ?? null, assignee: r.assignee ?? null, parentId: r.parent_id == null ? null : Number(r.parent_id),
   lineOrder: r.line_order == null ? null : Number(r.line_order), tags: JSON.parse(r.tags ?? "[]"), source: r.source, openedBy: r.opened_by, fingerprint: r.fingerprint ?? null,
   run: r.run == null ? null : Number(r.run), branch: r.branch ?? null, branchDir: r.branch_dir ?? null, pushedUrl: r.pushed_url ?? null,
   pr: r.pr_number != null ? { repo: r.pr_repo, number: Number(r.pr_number), url: r.pr_url, state: r.pr_state } : null, createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at ?? null, lastNote: r.last_note ?? null,
@@ -269,6 +295,9 @@ export class Tickets {
       if ((busy.get(k) ?? 0) >= rule.wip) continue;
       if ((today + 1) * rule.maxUsd > rule.dailyUsd + 1e-9) break;
       const t = spot.ticket;
+      // The check before money holds a ticket with open questions: they wait in Needs you, said once on its timeline.
+      const held = this.check(t.id);
+      if (held.verdict === "ask") { this.recordCheck(t.id, held, "dispatcher"); continue; }
       try {
         this.log.append("ticket.noted", { id: t.id, by: "dispatcher", auto: 1, kind: "event", text: `The crew picked it up on its own: a ready ${t.kind}, size ${t.size}, capped at $${rule.maxUsd.toFixed(2)}. Write "hold" on the thread to keep the crew off it.` });
         this.work(t.id, { maxUsd: rule.maxUsd, autoApprove: true, by: "dispatcher" });
@@ -449,6 +478,7 @@ export class Tickets {
       ticket: t, notes, timeline: this.timeline(id), links, lines, parent: t.parentId != null ? this.get(t.parentId) ?? null : null,
       moves: nextMoves(t.status, t.kind), document: workDocument(t, notes, links, lines), run,
       repo, route: repo && this.opts.repoRuns && !epicOfTickets(t) ? this.routeOf(t, {}) : null, working: this.inRepo.has(id), steps: this.steps(id),
+      flow: this.flowOf(t, !!repo),
       queue: t.status === "ready" ? this.spot(t) : null,
     };
   }
@@ -531,7 +561,7 @@ export class Tickets {
   edit(id: number, field: string, value: unknown, by = "you", key?: string): TicketView {
     const t = this.must(id);
     if (field === "answer") {
-      if (!key || !FORMS[t.kind].some((q) => q.key === key)) throw new Error(`${aKind(t.kind).replace(/^a/, "A")} has no question "${key}"`);
+      if (!key || !(FORMS[t.kind].some((q) => q.key === key) || /^check\.[a-z-]{2,40}$/.test(key))) throw new Error(`${aKind(t.kind).replace(/^a/, "A")} has no question "${key}"`);
       this.log.append("ticket.edited", { id, field, key, value: String(value ?? "").slice(0, 4000), by });
       return this.get(id)!;
     }
@@ -551,8 +581,14 @@ export class Tickets {
     if (field === "kind" && value === "plan" && t.parentId != null) throw new Error("An epic sits at the top: take it out of its parent first.");
     if (field === "kind" && t.kind === "plan" && value !== "plan" && t.children.total > 0) throw new Error("This epic still holds tickets; move them out first.");
     if (field === "title" && !String(value ?? "").trim()) throw new Error("A ticket needs a title.");
+    if (field === "flow" && value != null && value !== "") {
+      const f = this.flows.get(String(value));
+      if (!f) throw new Error(`There is no flow "${value}".`);
+      if (runnerOf(f) === "door") throw new Error(`"${f.name}" is carried out by its own screen (${f.door}), not on a ticket.`);
+    }
     const v = field === "tags" ? (Array.isArray(value) ? value.map(String).filter(Boolean) : String(value ?? "").split(",").map((s) => s.trim()).filter(Boolean))
-      : field === "project" || field === "parent" ? (value == null || value === "" ? null : Number(value)) : value;
+      : field === "project" || field === "parent" ? (value == null || value === "" ? null : Number(value))
+      : field === "flow" ? (value == null || value === "" ? null : String(value)) : value;
     if (field === "project") {
       const to = v as number | null;
       if (to === t.project) return t;
@@ -616,22 +652,35 @@ export class Tickets {
    * work document, the ticket moves to in progress, and the run writes back
    * onto the ticket when it ends (see react()).
    */
-  work(id: number, o: { maxUsd?: number; autoApprove?: boolean; where?: "auto" | "repo" | "new"; by?: string; again?: boolean; /** In a repo project: one session ("light") or the whole engine. Not given, the ticket's kind and size decide. */ route?: WorkRoute } = {}): { ticket: TicketView; run: number | null; branch?: string; route?: Routed } {
+  work(id: number, o: { maxUsd?: number; autoApprove?: boolean; where?: "auto" | "repo" | "new"; by?: string; again?: boolean; /** In a repo project: one session ("light") or the whole engine. Not given, the ticket's flow, kind and size decide. */ route?: WorkRoute; /** Run the check before money first, and refuse (with its questions) when it asks. */ check?: boolean } = {}): { ticket: TicketView; run: number | null; branch?: string; route?: Routed; flow?: { id: string; name: string } } {
     const t = this.must(id);
     if (isClosed(t.status)) throw new Error("This ticket is closed; reopen it first.");
+    if (o.check) {
+      const c = this.check(id);
+      this.recordCheck(id, c, o.by ?? "you");
+      if (c.verdict === "ask") throw Object.assign(new Error(`Before it costs money, ${c.questions.length === 1 ? "one question needs" : `${c.questions.length} questions need`} your answer: ${c.questions.map((q) => q.ask).join(" ")}`), { check: c });
+    }
     const repo = o.where === "new" ? null : repoOfProject(this.log, t.project);
     if (o.where === "repo" && !repo) throw new Error("This ticket's project has no imported repo to work in.");
+    // The flow it follows (tickets/flowpick.ts): the one you picked, else its kind's.
+    const first = pickFlow(this.flows, t, { repo: !!repo, routeChosen: !!o.route });
+    const named = (f: FlowDef) => ({ id: f.id, name: f.name });
+    if (routeOfFlow(first.flow) === "answer" && !o.route) return { ...this.workAnswer(t, repo, o, first.flow), flow: named(first.flow) };
     if (repo) {
       const held = epicOfTickets(t);
       if (held) throw new Error(held);
       // Intake: a bug, a task or a small ask is one session in the clone; a feature gets the whole engine there.
-      const routed = this.routeOf(t, o);
+      // A flow you picked decides the route; a route you pressed decides it over the ticket's kind.
+      const routed: Routed = first.chosen && !o.route ? { route: routeOfFlow(first.flow) === "engine" ? "engine" : "light", why: first.why, chosen: true } : this.routeOf(t, o);
+      const pick = first.chosen && !o.route ? first : pickFlow(this.flows, { kind: t.kind }, { repo: true, route: routed.route, routeChosen: true });
       if (routed.route === "engine") {
-        const started = this.workEngine(t, o, routed);
-        if (started) return started;
+        const started = this.workEngine(t, o, routed, pick.flow.id);
+        if (started) return { ...started, flow: named(pick.flow) };
       }
-      return { ...this.workRepo(t, repo, o.maxUsd), route: routed.route === "light" ? routed : { route: "light", why: "the engine could not take it (see the ticket's thread)" } };
+      const session = runnerOf(pick.flow) === "session" ? pick.flow : pickFlow(this.flows, { kind: t.kind }, { repo: true, route: "light", routeChosen: true }).flow;
+      return { ...this.workRepo(t, repo, o.maxUsd, session), route: routed.route === "light" ? routed : { route: "light", why: "the engine could not take it (see the ticket's thread)" }, flow: named(session) };
     }
+    if (first.chosen && runnerOf(first.flow) !== "engine") throw new Error(`"${first.flow.name}" works in a repo, and this ticket's project has none. Pick New project, or import the repo first.`);
     const factory = this.opts.factory;
     if (!factory) throw new Error("The factory is not running in this core.");
     if (t.run != null && factory.isActive(t.run)) throw new Error(`Run #${t.run} is already working this ticket.`);
@@ -642,10 +691,10 @@ export class Tickets {
       const what = d.state === "running" ? "is already building it" : d.state === "stopped" ? "already started it and can resume" : "already built it today";
       throw Object.assign(new Error(`Run #${d.run} ${what}. Open that run, or work it again anyway.`), { duplicate: { duplicateOf: d.run, state: d.state, projectId: d.projectId } });
     }
-    const run = factory.start(idea, { maxUsd: o.maxUsd, autoApprove: o.autoApprove, ...(t.project != null ? { projectId: t.project } : {}) });
+    const run = factory.start(idea, { maxUsd: o.maxUsd, autoApprove: o.autoApprove, ...(t.project != null ? { projectId: t.project } : {}), ...(first.chosen ? { flow: first.flow.id } : {}) });
     this.log.append("ticket.run", { id, run, by: o.by ?? "you" });
     if (t.status !== "in_progress") this.log.append("ticket.noted", { id, by: "factory", status: "in_progress", text: `The crew took it: factory run #${run}` });
-    return { ticket: this.get(id)!, run };
+    return { ticket: this.get(id)!, run, flow: named(first.flow) };
   }
 
   /**
@@ -819,6 +868,150 @@ export class Tickets {
     return routeWork({ kind: t.kind, size: t.size, text, asked: o.route ?? null, maxUsd: o.maxUsd, engineMinUsd: REPO_ENGINE_MIN_USD });
   }
 
+  // ---- the check before money (tickets/precheck.ts) -------------------------
+
+  /** Read the ticket for clarity, confidence and decisions only you make. Free and instant. */
+  check(id: number): TicketCheck {
+    const t = this.must(id);
+    return checkTicket(t, { runner: this.flowOf(t)?.runner });
+  }
+
+  /** Put the check on the ticket's timeline, unless it says the same as the last one. */
+  private recordCheck(id: number, c: TicketCheck, by: string): void {
+    const last = this.log.db.prepare("SELECT payload FROM events WHERE type = 'ticket.checked' AND json_extract(payload, '$.id') = ? ORDER BY id DESC LIMIT 1").get(id) as { payload: string } | undefined;
+    const sig = (x: { verdict: string; questions: { id: string }[] }) => `${x.verdict}:${x.questions.map((q) => q.id).join(",")}`;
+    if (last && sig(JSON.parse(last.payload)) === sig(c) && c.verdict === "ask") return;
+    this.log.append("ticket.checked", { id, by, verdict: c.verdict, answered: c.answered, questions: c.questions });
+  }
+
+  /**
+   * Every ticket the check would hold, across projects (or one): the questions to answer in one sitting
+   * before any of them costs money. Only tickets that could be worked now (open or ready, not being worked).
+   */
+  checks(project?: number | null): { ticket: TicketView; projectName: string | null; flow: { id: string; name: string } | null; check: TicketCheck }[] {
+    const names = new Map((this.log.db.prepare("SELECT id, name FROM projects").all() as { id: number; name: string }[]).map((r) => [Number(r.id), r.name]));
+    const out: { ticket: TicketView; projectName: string | null; flow: { id: string; name: string } | null; check: TicketCheck }[] = [];
+    for (const status of ["ready", "open"] as const) {
+      for (const t of this.list({ view: "all", status, project: project ?? undefined, limit: 300 })) {
+        if (t.kind === "plan" || this.isWorking(t) || this.inRepo.has(t.id)) continue;
+        const f = this.flowOf(t);
+        const c = checkTicket(t, { runner: f?.runner });
+        if (c.verdict === "ask") out.push({ ticket: t, projectName: t.project != null ? names.get(t.project) ?? null : null, flow: f ? { id: f.id, name: f.name } : null, check: c });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Your answers to the check, in one batch: each goes on its ticket (its record and its thread). With
+   * `run`, every ticket that is then clear starts, through the same Work it as your press.
+   */
+  answerChecks(answers: { id: number; q: string; text: string }[], o: { run?: boolean; by?: string } = {}): { answered: number; started: { id: number; run: number | null; flow?: string }[]; held: { id: number; error: string }[] } {
+    const by = o.by ?? "you";
+    const touched = new Set<number>();
+    let answered = 0;
+    for (const a of answers) {
+      const text = String(a.text ?? "").trim();
+      if (!text) continue;
+      const t = this.must(Number(a.id));
+      const q = checkTicket(t, { runner: this.flowOf(t)?.runner }).questions.find((x) => x.id === a.q);
+      this.edit(t.id, "answer", text, by, `check.${a.q}`);
+      this.log.append("ticket.noted", { id: t.id, by, kind: "note", text: `${q ? `${q.ask}\n` : ""}${text}` });
+      touched.add(t.id);
+      answered++;
+    }
+    const started: { id: number; run: number | null; flow?: string }[] = [];
+    const held: { id: number; error: string }[] = [];
+    if (o.run) for (const id of touched) {
+      try { const r = this.work(id, { by, check: true }); started.push({ id, run: r.run, flow: r.flow?.name }); }
+      catch (e) { held.push({ id, error: (e as Error).message }); }
+    }
+    return { answered, started, held };
+  }
+
+  // ---- the home board (SF behavior brief 4.1) ---------------------------------
+
+  /**
+   * Every ticket across projects in four lanes: Needs you (first), Running, In review, Done. Each card says
+   * the flow it follows and, while it runs, the step it is on, so the board can draw the live flow beside it.
+   */
+  board(o: { project?: number | null; doneDays?: number } = {}): { lanes: Record<BoardLane, BoardCard[]>; counts: Record<BoardLane, number> } {
+    const names = new Map((this.log.db.prepare("SELECT id, name FROM projects").all() as { id: number; name: string }[]).map((r) => [Number(r.id), r.name]));
+    const lanes: Record<BoardLane, BoardCard[]> = { needs: [], running: [], review: [], done: [] };
+    const placed = new Set<number>();
+    const card = (t: TicketView, extra: Partial<BoardCard> = {}): BoardCard => {
+      const f = this.flowOf(t);
+      return { id: t.id, key: t.key, title: t.title, kind: t.kind, status: t.status, project: t.project, projectName: t.project != null ? names.get(t.project) ?? null : null,
+        flow: f ? { id: f.id, name: f.name, runner: f.runner } : null, run: t.run, pr: t.pr ? { number: t.pr.number, url: t.pr.url, state: t.pr.state } : null, updatedAt: t.updatedAt, ...extra };
+    };
+    const put = (lane: BoardLane, c: BoardCard) => { if (placed.has(c.id)) return; placed.add(c.id); lanes[lane].push(c); };
+    const station = this.log.db.prepare("SELECT payload FROM events WHERE type = 'factory.station' AND json_extract(payload, '$.run') = ? ORDER BY id DESC LIMIT 1");
+    const lastStep = this.log.db.prepare("SELECT payload FROM events WHERE type = 'ticket.step' AND json_extract(payload, '$.id') = ? ORDER BY id DESC LIMIT 1");
+    const scope = o.project ?? undefined;
+    // Running first, so a run waiting at your OK moves to Needs you with the step it waits on.
+    for (const t of this.list({ view: "all", status: "in_progress", project: scope, limit: 300 })) {
+      if (t.run != null) {
+        const sp = station.get(t.run) as { payload: string } | undefined;
+        const st = sp ? JSON.parse(sp.payload) as { station?: string; state?: string } : null;
+        const live = this.isWorking(t);
+        if (st?.state === "waiting") { put("needs", card(t, { need: "gate", say: `Waiting for your OK at ${st.station === "gateA" ? "the plan" : st.station === "gateB" ? "the build" : st.station}`, step: st.station ?? null, live: true })); continue; }
+        put("running", card(t, { step: st?.station ?? null, live }));
+      } else {
+        const sp = lastStep.get(t.id) as { payload: string } | undefined;
+        const name = sp ? String(JSON.parse(sp.payload).step) : null;
+        put("running", card(t, { step: name ? stepOfSession(name) : null, stepName: name, live: this.inRepo.has(t.id) }));
+      }
+    }
+    for (const c of this.checks(scope)) put("needs", card(c.ticket, { need: "check", say: c.check.questions[0]?.ask ?? "Questions before it costs money", questions: c.check.questions.length }));
+    for (const w of this.waiting(scope)) {
+      if (w.ticket.status === "built" && w.ticket.pr?.state === "open") continue; // its PR is in review
+      put("needs", card(w.ticket, { need: w.need, say: w.say }));
+    }
+    for (const t of this.list({ view: "look", project: scope, limit: 300 })) if (t.pr?.state === "open") put("review", card(t, { say: `Draft PR #${t.pr.number}: checks run, its merge moves it on` }));
+    const since = new Date(Date.now() - (o.doneDays ?? 14) * 86_400_000).toISOString();
+    for (const t of this.list({ view: "closed", project: scope, limit: 200 })) if (t.status === "closed" && (t.closedAt ?? t.updatedAt) >= since) put("done", card(t));
+    lanes.done.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    lanes.done.splice(40);
+    return { lanes, counts: { needs: lanes.needs.length, running: lanes.running.length, review: lanes.review.length, done: lanes.done.length } };
+  }
+
+  /** The flow library (the factory's when it has one, so both read the same saved flows). */
+  get flows(): FlowLibrary { return (this.flowLib ??= this.opts.factory?.flows ?? new FlowLibrary(this.log)); }
+  private flowLib?: FlowLibrary;
+
+  /** The flow this ticket follows if it is worked now, and why. */
+  flowOf(t: TicketView, repo = !!repoOfProject(this.log, t.project)): { id: string; name: string; runner: string; why: string; chosen: boolean } | null {
+    try {
+      let p: FlowPick = pickFlow(this.flows, t, { repo });
+      if (repo && !p.chosen && routeOfFlow(p.flow) !== "answer") p = pickFlow(this.flows, t, { repo, route: this.routeOf(t, {}).route });
+      return { id: p.flow.id, name: p.flow.name, runner: runnerOf(p.flow), why: p.why, chosen: p.chosen };
+    } catch { return null; }
+  }
+
+  /**
+   * The Research or question flow: a reader answers on the ticket and changes nothing (tickets/research.ts).
+   * Cents: capped at the ticket's limit, $0.30 when none was given.
+   */
+  private workAnswer(t: TicketView, repo: RepoRef | null, o: { maxUsd?: number; by?: string }, flow: FlowDef): { ticket: TicketView; run: null } {
+    const { runtime, bay, workRoot } = this.opts;
+    if (!runtime || !workRoot) throw new Error("No crew or work folder in this core.");
+    if (this.inRepo.has(t.id)) throw new Error("A reader is already working this ticket.");
+    const by = bay?.crewFor("survey")[0]?.id ?? "surveyor";
+    this.log.append("ticket.noted", { id: t.id, by, status: t.status === "in_progress" ? undefined : "in_progress", text: `${flow.name}: reading ${repo ? `a copy of ${repo.source}` : "the ticket and its project"} to answer it. Nothing is changed.` });
+    const gh = this.opts.github;
+    if (repo?.github && gh && !existsSync(join(repo.dir, ".git"))) repo = { ...repo, dir: gh.remote(repo.github) };
+    const job = answerTicket(this.log, runtime, bay, { id: t.id, key: t.key, title: t.title, document: this.document(t.id), repo, workRoot, maxUsd: Math.min(o.maxUsd ?? 0.3, 0.6), projectId: t.project, flow, git: gh ? (d, ...a) => gh.git(d, ...a) : undefined })
+      .then((r) => {
+        if (!r.ok) { this.log.append("ticket.noted", { id: t.id, by, status: "open", costUsd: r.costUsd, text: `The reader could not answer it: ${r.error}` }); return; }
+        const now = this.get(t.id)!;
+        this.log.append("ticket.noted", { id: t.id, by, kind: "reply", costUsd: r.costUsd, status: isClosed(now.status) || now.status === "built" ? undefined : "built", text: r.text });
+      })
+      .catch((e) => { this.log.append("ticket.noted", { id: t.id, by, status: "open", text: `Answering it failed: ${(e as Error).message}` }); })
+      .finally(() => this.inRepo.delete(t.id));
+    this.inRepo.set(t.id, job);
+    return { ticket: this.get(t.id)!, run: null };
+  }
+
   /**
    * An ask said in a project that lives in a repo (its page's idea box, the Assistant's "Build it"): it becomes
    * a request ticket there, and the ticket takes its route. So every piece of work in a repo has a thread, a
@@ -835,7 +1028,7 @@ export class Tickets {
    * build feature by feature, a review, a judge on the running site), on a branch of its own. Returns null,
    * after saying why on the thread, when the engine cannot take it and nobody chose it: the light route does.
    */
-  private workEngine(t: TicketView, o: { maxUsd?: number; autoApprove?: boolean; by?: string }, routed: Routed): { ticket: TicketView; run: number; branch: string; route: Routed } | null {
+  private workEngine(t: TicketView, o: { maxUsd?: number; autoApprove?: boolean; by?: string }, routed: Routed, flow?: string): { ticket: TicketView; run: number; branch: string; route: Routed } | null {
     const { factory, repoRuns } = this.opts;
     const no = (why: string): null => {
       if (routed.chosen) throw new Error(why);
@@ -849,7 +1042,7 @@ export class Tickets {
     if ("error" in allow) return no(allow.error);
     const maxUsd = allow.maxUsd ?? DEFAULT_NEXT_USD;
     if (maxUsd < REPO_ENGINE_MIN_USD) return no(`an engine run needs at least $${REPO_ENGINE_MIN_USD.toFixed(2)} and this one may spend $${maxUsd.toFixed(2)}`);
-    const { run, branch } = repoRuns.start(t.project, ideaFromTicket(t, this.document(t.id)), { maxUsd, autoApprove: o.autoApprove, ticket: { id: t.id, key: t.key, title: t.title } });
+    const { run, branch } = repoRuns.start(t.project, ideaFromTicket(t, this.document(t.id)), { maxUsd, autoApprove: o.autoApprove, ticket: { id: t.id, key: t.key, title: t.title }, ...(flow && flow !== "repo-change" ? { flow } : {}) });
     this.log.append("ticket.run", { id: t.id, run, by: o.by ?? "you" });
     this.log.append("ticket.noted", {
       id: t.id, by: "factory", status: t.status === "in_progress" ? undefined : "in_progress",
@@ -863,7 +1056,7 @@ export class Tickets {
    * branch of a clone (never main, never the original, never pushed) and the
    * ticket says where the branch is. It stays built for your look.
    */
-  private workRepo(t: TicketView, repo: RepoRef, maxUsd?: number): { ticket: TicketView; run: null; branch: string } {
+  private workRepo(t: TicketView, repo: RepoRef, maxUsd?: number, flow?: FlowDef): { ticket: TicketView; run: null; branch: string } {
     const { runtime, bay, workRoot } = this.opts;
     if (!runtime || !workRoot) throw new Error("No crew or work folder in this core.");
     if (this.inRepo.has(t.id)) throw new Error("The Builder is already working this ticket in the repo.");
@@ -875,7 +1068,7 @@ export class Tickets {
     // A GitHub repo with no copy on this computer is cloned from where this core's GitHub access points
     // (github.com; a local stand-in in tests). One imported from GitHub is cloned from its copy here.
     if (repo.github && gh && !existsSync(join(repo.dir, ".git"))) repo = { ...repo, dir: gh.remote(repo.github) };
-    const job = workInRepo(this.log, runtime, bay, { id: t.id, key: t.key, title: t.title, document: doc, repo, workRoot, maxUsd: Math.min(maxUsd ?? 0.6, 1.5), git: gh ? (d, ...a) => gh.git(d, ...a) : undefined, projectId: t.project, checks: harnessChecks({ maxMinutes: this.opts.factory?.maxRunMinutes }) })
+    const job = workInRepo(this.log, runtime, bay, { id: t.id, key: t.key, title: t.title, document: doc, repo, workRoot, maxUsd: Math.min(maxUsd ?? 0.6, 1.5), git: gh ? (d, ...a) => gh.git(d, ...a) : undefined, projectId: t.project, checks: harnessChecks({ maxMinutes: this.opts.factory?.maxRunMinutes }), flow })
       .then(async (r) => {
         if (!r.ok) {
           this.log.append("ticket.noted", { id: t.id, by, status: "open", text: `The Builder could not work it: ${r.error}` });
@@ -884,7 +1077,7 @@ export class Tickets {
         this.log.append("ticket.branch", { id: t.id, by, source: repo.source, dir: r.dir, branch: r.branch, base: r.base, sha: r.sha, files: r.files.slice(0, 200), costUsd: r.costUsd });
         const now = this.get(t.id)!;
         if (isClosed(now.status)) return;
-        if (r.sha && repo.github) {
+        if (r.sha && repo.github && r.handover !== false) {
           const shipped = await this.openPr(t.id, repo, r).catch((e) => { this.log.append("ticket.noted", { id: t.id, by, kind: "event", text: hideTokens(`Could not open a PR: ${(e as Error).message}`) }); return false; });
           if (shipped) return;
         }

@@ -20,8 +20,9 @@ export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0,
     <nav className="sb" aria-label="Main">
       <a className="sb-brand" href={href({ page: "home" })}><span className="logo" aria-hidden>◈</span>SoftwareFactory</a>
       <div className="sb-group">
+        <Item to={{ page: "home" }} on={at("home")} icon={<Ico d="M2.5 7.5 8 3l5.5 4.5V13h-4V9.5h-3V13h-4z" />}>Home</Item>
         <Item to={{ page: "needs" }} on={at("needs")} icon={<StatusGlyph status={needs ? "needs" : "idle"} label="" />} badge={needs || undefined} alert={needs > 0}>Needs you</Item>
-        <Item to={{ page: "home" }} on={at("home")} icon={<Ico d="M3 4h10v8H3zM3 7h10" />}>Projects</Item>
+        <Item to={{ page: "projects" }} on={at("projects")} icon={<Ico d="M3 4h10v8H3zM3 7h10" />}>Projects</Item>
       </div>
       {recent.length > 0 && (
         <div className="sb-group">

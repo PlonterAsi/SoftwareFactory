@@ -43,6 +43,31 @@ A ticket that reaches **ready** joins its project's queue, ordered by priority, 
 - **Caps**: at most 2 tickets worked at once per project, $0.60 per ticket, and a day's starts × $0.60 stay under $3. An auto-started run approves its own gates (budget escalations still stop it), and the QA rule closes the ticket only on green locked tests.
 - **The switch**: "Crew picks up: on/off" in the Tickets header; `GET/POST /api/tickets/auto { on, maxUsd, dailyUsd, wip }`, saved as settings. `GET /api/tickets/queue?project=` lists each ready ticket with its place in line or the reason it waits.
 
+## Each ticket follows a flow (2026-11-17, phase 2)
+
+Every kind of work has its own flow in the library (`#/factory/flows`, [engine.md](engine.md#the-flow-library-2026-11-17-phase-2)). A ticket follows its kind's flow unless you pick another with the **flow** chip on the ticket page:
+
+- **Bug fix** (bugs) and **Small change** (tasks and small asks): one Builder session in a clone of the repo, the checks with up to two fix rounds, a Reviewer, a commit and a draft PR. Bug fix tells the Builder to find the cause first and prove the fix with a test.
+- **Refactor** (picked by you): the same session, told that behaviour must not change and existing tests stay as they are; the Reviewer is told too.
+- **Research or question** (questions): a reader goes through a read-only copy of the repo, or the ticket and its project when there is none, and answers on the ticket with the files it read. No branch, no PR, nothing changed. Up to $0.30.
+- **Feature in a repo** (requests, ideas, epics in a repo project): the whole engine on a branch. **New project**: the engine, for projects with no repo.
+
+The ticket page says which flow it would follow and why. A flow you save for a kind (its `kinds`) takes over from the built-in one.
+
+## The check before money (2026-11-17, phase 2)
+
+Before a ticket costs anything, SF reads it (`tickets/precheck.ts`: plain code, free, instant) for three things and asks you first:
+
+- **Clarity**: enough words to build from, the kind's first question answered, what right looks like for a bug.
+- **Confidence**: no open words left ("maybe", "something", "not sure"), and not more than one session's work on a session flow (size L, or six listed asks).
+- **Your call**: money, data that could be lost, secrets and accounts, going public, legal terms.
+
+Work it runs the check first; the ticket page shows a **Before it costs money** box with each question, and you answer, or press Work it anyway (the caps still guard the money). The crew's own pickups skip a ticket the check holds. Answers go on the ticket's record (`answers["check.<id>"]`) and thread, and the check is on the ticket's timeline (`ticket.checked`). On Home, **Answer before money** lists every question across tickets in one sitting and starts the tickets that are then clear.
+
+## Home: the board across projects (2026-11-17, phase 2)
+
+Home (`#/`) is every ticket across projects in four lanes: **Needs you** (questions before money, a run waiting for your OK, a build to look at, a question to answer, an idea to decide), **Running** (its flow and the step it is on), **In review** (an open draft PR) and **Done** (closed in the last two weeks). Above the lanes the flow of what runs now is drawn live: an engine run lit by its own events, a one-session ticket by its last step. The projects list moved to Projects (`#/projects`).
+
 ## SoftwareFactory builds itself: tickets come back as pull requests
 
 SoftwareFactory's own project is linked to its GitHub repo (`github` link, `PlonterAsi/SoftwareFactory`, or `SF_SELF_REPO`), so Work it on an SF ticket works in a clone of that repo, on branch `sf/SF-12-short-title`, never in the running app. Any project with a `github` link works the same way. So does a repo imported from GitHub: it is worked from the copy the import made on this computer (no sign-in needed to start), and its branches go to GitHub as pull requests or on your press.
@@ -100,6 +125,10 @@ SELECT agent, count(*), round(sum(cost_usd), 4) FROM agent_runs WHERE station = 
 ```
 GET  /api/tickets?project=&view=open|look|agents|plans|closed|all&kind=&q=   list + counts
 GET  /api/tickets/waiting?project=     what waits on you: look, answer, decide, with the moves that answer it
+GET  /api/tickets/board?project=       Home: lanes needs, running, review, done; each card with its flow and step
+GET  /api/tickets/checks?project=      every ticket the check before money holds, with its questions
+POST /api/tickets/checks               { answers: [{ id, q, text }], run? }   answers in one batch; run starts the tickets that are then clear
+GET  /api/tickets/:id/check            the check before money for one ticket { verdict, questions, answered }
 GET  /api/tickets/key/:key             a ticket by its key (SF-42) or #id
 GET  /api/tickets/meta                 kinds with their questions, statuses, priorities, severities, relations
 GET  /api/tickets/:id                  ticket, thread, timeline, links, plan lines, next moves, work document, its run
@@ -110,7 +139,7 @@ POST /api/tickets/:id/say              { text, status? }        a note, and opti
 POST /api/tickets/:id/link             { to, relation, removed? }
 POST /api/tickets/:id/line             { dir: "up" | "down" }   reorder a plan line
 POST /api/tickets/:id/spawn            { kind, title, ... }     a new ticket, linked derived from
-POST /api/tickets/:id/work             { maxUsd?, where?: "auto" | "repo" | "new", again?, route?: "light" | "engine" }   in the project's repo when it has one (one session or the whole engine: route, else the ticket's kind and size decide; the reply says which and why), else a factory run (409 { duplicateOf, state } when that idea is built or building)
+POST /api/tickets/:id/work             { maxUsd?, where?: "auto" | "repo" | "new", again?, route?: "light" | "engine", anyway? }   runs the check before money first (409 { check } when it asks; anyway skips it);   in the project's repo when it has one (one session or the whole engine: route, else the ticket's kind and size decide; the reply says which and why), else a factory run (409 { duplicateOf, state } when that idea is built or building)
 POST /api/tickets/:id/ask              { agent? }               one capped agent reply on the thread
 POST /api/tickets/intake               { text, exclude? }       is it a new project, or an ask about one you have? { verdict, projectId, projectName, kind, why, confidence }
 GET  /api/tickets/self                 SoftwareFactory's own project id (made when first needed)

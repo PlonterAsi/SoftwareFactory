@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type DragEvent } from "react";
-import { API, type SfEvent } from "./api";
+import { API, flowsApi, type FlowSummaryView, type SfEvent } from "./api";
 import { peekPendingTicket, takePendingTicket } from "./BugReport";
 
 /**
@@ -15,7 +15,7 @@ export type TicketKind = "bug" | "request" | "task" | "idea" | "plan" | "questio
 export type TicketStatus = "open" | "ready" | "in_progress" | "built" | "closed" | "rejected";
 export interface TicketView {
   id: number; key: string; number: number | null; level: "epic" | "ticket" | "subtask"; blocked: boolean; children: { total: number; done: number }; kind: TicketKind; title: string; body: string; answers: Record<string, string>; project: number | null; status: TicketStatus;
-  priority: string | null; severity: string | null; size: "S" | "M" | "L" | null; assignee: string | null; parentId: number | null; lineOrder: number | null; tags: string[];
+  priority: string | null; severity: string | null; size: "S" | "M" | "L" | null; flow?: string | null; assignee: string | null; parentId: number | null; lineOrder: number | null; tags: string[];
   source: string; openedBy: string; run: number | null; pr: { repo: string; number: number; url: string; state: "open" | "merged" | "closed" } | null; branch: string | null; branchDir: string | null; pushedUrl?: string | null; createdAt: string; updatedAt: string; closedAt: string | null; lastNote: string | null;
 }
 interface NoteView { eventId: number; ts: string; by: string; kind: "note" | "reply" | "status" | "event"; text: string; status: TicketStatus | null; costUsd: number | null }
@@ -30,6 +30,8 @@ interface Detail {
   /** In a project that lives in a repo: the route Work it takes when you do not choose, and why. */
   route?: { route: "light" | "engine"; why: string } | null;
   steps?: { step: string; state: "running" | "passed" | "failed" | "skipped"; note: string; at: string }[];
+  /** The flow it follows if worked now, and why (you picked it, or its kind's). */
+  flow?: { id: string; name: string; runner: string; why: string; chosen: boolean } | null;
   queue: { position: number | null; why: string | null } | null;
 }
 interface AutoWork { on: boolean; maxUsd: number; dailyUsd: number; wip: number }
@@ -37,6 +39,12 @@ interface Question { key: string; label: string; short?: boolean; required?: boo
 interface Meta { kinds: { code: TicketKind; label: string; questions: Question[] }[]; statuses: { code: TicketStatus; label: string; closed?: boolean; wantsLook?: boolean }[]; priorities: { code: string; label: string }[]; severities: string[]; relations: string[] }
 interface Counts { byStatus: Record<string, number>; byKind: Record<string, number>; open: number; look: number; you: number; total: number; oldest: { id: number; title: string; createdAt: string } | null }
 type View = "you" | "open" | "look" | "agents" | "plans" | "closed" | "all";
+
+export type CheckKind = "clarity" | "confidence" | "decision";
+export interface CheckQuestion { id: string; kind: CheckKind; ask: string; why: string }
+export interface TicketCheck { verdict: "go" | "ask"; questions: CheckQuestion[]; answered: number }
+export const CHECK_WORD: Record<CheckKind, string> = { clarity: "Clarity", confidence: "Confidence", decision: "Your call" };
+export const RUNNER_WORD: Record<string, string> = { engine: "the whole engine", session: "one Builder session", answer: "a reader answers, nothing changes", door: "its own screen" };
 
 export interface WaitingItem { ticket: TicketView; projectName: string | null; need: "look" | "answer" | "decide"; say: string; moves: { to: TicketStatus; label: string }[] }
 
@@ -74,7 +82,10 @@ export const ticketsApi = {
   send: (id: number) => call<TicketView>("POST", `/api/tickets/${id}/send`, {}),
   linkPr: (id: number, pr: string) => call<TicketView>("POST", `/api/tickets/${id}/pr`, { pr }),
   line: (id: number, dir: "up" | "down") => call<TicketView[]>("POST", `/api/tickets/${id}/line`, { dir }),
-  work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number, again?: boolean, route?: "light" | "engine") => call<{ run: number | null; branch?: string; route?: { route: "light" | "engine"; why: string } }>("POST", `/api/tickets/${id}/work`, { maxUsd, where, again, route }),
+  work: (id: number, where: "auto" | "repo" | "new" = "auto", maxUsd?: number, again?: boolean, route?: "light" | "engine", anyway?: boolean) => call<{ run: number | null; branch?: string; route?: { route: "light" | "engine"; why: string } }>("POST", `/api/tickets/${id}/work`, { maxUsd, where, again, route, anyway }),
+  check: (id: number) => call<TicketCheck>("GET", `/api/tickets/${id}/check`),
+  checks: (project?: number | null) => call<{ items: { ticket: TicketView; projectName: string | null; flow: { id: string; name: string } | null; check: TicketCheck }[] }>("GET", `/api/tickets/checks${project != null ? `?project=${project}` : ""}`),
+  answerChecks: (answers: { id: number; q: string; text: string }[], run: boolean) => call<{ answered: number; started: { id: number; run: number | null; flow?: string }[]; held: { id: number; error: string }[] }>("POST", "/api/tickets/checks", { answers, run }),
   ask: (id: number, agent?: string) => call<{ reply?: string; error?: string }>("POST", `/api/tickets/${id}/ask`, { agent }),
 };
 
@@ -308,7 +319,14 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   const [prRef, setPrRef] = useState("");
   // A Work it the factory held back because that idea is built or building (hooks stay above the early return).
   const [dup, setDup] = useState<{ run: number; error: string } | null>(null);
+  // The check before money: its open questions, your answers so far, and the flows a ticket may pick.
+  const [check, setCheck] = useState<TicketCheck | null>(null);
+  const [replies, setReplies] = useState<Record<string, string>>({});
+  const [flows, setFlows] = useState<FlowSummaryView[]>([]);
   useEffect(() => { ticketsApi.get(id).then(setD).catch((e) => onError((e as Error).message)); }, [id, last]);
+  useEffect(() => { ticketsApi.check(id).then(setCheck).catch(() => setCheck(null)); }, [id, last]);
+  useEffect(() => { setReplies({}); }, [id]);
+  useEffect(() => { flowsApi.list().then((j) => setFlows(j.flows.filter((f) => f.runner !== "door"))).catch(() => {}); }, []);
   if (!d) return <aside className="tk-page"><div className="empty">Loading…</div></aside>;
   const t = d.ticket;
   const questions = meta.kinds.find((k) => k.code === t.kind)?.questions ?? [];
@@ -319,14 +337,28 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   };
   const edit = (field: string, value: unknown, key?: string) => act("edit", () => ticketsApi.edit(id, field, value, key));
   // The factory builds one idea once a day: when this one is already built or building, say so and offer both ways on.
-  const work = async (where: "auto" | "repo" = "auto", again = false, route?: "light" | "engine") => {
+  const work = async (where: "auto" | "repo" = "auto", again = false, route?: "light" | "engine", anyway = false) => {
     setBusy("work"); setDup(null);
-    try { await ticketsApi.work(id, where, undefined, again, route); setD(await ticketsApi.get(id)); }
+    try { await ticketsApi.work(id, where, undefined, again, route, anyway); setD(await ticketsApi.get(id)); }
     catch (e) {
-      const b = (e as { body?: { duplicateOf?: number } }).body;
-      if (b?.duplicateOf != null) setDup({ run: b.duplicateOf, error: (e as Error).message }); else onError((e as Error).message);
+      const b = (e as { body?: { duplicateOf?: number; check?: TicketCheck } }).body;
+      if (b?.duplicateOf != null) setDup({ run: b.duplicateOf, error: (e as Error).message });
+      else if (b?.check) setCheck(b.check);
+      else onError((e as Error).message);
     } finally { setBusy(null); }
   };
+  // Your answers go on the ticket; with go, the ticket starts once nothing is left to ask.
+  const answer = async (go: boolean) => {
+    const answers = Object.entries(replies).filter(([, v]) => v.trim()).map(([q, text]) => ({ id, q, text }));
+    setBusy("check");
+    try {
+      const r = await ticketsApi.answerChecks(answers, go);
+      setReplies({});
+      if (r.held.length) onError(r.held[0].error);
+      setD(await ticketsApi.get(id)); setCheck(await ticketsApi.check(id));
+    } catch (e) { onError((e as Error).message); } finally { setBusy(null); }
+  };
+  const asking = !!check && check.verdict === "ask" && (t.status === "open" || t.status === "ready") && !d.working;
   const closed = t.status === "closed" || t.status === "rejected";
   const engineFirst = d.route?.route === "engine";
   // In a repo an epic that holds tickets is worked through them, one branch each (the core refuses a run over the whole epic).
@@ -346,6 +378,7 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
         {t.blocked && <span className="tk-blocked" title="Another ticket that is still open blocks this one: see Links">blocked</span>}
         <ChipSelect label="priority" value={t.priority ?? ""} options={[["", "+ priority"], ...meta.priorities.map((p) => [p.code, p.label] as [string, string])]} onChange={(v) => edit("priority", v || null)} />
         <ChipSelect label="size" value={t.size ?? ""} options={[["", "+ size"], ["S", "size S"], ["M", "size M"], ["L", "size L"]]} onChange={(v) => edit("size", v || null)} />
+        {flows.length > 0 && <ChipSelect label="flow" value={t.flow ?? ""} options={[["", `flow: ${d.flow && !d.flow.chosen ? d.flow.name : "its kind's own"}`], ...flows.map((f) => [f.id, `flow: ${f.name}`] as [string, string])]} onChange={(v) => edit("flow", v || null)} />}
         {t.kind === "bug" && <ChipSelect label="severity" value={t.severity ?? ""} options={[["", "+ severity"], ...meta.severities.map((s) => [s, s] as [string, string])]} onChange={(v) => edit("severity", v || null)} />}
         <ChipSelect label="assignee" value={t.assignee ?? ""} options={[["", "+ assignee"], ["you", "you"], ...crew.map((c) => [c.id, `${c.avatar} ${c.name}`] as [string, string])]} onChange={(v) => edit("assignee", v || null)} />
         {projects.length > 0 && <ChipSelect label="project" value={t.project != null ? String(t.project) : ""} options={[["", "+ project"], ...projects.map((p) => [String(p.id), p.title] as [string, string])]} onChange={(v) => edit("project", v ? Number(v) : null)} />}
@@ -354,7 +387,11 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
       {d.parent && <div className="muted tk-parent">{t.level === "subtask" ? "Subtask of" : "Part of epic"} <button className="link" onClick={() => onSelect(d.parent!.id)}>{d.parent.key} {d.parent.title}</button></div>}
 
       <div className="tk-crew">
-        {epicOfTickets ? null : d.repo ? (() => {
+        {epicOfTickets ? null : d.flow?.runner === "answer" ? (
+          <button disabled={closed || busy != null || d.working} onClick={() => void work(d.repo ? "repo" : "auto")} title={`${d.flow.name}: a reader goes through ${d.repo ? `a read-only copy of ${d.repo.source}` : "the ticket and its project"} and answers here, with the files it read. Nothing is changed. Up to $0.30.`}>
+            {busy === "work" ? "Starting…" : d.working ? "Reading…" : t.status === "built" ? "Answer it again" : "Find the answer"}
+          </button>
+        ) : d.repo ? (() => {
           // Two routes in a repo: one Builder session, or the whole engine. The suggested one is the main button; the other is one press away.
           const running = !!d.run && !d.run.outcome;
           const off = closed || busy != null || d.working || running;
@@ -386,10 +423,27 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
           This epic is worked through its tickets ({t.children.done} of {t.children.total} done): open one and press Work it. Each gets its own branch.
         </div>
       )}
-      {d.repo && d.route && (t.status === "open" || t.status === "ready") && !d.working && !(d.run && !d.run.outcome) && (
+      {d.flow && (t.status === "open" || t.status === "ready") && !d.working && !(d.run && !d.run.outcome) && (
         <div className="tk-queue tk-route" role="note">
-          Suggested: {d.route.route === "engine" ? "the whole engine (design, plan, build, review, judge)" : "one Builder session"}. Why: {d.route.why}.
+          Follows the <a href="#/factory/flows" className="link">{d.flow.name}</a> flow: {RUNNER_WORD[d.flow.runner] ?? d.flow.runner}. Why: {d.flow.chosen ? d.flow.why : d.repo && d.route && d.flow.runner !== "answer" ? d.route.why : d.flow.why}.
         </div>
+      )}
+      {asking && (
+        <section className="tk-check" aria-label="Before it costs money">
+          <div className="tk-check-head"><b>Before it costs money</b> <span className="muted small">SF read the ticket and needs {check!.questions.length === 1 ? "one answer" : `${check!.questions.length} answers`} from you first. Each goes on the ticket.</span></div>
+          {check!.questions.map((q) => (
+            <label key={q.id} className={`tk-check-q c-${q.kind}`}>
+              <span className="tk-check-kind">{CHECK_WORD[q.kind]}</span>
+              <span className="tk-check-ask">{q.ask} <span className="muted small">({q.why})</span></span>
+              <textarea rows={2} value={replies[q.id] ?? ""} onChange={(e) => setReplies((r) => ({ ...r, [q.id]: e.target.value }))} aria-label={q.ask} />
+            </label>
+          ))}
+          <div className="tk-check-actions">
+            <button disabled={busy != null || !check!.questions.every((q) => (replies[q.id] ?? "").trim())} onClick={() => void answer(true)}>{busy === "check" ? "Saving…" : "Answer and work it"}</button>
+            <button className="ghost" disabled={busy != null || !Object.values(replies).some((v) => v.trim())} onClick={() => void answer(false)}>Save answers</button>
+            <button className="ghost" disabled={busy != null || closed} onClick={() => void work(d.repo ? "repo" : "auto", false, undefined, true)} title="Run it as it is. The caps still guard the money.">Work it anyway</button>
+          </div>
+        </section>
       )}
       {d.queue && (
         <div className={`tk-queue ${d.queue.position != null ? "in-line" : ""}`} role="status">

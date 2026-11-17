@@ -29,7 +29,7 @@ The code is `Run.go()` in `packages/core/src/factory/loop.ts`. Station ids, in o
 
 ### The pipeline is a flow (2026-11-17)
 
-The pipeline above is no longer fixed code. It is the built-in **New project** flow, stored as data in `packages/core/src/flows/flow.ts`: each step names its kind (step, loop or gate), the engine action that carries it out, the crew slots that work it, its loop rule (goal, observer, passes when, stops anyway, round limit), when it is skipped, the milestone that skips it on a resume, the stop on the project track it belongs to, and where the canvas draws it. Imported repositories follow the built-in **Change in a repo** flow, the same steps with the repo's own intake, tests and hand-over.
+The pipeline above is no longer fixed code. It is the built-in **New project** flow, stored as data in `packages/core/src/flows/flow.ts`: each step names its kind (step, loop or gate), the engine action that carries it out, the crew slots that work it, its loop rule (goal, observer, passes when, stops anyway, round limit), when it is skipped, the milestone that skips it on a resume, the stop on the project track it belongs to, and where the canvas draws it. Imported repositories follow the built-in **Feature in a repo** flow, the same steps with the repo's own intake, tests and hand-over.
 
 - `Run.go()` reads the flow the run started with and carries out its steps in order, one engine action each (`intake`, `council`, `discover`, `plan`, `tests`, `build`, `testFix`, `review`, `evaluate`, `accept`, `ship`). Gate A and the Fixer are drawn as their own boxes but carried out inside the plan loop and the test loop (`within`).
 - Every run copies its flow onto its `factory.run.started` event, so an edit never changes a run already going and a resume follows the same flow. Runs from before flows follow the built-in of their kind.
@@ -37,6 +37,24 @@ The pipeline above is no longer fixed code. It is the built-in **New project** f
 - The engine reads the round limits of the council, design and judge loops from the flow.
 - The factory floor, the project's Mission track and the Flows page (`#/factory/flows`) draw the flow. API: `GET /api/flows`, `GET /api/flows/:id`, `PUT /api/flows/:id`, `POST /api/flows/:id/reset`, `POST /api/flows/check`.
 - Proof of no change: the four practice-crew runs (default, council always, no planted bug, Agent Bay crew) write the same events, in the same order, before and after; every existing test passes.
+
+### The flow library (2026-11-17, phase 2)
+
+One flow per kind of work, each saying who carries it out (`runner`):
+
+| Flow | Runner | Takes | What it does |
+|---|---|---|---|
+| New project | engine | projects with no repo | the pipeline above |
+| Feature in a repo | engine | requests, ideas, epics in a repo project | the pipeline on a branch of a clone |
+| Bug fix | session | bugs | one Builder session: read the repo, build, checks with fix rounds (2), Reviewer with fix rounds (1), commit, draft PR; told to find the cause and prove it with a test |
+| Small change | session | tasks, small asks | the same session, exactly what the light route always did |
+| Refactor | session | picked by you | the same session, told behaviour must not change |
+| Research or question | answer | questions | a reader answers on the ticket from a read-only copy; nothing changes |
+| Import a repo, Improve loop, Release | door | their own screens | drawn so every kind of work is on one map; their screens follow the boxes once they read flows |
+
+- Session flows have their own actions (`orient`, `build`, `checks`, `review`, `commit`, `handover`) and answer flows theirs (`orient`, `answer`); the check before save refuses an action the runner cannot do, a missing required one, or a change of runner. A door flow cannot be saved until its screen reads flows.
+- `workInRepo` (tickets/repowork.ts) carries out a session flow step by step and reads its fix round limits and its `brief` (words added to the Builder's and the Reviewer's instructions). With the built-in Small change flow it takes exactly the steps it took before flows.
+- Which flow a ticket follows: `tickets/flowpick.ts` (yours, else its kind's via each flow's `kinds`, else by route). The check before money and Home are in [tickets.md](tickets.md).
 
 ### Each loop: goal, observer, stop
 

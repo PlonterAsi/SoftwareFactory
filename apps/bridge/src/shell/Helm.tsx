@@ -14,7 +14,8 @@ type Row = { key: string; label: string; hint?: string; kind: "note" | "build" |
 
 const PAGES: { label: string; to: Route; words: string }[] = [
   { label: "Needs you", to: { page: "needs" }, words: "approvals waiting gates ok" },
-  { label: "Projects", to: { page: "home" }, words: "all projects home" },
+  { label: "Home", to: { page: "home" }, words: "home board tickets lanes needs running review done" },
+  { label: "Projects", to: { page: "projects" }, words: "all projects" },
   { label: "Agents", to: { page: "factory", view: "bay" }, words: "crew agent bay models" },
   { label: "Tickets", to: { page: "factory", view: "tickets" }, words: "tickets bugs tasks work" },
   { label: "All builds", to: { page: "factory", view: "factory" }, words: "floor runs builds whole factory" },

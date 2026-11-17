@@ -212,7 +212,7 @@ export class RepoRun extends Run {
 
   protected get asked(): string { return `In the existing product "${this.info.name}" (${this.info.source}) the person asks for this change: ${this.idea}`; }
 
-  // The run follows the "Change in a repo" flow (flows/flow.ts) through Run.go; these are the steps that
+  // The run follows the "Feature in a repo" flow (flows/flow.ts) through Run.go; these are the steps that
   // differ in a repo: intake clones and reads it, tests runs the repo's own suite before anything changes.
   protected async intakeStep() { await this.station("intake", async () => { captureSignal(this.log, this.idea, "factory"); await this.prepare(); }); }
   protected async testsStep() { await this.baselineTests(); }
@@ -622,7 +622,7 @@ export function githubShipper(gh: GitHub | undefined, canShip?: () => string | n
 
 export interface RepoRuns {
   /** Start an engine run for `ask` in the project's repo. Throws when the project has none. Returns the run id at once. */
-  start(projectId: number, ask: string, opts?: Pick<RunOptions, "maxUsd" | "autoApprove" | "autoRetries" | "models" | "council"> & { ticket?: { id: number; key: string; title?: string } }): { run: number; branch: string };
+  start(projectId: number, ask: string, opts?: Pick<RunOptions, "maxUsd" | "autoApprove" | "autoRetries" | "models" | "council" | "flow"> & { ticket?: { id: number; key: string; title?: string } }): { run: number; branch: string };
 }
 
 /**

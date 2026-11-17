@@ -21,7 +21,8 @@ function setup(rule: Partial<AutoWork> = {}) {
   const r: AutoWork = { ...AUTO_WORK_DEFAULT, ...rule };
   const t = new Tickets(log, { factory: factory as unknown as Factory, autoWork: () => r });
   const ready = (o: Parameters<Tickets["open"]>[0], size: "S" | "M" | "L" | null = "S") => {
-    const x = t.open({ project: 7, ...o });
+    // Written clearly enough for the check before money (tickets/precheck.ts), unless a test says otherwise.
+    const x = t.open({ project: 7, body: "After a restart the screen shows nothing. It should show the list it showed before the restart.", answers: { expected: "The list it showed before" }, ...o });
     if (size) t.edit(x.id, "size", size);
     t.say(x.id, "", { status: "ready" });
     return x.id;

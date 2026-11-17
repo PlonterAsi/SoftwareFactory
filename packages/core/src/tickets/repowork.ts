@@ -14,6 +14,7 @@ import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
 import { stopReason } from "../factory/stoprules.js";
 import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, statusPath, workbenchContract } from "../factory/workbench.js";
 import { parseGitHubRepo, type GitHubRepo } from "./github.js";
+import { SMALL_CHANGE_FLOW, roundsOf, stepsToRun, type FlowDef } from "../flows/flow.js";
 
 /**
  * Working a ticket inside an existing codebase (a project imported from a git
@@ -108,7 +109,7 @@ export function prepareClone(repo: RepoRef, workRoot: string, id: number, branch
   return { dir, base };
 }
 
-export interface RepoWorkResult { ok: boolean; dir: string; branch: string; base: string; sha: string | null; files: string[]; costUsd: number; summary: string; error?: string; /** The checks that passed (gates, test integrity, tests, review). */ checks?: string[] }
+export interface RepoWorkResult { ok: boolean; dir: string; branch: string; base: string; sha: string | null; files: string[]; costUsd: number; summary: string; error?: string; /** The checks that passed (gates, test integrity, tests, review). */ checks?: string[]; /** The flow ends with a draft PR step (false: the branch stays here by the flow's choice). */ handover?: boolean }
 
 /**
  * The codebase overview the Cartographer and Surveyor already wrote (SF-20): each module's purpose,
@@ -257,7 +258,10 @@ export function highFindings(text: string): string[] {
  */
 export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: AgentBay | undefined, o: {
   id: number; key: string; title: string; document: string; repo: RepoRef; workRoot: string; maxUsd: number; git?: (dir: string, ...args: string[]) => string; projectId?: number | null; checks?: LoopChecks;
+  /** The session flow to follow (flows/flow.ts): its steps in order, its fix round limits, its brief. Default: Small change. */
+  flow?: FlowDef;
 }): Promise<RepoWorkResult> {
+  const flow = o.flow ?? SMALL_CHANGE_FLOW;
   const branch = branchFor(o.key, o.title);
   const { dir, base } = prepareClone(o.repo, o.workRoot, o.id, branch, o.git);
   const c = o.checks ?? {};
@@ -278,7 +282,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     const run = await runAgent(log, runtime, b?.id ?? "builder", {
       prompt,
       model: b?.model ?? "sonnet",
-      systemPrompt: `${b?.role.split("Station contract:")[0].trim() ?? "You are the Builder: you write working code."}\n\n${REPO_CONTRACT}\n${REPO_BENCH}`,
+      systemPrompt: `${b?.role.split("Station contract:")[0].trim() ?? "You are the Builder: you write working code."}\n\n${REPO_CONTRACT}\n${flow.brief ? `${flow.brief}\n` : ""}${REPO_BENCH}`,
       budgetUsd: Math.min(left(), share, b?.budgetUsd ?? share),
       pluginDirs: b?.pluginDirs.length ? b.pluginDirs : undefined,
       // The working-copy tools, plus the Builder's own skills and MCP servers.
@@ -295,13 +299,6 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     step(name, "passed");
     return { text: run.result.text };
   };
-
-  // The Builder runs the tests itself, so the clone's dependencies go in before it starts (once; skipped when present).
-  if (o.checks) { const why = ensureDeps(dir); if (why) step("install", "skipped", why); }
-  step("orient", "passed", "repo rules and code map added to the prompt");
-  const first = await build(`${o.document}\n\nYou are on branch ${branch} of a clone of ${o.repo.source}.${repoGuidance(dir)}${reviewBrief(log, o.projectId)}${overviewBlock(log, o.projectId)}`, o.maxUsd * 0.5, "build");
-  if (first.error) return fail(first.error);
-  const summary = first.text.replace(/<<<\s*FILE[\s\S]*?(?:FILE\s*>>>|$)/g, "").trim().split("\n").filter(Boolean).slice(-6).join("\n");
 
   /** Every check, in order; the first failure comes back as { name, output }. */
   const check = async (): Promise<{ name: string; output: string } | null> => {
@@ -325,47 +322,83 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     return null;
   };
 
-  // Checks, with at most two fix rounds on a failure.
-  const failures: string[] = [];
-  let bad = await check();
-  for (let round = 1; bad && round <= MAX_FIX_ROUNDS; round++) {
-    failures.push(`${bad.name}: ${bad.output}`);
-    if (bad.name === "secrets") break;
-    const why = c.stopRule?.({ round, failures, costUsd: spent, maxUsd: o.maxUsd }) ?? (left() < o.maxUsd * 0.1 ? "the budget for this ticket is used up" : null);
-    if (why) { step("fix", "skipped", why); break; }
-    const fixed = await build(`The ${bad.name} check failed on your change to the ticket "${o.title}". Fix the cause (not the check) and change nothing else.\n\n${trim(bad.output)}`, o.maxUsd * 0.15, `fix ${round}`);
-    if (fixed.error) break;
-    bad = await check();
-  }
-  if (bad) return fail(`Not committed: ${bad.name} still failing after ${failures.length} round(s).\n${trim(bad.output, 1500)}`, changedFiles(dir));
-
-  // A Reviewer reads the diff; a high finding gets one fix round, then the checks again.
-  if (left() > 0) {
+  /** A Reviewer reads the diff. */
+  const review = async (): Promise<{ error?: string; high: string[] }> => {
     step("review", "running");
     git(dir, "add", "-A");
     const diff = git(dir, "diff", "--cached", "--no-color").slice(0, 20000);
     const rr = await runAgent(log, runtime, rv?.id ?? "reviewer", {
       prompt: `Ticket: ${o.title}\n\nThe diff:\n${diff}`,
       model: rv?.model ?? "sonnet",
-      systemPrompt: `You are the Reviewer. Read the diff for bugs, missed requirements and risks, and for gaming the tests: deleted, skipped or weakened tests, tests changed to match wrong output, or expected values hard-coded in the source (each of these is high).\n\nStation contract: review. Answer only with JSON: { "verdict": "pass"|"fail", "findings": [{ "severity": "high"|"medium"|"low", "text": "..." }] }. High means it must be fixed before merge.`,
+      systemPrompt: `You are the Reviewer. Read the diff for bugs, missed requirements and risks, and for gaming the tests: deleted, skipped or weakened tests, tests changed to match wrong output, or expected values hard-coded in the source (each of these is high).${flow.brief ? `\n\nThe work was asked for this way: ${flow.brief}` : ""}\n\nStation contract: review. Answer only with JSON: { "verdict": "pass"|"fail", "findings": [{ "severity": "high"|"medium"|"low", "text": "..." }] }. High means it must be fixed before merge.`,
       budgetUsd: Math.min(left(), o.maxUsd * 0.2, rv?.budgetUsd ?? o.maxUsd),
     }, { agentVersion: rv?.version, station: "review", ticket: o.id });
     spent += rr.result?.costUsd ?? 0;
-    const high = rr.result ? highFindings(rr.result.text) : [];
-    if (rr.error) step("review", "skipped", rr.error);
-    else if (!high.length) { step("review", "passed"); passed.push("review"); }
-    else {
-      step("review", "failed", high.join("; "));
-      const fixed = await build(`A reviewer found high-severity problems in your change to "${o.title}". Fix them and change nothing else.\n\n${high.map((h) => `- ${trim(h, 600)}`).join("\n")}`, o.maxUsd * 0.15, "review fix");
-      const again = fixed.error ? { name: "review fix", output: fixed.error } : await check();
-      if (again) return fail(`Not committed: ${again.name} failed after the review fix.\n${trim(again.output, 1500)}`, changedFiles(dir));
-      step("review", "passed", "high findings fixed");
-      passed.push("review");
+    return { error: rr.error, high: rr.result ? highFindings(rr.result.text) : [] };
+  };
+
+  // The flow's steps, in its order (flows/flow.ts, runner "session").
+  let summary = "";
+  let sha: string | null = null;
+  let handover = false;
+  for (const s of stepsToRun(flow)) {
+    switch (s.action) {
+      case "orient": {
+        // The Builder runs the tests itself, so the clone's dependencies go in before it starts (once; skipped when present).
+        if (o.checks) { const why = ensureDeps(dir); if (why) step("install", "skipped", why); }
+        step("orient", "passed", "repo rules and code map added to the prompt");
+        break;
+      }
+      case "build": {
+        const first = await build(`${o.document}\n\nYou are on branch ${branch} of a clone of ${o.repo.source}.${repoGuidance(dir)}${reviewBrief(log, o.projectId)}${overviewBlock(log, o.projectId)}`, o.maxUsd * 0.5, "build");
+        if (first.error) return fail(first.error);
+        summary = first.text.replace(/<<<\s*FILE[\s\S]*?(?:FILE\s*>>>|$)/g, "").trim().split("\n").filter(Boolean).slice(-6).join("\n");
+        break;
+      }
+      case "checks": {
+        // Checks, with the flow's number of fix rounds on a failure (two as shipped).
+        const failures: string[] = [];
+        const rounds = roundsOf(flow, "checks", MAX_FIX_ROUNDS);
+        let bad = await check();
+        for (let round = 1; bad && round <= rounds; round++) {
+          failures.push(`${bad.name}: ${bad.output}`);
+          if (bad.name === "secrets") break;
+          const why = c.stopRule?.({ round, failures, costUsd: spent, maxUsd: o.maxUsd }) ?? (left() < o.maxUsd * 0.1 ? "the budget for this ticket is used up" : null);
+          if (why) { step("fix", "skipped", why); break; }
+          const fixed = await build(`The ${bad.name} check failed on your change to the ticket "${o.title}". Fix the cause (not the check) and change nothing else.\n\n${trim(bad.output)}`, o.maxUsd * 0.15, `fix ${round}`);
+          if (fixed.error) break;
+          bad = await check();
+        }
+        if (bad) return fail(`Not committed: ${bad.name} still failing after ${failures.length} round(s).\n${trim(bad.output, 1500)}`, changedFiles(dir));
+        break;
+      }
+      case "review": {
+        // A high finding gets the flow's number of fix rounds (one as shipped), each followed by the checks.
+        if (left() <= 0) break;
+        const rounds = roundsOf(flow, "review", 1);
+        let res = await review();
+        for (let r = 0; ; ) {
+          if (res.error) { step("review", "skipped", res.error); break; }
+          if (!res.high.length) { step("review", "passed", r ? "high findings fixed" : ""); passed.push("review"); break; }
+          step("review", "failed", res.high.join("; "));
+          const fixed = await build(`A reviewer found high-severity problems in your change to "${o.title}". Fix them and change nothing else.\n\n${res.high.map((h) => `- ${trim(h, 600)}`).join("\n")}`, o.maxUsd * 0.15, "review fix");
+          const again = fixed.error ? { name: "review fix", output: fixed.error } : await check();
+          if (again) return fail(`Not committed: ${again.name} failed after the review fix.\n${trim(again.output, 1500)}`, changedFiles(dir));
+          r++;
+          if (r >= rounds || left() <= 0) { step("review", "passed", "high findings fixed"); passed.push("review"); break; }
+          res = await review();
+        }
+        break;
+      }
+      case "commit": {
+        sha = commitAll(dir, `${o.key}: ${o.title}\n\nWorked by SoftwareFactory's crew on branch ${branch}.`);
+        step("commit", sha ? "passed" : "skipped", sha ?? "nothing changed");
+        break;
+      }
+      case "handover": handover = true; break;
+      default: return fail(`The flow "${flow.name}" asks for "${s.action}", which one Builder session cannot do.`);
     }
   }
-
-  const sha = commitAll(dir, `${o.key}: ${o.title}\n\nWorked by SoftwareFactory's crew on branch ${branch}.`);
   const files = sha ? git(dir, "diff", "--name-only", `${base}..HEAD`).split("\n").filter(Boolean) : [];
-  step("commit", sha ? "passed" : "skipped", sha ?? "nothing changed");
-  return { ok: true, dir, branch, base, sha, files, costUsd: spent, summary, checks: passed };
+  return { ok: true, dir, branch, base, sha, files, costUsd: spent, summary, checks: passed, handover };
 }
