@@ -14,7 +14,8 @@ import { runAgent } from "../agents.js";
 import { captureSignal } from "../signals.js";
 import { builtinCrew, kitArgs, type CrewMember, type CrewSource } from "./crew.js";
 import { FlowLibrary, flowOfRun } from "../flows/library.js";
-import { roundsOf, stepsToRun, type FlowDef, type FlowStep } from "../flows/flow.js";
+import { noteLesson } from "../bay/memory.js";
+import { crewPick, roundsOf, stepsToRun, type FlowDef, type FlowStep } from "../flows/flow.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mergeNextDocs, mustRequirements, newRequirements, nextVersionPrompt, withAsk, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featureCapUsd, featurePrompt, featuresFile, featuresOf, nextFeaturesOf, progressEntry, type Feature } from "./features.js";
 import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, withScreenItems, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
@@ -552,7 +553,7 @@ export class Run {
     let brief!: CouncilBrief;
     const maxRounds = roundsOf(this.flow, "council", MAX_COUNCIL_ROUNDS);
     for (let round = 1; round <= maxRounds; round++) {
-      const crew = this.f.crew.crewFor("council");
+      const crew = this.f.crew.crewFor("council", crewPick(this.flow, "council"));
       const prev = seats.filter((x) => x.round === round - 1);
       brief = await this.station("council", async () => {
         const results = await Promise.all(crew.map(async (m, seat) => {
@@ -1281,6 +1282,9 @@ export class Run {
         this.mark("review", "pass", round, `still "fix" after ${round} reviews: ${failing.length} criteria failing, ${open.length} serious findings, handed to the repair loop`);
         return;
       }
+      // The serious findings become lessons of the agent that built it (bay/memory.ts), for its next work in any project.
+      const builder = this.f.crew.crewFor("build", crewPick(this.flow, "build"))[0];
+      if (builder) for (const f of r.findings.filter((x) => x.severity === "high" && !/^Acceptance criterion not met/.test(x.text)).slice(0, 2)) noteLesson(this.log, builder.id, `A reviewer sent back my build for: ${f.text.slice(0, 240)}`, "review", `run:${this.id}`);
       const high = r.findings.filter((f) => f.severity === "high").map((f) => `- ${f.text}`).join("\n");
       await this.testFixLoop(`The Reviewer found these problems; fix them without breaking the tests:\n${high}`, true);
     }
@@ -1609,7 +1613,8 @@ export class Run {
 
   /** The one agent working a single-seat station right now. */
   protected one(slot: Slot): CrewMember {
-    const m = this.f.crew.crewFor(slot)[0];
+    // The agent the run's flow names for this station, else whoever works it in the Bay.
+    const m = this.f.crew.crewFor(slot, crewPick(this.flow, slot))[0];
     if (!m) throw new Error(`Nobody works the ${slot} station`);
     return m;
   }

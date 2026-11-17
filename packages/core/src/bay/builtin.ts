@@ -357,8 +357,9 @@ export const SLOT_SEATS: Record<Slot, number> = { council: 6, design: 1, critiqu
  * for that station, then the station's contract. The principles come from the Brain (the event
  * log, so your edits apply to the next call); without a log, the defaults.
  */
-export function systemPromptFor(agent: Pick<AgentDef, "prompt">, slot: Slot | "none", principles: Principle[] = DEFAULT_PRINCIPLES): string {
-  if (slot === "none") return agent.prompt;
+export function systemPromptFor(agent: Pick<AgentDef, "prompt">, slot: Slot | "none", principles: Principle[] = DEFAULT_PRINCIPLES, memory = ""): string {
+  // The agent's own memory (bay/memory.ts) sits right after its own instructions: it is part of who it is.
+  if (slot === "none") return [agent.prompt.trim(), memory].filter(Boolean).join("\n\n");
   const brain = brainBlock(slot, principles);
-  return [agent.prompt.trim(), brain, CONTRACTS[slot]].filter(Boolean).join("\n\n");
+  return [agent.prompt.trim(), memory, brain, CONTRACTS[slot]].filter(Boolean).join("\n\n");
 }

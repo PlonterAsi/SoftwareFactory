@@ -29,12 +29,17 @@ export interface CrewMember {
   tools: string[];
   /** Its own --mcp-config (only its MCP servers), when it has any. */
   mcpConfig?: string;
+  /** Its memory block (bay/memory.ts), already inside `role`; kept apart for prompts that do not use the role. */
+  memory?: string;
 }
 
 /** Where the factory gets its workers. The Agent Bay is one; the built-in crew is the fallback. */
 export interface CrewSource {
-  /** The agents working a station, in seat order (the Council has up to six). */
-  crewFor(slot: Slot): CrewMember[];
+  /**
+   * The agents working a station, in seat order (the Council has up to six). `pick` is the Bay agents a flow
+   * step names for it (flows/flow.ts `crew`); when none of them can work, the station's own crew does.
+   */
+  crewFor(slot: Slot, pick?: string[]): CrewMember[];
 }
 
 /** Plugin names resolve under SF_PLUGINS_DIR; absolute paths are used as they are. */
@@ -43,10 +48,10 @@ export function pluginDirsFor(plugins: string[], env = process.env): string[] {
 }
 
 /** Bind an agent to a station. Its role is its prompt, the Brain's principles for the station, then the contract. */
-export function bind(agent: AgentDef, version: number, slot: Slot, principles?: Principle[]): CrewMember {
+export function bind(agent: AgentDef, version: number, slot: Slot, principles?: Principle[], memory?: string): CrewMember {
   return {
     id: agent.id, version, name: agent.name, station: slot, model: agent.model, budgetUsd: agent.budgetUsd,
-    role: systemPromptFor(agent, slot, principles), ...kitOf(agent),
+    role: systemPromptFor(agent, slot, principles, memory), ...kitOf(agent), ...(memory ? { memory } : {}),
   };
 }
 

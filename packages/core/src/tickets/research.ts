@@ -2,7 +2,7 @@ import type { EventLog } from "../events.js";
 import { runAgent } from "../agents.js";
 import type { AgentRuntime } from "../runtime.js";
 import type { AgentBay } from "../bay/bay.js";
-import { RESEARCH_FLOW, stepsToRun, type FlowDef } from "../flows/flow.js";
+import { RESEARCH_FLOW, crewPick, stepsToRun, type FlowDef } from "../flows/flow.js";
 import { branchFor, overviewBlock, prepareClone, repoGuidance, type RepoRef } from "./repowork.js";
 
 /**
@@ -23,7 +23,7 @@ export async function answerTicket(log: EventLog, runtime: AgentRuntime, bay: Ag
   git?: (dir: string, ...args: string[]) => string;
 }): Promise<AnswerResult> {
   const flow = o.flow ?? RESEARCH_FLOW;
-  const reader = bay?.crewFor("survey")[0];
+  const reader = bay?.crewFor("survey", crewPick(flow, "survey"))[0];
   const step = (name: string, state: "running" | "passed" | "failed" | "skipped", note = "") =>
     log.append("ticket.step", { id: o.id, key: o.key, step: name, state, note: note.slice(0, 500) });
   let dir: string | null = null;

@@ -101,6 +101,11 @@ export interface FlowStep {
   action?: string;
   /** The crew slots that work it, first the main one. Empty: the core does it with no agent. */
   agents: string[];
+  /**
+   * The named Agent Bay agents that work this step's main slot (agents[0]), in seat order: for example the
+   * "react-builder" specialist on Build. Absent or empty: whoever works that station in the Bay.
+   */
+  crew?: string[];
   /** The engine stations whose state lights this step on the canvas (default: its id). */
   stations?: string[];
   /** The milestone that, once reached, skips this step when a stopped run is picked up again. */
@@ -376,6 +381,18 @@ export function stepsToRun(flow: FlowDef): FlowStep[] {
 }
 
 /** The round limit a flow sets for the loop of `action`, or `fallback` when it sets none. */
+/**
+ * The Bay agents a flow names for a station: the crew of the first step whose main slot it is. Undefined when
+ * no step names any, so the station's own crew works it (AgentBay.crewFor).
+ */
+export function crewPick(flow: FlowDef | undefined, slot: string): string[] | undefined {
+  const s = flow?.steps.find((x) => x.agents?.[0] === slot && Array.isArray(x.crew) && x.crew.length);
+  return s?.crew?.slice();
+}
+
+/** Most agents one step may name: the Council's six seats; every other station has one. */
+export const crewSeats = (slot: string | undefined) => (slot === "council" ? 6 : 1);
+
 export function roundsOf(flow: FlowDef, action: string, fallback: number): number {
   const n = flow.steps.find((s) => s.action === action)?.loop?.maxRounds;
   return typeof n === "number" && Number.isInteger(n) && n >= 1 ? n : fallback;
@@ -414,6 +431,11 @@ export function flowProblems(f: FlowDef): string[] {
     if (!s.at || typeof s.at.x !== "number" || typeof s.at.y !== "number") out.push(`${name} needs a place on the canvas.`);
     if (!Array.isArray(s.agents)) out.push(`${name} must list its agents (an empty list when the core does it).`);
     else for (const a of s.agents) if (!(STEP_AGENTS as readonly string[]).includes(a)) out.push(`${name} names "${a}", which is not a crew slot (${STEP_AGENTS.join(", ")}).`);
+    if (s.crew != null) {
+      if (!Array.isArray(s.crew) || s.crew.some((x) => typeof x !== "string" || !/^[a-z0-9-]{1,48}$/.test(x))) out.push(`${name} must name its agents by their Bay ids.`);
+      else if (s.crew.length && !s.agents?.length) out.push(`${name} names agents, but the core does this step with no agent.`);
+      else if (s.crew.length > crewSeats(s.agents?.[0])) out.push(`${name} names ${s.crew.length} agents; ${s.agents?.[0]} takes ${crewSeats(s.agents?.[0])}.`);
+    }
     if (s.resumeKey && !(RESUME_KEYS as readonly string[]).includes(s.resumeKey)) out.push(`${name} has an unknown resume milestone "${s.resumeKey}".`);
     if (s.loop?.maxRounds != null && (!Number.isInteger(s.loop.maxRounds) || s.loop.maxRounds < 1 || s.loop.maxRounds > MAX_ROUNDS_LIMIT)) out.push(`${name} may loop 1 to ${MAX_ROUNDS_LIMIT} rounds.`);
     if (s.loop && s.kind !== "loop") out.push(`${name} has a loop rule but is not a loop.`);

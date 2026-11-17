@@ -1,3 +1,4 @@
+import { noteLesson, rememberLines } from "./bay/memory.js";
 import type { EventLog } from "./events.js";
 import type { AgentRequest, AgentResult, AgentRuntime } from "./runtime.js";
 import { explainAgentError, isSignInError } from "./setup.js";
@@ -27,6 +28,8 @@ export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: stri
       result = await runtime.run(req);
     }
     log.append("agent.run.completed", { runId: start.id, agent, ...meta, ...result });
+    // Lessons the agent noted for itself go into its own memory (bay/memory.ts). A test run in the Bay teaches nothing.
+    if (!meta.bayTest && result.text) for (const t of rememberLines(result.text)) noteLesson(log, agent, t, "self", meta.factoryRun ? `run:${meta.factoryRun}` : meta.ticket ? `ticket:${meta.ticket}` : null);
     return { runId: start.id, agent, result };
   } catch (e) {
     // Say what to do first; keep the raw message for the log.

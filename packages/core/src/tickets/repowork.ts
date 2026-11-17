@@ -14,7 +14,8 @@ import { describeIntegrity, testIntegrity } from "../safety/testguard.js";
 import { stopReason } from "../factory/stoprules.js";
 import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, statusPath, workbenchContract } from "../factory/workbench.js";
 import { parseGitHubRepo, type GitHubRepo } from "./github.js";
-import { SMALL_CHANGE_FLOW, roundsOf, stepsToRun, type FlowDef } from "../flows/flow.js";
+import { SMALL_CHANGE_FLOW, crewPick, roundsOf, stepsToRun, type FlowDef } from "../flows/flow.js";
+import { noteLesson } from "../bay/memory.js";
 
 /**
  * Working a ticket inside an existing codebase (a project imported from a git
@@ -267,8 +268,9 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
   const branch = branchFor(o.key, o.title);
   const { dir, base } = prepareClone(o.repo, o.workRoot, o.id, branch, o.git);
   const c = o.checks ?? {};
-  const b = bay?.crewFor("build")[0];
-  const rv = bay?.crewFor("review")[0];
+  // The agents the flow names for Build and Review, else whoever works those stations in the Bay.
+  const b = bay?.crewFor("build", crewPick(flow, "build"))[0];
+  const rv = bay?.crewFor("review", crewPick(flow, "review"))[0];
   let spent = 0;
   const left = () => Math.max(0, o.maxUsd - spent);
   const step = (name: string, state: "running" | "passed" | "failed" | "skipped", note = "") => {
@@ -332,7 +334,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     const rr = await runAgent(log, runtime, rv?.id ?? "reviewer", {
       prompt: `Ticket: ${o.title}\n\nThe diff:\n${diff}`,
       model: rv?.model ?? "sonnet",
-      systemPrompt: `You are the Reviewer. Read the diff for bugs, missed requirements and risks, and for gaming the tests: deleted, skipped or weakened tests, tests changed to match wrong output, or expected values hard-coded in the source (each of these is high).${flow.brief ? `\n\nThe work was asked for this way: ${flow.brief}` : ""}\n\nStation contract: review. Answer only with JSON: { "verdict": "pass"|"fail", "findings": [{ "severity": "high"|"medium"|"low", "text": "..." }] }. High means it must be fixed before merge.`,
+      systemPrompt: `${rv?.memory ? `${rv.memory}\n\n` : ""}You are the Reviewer. Read the diff for bugs, missed requirements and risks, and for gaming the tests: deleted, skipped or weakened tests, tests changed to match wrong output, or expected values hard-coded in the source (each of these is high).${flow.brief ? `\n\nThe work was asked for this way: ${flow.brief}` : ""}\n\nStation contract: review. Answer only with JSON: { "verdict": "pass"|"fail", "findings": [{ "severity": "high"|"medium"|"low", "text": "..." }] }. High means it must be fixed before merge.`,
       budgetUsd: Math.min(left(), o.maxUsd * 0.2, rv?.budgetUsd ?? o.maxUsd),
     }, { agentVersion: rv?.version, station: "review", ticket: o.id });
     spent += rr.result?.costUsd ?? 0;
@@ -383,6 +385,8 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
           if (res.error) { step("review", "skipped", res.error); break; }
           if (!res.high.length) { step("review", "passed", r ? "high findings fixed" : ""); passed.push("review"); break; }
           step("review", "failed", res.high.join("; "));
+          // What the Reviewer sent back becomes a lesson of the agent that built it (bay/memory.ts), for its next work anywhere.
+          if (r === 0) for (const h of res.high.slice(0, 2)) noteLesson(log, b?.id ?? "builder", `A reviewer sent back my change for: ${h.slice(0, 240)}`, "review", `ticket:${o.id}`);
           const fixed = await build(`A reviewer found high-severity problems in your change to "${o.title}". Fix them and change nothing else.\n\n${res.high.map((h) => `- ${trim(h, 600)}`).join("\n")}`, o.maxUsd * 0.15, "review fix");
           const again = fixed.error ? { name: "review fix", output: fixed.error } : await check();
           if (again) return fail(`Not committed: ${again.name} failed after the review fix.\n${trim(again.output, 1500)}`, changedFiles(dir));

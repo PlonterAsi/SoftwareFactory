@@ -87,6 +87,8 @@ export interface GateWaitView { gate: string; question: string; at: string; acti
 /** A flow: the engine's work as data (packages/core/src/flows/flow.ts). The canvas draws it. */
 export interface FlowStepView {
   id: string; label: string; sub: string; kind: "step" | "loop" | "gate"; action?: string; agents: string[]; stations?: string[];
+  /** The named Agent Bay agents that work this step's main slot; empty or absent: whoever works that station. */
+  crew?: string[];
   resumeKey?: string; within?: string; loop?: { goal: string; observer: string; passes: string; stops: string; maxRounds?: number };
   gate?: { asks: string; auto: string }; skippedWhen?: string; stop: string; at: { x: number; y: number };
 }
@@ -414,10 +416,19 @@ export interface AgentStats {
   byVersion: Record<number, { calls: number; costUsd: number; pass: number; total: number }>;
   cache?: { read: number; write: number; input: number; hitRate: number | null };
 }
+/** One lesson in an agent's own memory (core: bay/memory.ts). */
+export interface Lesson { id: number; agent: string; text: string; source: "person" | "self" | "review" | "dream"; ref: string | null; at: string }
+/** A proposed cleaning of a memory: nothing changes until you accept it. */
+export interface DreamView {
+  id: number; agent: string; at: string; state: "proposed" | "accepted" | "rejected"; by: "free" | "agent"; saw: number[];
+  lessons: { text: string; from: number[] }[]; dropped: { id: number; why: string }[]; costUsd: number; decidedAt: string | null; error?: string;
+}
 export interface BayState {
   agents: AgentView[]; slots: Record<Slot, string[]>; seats: Record<Slot, number>; tests: BayTest[]; stats: Record<string, AgentStats>;
   visuals: { id: number; ts: string; scope: string; pass: boolean; items: string[]; missing: string[] }[]; models: string[];
   library?: BayLibrary;
+  memory?: Record<string, Lesson[]>;
+  dreams?: DreamView[];
 }
 const EMPTY_BAY: BayState = { agents: [], slots: {} as Record<Slot, string[]>, seats: {} as Record<Slot, number>, tests: [], stats: {}, visuals: [], models: ["haiku", "sonnet", "opus"] };
 
@@ -433,6 +444,11 @@ export const bayApi = {
   importFile: (text: string) => post(`/api/bay/import`, { text }) as Promise<AgentView>,
   version: async (id: string, version: number) => (await fetch(`${API}/api/bay/agents/${id}/versions/${version}`)).json() as Promise<{ version: number; def: AgentDef; note: string }>,
   fileUrl: (id: string, version?: number) => `${API}/api/bay/agents/${id}/file${version ? `?version=${version}` : ""}`,
+  teach: (id: string, text: string) => post(`/api/bay/agents/${id}/memory`, { text }) as Promise<Lesson>,
+  forget: (id: string, ids: number[]) => post(`/api/bay/agents/${id}/memory/forget`, { ids }),
+  tidy: (id: string) => post(`/api/bay/agents/${id}/memory/tidy`) as Promise<{ removed: number }>,
+  dream: (id: string, maxUsd?: number) => post(`/api/bay/agents/${id}/memory/dream`, { maxUsd }) as Promise<DreamView>,
+  decideDream: (dreamId: number, accept: boolean) => post(`/api/bay/dreams/${dreamId}/${accept ? "accept" : "reject"}`) as Promise<DreamView>,
 };
 
 /** The Bay's state is folded by the core; refetch whenever a Bay event or an agent call lands, so crew cards stay live. */
@@ -659,4 +675,11 @@ export function useChatRoutes(events: SfEvent[], online: boolean) {
 export const flowsApi = {
   list: () => getJson("/api/flows", "could not list the flows") as Promise<{ flows: FlowSummaryView[]; actions: Record<string, { label: string; needs: string[]; required: boolean }>; agents: string[] }>,
   get: (id: string) => getJson(`/api/flows/${encodeURIComponent(id)}`, "could not open the flow") as Promise<{ flow: FlowView; history: { version: number; savedBy: string; savedAt: string }[] }>,
+  /** Save the flow as its next version; refused with every problem when it could not run. */
+  save: async (flow: FlowView) => {
+    const r = await fetch(`${API}/api/flows/${encodeURIComponent(flow.id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ flow }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error ?? `The core said ${r.status}`);
+    return j as { flow: FlowView };
+  },
 };
