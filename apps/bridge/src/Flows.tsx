@@ -3,7 +3,7 @@ import { ReactFlow, Background, type ReactFlowInstance, type Node } from "@xyflo
 import "@xyflow/react/dist/style.css";
 import { flowsApi, type FlowStepView, type FlowSummaryView, type FlowView } from "./api";
 import { Station, edgesFor, nodesFor, type StationData } from "./FactoryFloor";
-import { loadFlow } from "./flows";
+import { loadFlow } from "./flowData";
 
 const KIND_WORD: Record<FlowStepView["kind"], string> = { step: "Step", loop: "Loop", gate: "Your OK" };
 

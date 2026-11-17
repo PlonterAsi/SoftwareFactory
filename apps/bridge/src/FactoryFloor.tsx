@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ReactFlow, Background, useNodesState, type ReactFlowInstance, type Edge, type Node, Handle, Position, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { resumeRun, setupApi, type AgentRunView, type CrewMode, type FactoryRunView, type FlowStepView, type FlowView, type StationState } from "./api";
-import { useRunFlow } from "./flows";
+import { useRunFlow } from "./flowData";
 
 type Worker = { name: string; avatar: string; since: string };
 export type StationData = { label: string; sub: string; gate?: boolean; later?: boolean; state: StationState; badge?: string; note?: string; workers?: Worker[] };

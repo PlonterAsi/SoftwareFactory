@@ -57,7 +57,7 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     flow: ["A run starts and copies its flow onto its started event", "The engine carries out each step by its action, in the flow's order", "A resume skips the steps whose milestone the log shows", "The canvas draws the flow's steps and lines and lights them from the run's events"],
     design: "The factory floor on All builds and the track on a project's Mission tab draw the run's flow; the Flows page lists the flows and shows each one's steps, loops, gates and agents.",
     screens: ["/factory/flows"], docs: ["docs/engine.md", "docs/flows.md"], stations: [],
-    files: [`${C}flows/`, `${B}Flows.tsx`, `${B}flows.ts`], api: ["/api/flows"],
+    files: [`${C}flows/`, `${B}Flows.tsx`, `${B}flowData.ts`], api: ["/api/flows"],
   },
   {
     id: "engine-loop", name: "Engine run loop", group: "Engine",

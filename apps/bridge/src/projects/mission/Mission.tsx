@@ -9,7 +9,7 @@ import { ago, describe } from "../builtin";
 import { inProject, projectSets, registerProjectPanel, type PanelContext } from "../panels";
 import { MissionTrack } from "./MissionTrack";
 import { currentStop, designRounds, headline, stopsFor, type StopId } from "./model";
-import { useRunFlow } from "../../flows";
+import { useRunFlow } from "../../flowData";
 import { ProductDocs, StageView } from "./stages";
 import { RepoWork, workedRepo } from "./RepoWork";
 import "./mission.css";
