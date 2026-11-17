@@ -8,7 +8,12 @@
  * code-free yet: each step names an engine action, and the action is the code that does the work.
  *
  * Today's engine is the built-in "New project" flow, and imported repositories run the built-in
- * "Change in a repo" flow. Both carry out exactly what the fixed pipeline did before flows existed.
+ * "Feature in a repo" flow. Both carry out exactly what the fixed pipeline did before flows existed.
+ *
+ * Phase 2 made it a library, one flow per kind of work: a bug fix, a small change and a refactor are one
+ * Builder session (runner "session"), a question is answered by a reader (runner "answer"), and import,
+ * improve and release are drawn as carried out by their own screens (runner "door"). A ticket takes the
+ * flow of its kind unless you pick another (tickets/flowpick.ts).
  */
 
 /** A step does one thing; a loop repeats until its goal is met or its limit is reached; a gate waits for you. */
@@ -33,8 +38,41 @@ export const ACTIONS = {
 } as const satisfies Record<string, { label: string; needs: string[]; required: boolean }>;
 export type ActionId = keyof typeof ACTIONS;
 
-/** Crew slots a step may name (the Agent Bay's stations). Kept in step with SLOTS in bay/agentfile.ts. */
-export const STEP_AGENTS = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix"] as const;
+/**
+ * What one Builder session in a repo can do for a step (tickets/repowork.ts). A bug fix, a small change and
+ * a refactor are this kind of flow: cents, not dollars.
+ */
+export const SESSION_ACTIONS = {
+  orient: { label: "Read the repo", needs: [], required: true },
+  build: { label: "Builder session", needs: ["orient"], required: true },
+  checks: { label: "Checks and fix loop", needs: ["build"], required: true },
+  review: { label: "Reviewer on the diff", needs: ["checks"], required: false },
+  commit: { label: "Commit on the branch", needs: ["checks"], required: true },
+  handover: { label: "Draft pull request", needs: ["commit"], required: false },
+} as const satisfies Record<string, { label: string; needs: string[]; required: boolean }>;
+
+/** What a research flow can do: read, answer on the ticket, change nothing (tickets/research.ts). */
+export const ANSWER_ACTIONS = {
+  orient: { label: "Read the repo", needs: [], required: true },
+  answer: { label: "Answer on the ticket", needs: ["orient"], required: true },
+} as const satisfies Record<string, { label: string; needs: string[]; required: boolean }>;
+
+/**
+ * Who carries a flow out:
+ *   engine   the factory engine (factory/loop.ts): design, plan, build, test, judge, ship. Dollars.
+ *   session  one Builder session in a clone of the repo, the checks, a Reviewer (tickets/repowork.ts). Cents.
+ *   answer   one reader who answers on the ticket and changes nothing (tickets/research.ts). Cents.
+ *   door     its own screen carries it out in a fixed order (import, improve, release). Drawn here so every
+ *            kind of work is on one map; its steps follow these boxes once that door reads flows.
+ */
+export type FlowRunner = "engine" | "session" | "answer" | "door";
+export const RUNNER_ACTIONS: Record<Exclude<FlowRunner, "door">, Record<string, { label: string; needs: readonly string[]; required: boolean }>> = {
+  engine: ACTIONS, session: SESSION_ACTIONS, answer: ANSWER_ACTIONS,
+};
+export const RUNNER_WORD: Record<FlowRunner, string> = { engine: "the whole engine", session: "one Builder session", answer: "one reader, no changes", door: "its own screen" };
+
+/** Crew slots a step may name (the Agent Bay's stations). Each is one of SLOTS in bay/agentfile.ts. */
+export const STEP_AGENTS = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "survey", "map", "inspect", "verdict", "improve"] as const;
 
 /** Milestones a resume reads from the log (restoreState): a step whose milestone is reached is not done again. */
 export const RESUME_KEYS = ["intake", "council", "discover", "plan", "tests", "build", "reviewed", "accepted"] as const;
@@ -59,8 +97,8 @@ export interface FlowStep {
   /** What it does, in a few words (the canvas's second line). */
   sub: string;
   kind: FlowStepKind;
-  /** The engine action that carries it out. A step carried out inside another step's loop has none. */
-  action?: ActionId;
+  /** The action that carries it out (one of its runner's actions). A step carried out inside another step's loop has none. */
+  action?: string;
   /** The crew slots that work it, first the main one. Empty: the core does it with no agent. */
   agents: string[];
   /** The engine stations whose state lights this step on the canvas (default: its id). */
@@ -101,9 +139,19 @@ export interface FlowDef {
   version: number;
   /** Still exactly as SoftwareFactory ships it. */
   builtIn: boolean;
+  /** Who carries it out (default: the engine, as every flow before the library). */
+  runner?: FlowRunner;
+  /** The kinds of ticket that take this flow when nobody chose one. */
+  kinds?: string[];
+  /** Words added to the worker's instructions on every run of this flow (what makes a refactor a refactor). */
+  brief?: string;
+  /** For a door flow: which screen carries it out today. */
+  door?: string;
   steps: FlowStep[];
   edges: FlowEdge[];
 }
+
+export const runnerOf = (f: Pick<FlowDef, "runner">): FlowRunner => f.runner ?? "engine";
 
 const X = [0, 190, 380, 570, 760];
 
@@ -199,6 +247,7 @@ const ENGINE_EDGES: FlowEdge[] = [
 export const NEW_PROJECT_FLOW: FlowDef = {
   id: "new-project",
   name: "New project",
+  runner: "engine",
   purpose: "One line becomes a designed, planned, built, tested and judged app, with your OK on the plan and on the build.",
   version: 1,
   builtIn: true,
@@ -209,7 +258,9 @@ export const NEW_PROJECT_FLOW: FlowDef = {
 /** The engine route in an imported repository: the change is built on a branch of a clone. */
 export const REPO_CHANGE_FLOW: FlowDef = {
   id: "repo-change",
-  name: "Change in a repo",
+  name: "Feature in a repo",
+  runner: "engine",
+  kinds: ["request", "idea", "plan"],
   purpose: "A feature for a project that lives in a git repository is built on its own branch in a clone, and handed over as a branch or a draft pull request.",
   version: 1,
   builtIn: true,
@@ -217,7 +268,102 @@ export const REPO_CHANGE_FLOW: FlowDef = {
   edges: ENGINE_EDGES,
 };
 
-export const BUILT_IN_FLOWS: FlowDef[] = [NEW_PROJECT_FLOW, REPO_CHANGE_FLOW];
+const Y = 0;
+/** One Builder session in a clone: read, build, checks with fix rounds, a Reviewer, commit, a draft PR. */
+function sessionSteps(o: { build: string; review?: boolean }): FlowStep[] {
+  const steps: FlowStep[] = [
+    { id: "orient", label: "Read the repo", sub: "rules, code map, installs", kind: "step", action: "orient", agents: [], stop: "idea", at: { x: X[0], y: Y } },
+    { id: "build", label: "Build", sub: o.build, kind: "step", action: "build", agents: ["build"], stop: "build", at: { x: X[1], y: Y } },
+    {
+      id: "checks", label: "Checks", sub: "secrets, gates, tests", kind: "loop", action: "checks", agents: [],
+      loop: { goal: "The change passes the secret gate, the fast gates, test integrity and the tests it touches", observer: "The core runs each check; the Builder never judges itself", passes: "Every check passes", stops: "After the fix round limit, or when 90% of the budget is spent: nothing is committed", maxRounds: 2 },
+      stop: "check", at: { x: X[2], y: Y },
+    },
+    { id: "fix", label: "Fix", sub: "Builder, the failing check only", kind: "step", within: "checks", agents: ["build"], stop: "check", at: { x: X[2], y: 130 } },
+  ];
+  if (o.review !== false) steps.push({
+    id: "review", label: "Review", sub: "Reviewer reads the diff", kind: "loop", action: "review", agents: ["review"],
+    loop: { goal: "No high finding left in the diff (bugs, missed asks, gamed tests)", observer: "The Reviewer, who did not write it", passes: "No high finding", stops: "After the fix round limit: nothing is committed", maxRounds: 1 },
+    skippedWhen: "the budget is used up before it", stop: "check", at: { x: X[3], y: Y },
+  });
+  steps.push(
+    { id: "commit", label: "Commit", sub: "on the ticket's branch", kind: "step", action: "commit", agents: [], stop: "ship", at: { x: X[3], y: 130 } },
+    { id: "handover", label: "Draft PR", sub: "or the branch stays here", kind: "step", action: "handover", agents: [], skippedWhen: "no GitHub access, or a folder on this computer: the branch waits for your Send", stop: "ship", at: { x: X[4], y: 130 } },
+  );
+  return steps;
+}
+const SESSION_EDGES: FlowEdge[] = [
+  { from: "orient", to: "build", kind: "next" },
+  { from: "build", to: "checks", kind: "next" },
+  { from: "checks", to: "fix", kind: "back", label: "a check failed", fromSide: "b1", toSide: "t1" },
+  { from: "fix", to: "checks", kind: "back", fromSide: "t2", toSide: "b2" },
+  { from: "checks", to: "review", kind: "next", label: "all pass" },
+  { from: "review", to: "commit", kind: "next", label: "no high finding", fromSide: "b", toSide: "t" },
+  { from: "commit", to: "handover", kind: "next" },
+];
+
+/** A bug: find the cause, fix it, prove it with a test. */
+export const BUG_FIX_FLOW: FlowDef = {
+  id: "bug-fix", name: "Bug fix", runner: "session", kinds: ["bug"], version: 1, builtIn: true,
+  purpose: "A bug in a project that lives in a repo: one Builder session finds the cause and fixes it on the ticket's branch, the checks and a Reviewer pass it, and it goes out as a draft pull request.",
+  brief: "This is a bug fix. Find the cause before you change anything. When the repo has tests, add one that fails without your fix and passes with it.",
+  steps: sessionSteps({ build: "Builder finds the cause and fixes it" }), edges: SESSION_EDGES,
+};
+
+/** A task or a small ask: one session, as the light route always did. */
+export const SMALL_CHANGE_FLOW: FlowDef = {
+  id: "small-change", name: "Small change", runner: "session", kinds: ["task"], version: 1, builtIn: true,
+  purpose: "A task or a small ask in a repo: one Builder session makes the change on the ticket's branch, the checks and a Reviewer pass it, and it goes out as a draft pull request.",
+  steps: sessionSteps({ build: "Builder makes the change" }), edges: SESSION_EDGES,
+};
+
+/** A refactor: the code gets better and nothing it does changes. */
+export const REFACTOR_FLOW: FlowDef = {
+  id: "refactor", name: "Refactor", runner: "session", kinds: [], version: 1, builtIn: true,
+  purpose: "Make code clearer or smaller without changing what it does: one Builder session, the repo's tests unchanged and green, a Reviewer looking for any change in behaviour.",
+  brief: "This is a refactor. What the code does must not change: do not edit existing tests, and every test that passed before must still pass. If a change would alter behaviour, leave it out and say so.",
+  steps: sessionSteps({ build: "Builder restructures, same behaviour" }), edges: SESSION_EDGES,
+};
+
+/** A question: read and answer, change nothing. */
+export const RESEARCH_FLOW: FlowDef = {
+  id: "research", name: "Research or question", runner: "answer", kinds: ["question"], version: 1, builtIn: true,
+  purpose: "A question about a project, or something to find out: a reader goes through the repo (or the ticket and its project when there is none) and answers on the ticket, with the files it read. Nothing is changed and no branch is made.",
+  steps: [
+    { id: "orient", label: "Read the repo", sub: "a clone, read only", kind: "step", action: "orient", agents: [], stop: "idea", at: { x: X[0], y: 0 } },
+    { id: "answer", label: "Answer", sub: "Surveyor, read-only tools", kind: "step", action: "answer", agents: ["survey"], stop: "ship", at: { x: X[1], y: 0 } },
+  ],
+  edges: [{ from: "orient", to: "answer", kind: "next" }],
+};
+
+const door = (o: { id: string; name: string; purpose: string; door: string; steps: [string, string, string, string[]?][] }): FlowDef => ({
+  id: o.id, name: o.name, purpose: o.purpose, runner: "door", door: o.door, kinds: [], version: 1, builtIn: true,
+  steps: o.steps.map(([id, label, sub, agents], i) => ({ id, label, sub, kind: "step" as const, action: id, agents: agents ?? [], stop: i === o.steps.length - 1 ? "ship" : "build", at: { x: X[Math.min(i, 4)] + (i > 4 ? 190 * (i - 4) : 0), y: 0 } })),
+  edges: o.steps.slice(1).map(([id], i) => ({ from: o.steps[i][0], to: id, kind: "next" as const })),
+});
+
+/** Import a git repo: clone, map, review, propose. Carried out by the import screen. */
+export const IMPORT_FLOW = door({
+  id: "import", name: "Import a repo", door: "Projects → Import from git, then the project's Review tab",
+  purpose: "A git repository becomes a project SF manages: cloned, mapped module by module, run and judged by the deep review, with next steps proposed as tickets.",
+  steps: [["clone", "Clone", "a copy SF works in"], ["map", "Map the code", "Cartographer, Surveyor", ["map", "survey"]], ["review", "Deep review", "run it, judge it", ["inspect", "verdict"]], ["propose", "Next steps", "proposed as tickets"]],
+});
+
+/** The improve loop: lenses look at a project and propose changes. Carried out by Improve. */
+export const IMPROVE_FLOW = door({
+  id: "improve", name: "Improve loop", door: "Improve, on the whole factory or a project",
+  purpose: "Lenses look at what exists (its code, its screens, how its runs went) and propose changes; what you accept becomes work.",
+  steps: [["look", "Look", "each lens reads the project", ["improve"]], ["propose", "Propose", "one card per change"], ["accept", "Your OK", "accept or drop each"], ["work", "Work", "accepted ones become tickets"]],
+});
+
+/** A release: merged tickets become a version. Carried out by shipping today; the git manager takes it over. */
+export const RELEASE_FLOW = door({
+  id: "release", name: "Release", door: "Ship tags each version today; release notes and the version timeline come with the git manager (phase 3)",
+  purpose: "Merged tickets are grouped into a version, release notes are written from their timelines, the version is tagged and shown on the project's version timeline.",
+  steps: [["collect", "Collect", "tickets merged since the last version"], ["notes", "Release notes", "from each ticket's timeline"], ["accept", "Your OK", "on the notes"], ["tag", "Tag", "the version on main"]],
+});
+
+export const BUILT_IN_FLOWS: FlowDef[] = [NEW_PROJECT_FLOW, REPO_CHANGE_FLOW, BUG_FIX_FLOW, SMALL_CHANGE_FLOW, REFACTOR_FLOW, RESEARCH_FLOW, IMPORT_FLOW, IMPROVE_FLOW, RELEASE_FLOW];
 
 /** The built-in flow a kind of run starts with when nothing else is chosen. */
 export function builtInFlowFor(kind?: string): FlowDef {
@@ -230,7 +376,7 @@ export function stepsToRun(flow: FlowDef): FlowStep[] {
 }
 
 /** The round limit a flow sets for the loop of `action`, or `fallback` when it sets none. */
-export function roundsOf(flow: FlowDef, action: ActionId, fallback: number): number {
+export function roundsOf(flow: FlowDef, action: string, fallback: number): number {
   const n = flow.steps.find((s) => s.action === action)?.loop?.maxRounds;
   return typeof n === "number" && Number.isInteger(n) && n >= 1 ? n : fallback;
 }
@@ -249,6 +395,11 @@ export function flowProblems(f: FlowDef): string[] {
   if (!String(f.name ?? "").trim()) out.push("The flow needs a name.");
   if (!Array.isArray(f.steps) || !f.steps.length) return [...out, "The flow has no steps."];
   if (!Array.isArray(f.edges)) out.push("The flow's lines (edges) must be a list.");
+  const runner = f.runner ?? "engine";
+  if (!["engine", "session", "answer", "door"].includes(runner)) return [...out, `"${runner}" is not a way to carry out a flow (engine, session, answer or door).`];
+  if (f.brief != null && (typeof f.brief !== "string" || f.brief.length > 2000)) out.push("The flow's brief must be words, at most 2,000 characters.");
+  if (f.kinds != null && (!Array.isArray(f.kinds) || f.kinds.some((k) => typeof k !== "string"))) out.push("The kinds a flow serves must be a list of ticket kinds.");
+  const table = runner === "door" ? null : RUNNER_ACTIONS[runner];
   const ids = new Set<string>();
   const seen = new Map<string, number>();
   const run = f.steps.filter((s) => !s.within && s.action);
@@ -269,16 +420,16 @@ export function flowProblems(f: FlowDef): string[] {
     if (s.within && s.action) out.push(`${name} is carried out inside "${s.within}", so it cannot have an action of its own.`);
     if (!s.within && !s.action) out.push(`${name} needs an action, or must sit inside a loop.`);
     if (s.action) {
-      if (!(s.action in ACTIONS)) { out.push(`${name} asks for "${s.action}", which the engine cannot do.`); continue; }
-      if (seen.has(s.action)) out.push(`${name} repeats "${ACTIONS[s.action].label}", which a flow does once.`);
+      if (table && !(s.action in table)) { out.push(`${name} asks for "${s.action}", which ${RUNNER_WORD[runner]} cannot do.`); continue; }
+      if (seen.has(s.action)) out.push(`${name} repeats "${table?.[s.action].label ?? s.action}", which a flow does once.`);
       seen.set(s.action, run.indexOf(s));
     }
   }
   for (const s of f.steps) if (s?.within && !f.steps.some((o) => o.id === s.within && o.kind === "loop")) out.push(`"${s.label ?? s.id}" sits inside "${s.within}", which is not a loop of this flow.`);
-  for (const [a, def] of Object.entries(ACTIONS) as [ActionId, (typeof ACTIONS)[ActionId]][]) {
+  if (table) for (const [a, def] of Object.entries(table)) {
     if (def.required && !seen.has(a)) out.push(`The flow must ${def.label.toLowerCase()} ("${a}").`);
     if (!seen.has(a)) continue;
-    for (const need of def.needs) if (seen.has(need) && seen.get(need)! > seen.get(a)!) out.push(`"${ACTIONS[a].label}" must come after "${ACTIONS[need as ActionId].label}".`);
+    for (const need of def.needs) if (seen.has(need) && seen.get(need)! > seen.get(a)!) out.push(`"${def.label}" must come after "${table[need].label}".`);
   }
   if (Array.isArray(f.edges)) for (const e of f.edges) {
     if (!ids.has(e?.from) || !ids.has(e?.to)) out.push(`A line goes from "${e?.from}" to "${e?.to}", and one of them is not a step.`);

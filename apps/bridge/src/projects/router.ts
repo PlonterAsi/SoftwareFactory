@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 /**
  * Where the Bridge is, kept in the address hash so a reload (or the back button) stays put.
- *   #/                     projects
+ *   #/                     home: the board of every ticket across projects (Needs you first) and the live flow
+ *   #/projects             projects
  *   #/p/12                 project 12, its first panel
  *   #/p/12/runs/57         project 12, Runs panel, run 57
  *   #/features[/7]         features added from finished projects (feature 7)
@@ -22,6 +23,7 @@ export type BridgeMode = "loom" | "score" | "quarter";
 const MODES: BridgeMode[] = ["loom", "score", "quarter"];
 export type Route =
   | { page: "home" }
+  | { page: "projects" }
   | { page: "project"; id: number; panel?: string; run?: number }
   | { page: "factory"; view: FactoryView }
   | { page: "features"; id?: number }
@@ -48,6 +50,7 @@ export function parse(hash: string): Route {
   if (parts[0] === "brain") return { page: "brain" };
   if (parts[0] === "map") return { page: "map", id: parts[1] ? decodeURIComponent(parts[1]) : undefined };
   if (parts[0] === "bases") return { page: "bases" };
+  if (parts[0] === "projects") return { page: "projects" };
   if (parts[0] === "runners") return { page: "runners" };
   if (parts[0] === "_kit") return { page: "kit" };
   if (parts[0] === "needs") return { page: "needs" };
@@ -63,6 +66,7 @@ export function href(r: Route): string {
   if (r.page === "brain") return "#/brain";
   if (r.page === "map") return r.id ? `#/map/${encodeURIComponent(r.id)}` : "#/map";
   if (r.page === "bases") return "#/bases";
+  if (r.page === "projects") return "#/projects";
   if (r.page === "runners") return "#/runners";
   if (r.page === "kit") return "#/_kit";
   if (r.page === "needs") return "#/needs";

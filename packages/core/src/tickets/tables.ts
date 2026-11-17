@@ -13,12 +13,12 @@ const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : n
 /** Fields `ticket.edited` may change, and the column each one writes. */
 export const EDITABLE: Record<string, string> = {
   title: "title", body: "body", kind: "kind", priority: "priority", severity: "severity", assignee: "assignee",
-  project: "project", tags: "tags", parent: "parent_id", size: "size",
+  project: "project", tags: "tags", parent: "parent_id", size: "size", flow: "flow",
 };
 
 export const ticketsProjection: Projection = {
   name: "tickets",
-  version: 7,
+  version: 8,
   tables: ["tickets", "ticket_notes", "ticket_links", "ticket_keys", "ticket_runs", "ticket_trace"],
   describe: "Tickets: units of work per project, their append-only timeline (notes, agent replies, status moves, agent steps, decisions, retries, branches and PRs) and links",
   migrate(db) {
@@ -53,7 +53,8 @@ export const ticketsProjection: Projection = {
       created_at  TEXT NOT NULL,
       updated_at  TEXT NOT NULL,
       closed_at   TEXT,
-      last_note   TEXT
+      last_note   TEXT,
+      flow        TEXT
     );
     CREATE INDEX IF NOT EXISTS tickets_project ON tickets(project, status);
     CREATE INDEX IF NOT EXISTS tickets_run ON tickets(run);
@@ -224,6 +225,14 @@ export function traceOf(type: string, p: P, ticketOfRun: (run: number) => number
     // The light route's harness steps: what failed or was skipped is already noted on the thread.
     if (p.state !== "passed" || p.id == null) return null;
     return { ticket: Number(p.id), by: "factory", cat: "step", text: `${p.step}: passed`, run: null, cost: null };
+  }
+  if (type === "ticket.checked") {
+    // The check before money (tickets/precheck.ts): what it asked, or that it was clear to run.
+    if (p.id == null) return null;
+    const qs = Array.isArray(p.questions) ? (p.questions as { ask?: string }[]) : [];
+    const text = p.verdict === "go" ? `Checked before money: clear to run${p.answered ? ` (${p.answered} answer${p.answered === 1 ? "" : "s"} from you)` : ""}`
+      : `Checked before money: ${qs.length} question${qs.length === 1 ? "" : "s"} for you first. ${qs.map((q) => clip(q.ask, 160)).join(" ")}`;
+    return { ticket: Number(p.id), by: String(p.by ?? "factory"), cat: "decision", text, run: null, cost: null };
   }
   if (type.startsWith("agent.run.")) {
     if (type !== "agent.run.completed" && type !== "agent.run.failed") return null;

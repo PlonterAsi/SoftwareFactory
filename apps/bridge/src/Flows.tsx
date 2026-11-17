@@ -6,6 +6,13 @@ import { Station, edgesFor, nodesFor, type StationData } from "./FactoryFloor";
 import { loadFlow } from "./flowData";
 
 const KIND_WORD: Record<FlowStepView["kind"], string> = { step: "Step", loop: "Loop", gate: "Your OK" };
+/** The library grouped by who carries each flow out, cheapest last so the engine leads. */
+const GROUPS: { runner: FlowSummaryView["runner"]; label: string; note: string }[] = [
+  { runner: "engine", label: "The whole engine", note: "design, plan, build, judge · dollars" },
+  { runner: "session", label: "One Builder session", note: "in a clone of the repo · cents" },
+  { runner: "answer", label: "Answered, nothing changed", note: "a reader · cents" },
+  { runner: "door", label: "Carried out by their own screen", note: "drawn here so every kind of work is on one map" },
+];
 
 /**
  * The flows the engine follows. Each flow is data: its steps in order, which steps are loops and what ends
@@ -44,13 +51,21 @@ export function FlowsPage() {
       <div className="flows-grid">
         <nav className="flows-list" aria-label="Flows">
           {!list && !err && <div className="muted">Loading…</div>}
-          {list?.map((f) => (
-            <button key={f.id} className={`flows-item${pick === f.id ? " on" : ""}`} aria-pressed={pick === f.id} onClick={() => setPick(f.id)}>
-              <b>{f.name}</b>
-              <span className="muted small">{f.steps} steps · v{f.version}{f.builtIn ? " · as shipped" : " · edited"}</span>
-              <span className="small">{f.purpose}</span>
-            </button>
-          ))}
+          {list && GROUPS.map((g) => {
+            const fs = list.filter((f) => (f.runner ?? "engine") === g.runner);
+            if (!fs.length) return null;
+            return (
+              <div key={g.runner} className="flows-group">
+                <div className="flows-group-head"><b>{g.label}</b> <span className="muted small">{g.note}</span></div>
+                {fs.map((f) => (
+                  <button key={f.id} className={`flows-item${pick === f.id ? " on" : ""}`} aria-pressed={pick === f.id} onClick={() => setPick(f.id)}>
+                    <b>{f.name}</b>
+                    <span className="muted small">{f.steps} steps · v{f.version}{f.builtIn ? " · as shipped" : " · edited"}{f.kinds.length ? ` · takes ${f.kinds.join(", ")} tickets` : ""}</span>
+                  </button>
+                ))}
+              </div>
+            );
+          })}
         </nav>
         <section className="flows-main">
           {flow && <>
@@ -61,7 +76,13 @@ export function FlowsPage() {
                 <Background gap={24} size={1} color="var(--grid)" />
               </ReactFlow>
             </div>
-            {picked ? <StepCard s={picked} flow={flow} /> : <p className="muted small">{flow.purpose}</p>}
+            {picked ? <StepCard s={picked} flow={flow} /> : (
+              <div className="flows-about">
+                <p>{flow.purpose}</p>
+                {flow.brief && <p className="small"><b>Told to the crew on every run:</b> {flow.brief}</p>}
+                {flow.door && <p className="small muted"><b>Carried out by:</b> {flow.door}. Its steps follow these boxes once that screen reads flows.</p>}
+              </div>
+            )}
             <table className="flows-steps">
               <thead><tr><th>#</th><th>Step</th><th>Kind</th><th>Who works it</th><th>Passes when</th><th>Stops anyway</th></tr></thead>
               <tbody>
@@ -79,7 +100,7 @@ export function FlowsPage() {
             </table>
             <p className="muted small">
               Version {flow.version}{history.length ? `, saved ${history.length} time${history.length > 1 ? "s" : ""}` : ", as SoftwareFactory ships it"}.
-              Crew slots a step may name: {agents.join(", ")}. Editing a flow in words or by dragging comes in a later phase; the engine already follows whatever flow is saved.
+              Crew slots a step may name: {agents.join(", ")}. Editing a flow in words or by dragging comes in a later phase; the engine and one-session tickets already follow whatever flow is saved. Pick a flow for one ticket on the ticket itself.
             </p>
           </>}
         </section>

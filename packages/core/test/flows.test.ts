@@ -41,7 +41,7 @@ describe("flows: the engine as data", () => {
     expect(p).toMatch(/1 to 6 rounds/);
     expect(p).toMatch(/"Ship" must come after/);
     expect(p).toMatch(/repeats/);
-    expect(p).toMatch(/"teleport", which the engine cannot do/);
+    expect(p).toMatch(/"teleport", which the whole engine cannot do/);
     expect(p).toMatch(/line goes from "tests"/);
   });
 

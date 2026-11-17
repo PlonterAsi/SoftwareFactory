@@ -1,6 +1,6 @@
 import type { EventLog } from "../events.js";
 import { registerProjection, type Projection } from "../store/projections.js";
-import { BUILT_IN_FLOWS, assertFlow, builtInFlowFor, flowProblems, type FlowDef } from "./flow.js";
+import { BUILT_IN_FLOWS, RUNNER_WORD, assertFlow, builtInFlowFor, flowProblems, runnerOf, type FlowDef, type FlowRunner } from "./flow.js";
 
 /**
  * Where flows are kept. Every save is a `flow.saved` event with the whole definition, so each version stays
@@ -42,6 +42,9 @@ export interface FlowSummary {
   purpose: string;
   version: number;
   builtIn: boolean;
+  runner: FlowRunner;
+  kinds: string[];
+  door: string | null;
   steps: number;
   savedBy: string | null;
   savedAt: string | null;
@@ -77,7 +80,7 @@ export class FlowLibrary {
     const rows = this.log.db.prepare("SELECT id, def, saved_by, saved_at FROM flows f WHERE version = (SELECT max(version) FROM flows g WHERE g.id = f.id) ORDER BY id").all() as { id: string; def: string; saved_by: string; saved_at: string }[];
     const saved = new Map(rows.map((r) => [r.id, r]));
     const out: FlowSummary[] = [];
-    const sum = (f: FlowDef, by: string | null, at: string | null): FlowSummary => ({ id: f.id, name: f.name, purpose: f.purpose, version: f.version, builtIn: f.builtIn, steps: f.steps.length, savedBy: by, savedAt: at });
+    const sum = (f: FlowDef, by: string | null, at: string | null): FlowSummary => ({ id: f.id, name: f.name, purpose: f.purpose, version: f.version, builtIn: f.builtIn, runner: runnerOf(f), kinds: f.kinds ?? [], door: f.door ?? null, steps: f.steps.length, savedBy: by, savedAt: at });
     for (const b of BUILT_IN_FLOWS) {
       const r = saved.get(b.id);
       out.push(r ? sum(JSON.parse(r.def), r.saved_by, r.saved_at) : sum(b, null, null));
@@ -92,13 +95,15 @@ export class FlowLibrary {
    * A built-in flow saved with changes is no longer marked built-in.
    */
   save(def: FlowDef, by = "you"): FlowDef {
+    const current = this.get(def?.id);
+    if (current && runnerOf(current) !== runnerOf(def)) throw new Error(`This flow cannot be saved: "${current.name}" is carried out by ${RUNNER_WORD[runnerOf(current)]}, and a saved version cannot change that. Save it under a new id instead.`);
     const problems = flowProblems(def);
     if (problems.length) throw new Error(`This flow cannot be saved: ${problems.join(" ")}`);
-    const current = this.get(def.id);
     const builtIn = BUILT_IN_FLOWS.find((f) => f.id === def.id);
     const { version: _v, builtIn: _b, ...rest } = def;
     const bare = (f: Partial<FlowDef>) => { const { version: _a, builtIn: _c, ...x } = f; return JSON.stringify(x); };
     const same = !!builtIn && bare(rest) === bare(builtIn);
+    if (runnerOf(def) === "door" && !same && builtIn) throw new Error(`This flow cannot be saved: "${builtIn.name}" is carried out by its own screen (${builtIn.door}), which does not read flows yet.`);
     const flow: FlowDef = { ...rest, version: (current?.version ?? 0) + 1, builtIn: same };
     this.log.append("flow.saved", { flow, by });
     return flow;
@@ -116,6 +121,15 @@ export class FlowLibrary {
     const id = chosen ?? builtInFlowFor(kind).id;
     const f = this.get(id);
     if (!f) throw new Error(`There is no flow "${id}".`);
+    if (runnerOf(f) !== "engine") throw new Error(`"${f.name}" is carried out by ${RUNNER_WORD[runnerOf(f)]}, not the engine.`);
+    return assertFlow(f);
+  }
+
+  /** A flow carried out by `runner`, checked: the chosen one, else `fallback`. */
+  forRunner(runner: FlowRunner, id: string): FlowDef {
+    const f = this.get(id);
+    if (!f) throw new Error(`There is no flow "${id}".`);
+    if (runnerOf(f) !== runner) throw new Error(`"${f.name}" is carried out by ${RUNNER_WORD[runnerOf(f)]}, not ${RUNNER_WORD[runner]}.`);
     return assertFlow(f);
   }
 }

@@ -610,6 +610,14 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
     const project = proj == null || proj === "" ? null : Number(proj);
     return [200, { rule: tickets.autoWork(), queue: tickets.queue(project).map((q) => ({ id: q.ticket.id, key: q.ticket.key, title: q.ticket.title, kind: q.ticket.kind, size: q.ticket.size, position: q.position, why: q.why })) }];
   }
+  if (req.method === "GET" && path === "/api/tickets/board") {
+    const project = proj == null || proj === "" ? null : Number(proj);
+    return [200, tickets.board({ project })];
+  }
+  if (req.method === "GET" && path === "/api/tickets/checks") {
+    const project = proj == null || proj === "" ? null : Number(proj);
+    return [200, { items: tickets.checks(project) }];
+  }
   if (req.method === "GET" && path === "/api/tickets/waiting") {
     const project = proj == null || proj === "" ? null : Number(proj);
     return [200, { items: tickets.waiting(project) }];
@@ -632,12 +640,18 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
   if (req.method === "GET" && m) {
     const id = Number(m[1]);
     if (m[2] === "document") return [-1, tickets.document(id)];
+    if (m[2] === "check") return [200, tickets.check(id)];
     if (m[2]) return null;
     const d = tickets.detail(id);
     return d ? [200, d] : [404, { error: `No ticket #${id}` }];
   }
   if (req.method !== "POST") return null;
   const body = await readJson(req);
+  // Your answers to the check before money, in one batch; with run, the tickets that are then clear start.
+  if (path === "/api/tickets/checks") {
+    const answers = Array.isArray(body.answers) ? (body.answers as { id: number; q: string; text: string }[]) : [];
+    try { return [200, tickets.answerChecks(answers, { run: body.run === true })]; } catch (e) { return [400, { error: (e as Error).message }]; }
+  }
   if (path === "/api/tickets") return [201, tickets.open({ ...(body as object), by: "you", source: typeof body.source === "string" ? body.source : "you" } as any)];
   m = path.match(/^\/api\/tickets\/(\d+)\/([a-z]+)$/);
   if (!m) return null;
@@ -662,10 +676,13 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
     case "work":
       if (!gitReady()) return [409, { error: "Git is not installed, so the crew has nowhere to keep what it builds. Install Git for Windows (git-scm.com/download/win), then press Work it again." }];
       try {
-        return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true, again: body.again === true, where: body.where === "repo" || body.where === "new" ? body.where : "auto", route: body.route === "light" || body.route === "engine" ? body.route : undefined })];
+        return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true, again: body.again === true, where: body.where === "repo" || body.where === "new" ? body.where : "auto", route: body.route === "light" || body.route === "engine" ? body.route : undefined, check: body.anyway !== true })];
       } catch (e) {
         const dup = (e as { duplicate?: Record<string, unknown> }).duplicate;
         if (dup) return [409, { error: (e as Error).message, ...dup }];
+        // The check before money asks first: its questions come back, and "anyway" runs it regardless.
+        const check = (e as { check?: unknown }).check;
+        if (check) return [409, { error: (e as Error).message, check }];
         throw e;
       }
     case "ask": return [200, await tickets.ask(id, body.agent ? String(body.agent) : undefined)];

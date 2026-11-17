@@ -86,6 +86,8 @@ const PROOF: Record<string, string[]> = {
   "use-apps": ["launch.started"],
   // Every run follows a flow, and carries its copy on its started event.
   flows: ["factory.run.started"],
+  "check-before-money": ["ticket.checked"],
+  "home-board": ["ticket.opened"],
 };
 
 /** Features whose events are kept outside a base's log, so the log cannot prove them either way. */

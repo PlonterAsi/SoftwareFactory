@@ -224,6 +224,8 @@ export interface TicketView {
   severity: TicketSeverity | null;
   /** S, M or L, as the agent who read it judged (or you set). */
   size: Size | null;
+  /** The flow you picked for it (flows/flow.ts); null: its kind's own flow. */
+  flow: string | null;
   assignee: string | null;
   parentId: number | null;
   lineOrder: number | null;

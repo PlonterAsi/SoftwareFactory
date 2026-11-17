@@ -256,11 +256,14 @@ export class MockRuntime implements AgentRuntime {
     else if (station === "inspect") text = MOCK.inspect(req.prompt);
     else if (station === "verdict") text = MOCK.verdict(req.prompt);
     else if (station === "improve") text = MOCK.improve(role, req.prompt);
+    else if (station === "research") text = MOCK.research(req.prompt);
     return { text, costUsd: role ? 0.0001 : 0, durationMs: this.opts.delayMs ?? 1, models: ["mock"], runtime: this.name, contextTokens: 0 };
   }
 }
 
 const MOCK = {
+  // The practice reader: a short answer that names what it read, from the question it was asked.
+  research: (prompt: string) => `Practice crew: this is where the answer to "${(prompt.match(/^#\s*(.+)$/m)?.[1] ?? prompt.split("\n")[0]).slice(0, 100)}" goes. The real crew reads the repo and answers in plain words.\n\nFiles read: README.md`,
   // The practice Designer and Critic: fixed documents that fit the practice plan, and a pass on the first round.
   design: "```json\n" + JSON.stringify({
     brief: { who: "Someone trying the practice crew.", problem: "They want to see the whole loop run without paying for it.", promise: "A tiny app that shows the loop end to end.", notThis: ["a real design: switch to the real crew for that"] },

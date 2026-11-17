@@ -23,7 +23,7 @@ export function Workspace({ id, panel, run, factory, order, bay, go }: {
     return (
       <section className="pane workspace loading" aria-busy={!err}>
         <p className={err ? "error pad" : "empty"}>{err ? `${err}.` : "Opening the project…"}</p>
-        {err && <a className="pad" href={href({ page: "home" })}>Back to projects</a>}
+        {err && <a className="pad" href={href({ page: "projects" })}>Back to projects</a>}
       </section>
     );
   }
@@ -54,7 +54,7 @@ export function Workspace({ id, panel, run, factory, order, bay, go }: {
   return (
     <section className={`pane workspace status-${detail.status}`} aria-label={`Project ${detail.name}`}>
       <header className="ws-head">
-        <a className="ws-back" href={href({ page: "home" })} aria-label="All projects">Projects</a>
+        <a className="ws-back" href={href({ page: "projects" })} aria-label="All projects">Projects</a>
         <span className="ws-slash" aria-hidden>/</span>
         <h1 className="ws-name" title={detail.name}>{short}</h1>
         <span className="ws-tag">{detail.kind}</span>

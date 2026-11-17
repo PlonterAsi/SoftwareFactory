@@ -1,6 +1,7 @@
 import { BrainPage } from "./Brain";
 import { FeatureMapPage } from "./FeatureMap";
 import { FlowsPage } from "./Flows";
+import { Board } from "./Board";
 import { KitPage } from "./Kit";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API, setupApi, useBay, useChatRoutes, useFactory, useOrder, useProjects, type SinceView } from "./api";
@@ -172,7 +173,9 @@ export function App() {
     ? <FeaturesPage events={f.events} id={route.id} onOpenProject={(id) => go({ page: "project", id, panel: "integrate" })} />
     : route.page === "project"
     ? <Workspace id={route.id} panel={route.panel} run={route.run} factory={f} order={order} bay={bay} go={go} />
-    : <Home list={projects.list} err={projects.err} events={f.events} cards onOpen={(id) => go({ page: "project", id })} />;
+    : route.page === "projects"
+    ? <Home list={projects.list} err={projects.err} events={f.events} cards onOpen={(id) => go({ page: "project", id })} />
+    : <Board last={lastEvent} factoryRuns={f.factoryRuns} runs={f.runs} crew={crew} onShowRun={showRun} />;
   const page = <ErrorBoundary key={route.page === "project" ? `p${route.id}` : route.page} where={`bridge ${href(route)}`}>{pageInner}</ErrorBoundary>;
   const bugButton = <button className="ghost sm bug-btn" onClick={() => setBugOpen(true)} aria-label="Report a bug" title="Report a bug: what went wrong, with the screen attached">Bug</button>;
   const crewChip = <button className={`crew-chip ${f.mode ?? ""}`} onClick={() => setSetupOpen(true)} title={`Runtime: ${f.runtime}. Click for crew, checks and folders.`}>{f.mode === "real" ? "Real crew" : f.mode === "practice" ? "Practice crew · free" : "Crew …"}</button>;
