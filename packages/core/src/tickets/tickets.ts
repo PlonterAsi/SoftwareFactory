@@ -9,7 +9,7 @@ import type { Factory } from "../factory/loop.js";
 import type { AgentBay } from "../bay/bay.js";
 import "./tables.js";
 import { projectOf, registerProjectFacet } from "../projects/service.js";
-import { EDITABLE } from "./tables.js";
+import { EDITABLE, type TimelineCat } from "./tables.js";
 import { branchFor, harnessChecks, repoOfProject, workInRepo, type RepoRef } from "./repowork.js";
 import { hideTokens, parseGitHubRepo, type GitHub, type MergedPr } from "./github.js";
 import { routeWork, type Routed, type WorkRoute } from "../factory/route.js";
@@ -79,9 +79,14 @@ export interface WaitingItem {
 }
 
 export interface TicketStep { step: string; state: "running" | "passed" | "failed" | "skipped"; note: string; at: string }
+/** One row of a ticket's timeline (Tickets.timeline). */
+export interface TimelineEntry { eventId: number; ts: string; by: string; cat: TimelineCat; text: string; costUsd: number | null; status: string | null; run: number | null }
+
 export interface TicketDetail {
   ticket: TicketView;
   notes: NoteView[];
+  /** The one timeline: the thread and what the crew did, in order. */
+  timeline: TimelineEntry[];
   links: LinkView[];
   lines: TicketView[];
   parent: TicketView | null;
@@ -399,6 +404,17 @@ export class Tickets {
     }));
   }
 
+  /**
+   * The ticket's one timeline, oldest first and append-only: its thread (what people said, status moves,
+   * branch, push and PR) and what the crew did for it (each step of its runs, agent calls, decisions at the
+   * gates, retries, the run starting and ending), merged in the order it happened.
+   */
+  timeline(id: number): TimelineEntry[] {
+    const rows = this.log.db.prepare(`SELECT event_id, ts, by_name, cat, text, cost_usd, status, NULL AS run FROM ticket_notes WHERE ticket_id = ?
+      UNION ALL SELECT event_id, ts, by_name, cat, text, cost_usd, NULL AS status, run FROM ticket_trace WHERE ticket_id = ? ORDER BY event_id`).all(id, id) as Row[];
+    return rows.map((r) => ({ eventId: Number(r.event_id), ts: r.ts, by: r.by_name, cat: r.cat as TimelineCat, text: r.text, costUsd: r.cost_usd ?? null, status: r.status ?? null, run: r.run == null ? null : Number(r.run) }));
+  }
+
   /** Links seen from this ticket, both ways (a link made on one side shows on the other). */
   links(id: number): LinkView[] {
     const rows = this.log.db.prepare(`SELECT l.from_id, l.to_id, l.relation, t.title, t.status, t.number, k.key FROM ticket_links l JOIN tickets t ON t.id = CASE WHEN l.from_id = ? THEN l.to_id ELSE l.from_id END
@@ -430,7 +446,7 @@ export class Tickets {
     }
     const repo = repoOfProject(this.log, t.project);
     return {
-      ticket: t, notes, links, lines, parent: t.parentId != null ? this.get(t.parentId) ?? null : null,
+      ticket: t, notes, timeline: this.timeline(id), links, lines, parent: t.parentId != null ? this.get(t.parentId) ?? null : null,
       moves: nextMoves(t.status, t.kind), document: workDocument(t, notes, links, lines), run,
       repo, route: repo && this.opts.repoRuns && !epicOfTickets(t) ? this.routeOf(t, {}) : null, working: this.inRepo.has(id), steps: this.steps(id),
       queue: t.status === "ready" ? this.spot(t) : null,
@@ -905,7 +921,7 @@ export class Tickets {
         systemPrompt: `${a?.def.prompt ?? "You are a careful engineer."}\n\n${TICKET_CONTRACT}`,
         budgetUsd: cap,
         ...(a ? kitArgs(kitOf(a.def)) : {}),
-      }, { agentVersion: a?.version, station: "ticket" });
+      }, { agentVersion: a?.version, station: "ticket", ticket: id });
       if (run.error || !run.result) {
         this.say(id, `${name} could not answer: ${run.error ?? "no reply"}`, { by: a?.def.id ?? want, kind: "event" });
         return { ticket: this.get(id)!, error: run.error ?? "no reply" };

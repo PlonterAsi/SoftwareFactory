@@ -35,6 +35,7 @@ import { coreDoor } from "./plugins/door.js";
 import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
 import { brainRoute } from "./brain/routes.js";
 import { featureMapRoute } from "./featuremap/routes.js";
+import { flowsRoute } from "./flows/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { askForApp } from "./factory/appagent.js";
 import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
@@ -456,6 +457,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (url.pathname.startsWith("/plugins/") && servePluginFile(plugins, req, res, url)) return;
       if (url.pathname === "/api/brain" || url.pathname.startsWith("/api/brain/")) {
         const r = await brainRoute({ log, bay, order: () => order.state(), readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
+      if (url.pathname === "/api/flows" || url.pathname.startsWith("/api/flows/")) {
+        const r = await flowsRoute({ flows: factory.flows, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/feature-map" || url.pathname.startsWith("/api/feature-map/")) {

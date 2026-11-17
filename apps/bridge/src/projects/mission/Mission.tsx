@@ -8,7 +8,8 @@ import { RepoStrip } from "../../RunDeck";
 import { ago, describe } from "../builtin";
 import { inProject, projectSets, registerProjectPanel, type PanelContext } from "../panels";
 import { MissionTrack } from "./MissionTrack";
-import { currentStop, designRounds, headline, ORDER, stopsFor, type StopId } from "./model";
+import { currentStop, designRounds, headline, stopsFor, type StopId } from "./model";
+import { useRunFlow } from "../../flowData";
 import { ProductDocs, StageView } from "./stages";
 import { RepoWork, workedRepo } from "./RepoWork";
 import "./mission.css";
@@ -38,14 +39,15 @@ function BuildMission(ctx: PanelContext) {
   // A link that opens a run (a notice, the Builds list) lands here with it picked.
   useEffect(() => { if (ctx.pickedRun != null) setRunId(ctx.pickedRun); }, [ctx.pickedRun]);
   const run = mine.find((r) => r.run === runId) ?? mine.at(-1);
-  const stops = useMemo(() => stopsFor(run), [run]);
+  const flow = useRunFlow(run);
+  const stops = useMemo(() => stopsFor(run, flow), [run, flow]);
   const cur = currentStop(stops);
   const [picked, setPicked] = useState<StopId | null>(null);
   // Follow the run as it moves, until you pick a stop yourself.
   useEffect(() => { setPicked(null); }, [run?.run]);
   const sel = picked ?? (run ? cur.id : "idea");
   const h = headline(run, stops);
-  const idx = ORDER.indexOf(cur.id) + 1;
+  const idx = stops.findIndex((x) => x.id === cur.id) + 1;
   return (
     <div className="mission">
       <AskBanner projectId={p.id} name={p.name} hasRuns={p.runIds.length > 0 || p.links.some((l) => l.kind === "self")} archived={p.status === "archived"} />
@@ -58,7 +60,7 @@ function BuildMission(ctx: PanelContext) {
                     {[...mine].reverse().map((r) => <option key={r.run} value={r.run}>Run #{r.run} · {r.finished?.outcome ?? (r.waiting ? "waits for you" : "running")}</option>)}
                   </select>
                 : <span className="mono">Run #{run.run}</span>}
-              <span>Stop {idx} of {ORDER.length}</span>
+              <span>Stop {idx} of {stops.length}</span>
               <span>{run.finished ? `took ${minutes(run.startedAt, lastTs(run, events))}` : `${minutes(run.startedAt)} in`}</span>
             </> : <span>No build yet</span>}
           </div>

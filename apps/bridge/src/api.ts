@@ -84,9 +84,21 @@ export interface ReviewView { round: number; agent: string; verdict: "pass" | "f
 export interface TestCaseView { name: string; file: string; pass: boolean; error?: string }
 /** A gate a run waits at. For a failed step: which one, how many tries, and whether the last try failed the same way. */
 export interface GateWaitView { gate: string; question: string; at: string; action?: string; kind?: "retry" | "council" | "rounds" | "budget"; station?: string; attempt?: number; error?: string; same?: boolean }
+/** A flow: the engine's work as data (packages/core/src/flows/flow.ts). The canvas draws it. */
+export interface FlowStepView {
+  id: string; label: string; sub: string; kind: "step" | "loop" | "gate"; action?: string; agents: string[]; stations?: string[];
+  resumeKey?: string; within?: string; loop?: { goal: string; observer: string; passes: string; stops: string; maxRounds?: number };
+  gate?: { asks: string; auto: string }; skippedWhen?: string; stop: string; at: { x: number; y: number };
+}
+export interface FlowEdgeView { from: string; to: string; kind: "next" | "back" | "branch"; label?: string; fromSide?: string; toSide?: string }
+export interface FlowView { id: string; name: string; purpose: string; version: number; builtIn: boolean; steps: FlowStepView[]; edges: FlowEdgeView[] }
+export interface FlowSummaryView { id: string; name: string; purpose: string; version: number; builtIn: boolean; steps: number; savedBy: string | null; savedAt: string | null }
+
 export interface FactoryRunView {
   run: number;
   idea: string;
+  /** The flow this run follows (a copy taken when it started). Runs from before flows have none: the built-in of their kind applies. */
+  flow?: FlowView;
   startedAt: string;
   maxUsd: number;
   spentUsd: number;
@@ -186,7 +198,7 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
   for (const e of events) {
     const p = e.payload ?? {};
     if (e.type === "factory.run.started") {
-      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], discovery: [], features: [], reviews: [], evaluations: [], loop: [], ...(p.kind === "repo" && p.repo ? { repo: { source: p.repo.source, name: p.repo.name, branch: p.repo.branch, ticket: p.repo.ticket } } : {}) });
+      runs.set(e.id, { run: e.id, idea: p.idea, startedAt: e.ts, maxUsd: p.maxUsd, spentUsd: 0, maxFixRounds: p.maxFixRounds, stations: {}, tests: [], files: {}, refused: [], visuals: [], fixRounds: 0, council: [], discovery: [], features: [], reviews: [], evaluations: [], loop: [], ...(p.flow ? { flow: p.flow } : {}), ...(p.kind === "repo" && p.repo ? { repo: { source: p.repo.source, name: p.repo.name, branch: p.repo.branch, ticket: p.repo.ticket } } : {}) });
       continue;
     }
     const r = runs.get(p.run ?? p.factoryRun);
@@ -642,3 +654,8 @@ export function useChatRoutes(events: SfEvent[], online: boolean) {
   }, [at, online]);
   return routes;
 }
+
+export const flowsApi = {
+  list: () => getJson("/api/flows", "could not list the flows") as Promise<{ flows: FlowSummaryView[]; actions: Record<string, { label: string; needs: string[]; required: boolean }>; agents: string[] }>,
+  get: (id: string) => getJson(`/api/flows/${encodeURIComponent(id)}`, "could not open the flow") as Promise<{ flow: FlowView; history: { version: number; savedBy: string; savedAt: string }[] }>,
+};

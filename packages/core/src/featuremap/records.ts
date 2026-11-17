@@ -44,6 +44,22 @@ const B = "apps/bridge/src/";
 export const DEFAULT_FEATURES: FeatureRecord[] = [
   // ───────────────────────────── Engine
   {
+    id: "flows", name: "Flows (the engine as data)", group: "Engine",
+    purpose: "The engine's work is a stored flow definition, not fixed code: its steps in order, which are loops and what ends them, where it stops for the person, and which crew slot works each step. Runs follow the flow they started with, and the canvas draws the same definition.",
+    spec: [
+      "Today's engine is the built-in New project flow; imported repositories follow the built-in Change in a repo flow. Both do exactly what the fixed pipeline did.",
+      "Every run keeps a copy of its flow on its started event, so an edit never changes a run already going, and a resume follows the same flow.",
+      "A flow is checked before it is saved or run: every step names an engine action the engine has, required steps are present and in an order that works, agents are crew slots, loop limits stay in range.",
+      "Every save is a new version on the record; a flow can be put back to what SoftwareFactory ships.",
+      "The engine reads the round limits of the council, design and judge loops from the flow; optional steps (council, design, review, judge) can be left out.",
+      "The factory floor and the project's track are drawn from the run's flow.",
+    ],
+    flow: ["A run starts and copies its flow onto its started event", "The engine carries out each step by its action, in the flow's order", "A resume skips the steps whose milestone the log shows", "The canvas draws the flow's steps and lines and lights them from the run's events"],
+    design: "The factory floor on All builds and the track on a project's Mission tab draw the run's flow; the Flows page lists the flows and shows each one's steps, loops, gates and agents.",
+    screens: ["/factory/flows"], docs: ["docs/engine.md", "docs/flows.md"], stations: [],
+    files: [`${C}flows/`, `${B}Flows.tsx`, `${B}flowData.ts`], api: ["/api/flows"],
+  },
+  {
     id: "engine-loop", name: "Engine run loop", group: "Engine",
     purpose: "Turns one line into a shipped, tested app by walking it through the stations in order, inside money and time limits, stopping for the person only at the two gates.",
     spec: [

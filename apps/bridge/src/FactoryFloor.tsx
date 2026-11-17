@@ -2,13 +2,14 @@ import { GateActions, STEP } from "./GateActions";
 import { useEffect, useRef, useState } from "react";
 import { ReactFlow, Background, useNodesState, type ReactFlowInstance, type Edge, type Node, Handle, Position, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { resumeRun, setupApi, type AgentRunView, type CrewMode, type FactoryRunView, type StationState } from "./api";
+import { resumeRun, setupApi, type AgentRunView, type CrewMode, type FactoryRunView, type FlowStepView, type FlowView, type StationState } from "./api";
+import { useRunFlow } from "./flowData";
 
 type Worker = { name: string; avatar: string; since: string };
-type StationData = { label: string; sub: string; gate?: boolean; later?: boolean; state: StationState; badge?: string; note?: string; workers?: Worker[] };
+export type StationData = { label: string; sub: string; gate?: boolean; later?: boolean; state: StationState; badge?: string; note?: string; workers?: Worker[] };
 export type CrewIndex = Record<string, { name: string; avatar: string }>;
 
-function Station({ data }: NodeProps<Node<StationData>>) {
+export function Station({ data }: NodeProps<Node<StationData>>) {
   const w = data.workers ?? [];
   return (
     <div className={`station s-${data.state}${data.gate ? " gate" : ""}${data.later ? " later" : ""}${w.length ? " manned" : ""}`} title={data.note}>
@@ -32,35 +33,16 @@ function Station({ data }: NodeProps<Node<StationData>>) {
   );
 }
 
-const X = [0, 190, 380, 570, 760];
-// id, label, what it does, x, y, gate?, later?
-const STATIONS: [string, string, string, number, number, boolean?, boolean?][] = [
-  ["intake", "One-line idea", "saved as a note", X[0], 0],
-  ["council", "Council", "up to 6 seats · big ideas", X[1], -95],
-  ["discover", "Product design", "Designer ⇄ Critic loop", X[1], 0],
-  ["plan", "Spec and plan", "Planner", X[2], 0],
-  ["gateA", "Your OK: plan", "one tap", X[3], 0, true],
-  ["tests", "Acceptance tests", "Tester, then locked", X[0], 130],
-  ["build", "Build", "Builder", X[1], 130],
-  ["test", "Test", "node --test", X[2], 130],
-  ["review", "Review", "Reviewer vs spec", X[3], 130],
-  ["gateB", "Your OK: build", "one tap", X[4], 130, true],
-  ["fix", "Fix", "Fixer loop", X[2], 260],
-  ["evaluate", "Product judge", "reads the running app", X[3], 260],
-  ["ship", "Ship to disk", "git repo, tagged", X[4], 260],
-];
-const EDGES: [string, string, string?, string?][] = [
-  ["intake", "discover"], ["intake", "council", "tb"], ["council", "discover", undefined, "t"], ["discover", "plan"], ["plan", "gateA"], ["gateA", "tests", "b", "t"], ["tests", "build"],
-  ["build", "test"], ["test", "fix", "b1", "t1"], ["fix", "test", "t2", "b2"], ["test", "review"], ["review", "fix", "b", "r"], ["review", "evaluate", "b", "t"], ["evaluate", "gateB", undefined, "b2"], ["gateB", "ship", "b", "t"],
-];
+// Workers and badges are matched by the engine station a step lights (its id, for the built-in flows).
+const stationOf = (s: FlowStepView) => s.stations?.[0] ?? s.id;
 
-// Agent-call stations ("tests" is the Tester; the floor's "test" box is node --test).
-const CALL_STATION: Record<string, string> = { council: "council", discover: "design", plan: "plan", tests: "tests", build: "build", fix: "fix", review: "review", evaluate: "evaluate" };
-
-function nodesFor(run?: FactoryRunView, runs: AgentRunView[] = [], crew: CrewIndex = {}): Node<StationData>[] {
+/** The floor's boxes: one per step of the run's flow, where the flow places it, lit by the run's events. */
+export function nodesFor(flow: FlowView | null, run?: FactoryRunView, runs: AgentRunView[] = [], crew: CrewIndex = {}): Node<StationData>[] {
+  if (!flow) return [];
   const working = runs.filter((r) => r.state === "running" && run && r.factoryRun === run.run);
-  return STATIONS.map(([id, label, sub, x, y, gate, later]) => {
-    const workers = working.filter((r) => CALL_STATION[id] && r.station === CALL_STATION[id]).map((r) => ({ name: crew[r.agent]?.name ?? r.agent, avatar: crew[r.agent]?.avatar ?? "◆", since: r.startedAt }));
+  return flow.steps.map((step) => {
+    const id = stationOf(step);
+    const workers = working.filter((r) => r.station && step.agents.includes(r.station)).map((r) => ({ name: crew[r.agent]?.name ?? r.agent, avatar: crew[r.agent]?.avatar ?? "◆", since: r.startedAt }));
     const s = run?.stations[id];
     let badge: string | undefined;
     if (id === "fix" && run?.fixRounds) badge = `${run.fixRounds}/${run.maxFixRounds}`;
@@ -69,17 +51,21 @@ function nodesFor(run?: FactoryRunView, runs: AgentRunView[] = [], crew: CrewInd
     if (id === "discover" && run?.discovery.length) { const d = run.discovery.at(-1)!; badge = d.pass ? "passed" : d.settled ? "best kept" : `round ${d.round}`; }
     if (id === "evaluate" && run?.evaluations.length) { const e = run.evaluations.at(-1)!; badge = e.skipped ? "skipped" : e.pass ? "passed" : `${e.requirements.filter((q) => !q.met).length} open`; }
     if (id === "review" && run?.reviews.length) { const r = run.reviews.at(-1)!; badge = r.findings.length ? `${r.findings.length} note${r.findings.length > 1 ? "s" : ""}` : "clean"; }
-    return { id, type: "station", position: { x, y }, draggable: false, data: { label, sub, gate, later, state: later ? "idle" : s?.state ?? "idle", badge, note: s?.note, workers } };
+    const note = s?.note ?? [step.loop ? `Loop: ${step.loop.passes}. Stops: ${step.loop.stops}${step.loop.maxRounds ? ` (at most ${step.loop.maxRounds} rounds)` : ""}.` : "", step.skippedWhen ? `Skipped when ${step.skippedWhen}.` : ""].filter(Boolean).join(" ");
+    return { id: step.id, type: "station", position: { x: step.at.x, y: step.at.y }, draggable: false, data: { label: step.label, sub: step.sub, gate: step.kind === "gate", state: s?.state ?? "idle", badge, note: note || undefined, workers } };
   });
 }
 
-function edgesFor(run?: FactoryRunView): Edge[] {
-  return EDGES.map(([s, t, sh, th]) => {
+export function edgesFor(flow: FlowView | null, run?: FactoryRunView): Edge[] {
+  if (!flow) return [];
+  const station = new Map(flow.steps.map((x) => [x.id, stationOf(x)]));
+  return flow.edges.map((e) => {
+    const s = station.get(e.from) ?? e.from, t = station.get(e.to) ?? e.to;
     const target = run?.stations[t]?.state;
     const later = (s === "council" || t === "council") && run?.stations.council?.state === "skipped";
     return {
-      id: `${s}-${t}`, source: s, target: t, sourceHandle: sh, targetHandle: th, type: "smoothstep",
-      animated: target === "active", className: `flow-edge${later ? " later" : ""}${run?.stations[s] && target ? " lit" : ""}`,
+      id: `${e.from}-${e.to}`, source: e.from, target: e.to, sourceHandle: e.fromSide, targetHandle: e.toSide, type: "smoothstep",
+      animated: target === "active", className: `flow-edge${later ? " later" : ""}${e.kind === "back" ? " back" : ""}${run?.stations[s] && target ? " lit" : ""}`,
     };
   });
 }
@@ -89,18 +75,28 @@ const NO_CREW: CrewIndex = {};
 
 export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_CREW, mode }: { runs: AgentRunView[]; factoryRuns: FactoryRunView[]; selected?: FactoryRunView; onSelect: (id: number) => void; crew?: CrewIndex; mode?: CrewMode | null }) {
   const run = selected;
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<StationData>>(nodesFor(run, runs, crew));
+  // The floor draws the run's own flow (or, before any run, the built-in New project flow).
+  const flow = useRunFlow(run);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<StationData>>(nodesFor(flow, run, runs, crew));
   const [openErr, setOpenErr] = useState<string | null>(null);
   // Controlled through useNodesState so React Flow keeps the measured node and handle sizes between events.
   useEffect(() => {
-    setNodes((ns) => { const next = nodesFor(run, runs, crew); return ns.map((n) => ({ ...n, data: next.find((x) => x.id === n.id)!.data })); });
-  }, [run, runs, crew, setNodes]);
+    setNodes((ns) => {
+      const next = nodesFor(flow, run, runs, crew);
+      // Another flow (a repo run after a new project): new boxes. The same flow: only what they show changes.
+      if (ns.length !== next.length || next.some((x) => !ns.some((n) => n.id === x.id))) return next;
+      return ns.map((n) => ({ ...n, data: next.find((x) => x.id === n.id)!.data }));
+    });
+  }, [flow, run, runs, crew, setNodes]);
+  useEffect(() => { requestAnimationFrame(() => flow && fitRef.current?.()); }, [flow?.id, flow?.version]);
   // Refit the floor whenever its pane changes size, so every station stays in view.
   const wrap = useRef<HTMLDivElement>(null);
-  const flow = useRef<ReactFlowInstance<Node<StationData>> | null>(null);
+  const rf = useRef<ReactFlowInstance<Node<StationData>> | null>(null);
+  const fitRef = useRef<(() => void) | null>(null);
+  fitRef.current = () => rf.current?.fitView({ padding: 0.08 });
   useEffect(() => {
     if (!wrap.current) return;
-    const ro = new ResizeObserver(() => flow.current?.fitView({ padding: 0.08 }));
+    const ro = new ResizeObserver(() => rf.current?.fitView({ padding: 0.08 }));
     ro.observe(wrap.current);
     return () => ro.disconnect();
   }, []);
@@ -109,7 +105,7 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
   return (
     <section className="pane floor" aria-label="Factory floor">
       <header className="pane-head">
-        <span>Factory floor</span>
+        <span>Factory floor{flow && <a className="muted floor-flow" href="#/factory/flows" title={flow.purpose}> · flow: {flow.name} v{flow.version}{flow.builtIn ? "" : " (edited)"}</a>}</span>
         {factoryRuns.length > 0 ? (
           <select className="run-pick" value={run?.run ?? ""} onChange={(e) => onSelect(Number(e.target.value))} aria-label="Factory run">
             {[...factoryRuns].reverse().map((r) => <option key={r.run} value={r.run}>#{r.run} {r.plan?.name ?? r.idea.slice(0, 40)} · {r.finished?.outcome ?? (r.resumed ? "resumed" : "running")}</option>)}
@@ -128,7 +124,7 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
       {run?.retrying && !run.waiting && !run.finished && <div className="run-result retrying" role="status">↻ Retrying <b>{STATION_LABEL[run.retrying.station] ?? run.retrying.station}</b> (attempt {run.retrying.attempt})…</div>}
       {run?.resumed && !run.finished && <div className="run-result resumed" role="status">↻ Picked up again at <b>{STATION_LABEL[run.resumed.from] ?? run.resumed.from}</b> after the app closed{run.resumed.count > 1 ? ` (${run.resumed.count} times)` : ""}. Finished stations were kept; spend carries over.</div>}
       <div className="flow-wrap" ref={wrap}>
-        <ReactFlow onInit={(i) => { flow.current = i; }} nodes={nodes} onNodesChange={onNodesChange} edges={edgesFor(run)} nodeTypes={{ station: Station }} fitView fitViewOptions={{ padding: 0.1 }} proOptions={{ hideAttribution: true }} nodesConnectable={false} panOnDrag zoomOnScroll={false}>
+        <ReactFlow onInit={(i) => { rf.current = i; }} nodes={nodes} onNodesChange={onNodesChange} edges={edgesFor(flow, run)} nodeTypes={{ station: Station }} fitView fitViewOptions={{ padding: 0.1 }} proOptions={{ hideAttribution: true }} nodesConnectable={false} panOnDrag zoomOnScroll={false}>
           <Background gap={24} size={1} color="var(--grid)" />
         </ReactFlow>
       </div>
