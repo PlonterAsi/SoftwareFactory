@@ -36,6 +36,8 @@ import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
 import { brainRoute } from "./brain/routes.js";
 import { featureMapRoute } from "./featuremap/routes.js";
 import { flowsRoute } from "./flows/routes.js";
+import { GitManager } from "./git/manager.js";
+import { gitRoute } from "./git/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { askForApp } from "./factory/appagent.js";
 import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
@@ -119,6 +121,8 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     autoWork, canWork: () => (gitReady() ? null : "Git is not installed"),
     github, canShip, repoRuns,
   });
+  // The git manager: local first then a private repo, the merge policy, outside work, versions (docs/git.md).
+  const gitman = new GitManager(log, tickets, { github, canShip });
   /** An ask in a project that lives in a repo: a ticket there, sent down the route that fits (the reply both doors share). */
   const repoAsk = (projectId: number, idea: string, o: { maxUsd?: number; route?: "light" | "engine"; autoApprove?: boolean }) => {
     const r = tickets.askInRepo(projectId, idea, o);
@@ -463,6 +467,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await flowsRoute({ flows: factory.flows, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (url.pathname === "/api/git" || url.pathname.startsWith("/api/git/")) {
+        const r = await gitRoute({ git: gitman, readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
       if (url.pathname === "/api/feature-map" || url.pathname.startsWith("/api/feature-map/")) {
         const r = await featureMapRoute({ log, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
@@ -501,7 +509,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { github, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, git: gitman, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, errors, fault, ensureSelf });
 }
 
 /**
@@ -812,7 +820,8 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
   linkSelfRepo(log, core.ensureSelf(), process.env.SF_SELF_REPO ?? "PlonterAsi/SoftwareFactory");
   // Follow the crew's open PRs: a merge moves the ticket on. At start, then every 5 minutes.
   // Work merged without the crew's own PR (a thread's PR that names SF-13) moves its ticket too.
-  const follow = () => core.tickets.followPrs().then(() => core.tickets.followMerges()).catch((e) => console.error("following PRs failed:", e));
+  // Then the git manager: a merge review of each crew PR whose CI ended (and a merge under "auto"), and outside work.
+  const follow = () => core.tickets.followPrs().then(() => core.tickets.followMerges()).then(() => core.git.tend()).then(() => core.git.watchAll()).catch((e) => console.error("following PRs failed:", e));
   follow();
   timers.push(setInterval(follow, 5 * 60_000).unref());
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.

@@ -10,14 +10,15 @@ import { EmptyState } from "./ui";
 
 /**
  * Home: every ticket across projects on one board (SF behavior brief 4.1). Four lanes, Needs you first:
- * questions before money, a run waiting for your OK, a build to look at, a question to answer. Beside it, the
+ * questions before money, a run waiting for your OK, a PR to merge, a build to look at, a question to answer. Beside it, the
  * flow of whatever runs right now, drawn live: the step it is on lit, the steps behind it done.
  */
 type Lane = "needs" | "running" | "review" | "done";
 interface BoardCard {
   id: number; key: string; title: string; kind: string; status: string; project: number | null; projectName: string | null;
   flow: { id: string; name: string; runner: string } | null; run: number | null; pr: { number: number; url: string; state: string } | null; updatedAt: string;
-  need?: "check" | "gate" | "look" | "answer" | "decide"; say?: string; questions?: number; step?: string | null; stepName?: string | null; live?: boolean;
+  need?: "check" | "gate" | "look" | "answer" | "decide" | "merge"; say?: string; questions?: number; step?: string | null; stepName?: string | null; live?: boolean;
+  merge?: { confident: boolean; score: number; number: number } | null;
 }
 interface BoardView { lanes: Record<Lane, BoardCard[]>; counts: Record<Lane, number> }
 
@@ -27,7 +28,7 @@ const LANES: { id: Lane; label: string; empty: string }[] = [
   { id: "review", label: "In review", empty: "No pull request open." },
   { id: "done", label: "Done", empty: "Nothing closed in the last two weeks." },
 ];
-const NEED_WORD: Record<NonNullable<BoardCard["need"]>, string> = { check: "Before money", gate: "Your OK", look: "Take a look", answer: "Answer", decide: "Decide" };
+const NEED_WORD: Record<NonNullable<BoardCard["need"]>, string> = { check: "Before money", gate: "Your OK", look: "Take a look", answer: "Answer", decide: "Decide", merge: "Merge?" };
 
 const ago = (iso: string) => {
   const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -39,6 +40,17 @@ export function Board({ last, factoryRuns, runs, crew, onShowRun }: { last: numb
   const [err, setErr] = useState<string | null>(null);
   const [pick, setPick] = useState<number | null>(null);
   const [batch, setBatch] = useState(false);
+  const [merging, setMerging] = useState<number | null>(null);
+  const [mergeErr, setMergeErr] = useState<{ id: number; text: string } | null>(null);
+  // Your press on a Merge? card: SF merges the PR (squash) and the ticket moves on (docs/git.md).
+  const merge = async (id: number) => {
+    setMerging(id); setMergeErr(null);
+    try {
+      const r = await fetch(`${API}/api/git/tickets/${id}/merge`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) setMergeErr({ id, text: j.error ?? "Could not merge." });
+    } finally { setMerging(null); }
+  };
   // Read again as events arrive, at most about once a second (a burst of events reads once, after it).
   const lastAt = useRef(0);
   useEffect(() => {
@@ -104,6 +116,13 @@ export function Board({ last, factoryRuns, runs, crew, onShowRun }: { last: numb
                         </span>
                       </button>
                       {(l.id === "running" || c.need === "gate") && <button className="link tiny board-open" onClick={() => showTicket(c.id, c.project)}>Open ticket</button>}
+                      {c.need === "merge" && (
+                        <div className="board-merge">
+                          <button className="tiny" disabled={merging === c.id} onClick={() => merge(c.id)}>{merging === c.id ? "Merging…" : `Merge PR #${c.merge?.number ?? c.pr?.number}`}</button>
+                          <span className={`small ${c.merge?.confident ? "board-sure" : "muted"}`}>{c.merge?.confident ? "Confident" : `Review ${c.merge?.score ?? 0}%`}</span>
+                          {mergeErr?.id === c.id && <span className="error small" role="alert">{mergeErr.text}</span>}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ol>

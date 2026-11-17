@@ -481,6 +481,7 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
           <a className="ghost tiny" href={t.pr.url} target="_blank" rel="noreferrer">Open on GitHub</a>
         </div>
       )}
+      {t.pr && t.pr.state !== "closed" && <MergeBox id={id} state={t.pr.state} last={last} />}
       {!t.pr && d.repo?.github && (
         <form className="tk-runstrip tk-prlink" aria-label="Link a pull request" onSubmit={(e) => { e.preventDefault(); if (prRef.trim()) void act("pr", () => ticketsApi.linkPr(id, prRef.trim()).then(() => setPrRef(""))); }}>
           <span className="mono">⇄</span>
@@ -727,6 +728,46 @@ function TicketTimeline({ rows, onShowRun }: { rows: TimelineEntry[]; onShowRun?
         ))}
         {shown.length === 0 && <li className="tk-note muted">Nothing of this kind yet.</li>}
       </ol>
+    </section>
+  );
+}
+
+/**
+ * SF's merge review of the ticket's PR (docs/git.md): each line it looked at, and Merge when CI passed.
+ * After a merge, "Not right" tells SF the merge was wrong: it starts counting right merges again.
+ */
+interface MergeCheck { confident: boolean; score: number; reasons: { key: string; ok: boolean; text: string }[]; ci: string; number: number; sha: string; at: string; mergedBy: string | null }
+function MergeBox({ id, state, last }: { id: number; state: string; last: number }) {
+  const [c, setC] = useState<MergeCheck | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { fetch(`${API}/api/git/tickets/${id}`).then((r) => r.json()).then((j) => setC(j.check ?? null)).catch(() => {}); }, [id, last]);
+  const post = async (what: string, path: string, body: unknown = {}) => {
+    setBusy(what); setErr(null);
+    try {
+      const r = await fetch(`${API}/api/git/tickets/${id}/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) setErr(j.error ?? "It did not work."); else if (j.check !== undefined) setC(j.check);
+    } finally { setBusy(null); }
+  };
+  if (state === "merged") {
+    if (!c?.mergedBy) return null;
+    return (
+      <section className="tk-merge" aria-label="Merge">
+        <span className="small">{c.mergedBy === "sf" ? "SF merged it by itself: every line of its review passed." : "Merged."} If the merge was not right, say so: SF starts counting right merges again and asks you before the next one.</span>
+        <div className="row"><button className="ghost tiny" disabled={!!busy} onClick={() => post("wrong", "not-right")}>The merge was not right</button>{err && <span className="error small">{err}</span>}</div>
+      </section>
+    );
+  }
+  return (
+    <section className="tk-merge" aria-label="Merge review">
+      <div className="row"><b>Merge review</b><span className="muted small">{!c ? "Not reviewed yet: SF reviews the PR when its CI ends." : c.ci === "green" ? (c.confident ? "Confident: every line passed" : `${c.score}% of the lines passed`) : c.ci === "red" ? "CI failed" : c.ci === "running" ? "CI is running" : "No CI on this PR"}</span></div>
+      {c && <ul>{c.reasons.map((r) => <li key={r.key} className={r.ok ? "" : "no"}>{r.text}</li>)}</ul>}
+      <div className="row">
+        <button className="tiny" disabled={!!busy || c?.ci !== "green"} title={c?.ci !== "green" ? "CI has to pass first" : undefined} onClick={() => post("merge", "merge")}>{busy === "merge" ? "Merging…" : `Merge PR #${c?.number ?? ""}`}</button>
+        <button className="ghost tiny" disabled={!!busy} onClick={() => post("check", "check")}>{busy === "check" ? "Reading…" : "Review again"}</button>
+        {err && <span className="error small" role="alert">{err}</span>}
+      </div>
     </section>
   );
 }

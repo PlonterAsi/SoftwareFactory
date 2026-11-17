@@ -64,6 +64,12 @@ Before a ticket costs anything, SF reads it (`tickets/precheck.ts`: plain code, 
 
 Work it runs the check first; the ticket page shows a **Before it costs money** box with each question, and you answer, or press Work it anyway (the caps still guard the money). The crew's own pickups skip a ticket the check holds. Answers go on the ticket's record (`answers["check.<id>"]`) and thread, and the check is on the ticket's timeline (`ticket.checked`). On Home, **Answer before money** lists every question across tickets in one sitting and starts the tickets that are then clear.
 
+## Merging and versions (phase 3)
+
+A crew PR whose CI passed shows on Home's Needs you as a **Merge?** card, with SF's merge review.
+Merging, the per-project merge policy, outside work and versions are described in
+[git.md](git.md).
+
 ## Home: the board across projects (2026-11-17, phase 2)
 
 Home (`#/`) is every ticket across projects in four lanes: **Needs you** (questions before money, a run waiting for your OK, a build to look at, a question to answer, an idea to decide), **Running** (its flow and the step it is on), **In review** (an open draft PR) and **Done** (closed in the last two weeks). Above the lanes the flow of what runs now is drawn live: an engine run lit by its own events, a one-session ticket by its last step. The projects list moved to Projects (`#/projects`).
