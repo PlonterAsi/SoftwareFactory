@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlow, Background, type ReactFlowInstance, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { API, SLOT_LABEL, flowsApi, type BayState, type FlowStepView, type FlowSummaryView, type FlowView, type Slot } from "./api";
+import { API, SLOT_LABEL, flowsApi, type BayState, type FlowProposalView, type FlowStepView, type FlowSummaryView, type FlowView, type Slot } from "./api";
 import { Station, edgesFor, nodesFor, type StationData } from "./FactoryFloor";
 import { loadFlow } from "./flowData";
 
@@ -97,6 +97,7 @@ export function FlowsPage() {
                 {flow.door && <p className="small muted"><b>Carried out by:</b> {flow.door}. Its steps follow these boxes once that screen reads flows.</p>}
               </div>
             )}
+            {(flow.runner ?? "engine") !== "door" && <Improve flow={flow} onSaved={() => setSaved((n) => n + 1)} />}
             <table className="flows-steps">
               <thead><tr><th>#</th><th>Step</th><th>Kind</th><th>Who works it</th><th>Passes when</th><th>Stops anyway</th></tr></thead>
               <tbody>
@@ -114,7 +115,7 @@ export function FlowsPage() {
             </table>
             <p className="muted small">
               Version {flow.version}{history.length ? `, saved ${history.length} time${history.length > 1 ? "s" : ""}` : ", as SoftwareFactory ships it"}.
-              Crew slots a step may name: {agents.join(", ")}. Pick a step to name the agent that works it; the engine and one-session tickets follow whatever flow is saved. Editing a flow in words or by dragging comes in a later phase. Pick a flow for one ticket on the ticket itself.
+              Crew slots a step may name: {agents.join(", ")}. Pick a step to name the agent that works it; change a flow in words under Improve this flow. The engine and one-session tickets follow whatever flow is saved. Pick a flow for one ticket on the ticket itself.
             </p>
           </>}
         </section>
@@ -166,5 +167,82 @@ function WhoPicker({ s, slot, bay, canEdit, onCrew }: { s: FlowStepView; slot: S
       </select>
       <span className="muted small"> {chosen ? "named for this step in this flow; saved as a new version" : "whoever is seated on the station"}</span>
     </span>
+  );
+}
+
+const VERDICT: Record<FlowProposalView["replay"]["verdict"], [string, string]> = {
+  cheaper: ["Cheaper, nothing risked", "ok"], costlier: ["Costs more", "warn"], risky: ["Risky", "bad"], "may-help": ["May pass more often", "ok"], same: ["No change in cost", ""], "no-history": ["No past runs yet", ""],
+};
+const STATE: Record<FlowProposalView["state"], string> = { proposed: "proposed", armed: "trial waiting for the next run", taken: "trial running", tried: "tried once", accepted: "accepted", rejected: "rejected" };
+const BY: Record<FlowProposalView["by"], string> = { sf: "SF, from past runs", words: "you, in words", you: "you" };
+const usd = (n?: number | null) => (n == null ? "–" : `$${n.toFixed(2)}`);
+
+/**
+ * Improving a flow: say a change in words, or let SF read the flow's past runs and propose one. Each proposal is
+ * replayed on the past runs first (what it would have cost, what it would have risked); then it can be tried once,
+ * live, on the next run of the flow; nothing changes the flow until you accept it (saved as its next version).
+ */
+function Improve({ flow, onSaved }: { flow: FlowView; onSaved: () => void }) {
+  const [list, setList] = useState<FlowProposalView[]>([]);
+  const [words, setWords] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const load = () => flowsApi.proposals(flow.id).then((j) => setList(j.proposals)).catch((e) => setErr(String(e.message ?? e)));
+  useEffect(() => { setList([]); setNote(null); setErr(null); void load(); }, [flow.id, flow.version]);
+  const act = async (what: string, fn: () => Promise<unknown>, after?: () => void) => {
+    setBusy(what); setErr(null); setNote(null);
+    try { await fn(); after?.(); await load(); } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
+  };
+  const open = list.filter((p) => !["accepted", "rejected"].includes(p.state));
+  const past = list.filter((p) => ["accepted", "rejected"].includes(p.state)).slice(0, 4);
+  return (
+    <section className="flow-improve" aria-label={`Improve ${flow.name}`}>
+      <div className="fi-head">
+        <h3>Improve this flow</h3>
+        <button type="button" className="ghost sm" disabled={!!busy} onClick={() => act("suggest", async () => { const j = await flowsApi.suggest(flow.id); setNote(j.proposals.length ? `SF proposed ${j.proposals.length} change${j.proposals.length > 1 ? "s" : ""} from past runs.` : "SF found nothing to propose from the past runs yet."); })}>{busy === "suggest" ? "Reading past runs…" : "Ask SF for ideas (free)"}</button>
+      </div>
+      <form className="fi-words" onSubmit={(e) => { e.preventDefault(); if (words.trim()) void act("words", () => flowsApi.propose(flow.id, words), () => setWords("")); }}>
+        <input value={words} onChange={(e) => setWords(e.target.value)} placeholder='Say a change, e.g. "skip the council", "at most 3 rounds for the judge", "tell the crew: keep changes small"' aria-label="Change this flow in words" maxLength={1000} />
+        <button disabled={!!busy || !words.trim()}>{busy === "words" ? "Replaying…" : "Propose"}</button>
+      </form>
+      <p className="muted small">Every proposal is replayed on this flow's past runs first. Then you can try it once on the next run, and accept it to make it the flow's next version.</p>
+      {err && <div className="err" role="alert">{err}</div>}
+      {note && <p className="small" role="status">{note}</p>}
+      {open.map((p) => <ProposalCard key={p.id} p={p} busy={busy} onAct={(what) => act(`${what}${p.id}`, () => flowsApi.decide(p.id, what), what === "accept" ? onSaved : undefined)} />)}
+      {past.length > 0 && <div className="fi-past muted small">{past.map((p) => <div key={p.id}>#{p.id} {p.state}: {p.replay.changes.map((c) => c.text).join("; ")}</div>)}</div>}
+    </section>
+  );
+}
+
+function ProposalCard({ p, busy, onAct }: { p: FlowProposalView; busy: string | null; onAct: (what: "try" | "accept" | "reject") => void }) {
+  const [v, tone] = VERDICT[p.replay.verdict];
+  return (
+    <article className={`fi-card fi-${p.replay.verdict}`}>
+      <header>
+        <b>#{p.id}</b> <span className={`pill ${tone}`}>{v}</span> <span className="muted small">by {BY[p.by]} · {STATE[p.state]}{p.costUsd ? ` · reading the words cost $${p.costUsd.toFixed(4)}` : ""}</span>
+      </header>
+      <p className="small">{p.why}</p>
+      <div className="fi-cols">
+        <div><div className="muted small">Changes</div><ul>{p.replay.changes.map((c, i) => <li key={i} className={`fi-ch ch-${c.kind}`}>{c.text}</li>)}</ul></div>
+        <div><div className="muted small">Replayed on past runs</div><p>{p.replay.summary}</p>{p.replay.unpriced.map((u, i) => <p key={i} className="muted small">{u}</p>)}</div>
+      </div>
+      {p.replay.runs.length > 0 && (
+        <details>
+          <summary className="muted small">Run by run ({p.replay.runs.length})</summary>
+          <table className="fi-runs">
+            <thead><tr><th>{p.replay.runs[0].kind === "run" ? "Run" : "Ticket"}</th><th>Outcome</th><th>Cost then</th><th>Would cost</th><th>What it changes</th></tr></thead>
+            <tbody>{p.replay.runs.map((r) => <tr key={r.run} className={`risk-${r.risk}`}><td className="mono">#{r.run}</td><td>{r.outcome}</td><td className="mono">{usd(r.beforeUsd)}</td><td className="mono">{usd(r.afterUsd)}</td><td className="small">{r.notes.join("; ") || "nothing"}</td></tr>)}</tbody>
+          </table>
+        </details>
+      )}
+      {p.trial && <p className="small fi-trial"><b>Live trial:</b> {p.trial.outcome ? `${p.trial.run != null ? `run #${p.trial.run}` : `ticket #${p.trial.ticket}`} ${p.trial.outcome}, ${usd(p.trial.totalUsd)}` : p.trial.ticket != null ? `ticket #${p.trial.ticket} is following it now` : "the run following it is under way"}</p>}
+      <div className="row">
+        {p.state === "proposed" && <button type="button" className="ghost" disabled={!!busy} onClick={() => onAct("try")} title="The next run of this flow follows the proposal once, within that run's own money limit">{busy === `try${p.id}` ? "Arming…" : "Try it once"}</button>}
+        {p.state !== "taken" && p.state !== "armed" && <button type="button" disabled={!!busy} onClick={() => onAct("accept")}>{busy === `accept${p.id}` ? "Saving…" : "Accept as the next version"}</button>}
+        {p.state === "armed" && <button type="button" disabled={!!busy} onClick={() => onAct("accept")}>Accept without the trial</button>}
+        {p.state !== "taken" && <button type="button" className="ghost" disabled={!!busy} onClick={() => onAct("reject")}>Reject</button>}
+      </div>
+    </article>
   );
 }

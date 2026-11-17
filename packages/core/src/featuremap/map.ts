@@ -90,6 +90,7 @@ const PROOF: Record<string, string[]> = {
   "home-board": ["ticket.opened"],
   "git-manager": ["project.published", "ticket.mergecheck", "project.version", "repo.watched"],
   "agent-memory": ["agent.memory.noted", "agent.memory.dream"],
+  "flow-improve": ["flow.proposed"],
 };
 
 /** Features whose events are kept outside a base's log, so the log cannot prove them either way. */

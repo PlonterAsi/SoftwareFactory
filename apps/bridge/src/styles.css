@@ -2287,3 +2287,24 @@ button.fm-wire-node .muted { font: 12px/1.2 var(--mono); white-space: nowrap; }
 .dream-drop ul { margin: 4px 0 0; padding-left: 18px; }
 .who-pick { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .who-pick select { max-width: 100%; }
+
+/* Phase 5: improving a flow (proposals, their replay, one live trial) */
+.flow-improve { border: 1px solid var(--line, rgba(255,255,255,.08)); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.fi-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.fi-head h3 { margin: 0; }
+.fi-words { display: flex; gap: 8px; }
+.fi-words input { flex: 1; min-width: 0; }
+.fi-card { border: 1px solid var(--line, rgba(255,255,255,.08)); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.fi-card.fi-risky { border-color: var(--bad, #e06c6c); }
+.fi-card.fi-cheaper, .fi-card.fi-may-help { border-color: color-mix(in srgb, var(--accent, #7aa2ff) 60%, transparent); }
+.fi-card header { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.fi-card .pill.bad { color: var(--bad, #e06c6c); }
+.fi-card .pill.warn { color: var(--warn, #e0a84f); }
+.fi-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.fi-cols ul { margin: 4px 0 0; padding-left: 18px; }
+.fi-cols p { margin: 4px 0; }
+.fi-runs { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+.fi-runs th, .fi-runs td { text-align: left; padding: 4px 6px; border-top: 1px solid var(--line, rgba(255,255,255,.08)); vertical-align: top; }
+.fi-runs tr.risk-high td { color: var(--bad, #e06c6c); }
+.fi-past { display: flex; flex-direction: column; gap: 2px; }
+@media (max-width: 700px) { .fi-cols { grid-template-columns: 1fr; } .fi-words { flex-direction: column; } }

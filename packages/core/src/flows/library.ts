@@ -54,6 +54,8 @@ export interface FlowSummary {
 export class FlowLibrary {
   /** The ids of the Agent Bay's active agents, when a Bay is there: saving a flow that names any other is refused. */
   agentsKnown?: () => Set<string>;
+  /** A proposed change waiting for its one live trial (flows/improver.ts): the flow the next run of `id` follows instead. */
+  trial?: (id: string, ticket?: number) => FlowDef | null;
   constructor(private log: EventLog) {}
 
   /** The flow by id: its latest saved version, else the built-in one. Undefined when there is no such flow. */
@@ -124,7 +126,9 @@ export class FlowLibrary {
   /** The flow a new run of this kind follows: the chosen one by id, else the kind's own. Checked before use. */
   forRun(kind?: string, chosen?: string): FlowDef {
     const id = chosen ?? builtInFlowFor(kind).id;
-    const f = this.get(id);
+    const base = this.get(id);
+    // A proposal you chose to try once is what this one run follows (only an engine flow, checked like any other).
+    const f = base && runnerOf(base) === "engine" ? (this.trial?.(id) ?? base) : base;
     if (!f) throw new Error(`There is no flow "${id}".`);
     if (runnerOf(f) !== "engine") throw new Error(`"${f.name}" is carried out by ${RUNNER_WORD[runnerOf(f)]}, not the engine.`);
     return assertFlow(f);

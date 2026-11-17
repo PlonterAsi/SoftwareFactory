@@ -51,6 +51,7 @@ flowchart LR
 | [apps.md](apps.md) | The Brain, the app kit and the app check: why builds are real programs | current |
 | [screens.md](screens.md) | Every project has a screen; adding a screen to a finished project | current |
 | [mcp-safety.md](mcp-safety.md) | The safety rule for agents' MCP servers | current |
+| [flows-improve.md](flows-improve.md) | Flows that improve themselves: proposals, replay on past runs, one live trial | current (phase 5) |
 | [agents.md](agents.md) | Named agents: who works each flow step, each agent's memory and its cleaning | current (phase 4) |
 | [git.md](git.md) | The git manager: local first, merge policy, outside work, versions | current (phase 3) |
 

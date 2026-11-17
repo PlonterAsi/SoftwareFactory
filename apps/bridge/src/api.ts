@@ -95,6 +95,23 @@ export interface FlowStepView {
 export interface FlowEdgeView { from: string; to: string; kind: "next" | "back" | "branch"; label?: string; fromSide?: string; toSide?: string }
 export type FlowRunnerView = "engine" | "session" | "answer" | "door";
 export interface FlowView { id: string; name: string; purpose: string; version: number; builtIn: boolean; runner?: FlowRunnerView; kinds?: string[]; brief?: string; door?: string; steps: FlowStepView[]; edges: FlowEdgeView[] }
+/** A proposed change to a flow, replayed on its past runs (core: flows/improve.ts). */
+export interface FlowReplayView {
+  runs: { run: number; kind: "run" | "ticket"; at: string; outcome: string; beforeUsd: number; afterUsd: number; risk: "none" | "low" | "high"; notes: string[] }[];
+  beforeUsd: number; afterUsd: number; risky: number; helped: number; verdict: "cheaper" | "costlier" | "risky" | "may-help" | "same" | "no-history";
+  summary: string; changes: { kind: string; step?: string; text: string }[]; unpriced: string[];
+}
+export interface FlowProposalView {
+  id: number; flowId: string; baseVersion: number; at: string; by: "sf" | "words" | "you"; why: string; words?: string; replay: FlowReplayView; costUsd: number;
+  state: "proposed" | "armed" | "taken" | "tried" | "accepted" | "rejected";
+  trial?: { run?: number; ticket?: number; outcome?: string; totalUsd?: number | null; at: string }; decidedAt?: string; note?: string;
+}
+async function flowPost(path: string, body: unknown = {}) {
+  const r = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error ?? `The core said ${r.status}`);
+  return j;
+}
 export interface FlowSummaryView { id: string; name: string; purpose: string; version: number; builtIn: boolean; runner: FlowRunnerView; kinds: string[]; door: string | null; steps: number; savedBy: string | null; savedAt: string | null }
 
 export interface FactoryRunView {
@@ -675,6 +692,10 @@ export function useChatRoutes(events: SfEvent[], online: boolean) {
 export const flowsApi = {
   list: () => getJson("/api/flows", "could not list the flows") as Promise<{ flows: FlowSummaryView[]; actions: Record<string, { label: string; needs: string[]; required: boolean }>; agents: string[] }>,
   get: (id: string) => getJson(`/api/flows/${encodeURIComponent(id)}`, "could not open the flow") as Promise<{ flow: FlowView; history: { version: number; savedBy: string; savedAt: string }[] }>,
+  proposals: (id: string) => getJson(`/api/flows/${encodeURIComponent(id)}/proposals`, "could not read the proposals") as Promise<{ proposals: FlowProposalView[] }>,
+  propose: (id: string, words: string) => flowPost(`/api/flows/${encodeURIComponent(id)}/propose`, { words }) as Promise<FlowProposalView>,
+  suggest: (id: string) => flowPost(`/api/flows/${encodeURIComponent(id)}/suggest`) as Promise<{ proposals: FlowProposalView[] }>,
+  decide: (pid: number, what: "try" | "accept" | "reject") => flowPost(`/api/flows/proposals/${pid}/${what}`) as Promise<FlowProposalView>,
   /** Save the flow as its next version; refused with every problem when it could not run. */
   save: async (flow: FlowView) => {
     const r = await fetch(`${API}/api/flows/${encodeURIComponent(flow.id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ flow }) });

@@ -36,6 +36,7 @@ import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
 import { brainRoute } from "./brain/routes.js";
 import { featureMapRoute } from "./featuremap/routes.js";
 import { flowsRoute } from "./flows/routes.js";
+import { FlowImprover } from "./flows/improver.js";
 import { GitManager } from "./git/manager.js";
 import { gitRoute } from "./git/routes.js";
 import { DropFolder } from "./bridge/drop.js";
@@ -123,6 +124,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   });
   // A flow step may name a Bay agent; saving one that names an agent the Bay does not have is refused.
   factory.flows.agentsKnown = () => new Set(bay.agents().filter((a) => !a.retired).map((a) => a.def.id));
+  // Flows that improve themselves (flows/improve.ts): proposals replayed on past runs, one live trial, your decision.
+  const flowImprover = new FlowImprover(log, factory.flows, {
+    runtime,
+    agents: () => bay.agents().filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, station: a.def.station })),
+    record: (id) => { const s = bay.stats()[id]; return s ? { passRate: s.passRate, avgUsd: s.avgUsd, calls: s.calls } : null; },
+  });
+  factory.flows.trial = (id, ticket) => flowImprover.takeTrial(id, ticket);
   // The git manager: local first then a private repo, the merge policy, outside work, versions (docs/git.md).
   const gitman = new GitManager(log, tickets, { github, canShip });
   /** An ask in a project that lives in a repo: a ticket there, sent down the route that fits (the reply both doors share). */
@@ -466,7 +474,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/flows" || url.pathname.startsWith("/api/flows/")) {
-        const r = await flowsRoute({ flows: factory.flows, readJson }, req, url);
+        const r = await flowsRoute({ flows: factory.flows, improver: flowImprover, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/git" || url.pathname.startsWith("/api/git/")) {
@@ -511,7 +519,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { github, git: gitman, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, git: gitman, flowImprover, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, errors, fault, ensureSelf });
 }
 
 /**
@@ -834,7 +842,7 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
   // Follow the crew's open PRs: a merge moves the ticket on. At start, then every 5 minutes.
   // Work merged without the crew's own PR (a thread's PR that names SF-13) moves its ticket too.
   // Then the git manager: a merge review of each crew PR whose CI ended (and a merge under "auto"), and outside work.
-  const follow = () => core.tickets.followPrs().then(() => core.tickets.followMerges()).then(() => core.git.tend()).then(() => core.git.watchAll()).catch((e) => console.error("following PRs failed:", e));
+  const follow = () => core.tickets.followPrs().then(() => core.tickets.followMerges()).then(() => core.git.tend()).then(() => core.git.watchAll()).then(() => core.flowImprover.suggestAll()).catch((e) => console.error("following PRs failed:", e));
   follow();
   timers.push(setInterval(follow, 5 * 60_000).unref());
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.

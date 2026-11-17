@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { ACTIONS, STEP_AGENTS, flowProblems, type FlowDef } from "./flow.js";
+import type { FlowImprover } from "./improver.js";
 import type { FlowLibrary } from "./library.js";
 
 /**
@@ -12,10 +13,28 @@ import type { FlowLibrary } from "./library.js";
  *   PUT  /api/flows/:id             { flow }   save it as the next version (refused, with every problem, when it cannot run)
  *   POST /api/flows/:id/reset       back to the flow SoftwareFactory ships, as the next version
  */
-export async function flowsRoute(ctx: { flows: FlowLibrary; readJson: (req: IncomingMessage) => Promise<any> }, req: IncomingMessage, url: URL): Promise<[number, unknown] | null> {
-  const { flows } = ctx;
+export async function flowsRoute(ctx: { flows: FlowLibrary; improver?: FlowImprover; readJson: (req: IncomingMessage) => Promise<any> }, req: IncomingMessage, url: URL): Promise<[number, unknown] | null> {
+  const { flows, improver } = ctx;
   const parts = url.pathname.replace(/^\/api\/flows\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
   try {
+    // Flows that improve themselves (flows/improve.ts): proposals, their replay, one live trial, your decision.
+    if (improver) {
+      if (req.method === "GET" && parts.length === 2 && parts[1] === "proposals") return [200, { proposals: improver.list(parts[0]) }];
+      if (req.method === "POST" && parts.length === 2 && parts[1] === "propose") {
+        const body = await ctx.readJson(req);
+        if (typeof body.words === "string") return [201, await improver.fromWords(parts[0], body.words)];
+        return [201, improver.propose(parts[0], Array.isArray(body.ops) ? body.ops : [], String(body.why ?? "Your change"), "you")];
+      }
+      if (req.method === "POST" && parts.length === 2 && parts[1] === "suggest") return [200, { proposals: improver.suggest(parts[0]) }];
+      if (req.method === "POST" && parts.length === 2 && parts[1] === "replay") { const body = await ctx.readJson(req); return [200, improver.replay(parts[0], body.flow as FlowDef)]; }
+      if (req.method === "POST" && parts.length === 3 && parts[0] === "proposals" && /^\d+$/.test(parts[1])) {
+        const id = Number(parts[1]);
+        const body = await ctx.readJson(req);
+        if (parts[2] === "try") return [200, improver.arm(id)];
+        if (parts[2] === "accept") return [200, improver.accept(id)];
+        if (parts[2] === "reject") return [200, improver.reject(id, body.note ? String(body.note) : undefined)];
+      }
+    }
     if (req.method === "GET" && !parts.length) return [200, { flows: flows.list(), actions: ACTIONS, agents: STEP_AGENTS }];
     if (req.method === "POST" && parts.length === 1 && parts[0] === "check") {
       const body = await ctx.readJson(req);
