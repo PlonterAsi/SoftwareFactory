@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlow, Background, type ReactFlowInstance, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { flowsApi, type FlowStepView, type FlowSummaryView, type FlowView } from "./api";
+import { API, SLOT_LABEL, flowsApi, type BayState, type FlowStepView, type FlowSummaryView, type FlowView, type Slot } from "./api";
 import { Station, edgesFor, nodesFor, type StationData } from "./FactoryFloor";
 import { loadFlow } from "./flowData";
 
@@ -27,14 +27,28 @@ export function FlowsPage() {
   const [flow, setFlow] = useState<FlowView | null>(null);
   const [history, setHistory] = useState<{ version: number; savedBy: string; savedAt: string }[]>([]);
   const [step, setStep] = useState<string | null>(null);
-  useEffect(() => { flowsApi.list().then((j) => { setList(j.flows); setAgents(j.agents); }).catch((e) => setErr(String(e.message ?? e))); }, []);
+  const [bay, setBay] = useState<BayState | null>(null);
+  const [saved, setSaved] = useState(0);
+  useEffect(() => { flowsApi.list().then((j) => { setList(j.flows); setAgents(j.agents); }).catch((e) => setErr(String(e.message ?? e))); }, [saved]);
+  // Who can work a step: the Agent Bay's agents (a step may name one of them instead of the station's crew).
+  useEffect(() => { fetch(`${API}/api/bay/state`).then((r) => r.json()).then(setBay).catch(() => { /* the picker then shows the station only */ }); }, []);
   useEffect(() => {
     let live = true;
-    setStep(null);
     loadFlow(pick).then((f) => { if (live) setFlow(f); }).catch((e) => setErr(String(e.message ?? e)));
     flowsApi.get(pick).then((j) => { if (live) setHistory(j.history); }).catch(() => { /* the flow itself says what failed */ });
     return () => { live = false; };
-  }, [pick]);
+  }, [pick, saved]);
+  useEffect(() => { setStep(null); }, [pick]);
+  /** Name the agents that work a step (empty: the station's crew), saved as the flow's next version. */
+  const pickCrew = async (stepId: string, crew: string[]) => {
+    setErr(null);
+    try {
+      const { flow: cur } = await flowsApi.get(pick);
+      await flowsApi.save({ ...cur, steps: cur.steps.map((s) => (s.id === stepId ? { ...s, crew: crew.length ? crew : undefined } : s)) });
+      setSaved((n) => n + 1);
+    } catch (e) { setErr((e as Error).message); }
+  };
+  const nameOf = (id: string) => bay?.agents.find((a) => a.def.id === id)?.def.name ?? id;
   const nodes = useMemo<Node<StationData>[]>(() => nodesFor(flow).map((n) => ({ ...n, selected: n.id === step })), [flow, step]);
   const edges = useMemo(() => edgesFor(flow), [flow]);
   const rf = useRef<ReactFlowInstance<Node<StationData>> | null>(null);
@@ -76,7 +90,7 @@ export function FlowsPage() {
                 <Background gap={24} size={1} color="var(--grid)" />
               </ReactFlow>
             </div>
-            {picked ? <StepCard s={picked} flow={flow} /> : (
+            {picked ? <StepCard s={picked} flow={flow} bay={bay} canEdit={(flow.runner ?? "engine") !== "door"} onCrew={(c) => pickCrew(picked.id, c)} /> : (
               <div className="flows-about">
                 <p>{flow.purpose}</p>
                 {flow.brief && <p className="small"><b>Told to the crew on every run:</b> {flow.brief}</p>}
@@ -91,7 +105,7 @@ export function FlowsPage() {
                     <td className="mono muted">{s.within ? "" : flow.steps.filter((x) => !x.within).indexOf(s) + 1}</td>
                     <td><b>{s.label}</b>{s.within && <span className="muted small"> inside {flow.steps.find((x) => x.id === s.within)?.label}</span>}<div className="muted small">{s.sub}</div></td>
                     <td><span className={`flows-kind k-${s.kind}`}>{KIND_WORD[s.kind]}</span>{s.loop?.maxRounds ? <span className="mono muted small"> ≤{s.loop.maxRounds}</span> : null}</td>
-                    <td className="small">{s.agents.length ? s.agents.join(", ") : <span className="muted">the core</span>}</td>
+                    <td className="small">{s.crew?.length ? <b>{s.crew.map(nameOf).join(", ")}</b> : s.agents.length ? s.agents.join(", ") : <span className="muted">the core</span>}</td>
                     <td className="small">{s.loop?.passes ?? (s.gate ? "you approve" : "")}</td>
                     <td className="small">{s.loop?.stops ?? (s.skippedWhen ? `skipped when ${s.skippedWhen}` : "")}</td>
                   </tr>
@@ -100,7 +114,7 @@ export function FlowsPage() {
             </table>
             <p className="muted small">
               Version {flow.version}{history.length ? `, saved ${history.length} time${history.length > 1 ? "s" : ""}` : ", as SoftwareFactory ships it"}.
-              Crew slots a step may name: {agents.join(", ")}. Editing a flow in words or by dragging comes in a later phase; the engine and one-session tickets already follow whatever flow is saved. Pick a flow for one ticket on the ticket itself.
+              Crew slots a step may name: {agents.join(", ")}. Pick a step to name the agent that works it; the engine and one-session tickets follow whatever flow is saved. Editing a flow in words or by dragging comes in a later phase. Pick a flow for one ticket on the ticket itself.
             </p>
           </>}
         </section>
@@ -109,7 +123,8 @@ export function FlowsPage() {
   );
 }
 
-function StepCard({ s, flow }: { s: FlowStepView; flow: FlowView }) {
+function StepCard({ s, flow, bay, canEdit, onCrew }: { s: FlowStepView; flow: FlowView; bay: BayState | null; canEdit: boolean; onCrew: (crew: string[]) => void }) {
+  const slot = s.agents[0] as Slot | undefined;
   const into = flow.edges.filter((e) => e.to === s.id).map((e) => flow.steps.find((x) => x.id === e.from)?.label ?? e.from);
   const out = flow.edges.filter((e) => e.from === s.id).map((e) => `${flow.steps.find((x) => x.id === e.to)?.label ?? e.to}${e.label ? ` (${e.label})` : ""}`);
   return (
@@ -117,7 +132,7 @@ function StepCard({ s, flow }: { s: FlowStepView; flow: FlowView }) {
       <h3>{s.label} <span className={`flows-kind k-${s.kind}`}>{KIND_WORD[s.kind]}</span></h3>
       <dl>
         <dt>Does</dt><dd>{s.sub}{s.action ? "" : s.within ? `, inside ${flow.steps.find((x) => x.id === s.within)?.label}` : ""}</dd>
-        <dt>Who</dt><dd>{s.agents.length ? s.agents.join(", ") : "the core, no agent"}</dd>
+        <dt>Who</dt><dd>{slot ? <WhoPicker s={s} slot={slot} bay={bay} canEdit={canEdit} onCrew={onCrew} /> : "the core, no agent"}{s.agents.length > 1 && <span className="muted small"> · with {s.agents.slice(1).join(", ")}</span>}</dd>
         {s.loop && <><dt>Goal</dt><dd>{s.loop.goal}</dd><dt>Judged by</dt><dd>{s.loop.observer}</dd><dt>Passes when</dt><dd>{s.loop.passes}</dd><dt>Stops anyway</dt><dd>{s.loop.stops}{s.loop.maxRounds ? ` (at most ${s.loop.maxRounds} rounds)` : ""}</dd></>}
         {s.gate && <><dt>Asks you</dt><dd>{s.gate.asks}</dd><dt>Answers itself</dt><dd>{s.gate.auto}</dd></>}
         {s.skippedWhen && <><dt>Skipped when</dt><dd>{s.skippedWhen}</dd></>}
@@ -125,5 +140,31 @@ function StepCard({ s, flow }: { s: FlowStepView; flow: FlowView }) {
         {out.length > 0 && <><dt>Goes to</dt><dd>{out.join(", ")}</dd></>}
       </dl>
     </div>
+  );
+}
+
+/**
+ * Who works a step: the station's crew (whoever is seated in the Agent Bay), or a named specialist that works this
+ * step in this flow only. A run follows the flow it started with, so a change applies to the next run.
+ */
+function WhoPicker({ s, slot, bay, canEdit, onCrew }: { s: FlowStepView; slot: Slot; bay: BayState | null; canEdit: boolean; onCrew: (crew: string[]) => void }) {
+  const live = (bay?.agents ?? []).filter((a) => !a.retired);
+  const seated = (bay?.slots?.[slot] ?? []).map((id) => live.find((a) => a.def.id === id)?.def.name ?? id);
+  const station = `${SLOT_LABEL[slot] ?? slot}'s crew${seated.length ? ` (now ${seated.join(", ")})` : ""}`;
+  const chosen = s.crew?.[0] ?? "";
+  const lessons = (id: string) => bay?.memory?.[id]?.length ?? 0;
+  if (!canEdit || slot === "council") return <span>{s.crew?.length ? s.crew.join(", ") : station}{slot === "council" && canEdit ? <span className="muted small"> · the Council's seats are set on the Agents screen</span> : null}</span>;
+  // Made for this station first, then everyone else.
+  const fit = live.filter((a) => a.def.station === slot), rest = live.filter((a) => a.def.station !== slot);
+  return (
+    <span className="who-pick">
+      <select aria-label={`Who works ${s.label}`} value={chosen} onChange={(e) => onCrew(e.target.value ? [e.target.value] : [])}>
+        <option value="">{station}</option>
+        {fit.length > 0 && <optgroup label={`Made for ${SLOT_LABEL[slot] ?? slot}`}>{fit.map((a) => <option key={a.def.id} value={a.def.id}>{a.def.avatar} {a.def.name} · {a.def.model}{lessons(a.def.id) ? ` · ${lessons(a.def.id)} lesson${lessons(a.def.id) > 1 ? "s" : ""}` : ""}</option>)}</optgroup>}
+        {rest.length > 0 && <optgroup label="Other agents">{rest.map((a) => <option key={a.def.id} value={a.def.id}>{a.def.avatar} {a.def.name} · {a.def.model}</option>)}</optgroup>}
+        {chosen && !live.some((a) => a.def.id === chosen) && <option value={chosen}>{chosen} (retired: the station's crew works it)</option>}
+      </select>
+      <span className="muted small"> {chosen ? "named for this step in this flow; saved as a new version" : "whoever is seated on the station"}</span>
+    </span>
   );
 }

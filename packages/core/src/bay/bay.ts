@@ -17,6 +17,7 @@ import { MODELS, SLOTS, normalizeAgent, parseAgentFile, serializeAgent, slugify,
 import { BUILTIN_AGENTS, DEFAULT_SLOTS, SLOT_SEATS, systemPromptFor } from "./builtin.js";
 import { principles } from "../brain/brain.js";
 import { library } from "./kits.js";
+import { DREAM_CONTRACT, DREAM_MAX_USD, DREAM_USD, acceptDream, allMemory, dreamPrompt, dreams, forget, freeDream, memoryBlock, memoryOf, noteLesson, parseDream, rejectDream, tidyMemory, type DreamView, type Lesson } from "./memory.js";
 
 /**
  * The Agent Bay: where workers are created, edited, tested and assigned.
@@ -65,6 +66,9 @@ export interface BayState {
   models: readonly string[];
   /** What an agent's settings can choose from: skills, built-in tools, MCP servers. */
   library: ReturnType<typeof library>;
+  /** Each agent's own memory (bay/memory.ts), and the cleanings waiting on you or decided lately. */
+  memory: Record<string, Lesson[]>;
+  dreams: DreamView[];
 }
 
 const DRAFT_CONTRACT = `Station contract: draft.
@@ -131,10 +135,75 @@ export class AgentBay implements CrewSource {
   }
 
   /** The agents working a station right now, bound to its contract (used by the factory and the Order Engine). */
-  crewFor(slot: Slot): CrewMember[] {
+  crewFor(slot: Slot, pick?: string[]): CrewMember[] {
     const all = new Map(this.agents().map((a) => [a.def.id, a]));
     const brain = principles(this.log);
-    return this.slots()[slot].map((id) => all.get(id)).filter((a): a is AgentView => !!a).map((a) => bind(a.def, a.version, slot, brain));
+    // A flow step may name its own agents for this station: the live ones it names work it, up to the station's seats.
+    const picked = (pick ?? []).filter((id) => all.has(id) && !all.get(id)!.retired).slice(0, SLOT_SEATS[slot]);
+    const ids = picked.length ? picked : this.slots()[slot];
+    return ids.map((id) => all.get(id)).filter((a): a is AgentView => !!a).map((a) => bind(a.def, a.version, slot, brain, memoryBlock(memoryOf(this.log, a.def.id))));
+  }
+
+  // ---------- memory (bay/memory.ts) ----------
+
+  memory(id: string): Lesson[] { return memoryOf(this.log, this.must(id).def.id); }
+
+  /** Teach an agent a lesson yourself. It goes first in its prompt and no tidy removes it. */
+  teach(id: string, text: string): Lesson {
+    const a = this.must(id);
+    if (!text.trim()) throw new Error("Write the lesson in a sentence");
+    const l = noteLesson(this.log, a.def.id, text, "person");
+    if (!l) throw new Error(`${a.def.name} already remembers that.`);
+    return l;
+  }
+
+  forget(id: string, ids: number[]): number {
+    const a = this.must(id);
+    const n = forget(this.log, a.def.id, ids, "removed by you");
+    if (!n) throw new Error(`${a.def.name} has no such lesson.`);
+    return n;
+  }
+
+  /** The free tidy: repeats and near repeats go, then the oldest past the limit (never one you taught). */
+  tidy(id: string): { removed: number } { return { removed: tidyMemory(this.log, this.must(id).def.id).length }; }
+
+  /**
+   * Clean a memory the way Claude Code's Auto Dream does: one capped call reads it and proposes a shorter one.
+   * Nothing changes until you accept it. On the practice crew (or when the answer is unusable) the proposal is
+   * the free tidy, so the screen works without spending anything.
+   */
+  async dream(id: string, maxUsd = DREAM_USD): Promise<DreamView> {
+    const a = this.must(id);
+    const cap = Number(maxUsd);
+    if (!Number.isFinite(cap) || cap <= 0 || cap > DREAM_MAX_USD) throw new Error(`A cleaning may spend above $0 and at most $${DREAM_MAX_USD.toFixed(2)}.`);
+    if (dreams(this.log, a.def.id).some((d) => d.state === "proposed")) throw new Error(`${a.def.name} already has a cleaning waiting on you: accept or reject it first.`);
+    const lessons = memoryOf(this.log, a.def.id);
+    if (lessons.length < 2) throw new Error(`${a.def.name} has ${lessons.length ? "one lesson" : "no lessons"}: nothing to clean yet.`);
+    let plan = freeDream(lessons);
+    let by: "free" | "agent" = "free";
+    let costUsd = 0;
+    let error: string | undefined;
+    if (this.runtime && this.runtime.name !== "mock") {
+      const r = await runAgent(this.log, this.runtime, a.def.id, {
+        prompt: dreamPrompt(a.def.name, lessons), model: "haiku", systemPrompt: `${a.def.prompt.trim()}\n\n${DREAM_CONTRACT}`, budgetUsd: cap,
+      }, { agentVersion: a.version, station: "dream" });
+      costUsd = r.result?.costUsd ?? r.costUsd ?? 0;
+      if (r.result) {
+        try { plan = parseDream(r.result.text, lessons); by = "agent"; }
+        catch (e) { error = `The cleaned memory was unusable (${(e as Error).message}); this is the free tidy instead.`; }
+      } else error = `${r.error ?? "The call failed"}; this is the free tidy instead.`;
+    }
+    const e = this.log.append("agent.memory.dream", { agent: a.def.id, state: "proposed", saw: lessons.map((l) => l.id), lessons: plan.lessons, dropped: plan.dropped, costUsd, by, ...(error ? { error } : {}) });
+    return dreams(this.log, a.def.id).find((d) => d.id === e.id)!;
+  }
+
+  acceptDream(dreamId: number): DreamView { return acceptDream(this.log, dreamId); }
+  rejectDream(dreamId: number): DreamView { return rejectDream(this.log, dreamId); }
+
+  private must(id: string): AgentView {
+    const a = this.get(id);
+    if (!a) throw new Error(`No agent "${id}"`);
+    return a;
   }
 
   tests(): BayTest[] {
@@ -151,6 +220,7 @@ export class AgentBay implements CrewSource {
     return {
       agents: this.agents(), slots: this.slots(), seats: SLOT_SEATS, tests: this.tests().slice(-60), stats: this.stats(),
       visuals: this.events("bay.visual").slice(-40).map((e) => ({ id: e.id, ts: e.ts, ...(e.payload as any) })), models: MODELS, library: library(),
+      memory: allMemory(this.log), dreams: dreams(this.log),
     };
   }
 
@@ -315,7 +385,7 @@ export class AgentBay implements CrewSource {
     const start = this.log.append("bay.test", { agent: id, version: a.version, station, task: sample, state: "running" });
     const prompt = samplePrompt(station, sample);
     const r = await runAgent(this.log, this.runtime, id, {
-      prompt, model: a.def.model, systemPrompt: systemPromptFor(a.def, station, principles(this.log)), budgetUsd: Math.min(a.def.budgetUsd, 0.25),
+      prompt, model: a.def.model, systemPrompt: systemPromptFor(a.def, station, principles(this.log), memoryBlock(memoryOf(this.log, id))), budgetUsd: Math.min(a.def.budgetUsd, 0.25),
       ...kitOf(a.def),
     }, { agentVersion: a.version, station: station === "none" ? undefined : station, bayTest: true });
     const checks: { label: string; pass: boolean }[] = [{ label: "answered within its cap", pass: !r.error }];

@@ -52,6 +52,8 @@ export interface FlowSummary {
 
 /** The flow library: the built-in flows, and every flow saved over them or beside them. */
 export class FlowLibrary {
+  /** The ids of the Agent Bay's active agents, when a Bay is there: saving a flow that names any other is refused. */
+  agentsKnown?: () => Set<string>;
   constructor(private log: EventLog) {}
 
   /** The flow by id: its latest saved version, else the built-in one. Undefined when there is no such flow. */
@@ -98,6 +100,9 @@ export class FlowLibrary {
     const current = this.get(def?.id);
     if (current && runnerOf(current) !== runnerOf(def)) throw new Error(`This flow cannot be saved: "${current.name}" is carried out by ${RUNNER_WORD[runnerOf(current)]}, and a saved version cannot change that. Save it under a new id instead.`);
     const problems = flowProblems(def);
+    // A step may only name agents the Bay has (the core wires `agentsKnown` to the Agent Bay).
+    const known = this.agentsKnown?.();
+    if (known && Array.isArray(def?.steps)) for (const st of def.steps) for (const a of Array.isArray(st?.crew) ? st.crew : []) if (!known.has(a)) problems.push(`"${st.label ?? st.id}" names "${a}", which is not an active agent in the Agent Bay.`);
     if (problems.length) throw new Error(`This flow cannot be saved: ${problems.join(" ")}`);
     const builtIn = BUILT_IN_FLOWS.find((f) => f.id === def.id);
     const { version: _v, builtIn: _b, ...rest } = def;
