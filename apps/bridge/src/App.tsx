@@ -30,6 +30,7 @@ import { Cycles } from "./Cycles";
 import "./projects/improvePanel";
 import "./projects/runPanel";
 import "./projects/budgetPanel";
+import "./projects/GitPanel";
 import "./CodeMap";
 import "./RepoReview";
 import { FeaturesPage, useIntegrations } from "./Features";

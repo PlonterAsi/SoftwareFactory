@@ -21,6 +21,11 @@ export interface GitHubRepo { owner: string; name: string }
 export interface PullRequest { number: number; url: string; state: "open" | "closed"; merged: boolean; draft: boolean; mergeSha: string | null; title: string }
 /** A merged pull request, with the words that may name tickets (its title and branch). */
 export interface MergedPr extends PullRequest { branch: string; mergedAt: string }
+/** A pull request as the git manager reads it. */
+export interface PrDetail extends PullRequest { headSha: string; branch: string; base: string; nodeId: string; author: string; additions: number; deletions: number; changedFiles: number; mergeable: boolean | null; createdAt: string; updatedAt: string; mergedAt: string | null }
+/** CI on one commit: green (all passed), red (one failed), running, or none (no CI). */
+export interface CiState { state: "green" | "red" | "running" | "none"; failed: string[]; total: number }
+export interface Commit { sha: string; message: string; author: string; at: string }
 
 const TOKEN_FILE = "github-token";
 const TOKEN_RE = /^(gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}$/;
@@ -157,6 +162,82 @@ export class GitHub {
   async mergedPrs(repo: GitHubRepo): Promise<MergedPr[]> {
     const rows = await this.call<any[]>("GET", `/repos/${repo.owner}/${repo.name}/pulls?state=closed&sort=updated&direction=desc&per_page=100`, undefined, { anonymous: true });
     return (Array.isArray(rows) ? rows : []).filter((j) => j?.merged_at).map((j) => ({ ...toPr(j), branch: String(j.head?.ref ?? ""), mergedAt: String(j.merged_at) }));
+  }
+
+  // ---- the git manager (docs/git.md) ----------------------------------------
+
+  /** A new repo under the token's account. Private unless asked otherwise. */
+  async createRepo(name: string, o: { private?: boolean; description?: string } = {}): Promise<GitHubRepo & { url: string }> {
+    const j = await this.call<any>("POST", "/user/repos", { name, private: o.private !== false, description: (o.description ?? "").slice(0, 300), auto_init: false });
+    return { owner: String(j.owner?.login ?? ""), name: String(j.name ?? name), url: String(j.html_url ?? "") };
+  }
+
+  /** The repo's default branch (main when it cannot be read). */
+  async defaultBranch(repo: GitHubRepo): Promise<string> {
+    try { return String((await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}`, undefined, { anonymous: true })).default_branch ?? "main") || "main"; } catch { return "main"; }
+  }
+
+  /** One pull request with what the merge check reads: head commit, size, author, branch. */
+  async prDetail(repo: GitHubRepo, number: number): Promise<PrDetail> {
+    const j = await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}/pulls/${number}`, undefined, { anonymous: true });
+    return { ...toPr(j), headSha: String(j.head?.sha ?? ""), branch: String(j.head?.ref ?? ""), base: String(j.base?.ref ?? "main"), nodeId: String(j.node_id ?? ""), author: String(j.user?.login ?? ""),
+      additions: Number(j.additions ?? 0), deletions: Number(j.deletions ?? 0), changedFiles: Number(j.changed_files ?? 0), mergeable: j.mergeable ?? null, createdAt: String(j.created_at ?? ""), updatedAt: String(j.updated_at ?? ""), mergedAt: j.merged_at ?? null };
+  }
+
+  /** The files a pull request changes (first 100). */
+  async prFiles(repo: GitHubRepo, number: number): Promise<string[]> {
+    const rows = await this.call<any[]>("GET", `/repos/${repo.owner}/${repo.name}/pulls/${number}/files?per_page=100`, undefined, { anonymous: true });
+    return (Array.isArray(rows) ? rows : []).map((f) => String(f.filename ?? "")).filter(Boolean);
+  }
+
+  /** CI on a commit: every check run and status, folded into one word. */
+  async ci(repo: GitHubRepo, sha: string): Promise<CiState> {
+    const runs = await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}/commits/${sha}/check-runs?per_page=100`, undefined, { anonymous: true }).catch(() => ({ check_runs: [] }));
+    const stat = await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}/commits/${sha}/status`, undefined, { anonymous: true }).catch(() => ({ statuses: [] }));
+    const items = [
+      ...((runs.check_runs ?? []) as any[]).map((r) => ({ name: String(r.name), done: r.status === "completed", ok: ["success", "skipped", "neutral"].includes(r.conclusion) })),
+      ...((stat.statuses ?? []) as any[]).map((r) => ({ name: String(r.context), done: r.state !== "pending", ok: r.state === "success" })),
+    ];
+    const failed = items.filter((i) => i.done && !i.ok).map((i) => i.name);
+    const state: CiState["state"] = !items.length ? "none" : failed.length ? "red" : items.some((i) => !i.done) ? "running" : "green";
+    return { state, failed, total: items.length };
+  }
+
+  /** A draft PR becomes ready for review (GitHub refuses to merge a draft). */
+  async markReady(nodeId: string): Promise<void> {
+    await this.call("POST", "/graphql", { query: "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { id } } }", variables: { id: nodeId } });
+  }
+
+  /** Merge a pull request (squash), only if its head is still the commit that was checked. */
+  async mergePr(repo: GitHubRepo, number: number, sha: string, title?: string): Promise<{ sha: string }> {
+    const j = await this.call<any>("PUT", `/repos/${repo.owner}/${repo.name}/pulls/${number}/merge`, { merge_method: "squash", sha, ...(title ? { commit_title: title.slice(0, 250) } : {}) });
+    return { sha: String(j.sha ?? "") };
+  }
+
+  /** Pull requests touched most recently first (one page of 50): open, closed and merged. */
+  async recentPrs(repo: GitHubRepo): Promise<PrDetail[]> {
+    const rows = await this.call<any[]>("GET", `/repos/${repo.owner}/${repo.name}/pulls?state=all&sort=updated&direction=desc&per_page=50`, undefined, { anonymous: true });
+    return (Array.isArray(rows) ? rows : []).map((j) => ({ ...toPr(j), headSha: String(j.head?.sha ?? ""), branch: String(j.head?.ref ?? ""), base: String(j.base?.ref ?? "main"), nodeId: String(j.node_id ?? ""), author: String(j.user?.login ?? ""),
+      additions: 0, deletions: 0, changedFiles: 0, mergeable: null, createdAt: String(j.created_at ?? ""), updatedAt: String(j.updated_at ?? ""), mergedAt: j.merged_at ?? null }));
+  }
+
+  /** Commits on a branch since a time (newest first, one page of 50). */
+  async commits(repo: GitHubRepo, branch: string, since?: string): Promise<Commit[]> {
+    const q = `sha=${encodeURIComponent(branch)}&per_page=50${since ? `&since=${encodeURIComponent(since)}` : ""}`;
+    const rows = await this.call<any[]>("GET", `/repos/${repo.owner}/${repo.name}/commits?${q}`, undefined, { anonymous: true });
+    return (Array.isArray(rows) ? rows : []).map((c) => ({ sha: String(c.sha), message: String(c.commit?.message ?? ""), author: String(c.author?.login ?? c.commit?.author?.name ?? ""), at: String(c.commit?.committer?.date ?? c.commit?.author?.date ?? "") }));
+  }
+
+  /** A release: its tag on `sha`, its notes as the body. */
+  async release(repo: GitHubRepo, o: { tag: string; sha: string; name: string; notes: string }): Promise<{ url: string }> {
+    const j = await this.call<any>("POST", `/repos/${repo.owner}/${repo.name}/releases`, { tag_name: o.tag, target_commitish: o.sha, name: o.name, body: o.notes.slice(0, 20_000) });
+    return { url: String(j.html_url ?? "") };
+  }
+
+  /** Send a local repo to a repo just made for it: its branch as main, and its tags. Only into an empty repo. */
+  async publishPush(dir: string, repo: GitHubRepo, branch = "HEAD"): Promise<void> {
+    this.git(dir, "push", "-q", this.remote(repo), `${branch}:refs/heads/main`);
+    try { this.git(dir, "push", "-q", "--tags", this.remote(repo)); } catch { /* no tags */ }
   }
 
   async pr(repo: GitHubRepo, number: number): Promise<PullRequest> {

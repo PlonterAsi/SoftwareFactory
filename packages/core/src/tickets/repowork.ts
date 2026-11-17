@@ -66,8 +66,10 @@ export function repoOfProject(log: EventLog, project: number | null): RepoRef | 
   }
   if (has("project_links")) {
     const rows = log.db.prepare("SELECT ref FROM project_links WHERE project_id = ? AND kind = 'repo'").all(project) as { ref: string }[];
-    for (const { ref } of rows) if (existsSync(join(ref, ".git"))) return { source: ref, dir: ref, branch: null };
     const gh = log.db.prepare("SELECT ref FROM project_links WHERE project_id = ? AND kind = 'github' ORDER BY rowid LIMIT 1").get(project) as { ref: string } | undefined;
+    // A folder on this computer; once published (docs/git.md) its branches go to the GitHub repo it was sent to.
+    const published = gh ? parseGitHubRepo(gh.ref) : null;
+    for (const { ref } of rows) if (existsSync(join(ref, ".git"))) return { source: ref, dir: ref, branch: null, ...(published ? { github: published } : {}) };
     const g = gh ? parseGitHubRepo(gh.ref) : null;
     if (g) {
       const github = r?.source ? parseGitHubRepo(r.source) ?? g : g;

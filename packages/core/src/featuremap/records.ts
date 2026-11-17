@@ -78,6 +78,21 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}tickets/precheck.ts`], api: [],
   },
   {
+    id: "git-manager", name: "Git manager", group: "Work",
+    purpose: "SoftwareFactory runs git for every project: a new project stays on this computer until it is worth continuing, then gets a private repo; crew PRs are merged by a policy with a confidence review; work done outside SF joins tickets; merged tickets become versions with release notes.",
+    spec: [
+      "Local first: Continue (or Publish at any time) makes a private GitHub repo and sends the project's code there; Park pauses it and Drop archives it, each with its reasons.",
+      "Every crew PR gets a free confidence review when its CI ends: CI, SF's own review and tests, size, sensitive files, decisions only the person makes, and taste.",
+      "Each project starts on ask: a PR that passed CI waits on Needs you with its review. After three right merges in a row SF offers auto, where it merges a confident PR by itself. A merge marked not right puts the project back on ask.",
+      "Outside work: a PR or commit that names a ticket joins it; any other becomes a ticket that says it was made outside SF. The first look at a repo only remembers where it stands.",
+      "Versions: the merged tickets since the last version, release notes written from them, a GitHub release (or a tag in the local folder), and a version timeline on the project.",
+    ],
+    flow: ["A project is built on this computer", "The person presses Continue or Publish", "The crew opens PRs; CI ends; SF reviews each", "The person merges, or SF merges under auto", "The person cuts a version"],
+    design: "A Git tab on each project (where the code lives, verdict, merge policy, versions), Merge cards on Home's Needs you, and a merge box on the ticket page.",
+    screens: ["/", "/factory/tickets"], docs: ["docs/git.md"], stations: [],
+    files: [`${C}git/`, `${B}projects/GitPanel.tsx`], api: ["/api/git"],
+  },
+  {
     id: "home-board", name: "Home board", group: "Work",
     purpose: "The first screen: every ticket across projects in four lanes (Needs you, Running, In review, Done), Needs you first, beside a live drawing of the flow of what is running now.",
     spec: [

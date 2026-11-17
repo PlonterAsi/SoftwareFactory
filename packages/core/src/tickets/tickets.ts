@@ -77,7 +77,9 @@ export interface BoardCard {
   id: number; key: string; title: string; kind: string; status: TicketStatus; project: number | null; projectName: string | null;
   flow: { id: string; name: string; runner: string } | null; run: number | null; pr: { number: number; url: string; state: string } | null; updatedAt: string;
   /** In Needs you: what it needs (check: questions before money; gate: a run waits for your OK; look, answer, decide). */
-  need?: "check" | "gate" | "look" | "answer" | "decide"; say?: string; questions?: number;
+  need?: "check" | "gate" | "look" | "answer" | "decide" | "merge"; say?: string; questions?: number;
+  /** A PR whose CI passed: SF's merge review (git/confidence.ts), when it waits for your merge. */
+  merge?: { confident: boolean; score: number; number: number } | null;
   /** While it runs: the flow step it is on (an engine station, or a session flow's step id), and whether the crew is on it now. */
   step?: string | null; stepName?: string | null; live?: boolean;
 }
@@ -967,7 +969,17 @@ export class Tickets {
       if (w.ticket.status === "built" && w.ticket.pr?.state === "open") continue; // its PR is in review
       put("needs", card(w.ticket, { need: w.need, say: w.say }));
     }
-    for (const t of this.list({ view: "look", project: scope, limit: 300 })) if (t.pr?.state === "open") put("review", card(t, { say: `Draft PR #${t.pr.number}: checks run, its merge moves it on` }));
+    // A crew PR whose CI passed waits for a merge: on Needs you with SF's merge review (docs/git.md). The rest are in review.
+    const hasChecks = !!this.log.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'merge_checks'").get();
+    const mergeRow = hasChecks ? this.log.db.prepare("SELECT number, ci, confident, score, reasons, merged_by FROM merge_checks WHERE ticket_id = ?") : null;
+    for (const t of this.list({ view: "all", project: scope, limit: 500 })) {
+      if (t.pr?.state !== "open" || isClosed(t.status)) continue;
+      const m = mergeRow?.get(t.id) as { number: number; ci: string; confident: number; score: number; reasons: string; merged_by: string | null } | undefined;
+      if (m && m.number === t.pr.number && m.ci === "green" && !m.merged_by && t.source !== "outside") {
+        const miss = (JSON.parse(m.reasons) as { ok: boolean; text: string }[]).filter((r) => !r.ok);
+        put("needs", card(t, { need: "merge", say: m.confident ? `PR #${t.pr.number} is ready to merge: every check of SF's review passed` : `PR #${t.pr.number} passed CI. ${miss[0]?.text ?? ""}`.trim(), merge: { confident: !!m.confident, score: m.score, number: m.number } }));
+      } else put("review", card(t, { say: m?.ci === "red" ? `PR #${t.pr.number}: CI failed` : t.source === "outside" ? `PR #${t.pr.number}, made outside SF` : `Draft PR #${t.pr.number}: checks run, its merge moves it on` }));
+    }
     const since = new Date(Date.now() - (o.doneDays ?? 14) * 86_400_000).toISOString();
     for (const t of this.list({ view: "closed", project: scope, limit: 200 })) if (t.status === "closed" && (t.closedAt ?? t.updatedAt) >= since) put("done", card(t));
     lanes.done.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

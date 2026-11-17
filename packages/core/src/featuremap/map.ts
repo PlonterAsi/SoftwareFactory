@@ -88,6 +88,7 @@ const PROOF: Record<string, string[]> = {
   flows: ["factory.run.started"],
   "check-before-money": ["ticket.checked"],
   "home-board": ["ticket.opened"],
+  "git-manager": ["project.published", "ticket.mergecheck", "project.version", "repo.watched"],
 };
 
 /** Features whose events are kept outside a base's log, so the log cannot prove them either way. */
