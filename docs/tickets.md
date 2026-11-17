@@ -41,6 +41,8 @@ A ticket that reaches **ready** joins its project's queue, ordered by priority, 
 - **The rule**: a bug or task, sized S or M, not blocked, not taken by you (assignee "you"), and no hold words from you on its thread ("hold", "don't close", "needs a look"). Requests, ideas, epics and questions are taste: they never start by themselves. Size L is split first, or started by you.
 - **Size** (S, M, L) is set by whoever reads the ticket: Ask an agent now ends with a `SIZE:` line and fills it if it is empty, or you set it on the ticket page.
 - **Caps**: at most 2 tickets worked at once per project, $0.60 per ticket, and a day's starts × $0.60 stay under $3. An auto-started run approves its own gates (budget escalations still stop it), and the QA rule closes the ticket only on green locked tests.
+- **Monthly budgets** (phase 6, [watchers.md](watchers.md#a-queue-that-fits-them)): on the real crew a ready ticket waits, saying "Waits for money", while its project's or the overall month has less left than one start's cap, and starts by itself when money is there again. A start you press gets no more than the month has left.
+- **Watchers** ([watchers.md](watchers.md)) open tickets on a schedule, as open (not ready), so the crew leaves them until you make them ready.
 - **The switch**: "Crew picks up: on/off" in the Tickets header; `GET/POST /api/tickets/auto { on, maxUsd, dailyUsd, wip }`, saved as settings. `GET /api/tickets/queue?project=` lists each ready ticket with its place in line or the reason it waits.
 
 ## Each ticket follows a flow (2026-11-17, phase 2)

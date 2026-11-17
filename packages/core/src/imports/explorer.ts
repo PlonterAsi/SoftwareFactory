@@ -327,7 +327,7 @@ export class RepoExplorer {
         const r = await runAgent(this.log, this.runtime, cart?.id ?? "cartographer", {
           prompt: mapPrompt(repoName, b), model: cart?.model ?? "haiku", systemPrompt: cart?.role,
           budgetUsd: Number(Math.max(0.01, Math.min(cart?.budgetUsd ?? 0.05, cap - spent)).toFixed(4)), ...kitArgs(cart), cwd: imp.dir,
-        }, { station: "map", agentVersion: cart?.version });
+        }, { projectId, station: "map", agentVersion: cart?.version });
         spent += r.result?.costUsd ?? 0;
         for (const n of (r.result && parseModuleNotes(r.result.text)) || []) { note(n, cart?.id ?? "cartographer"); mapped++; }
       }
@@ -346,7 +346,7 @@ export class RepoExplorer {
       const r = await runAgent(this.log, this.runtime, sv?.id ?? "surveyor", {
         prompt: surveyPrompt(repoName, mapText(map, notes)), model: sv?.model ?? "haiku", systemPrompt: sv?.role,
         budgetUsd: Number(Math.max(0.01, Math.min(sv?.budgetUsd ?? 0.1, cap - spent)).toFixed(4)), ...kitArgs(sv), cwd: imp.dir,
-      }, { station: "survey", agentVersion: sv?.version });
+      }, { projectId, station: "survey", agentVersion: sv?.version });
       spent += r.result?.costUsd ?? 0;
       suggestions = r.result ? parseSuggestions(r.result.text) : null;
       if (suggestions) by = sv?.id ?? "surveyor";

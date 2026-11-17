@@ -689,6 +689,31 @@ export function useChatRoutes(events: SfEvent[], online: boolean) {
   return routes;
 }
 
+/** This month's money for one project or for everything (core: watch/spend.ts). */
+export interface MonthView {
+  month: string; projectId: number | null; budgetUsd: number | null; spentUsd: number; leftUsd: number | null;
+  days: { day: string; usd: number }[]; burnUsd: number; projectedUsd: number; runsOutOn: string | null; daysLeft: number;
+  projects?: { projectId: number; name: string; spentUsd: number; budgetUsd: number | null; leftUsd: number | null }[]; unassignedUsd?: number;
+}
+/** One watcher of a project (core: watch/watchers.ts). */
+export interface WatcherView {
+  kind: "debt" | "security" | "dependencies" | "flaky"; label: string; text: string; on: boolean; everyHours: number;
+  lastAt: string | null; nextAt: string | null; last: { found: number; opened: number[]; note: string; error?: string } | null; blocked: string | null;
+}
+async function postJson(path: string, body: unknown = {}) {
+  const r = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error ?? `The core said ${r.status}`);
+  return j;
+}
+export const watchApi = {
+  month: (project?: number | null) => getJson(`/api/budget/month${project != null ? `?project=${project}` : ""}`, "could not read this month's money") as Promise<MonthView>,
+  setMonth: (projectId: number | null, usd: number | null) => postJson("/api/budget/month", { projectId, usd }) as Promise<MonthView>,
+  watchers: (project: number) => getJson(`/api/watchers?project=${project}`, "could not read the watchers") as Promise<{ watchers: WatcherView[] }>,
+  setWatcher: (project: number, kind: string, patch: { on?: boolean; everyHours?: number }) => postJson(`/api/watchers/${project}/${kind}`, patch) as Promise<{ watchers: WatcherView[] }>,
+  runWatcher: (project: number, kind: string) => postJson(`/api/watchers/${project}/${kind}/run`) as Promise<{ note: string; opened: number[]; watchers: WatcherView[] }>,
+};
+
 export const flowsApi = {
   list: () => getJson("/api/flows", "could not list the flows") as Promise<{ flows: FlowSummaryView[]; actions: Record<string, { label: string; needs: string[]; required: boolean }>; agents: string[] }>,
   get: (id: string) => getJson(`/api/flows/${encodeURIComponent(id)}`, "could not open the flow") as Promise<{ flow: FlowView; history: { version: number; savedBy: string; savedAt: string }[] }>,

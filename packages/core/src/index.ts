@@ -37,6 +37,8 @@ export * from "./flows/flow.js";
 export * from "./flows/library.js";
 export * from "./flows/improve.js";
 export * from "./flows/improver.js";
+export * from "./watch/spend.js";
+export * from "./watch/watchers.js";
 export * from "./tickets/tickets.js";
 export * from "./tickets/repowork.js";
 export * from "./tickets/github.js";
