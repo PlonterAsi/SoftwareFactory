@@ -72,6 +72,8 @@ export type EventType =
   | "agent.memory.noted"
   | "agent.memory.removed"
   | "agent.memory.dream"
+  | "flow.proposed"
+  | "flow.proposal"
   | "bay.agent.saved"
   | "bay.agent.retired"
   | "bay.assign"

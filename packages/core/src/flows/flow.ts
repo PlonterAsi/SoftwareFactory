@@ -150,6 +150,8 @@ export interface FlowDef {
   kinds?: string[];
   /** Words added to the worker's instructions on every run of this flow (what makes a refactor a refactor). */
   brief?: string;
+  /** Set on the copy a run follows when that run is the live trial of a proposed change (flows/improve.ts). */
+  trialOf?: number;
   /** For a door flow: which screen carries it out today. */
   door?: string;
   steps: FlowStep[];
