@@ -107,6 +107,17 @@ describe("watchers only open tickets", () => {
     expect(securityFindings(dir).some((f) => f.key === "env-not-ignored")).toBe(false);
   });
 
+  it("finds a password under a longer name, or passed straight to a mail login, and not a setting read at start", () => {
+    const secretPlaces = (code: string) => {
+      const dir = tmp("sf-watch-sec-");
+      writeFileSync(join(dir, "app.py"), code);
+      return securityFindings(dir).filter((f) => /secret/i.test(f.title)).length;
+    };
+    expect(secretPlaces('MAIL_PASSWORD = "abcd efgh ijkl mnop"\n')).toBe(1);
+    expect(secretPlaces('server.login("me@example.com", "abcdefghijklmnop")\n')).toBe(1);
+    expect(secretPlaces('MAIL_PASSWORD = os.environ["MAIL_PASSWORD"]\nserver.login(user, password)\n')).toBe(0);
+  });
+
   it("finds a test that passed and then failed again inside one build, in two builds", () => {
     const log = new EventLog();
     const p = createProject(log, { name: "Timer" });
