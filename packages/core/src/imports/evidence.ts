@@ -257,7 +257,7 @@ export function extractIntegrations(dir: string, files: Map<string, string>, env
 
 const RISKS: { id: string; level: RiskLevel; text: string; re: RegExp; ext?: RegExp }[] = [
   { id: "debug-on", level: "high", text: "The app starts in debug mode, which lets anyone who reaches an error page run code on the server", re: /\.run\([^)]*debug\s*=\s*True|^\s*DEBUG\s*=\s*True\b/m, ext: /\.py$/ },
-  { id: "hardcoded-secret", level: "high", text: "A secret key is written in the code instead of read from a setting", re: /\b(?:SECRET_KEY|secret_key|JWT_SECRET|jwtSecret|API_KEY|api_key|PASSWORD|password)\b\s*[:=]\s*['"][^'"\s]{6,}['"]/ },
+  { id: "hardcoded-secret", level: "high", text: "A secret key is written in the code instead of read from a setting", re: /\b\w*(?:secret_?key|jwt_?secret|api_?key|password|passwd)\b\s*[:=]\s*['"](?=[^'"\n]*[^\s'"])[^'"\n{}$<>]{6,}['"]|\.login\(\s*['"][^'"\n]+['"]\s*,\s*['"][^'"\n]{6,}['"]/i },
   { id: "eval", level: "high", text: "Code is built from text and run (eval or exec): unsafe when any of that text comes from a visitor", re: /(^|[^.\w])(eval|exec)\(\s*[^)'"]/m, ext: /\.(py|js|ts|jsx|tsx|mjs|cjs|php)$/ },
   { id: "shell", level: "high", text: "A shell command is built from text (shell=True or os.system): unsafe when any of it comes from a visitor", re: /shell\s*=\s*True|os\.system\(|child_process['"]\)?\.exec\(/ },
   { id: "sql-format", level: "high", text: "A database query is put together from text, which allows SQL injection", re: /(execute|query)\(\s*(f['"]|['"][^'"]*['"]\s*(%|\+)|`[^`]*\$\{)[^)]*\b(SELECT|INSERT|UPDATE|DELETE)\b|\b(SELECT|INSERT|UPDATE|DELETE)\b[^'"`\n]*['"`]\s*(\+|%)\s*\w/i },
