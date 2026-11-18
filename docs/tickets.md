@@ -115,6 +115,33 @@ An ask said in a project (its idea box, the Assistant) is read for its door befo
 - **Another round** ("another round on the landing page", "re-loop this project", "improve it again") becomes an **epic of the round**: a reader goes through a read-only copy of the repo and lists 3 to 6 findings, each filed as a ready bug or task with its size under that epic. The crew works them like any ticket (asked for when you asked, so they start within your limit), and the epic moves on by itself when they are done. Repo projects only.
 - **Anything else** is work: a request ticket on the light or engine route, as before. A route you choose always means work.
 
+## Files on a ticket (2026-11-18)
+
+A ticket holds files: screenshots, logs, reports. On the ticket page, drop them on Files, paste a screenshot there, or press add a file; pictures show as a gallery and the rest as links. From a terminal: `sf attach SF-12 shot.png`. The bytes live on this PC in `ticket-files/<ticket id>/` next to the crew's work folder, never in the log (event `ticket.file` records the name, size and type; a removed file is only hidden). Up to 15 MB a file. The work document lists each file with where it lies, so an agent that works the ticket can open it. Pictures, video, PDF and plain text open in place; HTML, SVG and anything else are downloaded, never run. API: `POST /api/tickets/<id>/files?name=<name>` with the raw bytes, `GET /api/tickets/<id>/files/<file>`, `POST /api/tickets/<id>/files/<file>/remove`.
+
+## Many at once (2026-11-18)
+
+Tick rows in the list (or Pick all) and a bar appears: move them to Open, Ready, Closed or Rejected, size them, set a priority, mark them asked for, or copy them as Markdown. Each ticket moves by the same rules as alone; one that refuses is named with why, and the rest still move. A sort menu orders the list by priority (the default), newest, oldest, last changed or smallest first. API: `POST /api/tickets/bulk { ids, action: status|asked|size|priority|parent|assignee, value }`, `GET /api/tickets/export?ids=1,2[&format=json]`.
+
+## From any terminal: `sf` (2026-11-18)
+
+`packages/core/bin/sf.mjs` reads and answers tickets from a terminal, for you and for agents such as a Claude Code session in another repo. It talks to the running core on this PC (`http://127.0.0.1:4317`, or `SF_URL`), needs nothing installed beyond Node, and every write goes through the same API as the app, so it lands on the ticket's thread like a press there.
+
+```
+node packages/core/bin/sf.mjs inbox                 what waits for you (look, answer, decide)
+node packages/core/bin/sf.mjs list --all --kind bug
+node packages/core/bin/sf.mjs show SF-12            the ticket, its thread, its run and its place in line
+node packages/core/bin/sf.mjs doc SF-12             the work document as Markdown (what an agent needs to do it)
+node packages/core/bin/sf.mjs open "Footer link is broken" --kind bug --size S --asked
+node packages/core/bin/sf.mjs reply SF-12 "Seen in base.html" --status ready
+node packages/core/bin/sf.mjs asked SF-12           the crew starts it by itself within your standing limit
+node packages/core/bin/sf.mjs work SF-12 --max 1.5 --route engine
+node packages/core/bin/sf.mjs retry SF-12 | pr SF-12 123 | queue
+node packages/core/bin/sf.mjs say-project 7 "Why does the login fail?"   a question, another round, or work
+```
+
+`--json` prints the raw answer. The skill in [skills/sf-tickets/SKILL.md](skills/sf-tickets/SKILL.md) teaches a Claude Code session to use it: copy its folder to `~/.claude/skills/` and every session on the PC can read and answer SF's tickets.
+
 ## Errors become bugs
 
 Nothing that goes wrong is lost in a log nobody reads, and nothing is sent to an outside service.

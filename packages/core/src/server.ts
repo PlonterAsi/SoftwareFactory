@@ -44,7 +44,7 @@ import { GitManager } from "./git/manager.js";
 import { gitRoute } from "./git/routes.js";
 import { DropFolder } from "./bridge/drop.js";
 import { askForApp } from "./factory/appagent.js";
-import { AUTO_WORK_DEFAULT, Tickets, type AutoWork } from "./tickets/tickets.js";
+import { AUTO_WORK_DEFAULT, TICKET_FILE_MAX, Tickets, type AutoWork, type TicketFile } from "./tickets/tickets.js";
 import { GitHub, ghCliToken, parseGitHubRepo } from "./tickets/github.js";
 import { RunnerManager } from "./runners/manager.js";
 import { runnersRoute } from "./runners/routes.js";
@@ -463,6 +463,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
           return json(res, 200, tickets.autoWork());
         }
         const r = await ticketRoute(tickets, req, url, gitReady);
+        if (r && r[0] === -2) return sendFile(res, r[1] as TicketFile);
         if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/imports" || url.pathname.startsWith("/api/imports/")) {
@@ -671,6 +672,11 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
     const project = proj == null || proj === "" ? null : Number(proj);
     return [200, { items: tickets.waiting(project) }];
   }
+  if (req.method === "GET" && path === "/api/tickets/export") {
+    const ids = (q.get("ids") ?? "").split(",").map(Number).filter((n) => n > 0);
+    const format = q.get("format") === "json" ? "json" : "md";
+    return [format === "json" ? 200 : -1, format === "json" ? JSON.parse(tickets.exportTickets(ids, "json")) : tickets.exportTickets(ids, "md")];
+  }
   const byKey = path.match(/^\/api\/tickets\/key\/([^/]+)$/);
   if (req.method === "GET" && byKey) {
     const t = tickets.byKey(decodeURIComponent(byKey[1]));
@@ -685,6 +691,11 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
       counts: tickets.counts(project),
     }];
   }
+  const fileGet = path.match(/^\/api\/tickets\/(\d+)\/files\/([^/]+)$/);
+  if (req.method === "GET" && fileGet) {
+    const f = tickets.files(Number(fileGet[1])).find((x) => x.file === decodeURIComponent(fileGet[2]));
+    return f ? [-2, f] : [404, { error: "No such file on this ticket." }];
+  }
   let m = path.match(/^\/api\/tickets\/(\d+)(?:\/([a-z]+))?$/);
   if (req.method === "GET" && m) {
     const id = Number(m[1]);
@@ -695,11 +706,25 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
     return d ? [200, d] : [404, { error: `No ticket #${id}` }];
   }
   if (req.method !== "POST") return null;
+  // A file for a ticket: the raw bytes as the body, its name in ?name= (no JSON, so a 10 MB screenshot is not inflated).
+  const fileAdd = path.match(/^\/api\/tickets\/(\d+)\/files$/);
+  if (fileAdd) {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const c of req) { size += (c as Buffer).length; if (size > TICKET_FILE_MAX) return [413, { error: "A ticket takes files up to 15 MB." }]; chunks.push(c as Buffer); }
+    try { return [201, tickets.attach(Number(fileAdd[1]), q.get("name") ?? "file", Buffer.concat(chunks), { mime: String(req.headers["content-type"] ?? "") })]; } catch (e) { return [400, { error: (e as Error).message }]; }
+  }
+  const fileOff = path.match(/^\/api\/tickets\/(\d+)\/files\/([^/]+)\/remove$/);
+  if (fileOff) { try { return [200, tickets.detach(Number(fileOff[1]), decodeURIComponent(fileOff[2]))]; } catch (e) { return [400, { error: (e as Error).message }]; } }
   const body = await readJson(req);
   // Your answers to the check before money, in one batch; with run, the tickets that are then clear start.
   if (path === "/api/tickets/checks") {
     const answers = Array.isArray(body.answers) ? (body.answers as { id: number; q: string; text: string }[]) : [];
     try { return [200, tickets.answerChecks(answers, { run: body.run === true })]; } catch (e) { return [400, { error: (e as Error).message }]; }
+  }
+  // Many tickets at once: a status move, asked, size, priority, parent or assignee. Each says why it refused.
+  if (path === "/api/tickets/bulk") {
+    try { return [200, tickets.bulk(Array.isArray(body.ids) ? body.ids.map(Number) : [], String(body.action ?? ""), body.value)]; } catch (e) { return [400, { error: (e as Error).message }]; }
   }
   if (path === "/api/tickets") return [201, tickets.open({ ...(body as object), by: "you", source: typeof body.source === "string" ? body.source : "you" } as any)];
   m = path.match(/^\/api\/tickets\/(\d+)\/([a-z]+)$/);
@@ -821,6 +846,16 @@ async function orderRoute(order: OrderEngine, req: IncomingMessage, path: string
 
 function send(res: ServerResponse, e: SfEvent) { res.write(`id: ${e.id}\ndata: ${JSON.stringify(e)}\n\n`); }
 function end(res: ServerResponse, status: number) { res.writeHead(status); res.end(); }
+/** A ticket's file. Pictures, video, PDF and plain text show in place; anything that could run (HTML, SVG) is downloaded. */
+function sendFile(res: ServerResponse, f: TicketFile) {
+  const inline = /^(image\/(png|jpeg|gif|webp)|video\/|application\/pdf|text\/plain)/.test(f.mime);
+  res.writeHead(200, {
+    "content-type": inline ? f.mime : "application/octet-stream", "content-length": String(f.size),
+    "content-disposition": `${inline ? "inline" : "attachment"}; filename="${f.name.replace(/"/g, "")}"`,
+    "x-content-type-options": "nosniff", "content-security-policy": "sandbox", "cache-control": "private, max-age=3600",
+  });
+  res.end(readFileSync(f.path));
+}
 function text(res: ServerResponse, status: number, body: string) {
   res.writeHead(status, { "content-type": "text/markdown; charset=utf-8" });
   res.end(body);
