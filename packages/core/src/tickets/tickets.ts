@@ -12,12 +12,12 @@ import { projectOf, registerProjectFacet } from "../projects/service.js";
 import { EDITABLE, type TimelineCat } from "./tables.js";
 import { branchFor, harnessChecks, repoOfProject, workInRepo, type RepoRef } from "./repowork.js";
 import { hideTokens, parseGitHubRepo, type GitHub, type MergedPr } from "./github.js";
-import { routeWork, type Routed, type WorkRoute } from "../factory/route.js";
+import { intakeDoor, routeWork, type Routed, type WorkRoute } from "../factory/route.js";
 import { REPO_ENGINE_MIN_USD, type RepoRuns } from "../factory/reporun.js";
 import { DEFAULT_NEXT_USD, buildAllowance } from "../projects/budget.js";
 import { selfProject } from "./intake.js";
 import { FlowLibrary } from "../flows/library.js";
-import { runnerOf, type FlowDef } from "../flows/flow.js";
+import { RESEARCH_FLOW, runnerOf, type FlowDef } from "../flows/flow.js";
 import { pickFlow, routeOfFlow, type FlowPick } from "./flowpick.js";
 import { answerTicket } from "./research.js";
 import { checkTicket, type TicketCheck } from "./precheck.js";
@@ -212,6 +212,26 @@ export const epicOfTickets = (t: Pick<TicketView, "kind" | "children">): string 
  * ticket to the crew. Every write is one event; the `tickets` projection keeps
  * the tables. Agents and the factory write back onto the ticket by themselves.
  */
+/** What the reader of a re-loop is asked for: findings in a shape the core files as tickets. */
+export const RELOOP_BRIEF = [
+  "This is another round on the project as it stands. Read the code that matters and list the improvements most worth making now: bugs you can see, rough edges a user meets, missing tests for code that matters, risky code.",
+  "Answer with 3 to 6 findings, most valuable first, each on one line exactly like this:",
+  "- [S] bug: Short title: what to change and where (files)",
+  "S is one small change, M a few files, L more than one session. The kind is bug or task. Only what you saw in the code, never a guess.",
+].join("\n");
+
+/** The findings of a re-loop reader, as tickets to open. At most 6. */
+export function reloopFindings(text: string): { size: Size; kind: "bug" | "task"; title: string; what: string }[] {
+  const out: { size: Size; kind: "bug" | "task"; title: string; what: string }[] = [];
+  for (const m of String(text ?? "").matchAll(/^\s*[-*]\s*\[(S|M|L)\]\s*(?:(bug|task)\s*:\s*)?([^:\n]{3,120})(?::\s*(.+))?$/gim)) {
+    const title = m[3].trim();
+    if (!title) continue;
+    out.push({ size: m[1].toUpperCase() as Size, kind: (m[2]?.toLowerCase() === "bug" ? "bug" : "task"), title, what: (m[4] ?? title).trim().slice(0, 2000) });
+    if (out.length === 6) break;
+  }
+  return out;
+}
+
 /** Ticket numbers a line of text names for one key: "SF-13", "SF-16, 17, 18", "sf/SF-24-h3-guard". */
 export function ticketNumbersIn(text: string, key: string): number[] {
   const out = new Set<number>();
@@ -1163,10 +1183,61 @@ export class Tickets {
    * a request ticket there, and the ticket takes its route. So every piece of work in a repo has a thread, a
    * branch and a pull request to follow, whichever door it came through. Null when the project has no repo.
    */
-  askInRepo(project: number, text: string, o: { maxUsd?: number; route?: WorkRoute; autoApprove?: boolean; by?: string } = {}): { ticket: TicketView; run: number | null; branch?: string; route?: Routed } | null {
-    if (!repoOfProject(this.log, project)) return null;
-    const t = this.open({ kind: "request", body: text, project, by: o.by ?? "you", source: "project", asked: (o.by ?? "you") === "you" });
-    return this.work(t.id, { maxUsd: o.maxUsd, route: o.route, autoApprove: o.autoApprove, where: "repo", by: o.by });
+  askInRepo(project: number, text: string, o: { maxUsd?: number; route?: WorkRoute; autoApprove?: boolean; by?: string } = {}): { ticket: TicketView; run: number | null; branch?: string; route?: Routed; door?: string } | null {
+    const repo = repoOfProject(this.log, project);
+    const asked = (o.by ?? "you") === "you";
+    // The doors before the route (factory/route.ts intakeDoor): a question is answered, "another round" is a review
+    // that files tickets. A route you chose means work. A question needs no repo; the other doors do.
+    const door = o.route ? { door: "work" as const, why: "you chose a route" } : intakeDoor(text);
+    if (door.door === "question" && this.opts.runtime && this.opts.workRoot) {
+      const t = this.open({ kind: "question", body: text, project, by: o.by ?? "you", source: "project", asked });
+      this.workAnswer(t, repo, { by: o.by }, RESEARCH_FLOW);
+      return { ticket: this.get(t.id)!, run: null, route: { route: "light", why: door.why }, door: "question" };
+    }
+    if (!repo) return null;
+    if (door.door === "reloop" && this.opts.runtime && this.opts.workRoot) {
+      const name = (this.log.db.prepare("SELECT name FROM projects WHERE id = ?").get(project) as { name: string } | undefined)?.name ?? "";
+      const t = this.open({ kind: "plan", title: `Another round${name ? ` on ${name}` : ""}: ${titleFrom(text)}`.slice(0, 200), body: text, project, by: o.by ?? "you", source: "project", asked });
+      this.workReloop(t, repo, { by: o.by });
+      return { ticket: this.get(t.id)!, run: null, route: { route: "light", why: door.why }, door: "reloop" };
+    }
+    const t = this.open({ kind: "request", body: text, project, by: o.by ?? "you", source: "project", asked });
+    return { ...this.work(t.id, { maxUsd: o.maxUsd, route: o.route, autoApprove: o.autoApprove, where: "repo", by: o.by }), door: "work" };
+  }
+
+  /**
+   * The re-loop door: another round on a project as it stands. A reader goes through a read-only copy (the
+   * answer runner, cents, nothing changed) and lists the improvements worth making now; each becomes a small
+   * ticket under this round's epic, ready for the crew. Work you asked for starts by itself within your limit;
+   * the epic moves on by itself when its tickets are done.
+   */
+  private workReloop(t: TicketView, repo: RepoRef, o: { by?: string } = {}) {
+    const { runtime, bay, workRoot } = this.opts;
+    if (!runtime || !workRoot) throw new Error("No crew or work folder in this core.");
+    const by = bay?.crewFor("survey")[0]?.id ?? "surveyor";
+    this.log.append("ticket.noted", { id: t.id, by, status: "in_progress", text: `Another round: reading a copy of ${repo.source} to find what is worth improving now. Nothing is changed; what it finds becomes tickets here.` });
+    const gh = this.opts.github;
+    if (repo.github && gh && !existsSync(join(repo.dir, ".git"))) repo = { ...repo, dir: gh.remote(repo.github) };
+    const document = [this.document(t.id), RELOOP_BRIEF].join("\n\n");
+    const job = answerTicket(this.log, runtime, bay, { id: t.id, key: t.key, title: t.title, document, repo, workRoot, maxUsd: 0.4, projectId: t.project, git: gh ? (d, ...a) => gh.git(d, ...a) : undefined })
+      .then((r) => {
+        if (!r.ok) { this.log.append("ticket.noted", { id: t.id, by, status: "open", costUsd: r.costUsd, text: `The round could not read the project: ${r.error}` }); return; }
+        const found = reloopFindings(r.text);
+        const made: string[] = [];
+        for (const f of found) {
+          try {
+            const c = this.open({ kind: f.kind, title: f.title, body: f.what, project: t.project, parent: t.id, by, source: "reloop", fingerprint: `reloop:${t.id}:${f.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60)}` });
+            this.edit(c.id, "size", f.size, by);
+            this.say(c.id, "Found in another round on the project: ready for the crew.", { status: "ready", by, kind: "event" });
+            made.push(c.key);
+          } catch { /* one finding that cannot be filed does not stop the others */ }
+        }
+        this.log.append("ticket.noted", { id: t.id, by, kind: "reply", costUsd: r.costUsd, ...(made.length ? {} : { status: "built" }),
+          text: made.length ? `${r.text}\n\nFiled as ${made.join(", ")}: the crew works them like any ticket, and this round moves on when they are done.` : `${r.text}\n\nNothing worth another round right now.` });
+      })
+      .catch((e) => { this.log.append("ticket.noted", { id: t.id, by, status: "open", text: `The round failed: ${(e as Error).message}` }); })
+      .finally(() => this.inRepo.delete(t.id));
+    this.inRepo.set(t.id, job);
   }
 
   /**
@@ -1318,6 +1389,8 @@ export class Tickets {
       }
     } else if (e.type === "factory.plan.sliced") {
       this.sliced(Number(p.run), p);
+    } else if (e.type === "factory.features.left") {
+      this.sliced(Number(p.run), { ...p, later: p.left, kept: p.built }, "left");
     } else if (e.type === "factory.gate" && p.state === "waiting" && !p.auto) {
       const t = this.byRun(Number(p.run));
       if (t) this.log.append("ticket.noted", { id: t.id, by: "factory", kind: "event", text: `Run #${p.run} waits for you at the ${String(p.gate).replace("gateA", "plan gate").replace("gateB", "build gate")}: ${p.question ?? ""}`.trim() });
@@ -1400,25 +1473,27 @@ export class Tickets {
    * own under the same epic, blocked by this one until it is done (its branch merged), and asked for when this
    * one was. The crew then starts it by itself within your limit, on the main line that has slice 1 in it.
    */
-  private sliced(run: number, p: Record<string, any>) {
+  private sliced(run: number, p: Record<string, any>, why: "slice" | "left" = "slice") {
     const t = (p.ticket?.id != null ? this.get(Number(p.ticket.id)) : undefined) ?? this.byRun(run);
-    const later = (Array.isArray(p.later) ? p.later : []) as { id: string; title: string; what: string; done: string; files?: string[] }[];
+    const later = (Array.isArray(p.later) ? p.later : []) as { id: string; title: string; what: string; done: string; files?: string[]; why?: string }[];
     if (!later.length) return;
     const project = t?.project ?? this.projectOfRun(run);
     const kept = (Array.isArray(p.kept) ? p.kept : []) as { id: string; title: string }[];
     const body = [
       `The next slice of ${t ? `${t.key} ` : ""}"${p.plan ?? "the change"}". Run #${run}'s money built ${kept.map((f) => `${f.id} ${f.title}`).join(", ") || "the first features"} (on branch ${p.branch ?? "its branch"}); these were left for a run of their own:`,
-      "", ...later.map((f) => `- ${f.id} ${f.title}: ${f.what}\n  Done when: ${f.done}`), "",
+      "", ...later.map((f) => `- ${f.id} ${f.title}: ${f.what}\n  Done when: ${f.done}${f.why ? `\n  Left because ${f.why}.` : ""}`), "",
       "Build on what slice 1 added once its branch is merged. The original ask:", "", String(p.ask ?? "").slice(0, 3000),
     ].join("\n");
     const next = this.open({
       kind: t?.kind === "plan" ? "request" : t?.kind ?? "request", title: `${t?.title ?? p.plan ?? "The change"}: next slice (${later.map((f) => f.id).join(", ")})`.slice(0, 200),
-      body, project, parent: t?.kind === "plan" ? t.id : t?.parentId ?? null, by: "factory", source: "factory", fingerprint: `slice:${run}`,
+      body, project, parent: t?.kind === "plan" ? t.id : t?.parentId ?? null, by: "factory", source: "factory", fingerprint: `${why}:${run}`,
       priority: t?.priority ?? null, asked: t ? this.isAsked(t) : false,
     });
     if (t) {
       try { this.link(t.id, next.id, "blocks", "factory"); this.link(next.id, t.id, "derived_from", "factory"); } catch { /* the slice stands without its links */ }
-      this.log.append("ticket.noted", { id: t.id, by: "factory", kind: "event", text: `The plan was more than run #${run}'s $${Number(p.fit?.poolUsd ?? 0).toFixed(2)} for building buys: it builds ${kept.length} of ${kept.length + later.length} features now, and ${next.key} holds the rest. All in one run would need about $${Number(p.fit?.needUsd ?? 0).toFixed(2)}.` });
+      this.log.append("ticket.noted", { id: t.id, by: "factory", kind: "event", text: why === "left"
+        ? `Run #${run} built ${kept.length} of ${kept.length + later.length} features and keeps the branch working; ${next.key} holds the rest (${later.map((f) => `${f.id}: ${f.why ?? "not built"}`).join("; ")}).`
+        : `The plan was more than run #${run}'s $${Number(p.fit?.poolUsd ?? 0).toFixed(2)} for building buys: it builds ${kept.length} of ${kept.length + later.length} features now, and ${next.key} holds the rest. All in one run would need about $${Number(p.fit?.needUsd ?? 0).toFixed(2)}.` });
     }
     try { this.edit(next.id, "size", later.length > 1 ? "M" : "S", "factory"); } catch { /* sized later */ }
     try { this.say(next.id, "Sliced from an approved plan: ready to build once what blocks it is done.", { status: "ready", by: "factory", kind: "event" }); } catch { /* stays open */ }

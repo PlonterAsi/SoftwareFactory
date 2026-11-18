@@ -49,6 +49,8 @@ export type EventType =
   | "factory.plan.fit"
   | "factory.plan.sliced"
   | "factory.run.retried"
+  | "factory.features.left"
+  | "factory.build.stopped"
   | "factory.discovery"
   | "factory.research"
   | "factory.repair"

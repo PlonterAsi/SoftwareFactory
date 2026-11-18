@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { AgentBay, EventLog, Factory, MockRuntime, Tickets, createProject, git, type AgentRequest, type AgentRuntime, type TestRun } from "../src/index.js";
 import { REPO_ENGINE_MIN_USD, enableRepoRuns, repoBranch, validateRepoPlan, type BranchToShip, type RepoTools } from "../src/factory/reporun.js";
 import { parseCases, prepareEnv, readPages, runRepoTests, siteProfile, withSite, type RepoEnv } from "../src/factory/repoenv.js";
-import { routeWork } from "../src/factory/route.js";
+import { intakeDoor, routeWork } from "../src/factory/route.js";
 import { withPathFirst } from "../src/runtime.js";
 
 const tmp = (p = "sf-rr-") => mkdtempSync(join(tmpdir(), p));
@@ -52,7 +52,7 @@ const PLAN = {
  * Planner returns a plan of two features, the Builder edits files with its tools (and breaks a test on its
  * first go at F2), and the Reviewer passes with the criteria it "ran".
  */
-function crew(o: { sloppy?: boolean; plan?: typeof PLAN } = {}) {
+function crew(o: { sloppy?: boolean; stubborn?: boolean; plan?: typeof PLAN; answer?: string; buildUsd?: number } = {}) {
   const mock = new MockRuntime();
   const seen: { station: string; req: AgentRequest }[] = [];
   let f2 = 0;
@@ -62,25 +62,27 @@ function crew(o: { sloppy?: boolean; plan?: typeof PLAN } = {}) {
     const r = await mock.run(req);
     r.costUsd = 0.01;
     if (st === "plan") r.text = block(o.plan ?? PLAN);
+    else if (st === "research" && o.answer) r.text = o.answer;
     else if (st === "review") r.text = block({ verdict: "pass", findings: [], criteria: PLAN.acceptance.map((text) => ({ text, pass: true, evidence: "ran pytest" })) });
     else if (st === "repo") {
       const put = (p: string, c: string) => { mkdirSync(dirname(join(req.cwd!, p)), { recursive: true }); writeFileSync(join(req.cwd!, p), c); };
       if (/Your work, F1/.test(req.prompt)) { put("app.py", "def home():\n    return 'Plonter'\n\ndef contact():\n    return 'Contact'\n"); put("tests/test_contact.py", "def test_contact():\n    assert True\n"); }
       else if (/Your work, F2/.test(req.prompt)) {
         put("templates/contact.html", "<form><input name=email><button>Send</button></form>\n");
-        if (o.sloppy && ++f2 === 1) put("BREAK", "x");
+        if ((o.sloppy && ++f2 === 1) || o.stubborn) put("BREAK", "x");
         else rmSync(join(req.cwd!, "BREAK"), { force: true });
         // An agent that writes into SoftwareFactory's own folder: it must never reach the branch.
         put(".sf/NOTES-FROM-AGENT.md", "should stay out of git\n");
       } else put("docs/softwarefactory/whole-change.md", "The whole change.\n");
       r.text = "Built it.\nNext: nothing to know.";
+      if (o.buildUsd) r.costUsd = o.buildUsd;
     }
     return r;
   } };
   return { rt, seen };
 }
 
-function world(o: { sloppy?: boolean; plan?: typeof PLAN; ship?: RepoTools["ship"]; site?: RepoTools["readSite"] } = {}) {
+function world(o: { sloppy?: boolean; stubborn?: boolean; answer?: string; buildUsd?: number; plan?: typeof PLAN; ship?: RepoTools["ship"]; site?: RepoTools["readSite"] } = {}) {
   const log = new EventLog();
   const { rt, seen } = crew(o);
   const bay = new AgentBay(log, rt);
@@ -289,6 +291,91 @@ describe("the engine in an imported repo", () => {
     expect(shipped[0].branch).toBe(branch);
     // The plan was written once: the resume did not pay the Planner again.
     expect(w.seen.filter((s) => s.station === "plan")).toHaveLength(1);
+  }, 60_000);
+});
+
+describe("a sliced run still hands over a branch that works (reliability after run 5669)", () => {
+  it("a feature that breaks passing tests twice is taken back off the branch, the rest ships, and it goes to the next slice", async () => {
+    const more = [{ id: "F3", title: "Part 3", what: "Part 3 of the page.", files: ["part3.py"], done: "It works." }];
+    const w = world({ stubborn: true, plan: { ...PLAN, features: [...PLAN.features, ...more] } });
+    const t = w.tickets.open({ kind: "request", project: w.project, title: "Contact page" });
+    const r = w.tickets.work(t.id, { route: "engine", maxUsd: 4, autoApprove: true });
+    await w.factory.wait(r.run!);
+    const fin = events(w.log, "factory.run.finished").at(-1);
+    expect(fin.outcome).toBe("shipped");
+    // F2 broke test_home twice: it is not on the branch, and the branch's tests pass.
+    expect(existsSync(join(fin.dir, "BREAK"))).toBe(false);
+    expect(existsSync(join(fin.dir, "templates", "contact.html"))).toBe(false);
+    expect(git(fin.dir, "ls-files")).toContain("app.py");
+    const left = events(w.log, "factory.features.left").at(-1);
+    expect(left.left.map((f: any) => f.id)).toEqual(["F2"]);
+    expect(left.left[0].why).toMatch(/taken back off the branch/);
+    expect(w.shipped[0].body).toMatch(/Left for the next slice[\s\S]*F2 The contact template/);
+    const next = w.tickets.list({ view: "all", project: w.project }).find((x) => /next slice/.test(x.title))!;
+    expect(next.body).toMatch(/F2 The contact template[\s\S]*Left because it broke/);
+    expect(next.blocked).toBe(true);
+    // The reviewer was told what was left, so it does not hold it against this run.
+    expect(w.seen.filter((x) => x.station === "review").at(-1)!.req.prompt).toMatch(/left to a run of their own[\s\S]*F2/);
+  }, 60_000);
+});
+
+describe("a run that runs short of money mid-build", () => {
+  it("stops building before a feature it cannot afford and still reviews and hands over what it built", async () => {
+    const more = [{ id: "F3", title: "Part 3", what: "Part 3 of the page.", files: ["part3.py"], done: "It works." }];
+    const w = world({ buildUsd: 1.2, plan: { ...PLAN, features: [...PLAN.features, ...more] } });
+    const t = w.tickets.open({ kind: "request", project: w.project, title: "Contact page" });
+    const r = w.tickets.work(t.id, { route: "engine", maxUsd: 3, autoApprove: true });
+    await w.factory.wait(r.run!);
+    expect(events(w.log, "factory.build.stopped").at(-1)).toMatchObject({ run: r.run, left: ["F3"] });
+    expect(events(w.log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    expect(events(w.log, "factory.features.left").at(-1).left[0].why).toMatch(/money ran short/);
+  }, 60_000);
+});
+
+describe("the doors before the route: a question and another round", () => {
+  it("reads which door an ask comes through, by its words", () => {
+    expect(intakeDoor("Why does the login page fail on Safari?").door).toBe("question");
+    expect(intakeDoor("Find out which pages are slow").door).toBe("question");
+    expect(intakeDoor("Is the contact form sending email anywhere?").door).toBe("question");
+    expect(intakeDoor("Can you add a contact page?").door).toBe("work");
+    expect(intakeDoor("Add a contact page").door).toBe("work");
+    expect(intakeDoor("Fix the typo in the footer").door).toBe("work");
+    expect(intakeDoor("Another round on the landing page please").door).toBe("reloop");
+    expect(intakeDoor("re-loop this project").door).toBe("reloop");
+    expect(intakeDoor("Improve it again").door).toBe("reloop");
+  });
+
+  it("a question said in the project becomes a question ticket a reader answers; nothing is built", async () => {
+    const w = world({ answer: "The form posts to /contact and nothing sends mail.\nFiles read: app.py" });
+    const r = w.tickets.askInRepo(w.project, "Is the contact form sending email anywhere?")!;
+    expect(r).toMatchObject({ run: null, door: "question", ticket: { kind: "question" } });
+    await w.tickets.waitRepo(r.ticket.id);
+    expect(w.tickets.get(r.ticket.id)!.status).toBe("built");
+    expect(w.tickets.notes(r.ticket.id).some((n) => /nothing sends mail/.test(n.text))).toBe(true);
+    expect(events(w.log, "factory.run.started")).toHaveLength(0);
+    // A project without a repo gets its question answered too, instead of a new app being built.
+    const plain = createProject(w.log, { name: "From scratch" });
+    expect(w.tickets.askInRepo(plain, "Why is the list empty after a restart?")).toMatchObject({ door: "question", run: null });
+    expect(w.tickets.askInRepo(plain, "Build a todo app")).toBeNull();
+  }, 60_000);
+
+  it("another round reads the project and files what it finds as ready tickets under the round's epic", async () => {
+    const w = world({ answer: [
+      "Two things are worth doing now.",
+      "- [S] bug: Footer link is broken: the footer points to /contct in templates/base.html",
+      "- [M] task: Test the home view: app.py has no test for home()",
+      "Files read: app.py, templates/base.html",
+    ].join("\n") });
+    const r = w.tickets.askInRepo(w.project, "Another round on the landing page")!;
+    expect(r).toMatchObject({ run: null, door: "reloop", ticket: { kind: "plan" } });
+    await w.tickets.waitRepo(r.ticket.id);
+    const kids = w.tickets.list({ view: "all", project: w.project, parent: r.ticket.id });
+    expect(kids.map((k) => [k.kind, k.size, k.status, k.title])).toEqual(expect.arrayContaining([
+      ["bug", "S", "ready", "Footer link is broken"], ["task", "M", "ready", "Test the home view"],
+    ]));
+    expect(w.tickets.detail(kids[0].id)!.asked).toBe(true);
+    expect(w.tickets.notes(r.ticket.id).some((n) => n.kind === "reply" && /Filed as/.test(n.text))).toBe(true);
+    expect(events(w.log, "factory.run.started")).toHaveLength(0);
   }, 60_000);
 });
 

@@ -37,3 +37,30 @@ export function routeWork(x: { kind?: string | null; size?: string | null; text:
   const small = isSmallJob(x.text);
   return small.small ? { route: "light", why: `${small.why}: one session in the repo` } : { route: "engine", why: `${kind ? aKind(kind) : "an ask"} of ${small.why}: feature-sized, so it is designed and planned first` };
 }
+
+/**
+ * The doors an ask comes through before any route (Assaf, 14 Nov 2026: "several entry points"). Free, words only.
+ *
+ *   question  "why does the login fail?", "find out which pages are slow": a reader answers it on a question
+ *             ticket and nothing changes (cents, no branch).
+ *   reloop    "another round on this", "re-loop the project": a reader reviews the project as it stands and
+ *             files what it finds as small tickets under an epic of the round; the crew works them like any.
+ *   work      anything else: a ticket on the light or engine route (routeWork).
+ */
+export type IntakeDoor = "question" | "reloop" | "work";
+
+const RELOOP_WORDS = /\b(re-?loop|another (round|pass|loop|iteration)|one more (round|pass|loop)|loop (it |this )?(again|once more)|go (over|through) it again|run (the )?(improvement )?loop again|improve (it|this|the (app|project|site|code|repo)) (again|further|more)|another improvement (round|pass)|next improvement round)\b/i;
+/** Openers that ask for an answer, whatever follows: "why", "how does", "find out". */
+const ASKS_ANSWER = /^(why|what|how|where|which|who|when|explain|tell me|find out|figure out|look into|investigate|check (whether|if)|is there|are there|do we|does (it|the|this))\b/i;
+/** Openers that may be a polite request ("can you add..."): an answer only when no change is asked. */
+const MAYBE_ASK = /^(can|could|would|should|will|is|are|do|does|did|has|have|was|were)\b/i;
+const CHANGE_WORDS = /\b(add|build|make|create|implement|fix|change|remove|rename|replace|write|update|move|delete|refactor|redesign|improve|support|turn|set up|install|upgrade)\b/i;
+
+export function intakeDoor(text: string): { door: IntakeDoor; why: string } {
+  const t = String(text ?? "").trim();
+  if (RELOOP_WORDS.test(t)) return { door: "reloop", why: "another round on what exists: a reader reviews it and files what it finds as small tickets" };
+  const first = t.split(/\n/)[0].trim();
+  if (ASKS_ANSWER.test(first) && !(/^(what|how) (if|about)\b/i.test(first) && CHANGE_WORDS.test(first))) return { door: "question", why: "a question: a reader answers it, nothing is changed" };
+  if (MAYBE_ASK.test(first) && first.endsWith("?") && !CHANGE_WORDS.test(first)) return { door: "question", why: "a question: a reader answers it, nothing is changed" };
+  return { door: "work", why: "work to do" };
+}
