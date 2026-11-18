@@ -237,7 +237,7 @@ export class PluginHost {
     if (resolve(dest) !== src) {
       this.stop(m.id);
       mkdirSync(this.root, { recursive: true });
-      rmSync(dest, { recursive: true, force: true });
+      rmSync(dest, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       cpSync(src, dest, { recursive: true, filter: (p) => basename(p) !== ".git" });
     }
     const manifest = readManifest(dest);
@@ -280,6 +280,8 @@ export class PluginHost {
       if (o.onlyIfNew && sha && parseGithubSource(o.onlyIfNew)?.sha === sha) return { ...this.get(readManifest(join(work, "x", top[0], path)).id)!, updated: false };
       const dir = resolve(work, "x", top[0], path);
       if (!dir.startsWith(resolve(work, "x") + sep)) throw new Error("That folder leaves the repository");
+      // On Windows a running backend locks its folder (it is its working folder): let it exit before the copy replaces it.
+      await this.stop(readManifest(dir).id);
       return { ...this.install(dir, { by: o.by, from }), updated: true };
     } finally {
       rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
