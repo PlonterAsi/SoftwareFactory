@@ -671,6 +671,11 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
     const project = proj == null || proj === "" ? null : Number(proj);
     return [200, { items: tickets.waiting(project) }];
   }
+  if (req.method === "GET" && path === "/api/tickets/export") {
+    const ids = (q.get("ids") ?? "").split(",").map(Number).filter((n) => n > 0);
+    const format = q.get("format") === "json" ? "json" : "md";
+    return [format === "json" ? 200 : -1, format === "json" ? JSON.parse(tickets.exportTickets(ids, "json")) : tickets.exportTickets(ids, "md")];
+  }
   const byKey = path.match(/^\/api\/tickets\/key\/([^/]+)$/);
   if (req.method === "GET" && byKey) {
     const t = tickets.byKey(decodeURIComponent(byKey[1]));
@@ -700,6 +705,10 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
   if (path === "/api/tickets/checks") {
     const answers = Array.isArray(body.answers) ? (body.answers as { id: number; q: string; text: string }[]) : [];
     try { return [200, tickets.answerChecks(answers, { run: body.run === true })]; } catch (e) { return [400, { error: (e as Error).message }]; }
+  }
+  // Many tickets at once: a status move, asked, size, priority, parent or assignee. Each says why it refused.
+  if (path === "/api/tickets/bulk") {
+    try { return [200, tickets.bulk(Array.isArray(body.ids) ? body.ids.map(Number) : [], String(body.action ?? ""), body.value)]; } catch (e) { return [400, { error: (e as Error).message }]; }
   }
   if (path === "/api/tickets") return [201, tickets.open({ ...(body as object), by: "you", source: typeof body.source === "string" ? body.source : "you" } as any)];
   m = path.match(/^\/api\/tickets\/(\d+)\/([a-z]+)$/);

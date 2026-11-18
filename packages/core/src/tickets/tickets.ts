@@ -628,6 +628,40 @@ export class Tickets {
     return q ? { position: q.position, why: q.why } : { position: null, why: null };
   }
 
+  /**
+   * One change to many tickets at once (gap 6, list parity): a status move, the asked mark, a size, a priority,
+   * a parent or an assignee. Each ticket moves by the same rules as alone; one that refuses says why and the
+   * rest still move.
+   */
+  bulk(ids: number[], action: string, value: unknown, by = "you"): { done: number[]; failed: { id: number; key: string | null; error: string }[] } {
+    const done: number[] = [], failed: { id: number; key: string | null; error: string }[] = [];
+    const uniq = [...new Set(ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 500);
+    if (!uniq.length) throw new Error("Pick at least one ticket.");
+    if (!["status", "asked", "size", "priority", "parent", "assignee"].includes(action)) throw new Error(`"${action}" cannot be done to many tickets at once.`);
+    for (const id of uniq) {
+      try {
+        if (action === "status") this.say(id, "", { status: String(value) as TicketStatus, by });
+        else if (action === "asked") this.setAsked(id, value !== false && value !== "off", by);
+        else this.edit(id, action, value === "" ? null : value, by);
+        done.push(id);
+      } catch (e) { failed.push({ id, key: this.get(id)?.key ?? null, error: (e as Error).message }); }
+    }
+    return { done, failed };
+  }
+
+  /** Tickets as Markdown (a list to paste anywhere) or JSON (each ticket's detail without its long work document). */
+  exportTickets(ids: number[], format: "md" | "json" = "md"): string {
+    const rows = [...new Set(ids.map(Number))].map((id) => this.detail(id)).filter((d): d is TicketDetail => !!d);
+    if (format === "json") return JSON.stringify(rows.map(({ document: _d, timeline: _t, ...d }) => d), null, 2);
+    return rows.map(({ ticket: t, notes, links }) => [
+      `## ${t.key} ${t.title}`,
+      `${t.kind}, ${t.status}${t.size ? `, size ${t.size}` : ""}${t.priority ? `, ${t.priority.replace("_", " ")}` : ""}${t.pr ? `, PR #${t.pr.number} (${t.pr.state}) ${t.pr.url}` : ""}`,
+      ...(t.body ? ["", t.body] : []),
+      ...(links.length ? ["", ...links.map((l) => `- ${l.relation.replace("_", " ")} ${l.key ?? `#${l.to}`} ${l.title ?? ""}`.trimEnd())] : []),
+      ...(notes.filter((n) => n.text).length ? ["", "Thread:", ...notes.filter((n) => n.text).slice(-10).map((n) => `- ${n.ts.slice(0, 16).replace("T", " ")} ${n.by}${n.status ? ` (${n.status})` : ""}: ${n.text.split("\n")[0].slice(0, 300)}`)] : []),
+    ].join("\n")).join("\n\n");
+  }
+
   document(id: number): string {
     const d = this.detail(id);
     if (!d) throw new Error(`No ticket #${id}`);

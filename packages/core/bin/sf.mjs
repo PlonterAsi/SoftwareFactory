@@ -65,7 +65,7 @@ function showDetail(d) {
   if (d.queue) out.push(d.queue.position != null ? `In the crew's line: ${d.queue.position}` : `Waits: ${d.queue.why}`);
   if (d.retry) out.push(`Can be retried from ${d.retry.from}, with ${money(d.retry.addUsd)} more`);
   if (t.body) out.push("", t.body);
-  if (d.links?.length) out.push("", "Links:", ...d.links.map((l) => `  ${l.relation} ${l.key ?? `#${l.id}`} ${l.title ?? ""}`.trimEnd()));
+  if (d.links?.length) out.push("", "Links:", ...d.links.map((l) => `  ${l.relation} ${l.key ?? `#${l.to}`} ${l.title ?? ""}`.trimEnd()));
   if (d.notes?.length) {
     out.push("", "Thread:");
     for (const n of d.notes.slice(-15)) out.push(`  [${String(n.at ?? n.ts ?? "").slice(0, 16).replace("T", " ")}] ${n.by}${n.status ? ` -> ${n.status}` : ""}: ${String(n.text ?? "").split("\n")[0].slice(0, 240)}`);

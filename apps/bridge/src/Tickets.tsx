@@ -93,7 +93,23 @@ export const ticketsApi = {
   ask: (id: number, agent?: string) => call<{ reply?: string; error?: string }>("POST", `/api/tickets/${id}/ask`, { agent }),
   asked: (id: number, on: boolean) => call<TicketView>("POST", `/api/tickets/${id}/asked`, { on }),
   retry: (id: number) => call<{ run: number; from: string; addUsd: number }>("POST", `/api/tickets/${id}/retry`, {}),
+  bulk: (ids: number[], action: BulkAction, value: unknown) => call<{ done: number[]; failed: { id: number; key: string | null; error: string }[] }>("POST", "/api/tickets/bulk", { ids, action, value }),
+  exportMd: async (ids: number[]) => { const r = await fetch(`${API}/api/tickets/export?ids=${ids.join(",")}`); if (!r.ok) throw new Error("The export failed."); return r.text(); },
 };
+
+type BulkAction = "status" | "asked" | "size" | "priority";
+type SortBy = "default" | "new" | "old" | "size" | "updated";
+const SIZE_RANK: Record<string, number> = { S: 0, M: 1, L: 2 };
+function sortTickets(list: TicketView[], by: SortBy): TicketView[] {
+  // The core lists by priority, then the last changed first.
+  if (by === "default") return list;
+  const out = [...list];
+  if (by === "new") out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (by === "old") out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  if (by === "updated") out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  if (by === "size") out.sort((a, b) => (SIZE_RANK[a.size ?? ""] ?? 9) - (SIZE_RANK[b.size ?? ""] ?? 9));
+  return out;
+}
 
 /** Ticket counts for a badge (the tab, a project card): refetched when a ticket event lands. */
 export function useTicketCounts(events: SfEvent[], project?: number | null) {
@@ -139,6 +155,10 @@ export function Tickets({ events, projectId = null, crew = [], onShowRun }: {
   }, []);
   const [err, setErr] = useState<string | null>(null);
   const [making, setMaking] = useState(false);
+  const [sortBy, setSortBy] = useState<SortBy>("default");
+  // Picked rows for a change to many at once (the bulk bar); cleared when the view changes.
+  const [pick, setPick] = useState<Set<number>>(new Set());
+  useEffect(() => setPick(new Set()), [view, projectId, mode]);
   // Anything that can change a ticket: its own events, and the runs that write back onto tickets.
   const last = events.filter((e) => e.type.startsWith("ticket.") || e.type === "factory.run.finished" || e.type === "factory.station" || e.type === "factory.gate").at(-1)?.id ?? 0;
   useEffect(() => { ticketsApi.meta().then(setMeta).catch(() => {}); }, []);
@@ -152,7 +172,7 @@ export function Tickets({ events, projectId = null, crew = [], onShowRun }: {
   }, [last, projectId, view, q, kind, mode]);
   // Opens on what needs you when something does; otherwise on the open list.
   useEffect(() => { if (!picked && data?.counts.you && view === "open") { setView("you"); setPicked(true); } }, [data?.counts.you]);
-  const tickets = data?.tickets ?? [];
+  const tickets = useMemo(() => sortTickets(data?.tickets ?? [], sortBy), [data, sortBy]);
   const counts = data?.counts;
   const crewById = useMemo(() => Object.fromEntries(crew.map((c) => [c.id, c])), [crew]);
   const run = async (fn: () => Promise<unknown>) => { setErr(null); try { await fn(); } catch (e) { setErr((e as Error).message); } };
@@ -180,18 +200,22 @@ export function Tickets({ events, projectId = null, crew = [], onShowRun }: {
             <option value="">every kind</option>
             {meta?.kinds.map((k) => <option key={k.code} value={k.code}>{k.label}{counts?.byKind[k.code] ? ` (${counts.byKind[k.code]})` : ""}</option>)}
           </select>
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} aria-label="Sort">
+            <option value="default">priority first</option><option value="new">newest first</option><option value="old">oldest first</option><option value="updated">last changed</option><option value="size">smallest first</option>
+          </select>
           <AutoToggle last={last} onError={setErr} />
           <button className="sm" onClick={() => setMaking((m) => !m)}>{making ? "Cancel" : "+ New ticket"}</button>
         </div>
       </div>
       {making && meta && <NewTicket meta={meta} projectId={projectId} projects={projects} onDone={(t) => { setMaking(false); setSel(t.id); }} onError={setErr} />}
+      {pick.size > 0 && mode === "list" && view !== "you" && meta && <BulkBar ids={[...pick]} meta={meta} onClear={() => setPick(new Set())} onError={setErr} />}
       {err && <div className="err tk-err" role="alert">{err} <button className="link" onClick={() => setErr(null)}>dismiss</button></div>}
       <div className={`tk-body ${sel != null ? "with-page" : ""}`}>
         <div className="tk-main">
           {mode === "board"
             ? <Board tickets={tickets} sel={sel} onSelect={setSel} crew={crewById} onMove={(id, to) => run(() => ticketsApi.say(id, "", to))} />
             : view === "you" ? <Waiting events={events} projectId={projectId} sel={sel} onSelect={setSel} onError={setErr} showProject={projectId == null} />
-            : <List tickets={tickets} view={view} sel={sel} onSelect={setSel} crew={crewById} counts={counts} />}
+            : <List tickets={tickets} view={view} sel={sel} onSelect={setSel} crew={crewById} counts={counts} pick={pick} onPick={setPick} />}
         </div>
         {sel != null && meta && <TicketPage key={sel} id={sel} meta={meta} last={last} crew={crew} projects={projects} onClose={() => setSel(null)} onSelect={setSel} onShowRun={onShowRun} onError={setErr} />}
       </div>
@@ -205,16 +229,20 @@ function Who({ id, crew }: { id: string | null; crew: Record<string, CrewRef> })
   return <span className="tk-who" title={c?.name ?? id}>{c ? <span className="tk-av" aria-hidden>{c.avatar}</span> : null}{c?.name ?? id}</span>;
 }
 
-function List({ tickets, view, sel, onSelect, crew, counts }: { tickets: TicketView[]; view: View; sel: number | null; onSelect: (id: number) => void; crew: Record<string, CrewRef>; counts?: Counts }) {
+function List({ tickets, view, sel, onSelect, crew, counts, pick, onPick }: { tickets: TicketView[]; view: View; sel: number | null; onSelect: (id: number) => void; crew: Record<string, CrewRef>; counts?: Counts; pick: Set<number>; onPick: (s: Set<number>) => void }) {
+  const toggle = (id: number) => { const n = new Set(pick); if (n.has(id)) n.delete(id); else n.add(id); onPick(n); };
+  const all = tickets.length > 0 && tickets.every((t) => pick.has(t.id));
   if (!tickets.length) {
     return <div className="empty">{view === "look" ? "Nothing waits for your look." : view === "agents" ? "No agent is working a ticket right now." : "No tickets here yet. Open one with + New ticket, or say a task to the Overseer and the Order Engine files it."}</div>;
   }
   return (
     <>
       {counts?.oldest && view === "open" && <div className="tk-summary muted">Oldest open: <button className="link" onClick={() => onSelect(counts.oldest!.id)}>{counts.oldest.title}</button> · opened {ago(counts.oldest.createdAt)}</div>}
+      <label className="tk-pickall muted"><input type="checkbox" checked={all} onChange={() => onPick(all ? new Set() : new Set(tickets.map((t) => t.id)))} /> {pick.size ? `${pick.size} picked` : "Pick all"}</label>
       <ul className="tk-list" role="listbox" aria-label="Tickets">
         {tickets.map((t) => (
           <li key={t.id} role="option" aria-selected={t.id === sel} className={`tk-row s-${t.status} ${t.id === sel ? "on" : ""} ${view === "plans" ? `lv-${t.level}` : ""}`} onClick={() => onSelect(t.id)}>
+            <input type="checkbox" className="tk-pick" checked={pick.has(t.id)} aria-label={`Pick ${t.key}`} onClick={(e) => e.stopPropagation()} onChange={() => toggle(t.id)} />
             <span className={`tk-kind k-${t.kind}`} title={t.kind === "plan" ? "epic" : t.kind} aria-hidden>{KIND_GLYPH[t.kind]}</span>
             <span className="tk-num mono">{t.key}</span>
             <span className="tk-title">
@@ -234,6 +262,41 @@ function List({ tickets, view, sel, onSelect, crew, counts }: { tickets: TicketV
         ))}
       </ul>
     </>
+  );
+}
+
+/** One change to every picked ticket: a status move, asked for, a size or a priority; or copy them as Markdown. */
+function BulkBar({ ids, meta, onClear, onError }: { ids: number[]; meta: Meta; onClear: () => void; onError: (m: string) => void }) {
+  const [said, setSaid] = useState<string | null>(null);
+  const go = async (action: BulkAction, value: unknown, label: string) => {
+    setSaid(null);
+    try {
+      const r = await ticketsApi.bulk(ids, action, value);
+      setSaid(`${label}: ${r.done.length} of ${ids.length}.${r.failed.length ? ` Not moved: ${r.failed.slice(0, 3).map((f) => `${f.key ?? `#${f.id}`} (${f.error})`).join("; ")}${r.failed.length > 3 ? ` and ${r.failed.length - 3} more` : ""}.` : ""}`);
+    } catch (e) { onError((e as Error).message); }
+  };
+  const copy = async () => {
+    try { const md = await ticketsApi.exportMd(ids); await navigator.clipboard.writeText(md); setSaid(`Copied ${ids.length} ticket${ids.length === 1 ? "" : "s"} as Markdown.`); } catch (e) { onError((e as Error).message); }
+  };
+  return (
+    <div className="tk-bulk" role="toolbar" aria-label="Change the picked tickets">
+      <b>{ids.length} picked</b>
+      <select value="" aria-label="Move to" onChange={(e) => e.target.value && go("status", e.target.value, `Moved to ${STATUS_LABEL[e.target.value as TicketStatus]}`)}>
+        <option value="">Move to…</option>
+        {(["open", "ready", "closed", "rejected"] as TicketStatus[]).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+      </select>
+      <select value="" aria-label="Size" onChange={(e) => e.target.value && go("size", e.target.value, `Sized ${e.target.value}`)}>
+        <option value="">Size…</option><option value="S">S</option><option value="M">M</option><option value="L">L</option>
+      </select>
+      <select value="" aria-label="Priority" onChange={(e) => e.target.value && go("priority", e.target.value, "Priority set")}>
+        <option value="">Priority…</option>
+        {meta.priorities.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
+      </select>
+      <button className="sm" onClick={() => go("asked", true, "Asked for")} title="The crew starts them by itself within your standing limit">Asked for</button>
+      <button className="sm" onClick={copy}>Copy as Markdown</button>
+      <button className="link" onClick={onClear}>clear</button>
+      {said && <span className="muted">{said}</span>}
+    </div>
   );
 }
 

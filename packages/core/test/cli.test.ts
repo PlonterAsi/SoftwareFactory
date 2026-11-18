@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventLog, MockRuntime, createCore } from "../src/index.js";
+import { EventLog, MockRuntime, Tickets, createCore } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-cli-"));
 
@@ -47,5 +47,32 @@ describe("sf: the tickets from any terminal (gap 10, agent interfaces outside th
     const { run } = await import("../bin/sf.mjs?down");
     await expect(run(["list"], () => {})).rejects.toThrow(/not running/);
     delete process.env.SF_URL;
+  });
+});
+
+describe("many tickets at once (gap 6, list parity)", () => {
+  it("moves, sizes, prioritizes and asks for many; one that refuses says why and the rest still move", () => {
+    const log = new EventLog();
+    const t = new Tickets(log);
+    const a = t.open({ kind: "bug", title: "Footer link is broken" });
+    const b = t.open({ kind: "task", title: "Test the home view" });
+    const c = t.open({ kind: "task", title: "Already done" });
+    t.say(c.id, "", { status: "closed" });
+    expect(t.bulk([a.id, b.id], "size", "S").done).toEqual([a.id, b.id]);
+    expect(t.bulk([a.id, b.id], "priority", "now").done).toHaveLength(2);
+    expect(t.bulk([a.id, b.id], "status", "ready").done).toEqual([a.id, b.id]);
+    expect(t.get(a.id)).toMatchObject({ status: "ready", size: "S", priority: "now" });
+    const asked = t.bulk([a.id, b.id, c.id], "asked", true);
+    expect(asked.done).toEqual([a.id, b.id]);
+    expect(asked.failed).toEqual([{ id: c.id, key: c.key, error: expect.stringMatching(/closed/) }]);
+    expect(t.detail(b.id)!.asked).toBe(true);
+    expect(() => t.bulk([], "status", "ready")).toThrow(/at least one/);
+    expect(() => t.bulk([a.id], "title", "x")).toThrow(/cannot be done/);
+    const md = t.exportTickets([a.id, b.id]);
+    expect(md).toMatch(new RegExp(`## ${a.key} Footer link is broken\\nbug, ready, size S`));
+    expect(md).toContain(`## ${b.key} Test the home view`);
+    const json = JSON.parse(t.exportTickets([a.id], "json"));
+    expect(json[0].ticket.title).toBe("Footer link is broken");
+    expect(json[0].document).toBeUndefined();
   });
 });

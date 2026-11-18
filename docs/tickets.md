@@ -115,6 +115,10 @@ An ask said in a project (its idea box, the Assistant) is read for its door befo
 - **Another round** ("another round on the landing page", "re-loop this project", "improve it again") becomes an **epic of the round**: a reader goes through a read-only copy of the repo and lists 3 to 6 findings, each filed as a ready bug or task with its size under that epic. The crew works them like any ticket (asked for when you asked, so they start within your limit), and the epic moves on by itself when they are done. Repo projects only.
 - **Anything else** is work: a request ticket on the light or engine route, as before. A route you choose always means work.
 
+## Many at once (2026-11-18)
+
+Tick rows in the list (or Pick all) and a bar appears: move them to Open, Ready, Closed or Rejected, size them, set a priority, mark them asked for, or copy them as Markdown. Each ticket moves by the same rules as alone; one that refuses is named with why, and the rest still move. A sort menu orders the list by priority (the default), newest, oldest, last changed or smallest first. API: `POST /api/tickets/bulk { ids, action: status|asked|size|priority|parent|assignee, value }`, `GET /api/tickets/export?ids=1,2[&format=json]`.
+
 ## From any terminal: `sf` (2026-11-18)
 
 `packages/core/bin/sf.mjs` reads and answers tickets from a terminal, for you and for agents such as a Claude Code session in another repo. It talks to the running core on this PC (`http://127.0.0.1:4317`, or `SF_URL`), needs nothing installed beyond Node, and every write goes through the same API as the app, so it lands on the ticket's thread like a press there.

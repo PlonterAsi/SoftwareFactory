@@ -2338,3 +2338,10 @@ button.fm-wire-node .muted { font: 12px/1.2 var(--mono); white-space: nowrap; }
 .mb-meter { height: 6px; border-radius: 3px; background: color-mix(in srgb, currentColor 12%, transparent); overflow: hidden; flex: none; }
 .mb-meter i { display: block; height: 100%; background: var(--accent, #4f8cff); }
 .mb-days { flex: none; }
+
+/* Picking many tickets at once (bulk bar) */
+.tk-row { grid-template-columns: 16px 16px minmax(34px, max-content) 1fr; }
+.tk-pick { margin: 2px 0 0; cursor: pointer; }
+.tk-pickall { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; }
+.tk-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; margin: 0 0 6px; border: 1px solid var(--accent-dim); border-radius: 6px; background: var(--panel-2); }
+.tk-bulk select { max-width: 140px; }
