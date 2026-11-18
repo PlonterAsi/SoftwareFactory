@@ -31,6 +31,8 @@ import { launchRoute } from "./launch/routes.js";
 import { Integrations } from "./integrations/service.js";
 import { integrationsRoute, serveExtension } from "./integrations/routes.js";
 import { PluginHost } from "./plugins/host.js";
+import { PluginStore } from "./plugins/store.js";
+import { PluginAi } from "./plugins/ai.js";
 import { coreDoor } from "./plugins/door.js";
 import { pluginsRoute, servePluginFile } from "./plugins/routes.js";
 import { brainRoute } from "./brain/routes.js";
@@ -158,7 +160,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const explorer = new RepoExplorer(log, runtime, join(dirname(projectsDir), "imports"), bay, { createNode: (title) => order.createNode("project", title) });
   // Finished projects added into SoftwareFactory: their frozen copies live in extensions/, next to projects/.
   // Plugins: folders with a plugin.json, copied into plugins/ next to projects/, each backend in its own locked-down process.
-  const plugins = new PluginHost(log, join(dirname(projectsDir), "plugins"), { bay, door: coreDoor({ log, tickets, bay }) });
+  // Add-ons may keep a searchable catalog (store) and ask Claude from their own monthly budget (ai): docs/plugins.md.
+  const pluginStore = new PluginStore(log.db);
+  const pluginAi = new PluginAi(log, () => runtime);
+  const plugins = new PluginHost(log, join(dirname(projectsDir), "plugins"), {
+    bay, door: coreDoor({ log, tickets, bay }), store: pluginStore, ai: pluginAi,
+    ...(github ? { tarball: (repo: string, ref: string) => github.tarball(repo, ref) } : {}),
+  });
   const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"), plugins);
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
   const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
@@ -482,7 +490,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (url.pathname.startsWith("/ext/") && serveExtension(integrations, req, res, url)) return;
       if (url.pathname === "/api/plugins" || url.pathname.startsWith("/api/plugins/")) {
-        const r = await pluginsRoute({ plugins, readJson }, req, url);
+        const r = await pluginsRoute({ plugins, readJson, openUrl: openFolder }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname.startsWith("/plugins/") && servePluginFile(plugins, req, res, url)) return;
@@ -929,6 +937,10 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
   timers.push(setInterval(improveTick, 15 * 60_000).unref());
   // Plugins you turned on start with the core and stop with it.
   for (const id of core.plugins.startAll()) console.log(`Plugin ${id} started`);
+  // Add-ons installed from GitHub keep themselves up to date: a minute after start, then every 6 hours.
+  const addonTick = () => { if (!process.env.VITEST) core.plugins.updateAllFromGithub().then((ids) => { for (const id of ids) console.log(`Add-on ${id} updated`); }).catch((e) => console.error("add-on updates failed:", e)); };
+  timers.push(setTimeout(addonTick, 60_000).unref());
+  timers.push(setInterval(addonTick, 6 * 3_600_000).unref());
   // Runs the app closed on pick up again from their last completed station (SF_AUTO_RESUME=0 leaves them for the Resume button).
   if (process.env.SF_AUTO_RESUME !== "0" && core.factory.interrupted.length) {
     if (!checkGit().found) console.log("Not resuming interrupted runs: Git is not installed.");

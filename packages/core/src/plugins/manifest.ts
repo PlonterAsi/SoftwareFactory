@@ -15,13 +15,17 @@ import { join, normalize, isAbsolute, sep } from "node:path";
  *     "panels": [                              optional UI, each a web page shown in a sandboxed frame
  *       { "id": "stats", "title": "Run stats", "entry": "ui/index.html", "where": "project", "order": 85 }
  *     ],
- *     "agents": ["agents/reviewer.md"]         optional agent files that join the Agent Bay (needs agents)
+ *     "agents": ["agents/reviewer.md"],        optional agent files that join the Agent Bay (needs agents)
+ *     "budget": { "monthlyUsd": 30 }           the most its Claude calls may spend in a month (needs ai); you can change it
  *   }
+ *
+ * A panel's "where": "project" (a tab in every project), "page" (a page on the Add-ons screen), or "nav" (its own
+ * item in the app's main menu, a whole page, for add-ons that are a tool of their own, like Scout).
  *
  * Every plugin may keep its own small data (key → JSON value) and log lines; nothing else is
  * open to it unless its permissions say so.
  */
-export const PLUGIN_PERMISSIONS = ["events:read", "events:write", "agents", "records:read", "actions"] as const;
+export const PLUGIN_PERMISSIONS = ["events:read", "events:write", "agents", "records:read", "actions", "ai", "store"] as const;
 export type PluginPermission = (typeof PLUGIN_PERMISSIONS)[number];
 
 export const PERMISSION_TEXT: Record<PluginPermission, string> = {
@@ -30,7 +34,13 @@ export const PERMISSION_TEXT: Record<PluginPermission, string> = {
   agents: "Add its agents to the Agent Bay, where the loops can pick them as workers",
   "records:read": "Read your projects, tickets and agents (names, states, counts and spend; no file contents)",
   actions: "Do the things its manifest lists for you (each one is named when you turn it on, and logged)",
+  ai: "Ask Claude (it may search and read the web), paid from its own monthly budget, which you set",
+  store: "Keep its own searchable catalog in SoftwareFactory's database",
 };
+
+/** The monthly budget an add-on with `ai` gets when its manifest names none, and the most a manifest may ask for (you can set more). */
+export const DEFAULT_AI_MONTHLY_USD = 5;
+export const MAX_MANIFEST_MONTHLY_USD = 100;
 
 /**
  * What a plugin may do with the `actions` permission. Each is the same core command the app's own
@@ -55,8 +65,8 @@ export interface PluginPanel {
   title: string;
   /** The page, relative to the plugin folder. */
   entry: string;
-  /** "project": a tab in every project. "page": a page of its own on the Plugins screen. */
-  where: "project" | "page";
+  /** "project": a tab in every project. "page": a page of its own on the Plugins screen. "nav": its own item in the main menu. */
+  where: "project" | "page" | "nav";
   order: number;
 }
 
@@ -72,6 +82,8 @@ export interface PluginManifest {
   agents: string[];
   /** The actions it may take (needs the actions permission); see PLUGIN_ACTIONS. */
   actions: PluginAction[];
+  /** What its Claude calls may spend (needs ai): the manifest's ask; your own setting wins (plugin.budget). */
+  budget: { monthlyUsd: number } | null;
 }
 
 export class ManifestError extends Error {}
@@ -118,7 +130,7 @@ export function readManifest(dir: string): PluginManifest {
     if (!/\.html?$/.test(entry)) throw new ManifestError(`Panel "${pid}" entry must be an .html page`);
     return {
       id: pid, title: String(p?.title ?? name).slice(0, 40), entry,
-      where: p?.where === "page" ? "page" : "project",
+      where: p?.where === "page" ? "page" : p?.where === "nav" ? "nav" : "project",
       order: Number.isFinite(Number(p?.order)) ? Number(p.order) : 85,
     };
   });
@@ -130,9 +142,16 @@ export function readManifest(dir: string): PluginManifest {
   if (actions.length && !permissions.includes("actions")) throw new ManifestError('"actions" needs the actions permission');
   if (permissions.includes("actions") && !actions.length) throw new ManifestError(`The actions permission needs an "actions" list (any of ${Object.keys(PLUGIN_ACTIONS).join(", ")})`);
   if (!main && !panels.length && !agents.length) throw new ManifestError("The plugin adds nothing: give it a main, panels or agents");
+  if ((permissions.includes("ai") || permissions.includes("store")) && !main) throw new ManifestError("The ai and store permissions are used by a backend: give it a main");
+  let budget: { monthlyUsd: number } | null = null;
+  if (permissions.includes("ai")) {
+    const ask = Number(raw.budget?.monthlyUsd ?? DEFAULT_AI_MONTHLY_USD);
+    if (!Number.isFinite(ask) || ask <= 0) throw new ManifestError('"budget.monthlyUsd" must be a positive number of dollars');
+    budget = { monthlyUsd: Math.min(ask, MAX_MANIFEST_MONTHLY_USD) };
+  }
   return {
     id, name, version: String(raw.version ?? "0.0.0").slice(0, 20), description: String(raw.description ?? "").slice(0, 300),
-    permissions: permissions as PluginPermission[], main, subscribe, panels, agents, actions: actions as PluginAction[],
+    permissions: permissions as PluginPermission[], main, subscribe, panels, agents, actions: actions as PluginAction[], budget,
   };
 }
 
