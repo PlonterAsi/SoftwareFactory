@@ -6,6 +6,7 @@ import { dependencyScan, readCode, riskScan } from "../imports/evidence.js";
 import { scanRepo } from "../imports/scan.js";
 import { projectFolders } from "../launch/routes.js";
 import type { Tickets } from "../tickets/tickets.js";
+import { AutoFile } from "../tickets/autofile.js";
 
 /**
  * Watchers (SF behavior brief, phase 6): scheduled looks at each project that only open tickets. They never change
@@ -224,6 +225,9 @@ export class Watchers {
         if (opened.length >= MAX_TICKETS_PER_LOOK) continue;
         const t = this.tickets.open({ project: projectId, kind: f.kind, title: f.title, body: f.body, priority: f.priority, severity: f.severity, by: `${WATCHER_LABEL[kind]} watcher`, source: "watcher", tags: ["watcher", kind], fingerprint });
         opened.push(t.id);
+        // An auto-file rule for watcher tickets can make the ones that meet it ready (tickets/autofile.ts).
+        const m = new AutoFile(this.log).match({ source: "watcher", projectId, severity: f.severity ?? null });
+        if (m.rule?.makeReady) { try { this.tickets.say(t.id, `Made ready by the auto-file rule "${m.rule.name}".`, { status: "ready", by: `${WATCHER_LABEL[kind]} watcher` }); } catch { /* the move is refused: it stays open */ } }
       }
       const left = findings.length - known - opened.length;
       const note = error ? `Could not look: ${error}`

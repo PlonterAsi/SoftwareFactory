@@ -48,7 +48,7 @@ describe("Agent Bay", () => {
     const bay = new AgentBay(log);
     new AgentBay(log);
     expect(bay.agents().map((a) => a.def.id)).toEqual(["overseer", "archivist", "visionary", "architect", "skeptic", "designer", "critic", "judge", "planner", "tester", "builder", "reviewer", "fixer",
-      "integrator", "automator", "simplifier", "enricher", "ux-lens", "flow-lens", "cartographer", "surveyor", "inspector", "assessor", "researcher"]);
+      "integrator", "automator", "simplifier", "enricher", "ux-lens", "flow-lens", "cartographer", "surveyor", "inspector", "assessor", "researcher", "scout-analyst", "scout-tester"]);
     expect(bay.slots().council).toEqual(["visionary", "architect", "skeptic"]);
     const [planner] = bay.crewFor("plan");
     expect(planner).toMatchObject({ id: "planner", version: 1, model: "haiku" });

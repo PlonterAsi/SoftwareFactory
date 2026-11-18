@@ -8,6 +8,7 @@ import { showTicket } from "./BugReport";
 import { CHECK_WORD, RUNNER_WORD, ticketsApi, type TicketCheck, type TicketView } from "./Tickets";
 import { EmptyState } from "./ui";
 import { MonthBlock } from "./projects/monthBlock";
+import { ScoutCard } from "./projects/scoutPanel";
 
 /**
  * Home: every ticket across projects on one board (SF behavior brief 4.1). Four lanes, Needs you first:
@@ -80,6 +81,7 @@ export function Board({ last, factoryRuns, runs, crew, onShowRun }: { last: numb
         {checks.length > 0 && <button className="sm" onClick={() => setBatch((x) => !x)} aria-expanded={batch}>{batch ? "Close the questions" : `Answer before money: ${checks.reduce((n, c) => n + (c.questions ?? 1), 0)} question${checks.length === 1 && (checks[0].questions ?? 1) === 1 ? "" : "s"}`}</button>}
       </header>
       <MonthBlock key={Math.floor(last / 50)} projectId={null} compact />
+      <ScoutCard key={`scout-${Math.floor(last / 50)}`} />
       {err && <div className="err" role="alert">{err}</div>}
       {batch && <CheckBatch onDone={() => setBatch(false)} />}
       <LiveFlow card={selected} factoryRuns={factoryRuns} runs={runs} crew={crew} onShowRun={onShowRun} />

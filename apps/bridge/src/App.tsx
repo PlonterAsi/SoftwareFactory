@@ -31,6 +31,7 @@ import "./projects/improvePanel";
 import "./projects/runPanel";
 import "./projects/budgetPanel";
 import "./projects/watchersPanel";
+import "./projects/scoutPanel";
 import "./projects/GitPanel";
 import "./CodeMap";
 import "./RepoReview";

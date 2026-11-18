@@ -278,6 +278,37 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}watch/watchers.ts`, `${C}watch/routes.ts`], api: ["/api/watchers"],
   },
   {
+    id: "scout", name: "Scout (AI engineering scout)", group: "Work",
+    purpose: "A project's daily look for AI engineering worth knowing (skills, plugins, MCP servers, mods, agents, prompts, tips, and the pages and people worth following): each find analyzed, rated, the best tried in a throwaway sandbox, and advised use, adapt, build our own or skip.",
+    spec: [
+      "Gathering is plain code and free: GitHub search, Hacker News, Reddit, RSS and Atom feeds (YouTube channels too), and awesome lists (only links added since the last read). Sites that need a sign-in (Instagram, Facebook, much of X) come in through the link inbox.",
+      "The same thing found twice is one find (one key per address). A look adds at most 60 new finds, strongest first; the inbox is read first.",
+      "The Analyst (a cheap model) reads each picked find and scores token efficiency, best practice, productivity, security and upkeep from 1 to 5 with reasons, and gives a category, a verdict, where it helps, an estimate and a risk level. A find scored 2 or less on security is never use.",
+      "Risk comes from what is known (know-how is read-only; a repo with few stars, or new, or archived is high); the Analyst may only raise it.",
+      "Every paid call is charged to the Scout project, so its monthly budget holds it: with less than five cents left, a look gathers and stops.",
+      "The best finds of the week (a set number) are queued for the sandbox; high risk waits for the person's click.",
+      "A sandbox trial downloads the code, scans it (install scripts, download-and-run, binaries, encoded code, credential reading, webhooks, secrets), makes a throwaway WSL machine with no Windows drives and no Windows programs, lets the Tester run use cases only inside it from outside, and removes the machine.",
+      "A rated find that meets an auto-file rule becomes a ticket on the project the settings name; the rest wait for one press. The person's verdict wins over Scout's.",
+    ],
+    flow: ["Its day comes round", "Plain code gathers new finds", "The Analyst rates the strongest", "The best go to the sandbox (high risk waits for a click)", "Rules file tickets, the rest wait for a press"],
+    design: "A Scout tab on a project (Improve) with the catalog (filters by category, verdict, trial; each find's scores, verdict, trial and buttons), the link inbox, the follow list, settings and the week; a Scout card on Home with today's finds and what waits for a click.",
+    screens: ["/p/ID/scout", "/"], docs: ["docs/scout.md"], stations: [],
+    files: [`${C}scout/`, `${B}projects/scoutPanel.tsx`], api: ["/api/scout"],
+  },
+  {
+    id: "autofile", name: "Auto-file rules", group: "Work",
+    purpose: "The person's settings for which suggestions become tickets by themselves (time, cost, severity, verdict, score, risk, category), and which of those are made ready for the crew.",
+    spec: [
+      "A suggestion that meets every condition of a rule that is on is filed; a condition the suggestion has nothing for does not match.",
+      "Scout hands every rated find to the rules; the watchers hand every ticket they open, and a matching rule can make it ready.",
+      "Rules are saved whole and checked; the list as shipped files quick, cheap, safe finds to use, not ready.",
+    ],
+    flow: ["Set the rules", "A suggestion arrives", "The first rule it meets files it (and may make it ready)", "Everything else waits for a press"],
+    design: "An Auto-file rules card on the Scout tab: one row per rule with its switch and conditions.",
+    screens: ["/p/ID/scout"], docs: ["docs/scout.md"], stations: [],
+    files: [`${C}tickets/autofile.ts`], api: ["/api/autofile"],
+  },
+  {
     id: "monthly-budgets", name: "Monthly budgets and burn rate", group: "Projects",
     purpose: "A monthly budget for each project and one for everything, read from the agent calls actually paid, with the burn rate and where the month ends at that rate. The crew's queue fits them.",
     spec: [

@@ -39,6 +39,9 @@ import { flowsRoute } from "./flows/routes.js";
 import { watchRoute } from "./watch/routes.js";
 import { monthLeft } from "./watch/spend.js";
 import { Watchers } from "./watch/watchers.js";
+import { Scout } from "./scout/scout.js";
+import { Sandbox } from "./scout/sandbox.js";
+import { scoutRoute } from "./scout/routes.js";
 import { FlowImprover } from "./flows/improver.js";
 import { GitManager } from "./git/manager.js";
 import { gitRoute } from "./git/routes.js";
@@ -129,6 +132,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   });
   // Watchers (watch/watchers.ts): scheduled, free looks at each project that only open tickets.
   const watchers = new Watchers(log, tickets);
+  // Scout (scout/scout.ts): a project's daily look for AI engineering worth knowing, rated, tried in a sandbox, filed by your rules.
+  const paidLeft = (p: number) => (crewMode() === "real" ? monthLeft(log, p) : { leftUsd: null, why: null });
+  const scout = new Scout(log, { runtime, bay, tickets, monthLeft: paidLeft });
+  const sandbox = new Sandbox(log, scout, join(dirname(projectsDir), "scout"), { runtime, bay, monthLeft: paidLeft });
   // A flow step may name a Bay agent; saving one that names an agent the Bay does not have is refused.
   factory.flows.agentsKnown = () => new Set(bay.agents().filter((a) => !a.retired).map((a) => a.def.id));
   // Flows that improve themselves (flows/improve.ts): proposals replayed on past runs, one live trial, your decision.
@@ -488,6 +495,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await watchRoute({ log, watchers, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (url.pathname === "/api/scout" || url.pathname.startsWith("/api/scout/") || url.pathname === "/api/autofile") {
+        const r = await scoutRoute({ scout, sandbox, readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
       if (url.pathname === "/api/git" || url.pathname.startsWith("/api/git/")) {
         const r = await gitRoute({ git: gitman, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
@@ -530,7 +541,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { github, git: gitman, flowImprover, watchers, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, git: gitman, flowImprover, watchers, scout, sandbox, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, errors, fault, ensureSelf });
 }
 
 /**
@@ -872,6 +883,10 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
   const watchTick = () => { core.watchers.runDue().then(() => core.tickets.dispatch()).catch((e) => console.error("watchers failed:", e)); };
   setTimeout(watchTick, 4 * 60_000).unref();
   timers.push(setInterval(watchTick, 30 * 60_000).unref());
+  // Scout looks when its day comes round (gathering is free; the Analyst is capped by the project's month), then the next queued sandbox trial runs.
+  const scoutTick = () => { core.scout.runDue().then(() => core.sandbox.next()).catch((e) => console.error("scout failed:", e)); };
+  setTimeout(scoutTick, 6 * 60_000).unref();
+  timers.push(setInterval(scoutTick, 30 * 60_000).unref());
   const followTick = () => { core.explorer.followTick().catch((e) => console.error("following imported repos failed:", e)); };
   setTimeout(followTick, 3 * 60_000).unref();
   timers.push(setInterval(followTick, 30 * 60_000).unref());

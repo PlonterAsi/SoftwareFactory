@@ -370,7 +370,14 @@ export const RELEASE_FLOW = door({
   steps: [["collect", "Collect", "tickets merged since the last version"], ["notes", "Release notes", "from each ticket's timeline"], ["accept", "Your OK", "on the notes"], ["tag", "Tag", "the version on main"]],
 });
 
-export const BUILT_IN_FLOWS: FlowDef[] = [NEW_PROJECT_FLOW, REPO_CHANGE_FLOW, BUG_FIX_FLOW, SMALL_CHANGE_FLOW, REFACTOR_FLOW, RESEARCH_FLOW, IMPORT_FLOW, IMPROVE_FLOW, RELEASE_FLOW];
+/** Scout: a daily look for AI engineering worth knowing, rated, tried in a sandbox, filed by your rules. Carried out by Scout. */
+export const SCOUT_FLOW = door({
+  id: "scout", name: "Scout", door: "The Scout tab of a project with Scout on (scout/scout.ts, scout/sandbox.ts)",
+  purpose: "Every day: find skills, plugins, MCP servers, mods, prompts, tips and pages worth following; analyze and rate each; try the best in a throwaway sandbox; advise use, adapt, build our own or skip; file what meets your rules.",
+  steps: [["gather", "Gather", "sources, follow list, link inbox (free)"], ["triage", "Triage", "repeats dropped, strongest first"], ["analyze", "Analyze", "Analyst scores each find"], ["try", "Try", "sandbox; high risk waits for you"], ["rate", "Rate and advise", "use, adapt, build our own, skip"], ["file", "File", "your auto-file rules, or your press"]],
+});
+
+export const BUILT_IN_FLOWS: FlowDef[] = [NEW_PROJECT_FLOW, REPO_CHANGE_FLOW, BUG_FIX_FLOW, SMALL_CHANGE_FLOW, REFACTOR_FLOW, RESEARCH_FLOW, IMPORT_FLOW, IMPROVE_FLOW, RELEASE_FLOW, SCOUT_FLOW];
 
 /** The built-in flow a kind of run starts with when nothing else is chosen. */
 export function builtInFlowFor(kind?: string): FlowDef {

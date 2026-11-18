@@ -714,6 +714,40 @@ export const watchApi = {
   runWatcher: (project: number, kind: string) => postJson(`/api/watchers/${project}/${kind}/run`) as Promise<{ note: string; opened: number[]; watchers: WatcherView[] }>,
 };
 
+export type ScoutVerdictView = "use" | "adapt" | "build" | "skip";
+export interface ScoutSourceView { id: string; kind: "github" | "hn" | "reddit" | "feed" | "awesome"; value: string; on: boolean; label?: string }
+export interface ScoutSettingsView { on: boolean; everyHours: number; runUsd: number; perLook: number; trialsPerWeek: number; ticketsTo: number | null; focus: string; sources: ScoutSourceView[]; follow: { id: string; name: string; url: string; note?: string }[] }
+export interface ScoutCountsView { total: number; rated: number; waiting: number; foundToday: number; worthToday: number; needsClick: number; byCategory: Record<string, number>; byVerdict: Record<string, number> }
+export interface ScoutLookView { ts?: string; gathered: number; fresh: number; analyzed: number; filed: number[]; trials: number; costUsd: number; notes: string[]; error?: string }
+export interface ScoutFindView {
+  id: number; projectId: number; ts: string; url: string; title: string; source: string; sourceWord: string; snippet: string | null;
+  meta: { stars?: number; points?: number; from?: string; repo?: string };
+  status: "new" | "rated"; category: string | null; summary: string | null; scores: Record<string, { n: number; why: string }>; score: number | null;
+  verdict: ScoutVerdictView | null; verdictBy: string | null; verdictNote: string | null; where: string | null; how: string | null;
+  risk: "read-only" | "low" | "medium" | "high" | null; minutes: number | null; usd: number | null; follow: boolean;
+  trial: string; trialNote: string | null; ticketId: number | null; filedBy: string | null; costUsd: number;
+}
+export interface AutoFileRuleView {
+  id: string; name: string; on: boolean; sources: ("scout" | "watcher")[]; projectId: number | null; maxMinutes?: number; maxUsd?: number;
+  minSeverity?: "blocking" | "annoying" | "cosmetic"; verdicts?: ScoutVerdictView[]; minScore?: number; maxRisk?: "read-only" | "low" | "medium" | "high"; categories?: string[]; makeReady?: boolean;
+}
+export interface ScoutWeekView { since: string; best: ScoutFindView[]; trials: ScoutFindView[]; looks: number; found: number; analyzed: number; filed: number[]; costUsd: number; followed: number }
+
+export const scoutApi = {
+  all: () => getJson("/api/scout", "could not read Scout") as Promise<{ projects: ({ projectId: number; name: string; on: boolean; last: ScoutLookView | null } & ScoutCountsView)[] }>,
+  state: (project: number) => getJson(`/api/scout/${project}`, "could not read Scout") as Promise<{ settings: ScoutSettingsView | null; on: boolean; counts: ScoutCountsView | null; last: ScoutLookView | null; sandbox: { ok: boolean; why: string | null } }>,
+  configure: (project: number, patch: Partial<ScoutSettingsView>) => postJson(`/api/scout/${project}`, patch) as Promise<{ settings: ScoutSettingsView; counts: ScoutCountsView }>,
+  look: (project: number, analyze = true) => postJson(`/api/scout/${project}/look`, { analyze }) as Promise<{ look: ScoutLookView; counts: ScoutCountsView }>,
+  finds: (project: number, f: Record<string, string> = {}) => getJson(`/api/scout/${project}/finds?${new URLSearchParams(f)}`, "could not read the catalog") as Promise<{ finds: ScoutFindView[]; counts: ScoutCountsView }>,
+  week: (project: number) => getJson(`/api/scout/${project}/week`, "could not read the week") as Promise<ScoutWeekView>,
+  inbox: (project: number, url: string, note = "") => postJson(`/api/scout/${project}/inbox`, { url, note }) as Promise<{ find: ScoutFindView }>,
+  follow: (project: number, url: string, name?: string) => postJson(`/api/scout/${project}/follow`, { url, name }) as Promise<{ settings: ScoutSettingsView }>,
+  act: (id: number, what: "file" | "try" | "approve" | "decline" | "run") => postJson(`/api/scout/find/${id}/${what}`) as Promise<{ find: ScoutFindView }>,
+  judge: (id: number, verdict: ScoutVerdictView, note = "") => postJson(`/api/scout/find/${id}/judge`, { verdict, note }) as Promise<{ find: ScoutFindView }>,
+  rules: () => getJson("/api/autofile", "could not read the rules") as Promise<{ rules: AutoFileRuleView[] }>,
+  saveRules: (rules: AutoFileRuleView[]) => postJson("/api/autofile", { rules }) as Promise<{ rules: AutoFileRuleView[] }>,
+};
+
 export const flowsApi = {
   list: () => getJson("/api/flows", "could not list the flows") as Promise<{ flows: FlowSummaryView[]; actions: Record<string, { label: string; needs: string[]; required: boolean }>; agents: string[] }>,
   get: (id: string) => getJson(`/api/flows/${encodeURIComponent(id)}`, "could not open the flow") as Promise<{ flow: FlowView; history: { version: number; savedBy: string; savedAt: string }[] }>,
