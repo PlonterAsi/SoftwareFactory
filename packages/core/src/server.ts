@@ -113,6 +113,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     return {
       on: st.ticketsAutoWork ?? AUTO_WORK_DEFAULT.on,
       maxUsd: st.ticketsAutoMaxUsd ?? AUTO_WORK_DEFAULT.maxUsd,
+      askedMaxUsd: st.ticketsAskedMaxUsd ?? AUTO_WORK_DEFAULT.askedMaxUsd,
       dailyUsd: st.ticketsAutoDailyUsd ?? AUTO_WORK_DEFAULT.dailyUsd,
       wip: st.ticketsWip ?? AUTO_WORK_DEFAULT.wip,
     };
@@ -374,6 +375,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const station = log.db.prepare("SELECT payload FROM events WHERE type = 'factory.station' AND json_extract(payload, '$.run') = ? ORDER BY id DESC LIMIT 1").get(id) as { payload: string } | undefined;
         return json(res, 200, { ...row, station: station ? JSON.parse(station.payload) : null, waiting: factory.waitingGate(id), resumable: factory.resumable(id) });
       }
+      const retryMatch = url.pathname.match(/^\/api\/factory\/runs\/(\d+)\/retry$/);
+      if (req.method === "POST" && retryMatch) {
+        // SF-65: a stopped or failed run, from the step it stopped at, with fresh money for what is left.
+        const b = await readJson(req);
+        try { return json(res, 202, factory.retry(Number(retryMatch[1]), { addUsd: typeof b.addUsd === "number" ? b.addUsd : undefined })); }
+        catch (e) { return json(res, 409, { error: (e as Error).message }); }
+      }
       const resumeMatch = url.pathname.match(/^\/api\/factory\/runs\/(\d+)\/resume$/);
       if (req.method === "POST" && resumeMatch) {
         const id = Number(resumeMatch[1]);
@@ -441,12 +449,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
           return json(res, 200, { hasToken: github.hasToken(), source, login, repo: self ? `${self.owner}/${self.name}` : null, canPush: check?.ok ?? false, why: check?.why ?? null });
         }
         if (url.pathname === "/api/tickets/auto") {
-          // The auto-work rule: GET reads it, POST changes any of on, maxUsd, dailyUsd, wip.
+          // The auto-work rule, your standing approval: GET reads it, POST changes any of on, maxUsd, askedMaxUsd, dailyUsd, wip.
           if (req.method === "POST") {
             const b = await readJson(req);
             const set = (key: string, v: unknown, ok: boolean) => { if (ok) log.append("settings.changed", { key, value: v }); };
             set("ticketsAutoWork", b.on, typeof b.on === "boolean");
             set("ticketsAutoMaxUsd", b.maxUsd, typeof b.maxUsd === "number" && b.maxUsd > 0 && b.maxUsd <= 5);
+            set("ticketsAskedMaxUsd", b.askedMaxUsd, typeof b.askedMaxUsd === "number" && b.askedMaxUsd > 0 && b.askedMaxUsd <= 20);
             set("ticketsAutoDailyUsd", b.dailyUsd, typeof b.dailyUsd === "number" && b.dailyUsd >= 0 && b.dailyUsd <= 50);
             set("ticketsWip", b.wip, Number.isInteger(b.wip) && Number(b.wip) >= 1 && Number(b.wip) <= 6);
             tickets.dispatch();
@@ -583,7 +592,7 @@ function selfGitHub(log: EventLog) {
 export function readSettings(log: EventLog): {
   crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean; importsFollow?: boolean;
   importReviewMaxUsd?: number; importReviewAuto?: boolean; importHomeStack?: string;
-  ticketsAutoWork?: boolean; ticketsAutoMaxUsd?: number; ticketsAutoDailyUsd?: number; ticketsWip?: number;
+  ticketsAutoWork?: boolean; ticketsAutoMaxUsd?: number; ticketsAskedMaxUsd?: number; ticketsAutoDailyUsd?: number; ticketsWip?: number;
   maxRunMinutes?: number;
 } {
   const rows = log.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
@@ -726,6 +735,11 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
         throw e;
       }
     case "ask": return [200, await tickets.ask(id, body.agent ? String(body.agent) : undefined)];
+    // You asked for it: the crew starts it by itself within the standing auto-work limit (no press each time).
+    case "asked": try { return [200, tickets.setAsked(id, body.on !== false)]; } catch (e) { return [400, { error: (e as Error).message }]; }
+    // SF-65: its run stopped or failed: pick it up from that step with fresh money, keeping what was built.
+    case "retry":
+      try { return [202, tickets.retry(id, { addUsd: typeof body.addUsd === "number" ? body.addUsd : undefined })]; } catch (e) { return [409, { error: (e as Error).message }]; }
   }
   return null;
 }

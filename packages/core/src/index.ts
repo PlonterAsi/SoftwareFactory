@@ -90,3 +90,4 @@ export { DEFAULT_FEATURES, type FeatureRecord } from "./featuremap/records.js";
 export * from "./git/manager.js";
 export * from "./git/confidence.js";
 export * from "./git/notes.js";
+export { FEATURE_FIT_USD, ONE_SESSION_FEATURE_USD, buildFit, buildPoolUsd, featureSessionCap, type BuildFit } from "./factory/features.js";

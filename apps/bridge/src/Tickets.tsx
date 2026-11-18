@@ -33,8 +33,12 @@ interface Detail {
   /** The flow it follows if worked now, and why (you picked it, or its kind's). */
   flow?: { id: string; name: string; runner: string; why: string; chosen: boolean } | null;
   queue: { position: number | null; why: string | null } | null;
+  /** You asked for it: the crew starts it within your standing auto-work limit. */
+  asked?: boolean;
+  /** Its run stopped or failed and can be tried again from that step, with what that adds. */
+  retry?: { from: string; addUsd: number } | null;
 }
-interface AutoWork { on: boolean; maxUsd: number; dailyUsd: number; wip: number }
+interface AutoWork { on: boolean; maxUsd: number; askedMaxUsd: number; dailyUsd: number; wip: number }
 interface Question { key: string; label: string; short?: boolean; required?: boolean; choices?: string[] }
 interface Meta { kinds: { code: TicketKind; label: string; questions: Question[] }[]; statuses: { code: TicketStatus; label: string; closed?: boolean; wantsLook?: boolean }[]; priorities: { code: string; label: string }[]; severities: string[]; relations: string[] }
 interface Counts { byStatus: Record<string, number>; byKind: Record<string, number>; open: number; look: number; you: number; total: number; oldest: { id: number; title: string; createdAt: string } | null }
@@ -87,6 +91,8 @@ export const ticketsApi = {
   checks: (project?: number | null) => call<{ items: { ticket: TicketView; projectName: string | null; flow: { id: string; name: string } | null; check: TicketCheck }[] }>("GET", `/api/tickets/checks${project != null ? `?project=${project}` : ""}`),
   answerChecks: (answers: { id: number; q: string; text: string }[], run: boolean) => call<{ answered: number; started: { id: number; run: number | null; flow?: string }[]; held: { id: number; error: string }[] }>("POST", "/api/tickets/checks", { answers, run }),
   ask: (id: number, agent?: string) => call<{ reply?: string; error?: string }>("POST", `/api/tickets/${id}/ask`, { agent }),
+  asked: (id: number, on: boolean) => call<TicketView>("POST", `/api/tickets/${id}/asked`, { on }),
+  retry: (id: number) => call<{ run: number; from: string; addUsd: number }>("POST", `/api/tickets/${id}/retry`, {}),
 };
 
 /** Ticket counts for a badge (the tab, a project card): refetched when a ticket event lands. */
@@ -267,9 +273,12 @@ function NewTicket({ meta, projectId, projects, onDone, onError }: { meta: Meta;
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [priority, setPriority] = useState("");
   const [project, setProject] = useState<number | null>(projectId);
+  // Work you ask for starts by itself within your standing limit; ideas, epics and questions wait unless you tick it.
+  const [asked, setAsked] = useState<boolean | null>(null);
+  const askedNow = asked ?? (kind === "bug" || kind === "task" || kind === "request");
   const qs = meta.kinds.find((k) => k.code === kind)?.questions.filter((q) => q.short) ?? [];
   const submit = async () => {
-    try { onDone(await ticketsApi.open({ kind, title, answers, priority: priority || null, project })); } catch (e) { onError((e as Error).message); }
+    try { onDone(await ticketsApi.open({ kind, title, answers, priority: priority || null, project, asked: askedNow } as Parameters<typeof ticketsApi.open>[0])); } catch (e) { onError((e as Error).message); }
   };
   return (
     <form className="tk-new" onSubmit={(e) => { e.preventDefault(); submit(); }}>
@@ -287,6 +296,9 @@ function NewTicket({ meta, projectId, projects, onDone, onError }: { meta: Meta;
           <textarea rows={2} value={answers[q.key] ?? ""} onChange={(e) => setAnswers({ ...answers, [q.key]: e.target.value })} />
         </label>
       ))}
+      <label className="tk-asked-pick small" title="The crew starts it by itself within your standing auto-work limit (the Limits button beside Crew picks up). No Work it press needed.">
+        <input type="checkbox" checked={askedNow} onChange={(e) => setAsked(e.target.checked)} /> The crew starts it by itself (within your limit)
+      </label>
       <div className="composer-row">
         <select value={priority} onChange={(e) => setPriority(e.target.value)} aria-label="Priority">
           <option value="">no priority</option>
@@ -416,6 +428,18 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
         <button className="ghost" disabled={busy != null} onClick={() => act("ask", () => ticketsApi.ask(id))} title="One short, capped call: the assignee (or the Overseer) reads the ticket and replies on the thread.">
           {busy === "ask" ? "Asking…" : `Ask ${t.assignee && crewById[t.assignee] ? crewById[t.assignee].name : "the Overseer"}`}
         </button>
+        {d.retry && !closed && !d.working && (
+          <button disabled={busy != null} onClick={() => act("retry", () => ticketsApi.retry(id))}
+            title={`Run #${t.run} stopped. This picks it up at ${d.retry.from}, keeps what it built, and adds $${d.retry.addUsd.toFixed(2)}: enough for what is left, not the same starved share again.`}>
+            {busy === "retry" ? "Retrying…" : `Retry from ${d.retry.from} (+$${d.retry.addUsd.toFixed(2)})`}
+          </button>
+        )}
+        {!closed && (
+          <button className={`ghost tk-asked ${d.asked ? "on" : ""}`} aria-pressed={!!d.asked} disabled={busy != null} onClick={() => act("asked", () => ticketsApi.asked(id, !d.asked))}
+            title={d.asked ? "You asked for it: the crew starts it by itself within your standing limit. Press to take that back." : "Mark it as asked for: the crew starts it by itself within your standing limit, without a Work it press."}>
+            <span className="tk-auto-dot" aria-hidden /> {d.asked ? "Asked for" : "Ask the crew to do it"}
+          </button>
+        )}
         <button className="ghost" onClick={() => setShowDoc((s) => !s)}>{showDoc ? "Hide" : "Work document"}</button>
       </div>
       {epicOfTickets && !closed && (
@@ -676,21 +700,49 @@ export function Waiting({ events, projectId = null, sel = null, onSelect, onErro
 }
 
 /**
- * The auto-work rule, as one switch in the Tickets header: when on, the crew
- * starts ready bugs and tasks of size S or M by itself, within the caps.
+ * The auto-work rule, as one switch in the Tickets header, and its limits one press away. Set once, it is your
+ * standing approval: the crew starts work you asked for (any kind and size) and ready bugs and tasks of size S
+ * or M by itself, within these limits, with no press, card or typed phrase each time.
  */
 function AutoToggle({ last, onError }: { last: number; onError: (m: string) => void }) {
   const [rule, setRule] = useState<AutoWork | null>(null);
+  const [open, setOpen] = useState(false);
   useEffect(() => { ticketsApi.auto().then(setRule).catch(() => {}); }, [last]);
   if (!rule) return null;
-  const flip = () => ticketsApi.auto({ on: !rule.on }).then(setRule).catch((e) => onError((e as Error).message));
+  const save = (patch: Partial<AutoWork>) => ticketsApi.auto(patch).then(setRule).catch((e) => onError((e as Error).message));
+  const flip = () => save({ on: !rule.on });
+  const money = (key: "askedMaxUsd" | "maxUsd" | "dailyUsd", label: string, max: number, hint: string) => (
+    <label className="tk-limit" title={hint}>
+      <span>{label}</span>
+      <span className="tk-limit-in">$<input type="number" min={0.1} max={max} step={0.1} defaultValue={rule[key]} key={`${key}-${rule[key]}`} aria-label={label}
+        onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && v <= max && v !== rule[key]) void save({ [key]: v }); }} /></span>
+    </label>
+  );
   return (
-    <button type="button" className={`ghost sm tk-auto ${rule.on ? "on" : ""}`} aria-pressed={rule.on} onClick={flip}
-      title={rule.on
-        ? `The crew starts ready bugs and tasks of size S or M by itself: at most ${rule.wip} per project at once, $${rule.maxUsd.toFixed(2)} each, $${rule.dailyUsd.toFixed(2)} a day in all. Press to stop.`
-        : "The crew only starts a ticket when you press Work it. Press to let it pick up ready bugs and tasks by itself."}>
-      <span className="tk-auto-dot" aria-hidden /> Crew picks up: {rule.on ? "on" : "off"}
-    </button>
+    <span className="tk-auto-wrap">
+      <button type="button" className={`ghost sm tk-auto ${rule.on ? "on" : ""}`} aria-pressed={rule.on} onClick={flip}
+        title={rule.on
+          ? `The crew starts work you asked for (up to $${rule.askedMaxUsd.toFixed(2)} a run) and ready bugs and tasks of size S or M ($${rule.maxUsd.toFixed(2)} each) by itself: at most ${rule.wip} per project at once, $${rule.dailyUsd.toFixed(2)} a day in all. Press to stop.`
+          : "The crew only starts a ticket when you press Work it. Press to let it start what you asked for, and ready bugs and tasks, by itself."}>
+        <span className="tk-auto-dot" aria-hidden /> Crew picks up: {rule.on ? "on" : "off"}
+      </button>
+      <button type="button" className="ghost sm" aria-expanded={open} onClick={() => setOpen((o) => !o)} title="Your standing limits: set them once, and the crew starts work within them without asking.">
+        Limits · ${rule.askedMaxUsd.toFixed(2)} a run · ${rule.dailyUsd.toFixed(2)} a day
+      </button>
+      {open && (
+        <div className="tk-limits" role="group" aria-label="Standing auto-work limits">
+          <p className="muted small">Your standing approval. Within these limits the crew starts work by itself, with no press or phrase each time. A plan bigger than a run's limit is sliced into runs that fit.</p>
+          {money("askedMaxUsd", "Work you asked for, per run", 20, "The most one run of work you asked for may spend. Feature-sized work goes on the engine; what does not fit becomes the next slice.")}
+          {money("maxUsd", "A ready bug or task, per run", 5, "The most one ready bug or task of size S or M may spend.")}
+          {money("dailyUsd", "All the crew's own starts, per day", 50, "Today's own starts together never reserve more than this.")}
+          <label className="tk-limit" title="Tickets worked at once in one project.">
+            <span>At once, per project</span>
+            <span className="tk-limit-in"><input type="number" min={1} max={6} step={1} defaultValue={rule.wip} key={`wip-${rule.wip}`} aria-label="At once, per project"
+              onBlur={(e) => { const v = Math.round(Number(e.target.value)); if (v >= 1 && v <= 6 && v !== rule.wip) void save({ wip: v }); }} /></span>
+          </label>
+        </div>
+      )}
+    </span>
   );
 }
 

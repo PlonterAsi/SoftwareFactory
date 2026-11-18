@@ -46,6 +46,59 @@ export const FEATURE_LOOP_MIN_USD = 3;
 export const BUILD_BUDGET_SHARE = 0.55;
 export const FEATURE_MIN_USD = 0.15;
 /**
+ * The least one feature session needs to finish its feature (SF-64). Run 5669 split $3 over six features,
+ * each Builder call was held to $0.15 to $0.27, and every one of them stopped half way: $2.05 spent and
+ * nothing built. A plan is now checked against this before it is approved, and what does not fit waits
+ * for a later slice instead of starving every feature of the run.
+ */
+export const FEATURE_FIT_USD = 0.45;
+/** One session that builds several features reads the code once, so each costs less than a session of its own. */
+export const ONE_SESSION_FEATURE_USD = 0.27;
+
+/**
+ * The money the build loop has for its features: its share of the run, and never more than what is really
+ * left (with room kept for the review and the judge). A run picked up again with a little added money
+ * (Retry, SF-65) plans with that money, not with a share of a total it already spent.
+ */
+export function buildPoolUsd(maxUsd: number, spentUsd: number): number {
+  return Math.max(0, Math.min(maxUsd * BUILD_BUDGET_SHARE, (maxUsd - spentUsd) * 0.8));
+}
+
+export interface BuildFit {
+  /** Features the plan holds. */
+  features: number;
+  /** How many of them this run can build well, in order (at least 1). */
+  fits: number;
+  ok: boolean;
+  poolUsd: number;
+  perFeatureUsd: number;
+  /** The run limit that would build them all in one run. */
+  needUsd: number;
+}
+
+/**
+ * Does the plan fit the money (SF-64)? Checked at the plan gate, before anything is built: how many features
+ * the build loop can give a full session each, after what the run has already spent on design and the plan.
+ */
+export function buildFit(features: number, maxUsd: number, spentUsd: number, perFeatureUsd = FEATURE_FIT_USD): BuildFit {
+  const poolUsd = buildPoolUsd(maxUsd, spentUsd);
+  const fits = Math.max(1, Math.floor((poolUsd + 1e-9) / perFeatureUsd));
+  const want = features * perFeatureUsd;
+  const needUsd = Math.max(want / BUILD_BUDGET_SHARE, spentUsd + want / 0.8);
+  const r = (x: number) => Number(x.toFixed(2));
+  return { features, fits: Math.min(fits, features), ok: features <= fits, poolUsd: r(poolUsd), perFeatureUsd, needUsd: Math.ceil(needUsd * 4) / 4 };
+}
+
+/**
+ * The cap of one feature session: an even share of what is left of the pool, but never under what a feature
+ * needs (FEATURE_FIT_USD). When the pool runs short the features in front are built whole and the rest stay
+ * to do, instead of every one of them stopping half way.
+ */
+export function featureSessionCap(agentUsd: number, maxUsd: number, poolLeftUsd: number, left: number): number {
+  return Math.min(featureCapUsd(agentUsd, maxUsd), Math.max(Math.min(FEATURE_FIT_USD, agentUsd), FEATURE_MIN_USD, poolLeftUsd / Math.max(1, left)));
+}
+
+/**
  * The most one feature session may spend: the Builder's own per-call budget, growing with the run up to
  * twice that. Run 4004 had $20 and spent $10.65: every build call was held to the Builder's fixed $0.60, two
  * died at it with work half written, and each was picked up by a fresh call that read everything again.

@@ -1304,6 +1304,15 @@ button.tool-raw { font-size: 13.5px; margin-left: auto; }
 .tk-auto { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .tk-auto-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .tk-auto.on .tk-auto-dot { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.tk-asked { display: inline-flex; align-items: center; gap: 6px; }
+.tk-asked.on .tk-auto-dot { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.tk-asked-pick { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+.tk-auto-wrap { position: relative; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.tk-limits { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; width: min(340px, calc(100vw - 32px)); padding: 12px; display: grid; gap: 8px; background: var(--panel, var(--bg)); border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+.tk-limits p { margin: 0; }
+.tk-limit { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tk-limit-in { display: inline-flex; align-items: center; gap: 2px; }
+.tk-limit-in input { width: 72px; }
 
 /* The ticket's pull request */
 .tk-pr.pr-open { border-color: var(--accent); }

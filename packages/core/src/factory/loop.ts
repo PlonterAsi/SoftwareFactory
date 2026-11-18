@@ -17,7 +17,7 @@ import { FlowLibrary, flowOfRun } from "../flows/library.js";
 import { noteLesson } from "../bay/memory.js";
 import { crewPick, roundsOf, stepsToRun, type FlowDef, type FlowStep } from "../flows/flow.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, critiquePasses, critiquePrompt, critiqueTotal, docsFiles, docsForPlanner, mergeNextDocs, mustRequirements, newRequirements, nextVersionPrompt, withAsk, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateDocs, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
-import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featureCapUsd, featurePrompt, featuresFile, featuresOf, nextFeaturesOf, progressEntry, type Feature } from "./features.js";
+import { FEATURE_FIT_USD, FEATURE_LOOP_MIN_USD, buildFit, buildPoolUsd, featurePrompt, featureSessionCap, type BuildFit, featuresFile, featuresOf, nextFeaturesOf, progressEntry, type Feature } from "./features.js";
 import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, withScreenItems, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation, type ScreenText } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import type { Slot } from "../bay/agentfile.js";
@@ -81,6 +81,11 @@ export interface Plan {
   features?: { id: string; title: string; what: string; files: string[]; done: string }[];
   testing?: string;
   risks?: string[];
+  /**
+   * SF-64: the plan was more than the run's money builds, so this run builds the features in front and the
+   * rest (`later`) wait for the next slice, a ticket of their own.
+   */
+  slice?: { n: number; of: number; fit: import("./features.js").BuildFit; later: { id: string; title: string; what: string; files: string[]; done: string }[] };
 }
 
 export interface RunOptions {
@@ -127,7 +132,7 @@ export function parseReview(text: string): ReviewResult {
 export interface GateDecision { approve: boolean; note?: string; by?: string }
 
 /** What a waiting gate tells the Bridge besides its question: the button's word, and for a failed step, which one and how often. */
-interface GateOpts { neverAuto?: boolean; action?: string; kind?: "retry" | "council" | "rounds" | "budget"; station?: StationId; attempt?: number; error?: string; same?: boolean }
+interface GateOpts { neverAuto?: boolean; action?: string; kind?: "retry" | "council" | "rounds" | "budget"; station?: StationId; attempt?: number; error?: string; same?: boolean; /** SF-64: the plan gate of a plan sliced to fit the money. */ fit?: Record<string, unknown>; /** SF-65: what a Retry changes so it does not fail the same way. */ retryWith?: Record<string, unknown> }
 
 export class StopRun extends Error {}
 
@@ -261,10 +266,75 @@ export class Factory {
     return { ok: true, from: st.from };
   }
 
+  /**
+   * SF-65: can a run that stopped or failed be tried again from the step it stopped at? Any run that did not
+   * ship, whose folder is still there. A screen run is not: its folder went back to what shipped.
+   */
+  retryable(run: number): { ok: boolean; why?: string; from?: StationId } {
+    if (this.active.has(run)) return { ok: false, why: "It is running." };
+    const started = this.log.get(run);
+    if (started?.type !== "factory.run.started") return { ok: false, why: "No such run." };
+    const sp = started.payload as { kind?: string; screen?: unknown };
+    if (sp.screen) return { ok: false, why: "A screen or feature run goes back to what shipped when it stops; start it again from its project." };
+    if (sp.kind && !this.kinds.has(sp.kind)) return { ok: false, why: `It is a "${sp.kind}" run, which this core cannot continue.` };
+    const life = this.log.list({ sinceId: run - 1, limit: 1e6 }).filter((e) => (e.type === "factory.run.finished" || e.type === "factory.run.resumed") && (e.payload as { run: number }).run === run).at(-1);
+    const fin = life?.type === "factory.run.finished" ? life.payload as { outcome: string } : null;
+    if (!fin) return { ok: false, why: "It has not stopped." };
+    if (fin.outcome === "shipped") return { ok: false, why: "It already shipped." };
+    const st = restoreState(this.log, run);
+    if (st.dir && !existsSync(join(st.dir, ".git"))) return { ok: false, why: `Its project folder is gone (${st.dir}).` };
+    if (!st.dir && !["intake", "council", "discover", "plan"].includes(st.from)) return { ok: false, why: "It has no project folder to pick up in." };
+    return { ok: true, from: st.from };
+  }
+
+  /**
+   * What a retry adds (SF-65): enough for what is left, not the same starved share again. At the build: a
+   * whole session (FEATURE_FIT_USD) for each feature not built yet, and room for the review and the judge.
+   * After the build: a review and a judge. Before it: what the run started with.
+   */
+  retryAddUsd(run: number): number {
+    const st = restoreState(this.log, run);
+    const first = Number((this.log.get(run)?.payload as { maxUsd?: number } | undefined)?.maxUsd ?? 1.5);
+    const evs = this.log.list({ sinceId: run - 1, limit: 1e6 }).filter((e) => e.type === "factory.feature" && (e.payload as { run?: number }).run === run).map((e) => e.payload as { id: string; state: string });
+    const builtIds = new Set<string>();
+    for (const f of evs) { if (f.state === "built") builtIds.add(f.id); else if (f.state !== "building") builtIds.delete(f.id); }
+    let add: number;
+    if (st.from === "build" || st.from === "tests") {
+      const all = st.plan?.features?.length ?? (st.plan ? (st.plan.views?.length ?? 0) + 2 : 1);
+      const left = Math.max(1, all - builtIds.size);
+      add = left * FEATURE_FIT_USD / 0.8 + 0.5;
+    } else if (st.from === "test" || st.from === "gateB" || st.from === "ship") add = 0.75;
+    else add = first;
+    return Number(Math.min(Math.max(add, 0.5), Math.max(first, 0.5) * 2).toFixed(2));
+  }
+
+  /**
+   * SF-65: try a stopped or failed run again from the step it stopped at, with fresh money for what is left.
+   * Until now Retry repeated the step with what was left of the old limit, so a build starved of money died
+   * the same way again. What was built stays built; the project's budget still bounds what is added.
+   */
+  retry(run: number, opts: { addUsd?: number; by?: string; auto?: boolean } = {}): { run: number; from: StationId; addUsd: number; maxUsd: number } {
+    const ok = this.retryable(run);
+    if (!ok.ok) throw new Error(`Run #${run} cannot be retried: ${ok.why}`);
+    const want = opts.addUsd ?? this.retryAddUsd(run);
+    const add = Number(Math.min(want, this.extraBudget(run, want)).toFixed(2));
+    if (add < 0.05) throw new Error(`Run #${run} cannot be retried: the project's budget has nothing left. Raise the project's total on its page to go on.`);
+    const st = restoreState(this.log, run);
+    const maxUsd = Number((st.spent + add).toFixed(4));
+    this.log.append("factory.budget", { run, maxUsd, retry: true });
+    this.log.append("factory.run.retried", { run, from: ok.from, addUsd: add, maxUsd, spentUsd: Number(st.spent.toFixed(4)), by: opts.by ?? "you" });
+    this.pickUp(run, { auto: !!opts.auto });
+    return { run, from: ok.from!, addUsd: add, maxUsd };
+  }
+
   /** Pick a stopped run up again from its last completed station. Returns the run id. */
   resume(run: number, opts: { auto?: boolean } = {}): number {
     const ok = this.resumable(run);
     if (!ok.ok) throw new Error(`Run #${run} cannot resume: ${ok.why}`);
+    return this.pickUp(run, opts);
+  }
+
+  private pickUp(run: number, opts: { auto?: boolean } = {}): number {
     const started = this.log.get(run)!.payload as { idea: string; maxUsd?: number; maxFixRounds?: number; autoApprove?: boolean; autoRetries?: number; runtime?: string; council?: "auto" | "always" | "never"; review?: boolean; models?: Record<string, string>; screen?: ScreenRun; kind?: string };
     // A run of a kind this core does not know is refused before anything about it is touched.
     const make = started.kind ? this.kinds.get(started.kind) : undefined;
@@ -707,12 +777,25 @@ export class Run {
         const sha = commitAll(this.dir, `Spec and plan: ${plan.name}`);
         this.log.append("factory.plan", { run: this.id, plan, dir: this.dir, sha, written: spec.written });
       });
-      const d = await this.gate("gateA", "Approve the spec and plan");
+      // SF-64: the plan is checked against the money before it is approved, and the gate says when it does not fit.
+      const fit = this.planFit();
+      const d = await this.gate("gateA", fit && !fit.ok
+        ? `Approve the spec and plan. Note: it has ${fit.features} features and this run's $${this.o.maxUsd.toFixed(2)} builds about ${fit.fits} of them whole; the rest stay to do and can be added as the next version. All in one run would need about $${fit.needUsd.toFixed(2)}.`
+        : "Approve the spec and plan", fit && !fit.ok ? { fit: { ...fit } } : {});
       this.verdict(this.one("plan"), "plan", d.approve, undefined, d.note);
       if (d.approve) return;
       if (!d.note) throw new StopRun("You rejected the plan.");
       feedback = d.note;
     }
+  }
+
+  /** SF-64: does the plan fit the run's money? Free; logged once per plan. Null when the run builds in one session. */
+  protected planFit(): BuildFit | null {
+    if (!this.bench || !this.plan?.app || this.o.maxUsd < FEATURE_LOOP_MIN_USD) return null;
+    const n = this.basePlan ? 1 + (this.plan.views ?? []).length : featuresOf(this.plan, this.docs).length;
+    const fit = buildFit(n, this.o.maxUsd, this.spent);
+    this.log.append("factory.plan.fit", { run: this.id, ...fit, spentUsd: Number(this.spent.toFixed(4)), maxUsd: this.o.maxUsd, mode: "feature-loop" });
+    return fit;
   }
 
   protected async writeTests() {
@@ -834,7 +917,7 @@ export class Run {
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
         const left = features.filter((x) => x.state !== "built").length;
-        const cap = Math.min(featureCapUsd(builder.budgetUsd, this.o.maxUsd), Math.max(FEATURE_MIN_USD, ((pool ?? this.o.maxUsd * BUILD_BUDGET_SHARE) - (this.spent - buildStart)) / left));
+        const cap = featureSessionCap(builder.budgetUsd, this.o.maxUsd, (pool ?? buildPoolUsd(this.o.maxUsd, buildStart)) - (this.spent - buildStart), left);
         this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: "building", attempt, capUsd: Number(cap.toFixed(3)) });
         const text = await this.askBench(builder, featurePrompt(this.plan, features, f, !!this.docs, retry), { round: i + 1 }, { capUsd: cap, raiseCap: cap > builder.budgetUsd });
         const res = this.takeWork(text);
@@ -1676,7 +1759,10 @@ export class Run {
     }
     // A hint you gave with Retry reaches the next agent call of that station.
     if (this.hint) prompt += `\n\nThe person retried this step after it failed (${this.hint.error.slice(0, 300)}) and said: ${this.hint.note}`;
-    const cap = Math.max(0.01, Math.min(x.capUsd ?? m.budgetUsd, x.raiseCap ? Infinity : m.budgetUsd, this.o.maxUsd - this.spent));
+    // SF-65: a step retried after it ran out of money gets the bigger cap the Retry said it would.
+    const boost = this.capBoost?.station === m.station ? this.capBoost.usd : 0;
+    const cap = Math.max(0.01, Math.min(Math.max(x.capUsd ?? m.budgetUsd, boost), x.raiseCap || boost ? Infinity : m.budgetUsd, this.o.maxUsd - this.spent));
+    this.lastCall = { station: m.station, capUsd: cap };
     this.calls++;
     // The Builder and Fixer of a real crew work at the workbench: the project folder, file tools and a shell.
     const bench = !x.noTools && this.bench && (m.station === "build" || m.station === "fix") && !!this.dir && existsSync(this.dir);
@@ -1718,6 +1804,7 @@ export class Run {
         const failing = (out as TestRun | undefined)?.failed;
         this.mark(id, failing ? "fail" : "pass", round, failing ? `${failing} failing` : undefined);
         if (this.hint?.station === id) this.hint = null;
+        if (this.capBoost?.station === id) this.capBoost = null;
         return out;
       } catch (e) {
         if (e instanceof StopRun) throw e;
@@ -1725,11 +1812,33 @@ export class Run {
         this.mark(id, "fail", round, msg);
         // The same error again means the retry changed nothing: say so, so a Retry that "does nothing" is visible.
         const same = attempt > 1 && msg === lastError;
-        const q = same
-          ? `${stationName(id)} failed again the same way (attempt ${attempt}): ${msg.slice(0, 300)}. Retrying as is will likely fail again; add a hint or check Systems, then retry?`
-          : `${stationName(id)} failed${attempt > 1 ? ` again (attempt ${attempt})` : ""}: ${msg.slice(0, 300)}. Retry it?`;
-        const d = await this.gate("escalation", q, { action: "Retry", kind: "retry", station: id, attempt, error: msg.slice(0, 2000), same });
+        // SF-65: a call that ran out of its own money is never retried with the same cap (run 5669: every
+        // Builder call held to $0.15 died at it, and Retry gave it $0.15 again). The Retry doubles the cap
+        // of that call, at least a whole feature session, and says what it adds to the run to afford it.
+        const starved = /max_budget|spend cap/i.test(msg) && this.lastCall?.station === id;
+        const boostUsd = starved ? Number(Math.max(FEATURE_FIT_USD, (this.lastCall?.capUsd ?? 0) * 2).toFixed(2)) : 0;
+        const room = this.o.maxUsd - this.spent;
+        const addUsd = starved && boostUsd > room ? Number((boostUsd - room + 0.25).toFixed(2)) : 0;
+        const q = starved
+          ? `${stationName(id)} ran out of money inside one call (its cap was $${(this.lastCall?.capUsd ?? 0).toFixed(2)}). Retry it with $${boostUsd.toFixed(2)} for that call${addUsd ? `, adding $${addUsd.toFixed(2)} to the run` : ""}? What is built stays built.`
+          : same
+            ? `${stationName(id)} failed again the same way (attempt ${attempt}): ${msg.slice(0, 300)}. Retrying as is will likely fail again; add a hint or check Systems, then retry?`
+            : `${stationName(id)} failed${attempt > 1 ? ` again (attempt ${attempt})` : ""}: ${msg.slice(0, 300)}. Retry it?`;
+        // An unattended run never repeats a failure that nothing changed, and never adds money by itself.
+        const d = await this.gate("escalation", q, {
+          action: starved ? `Retry with $${boostUsd.toFixed(2)}` : "Retry", kind: "retry", station: id, attempt, error: msg.slice(0, 2000), same,
+          ...(starved ? { retryWith: { capUsd: boostUsd, addUsd } } : {}), ...((same && !starved) || addUsd ? { neverAuto: true } : {}),
+        });
         if (!d.approve) throw new StopRun(`${stationName(id)} failed: ${msg}`);
+        if (starved) {
+          this.capBoost = { station: id, usd: boostUsd };
+          if (addUsd) {
+            const more = this.f.extraBudget(this.id, addUsd);
+            if (more < 0.01) throw new StopRun(`${stationName(id)} needs $${addUsd.toFixed(2)} more and the project's budget has nothing left. Raise the project's total on its page to go on.`);
+            this.o.maxUsd += more;
+            this.log.append("factory.budget", { run: this.id, maxUsd: this.o.maxUsd });
+          }
+        }
         this.hint = d.note ? { station: id, note: d.note, error: msg } : null;
         lastError = msg;
         attempt++;
@@ -1742,6 +1851,10 @@ export class Run {
   }
 
   protected autoRetriesUsed = 0;
+  /** The last agent call: its station and the cap it had (SF-65). */
+  protected lastCall: { station: string; capUsd: number } | null = null;
+  /** A bigger cap a Retry promised the next calls of a station (SF-65). */
+  protected capBoost: { station: string; usd: number } | null = null;
   protected budgetRefused = false;
   protected hint: { station: StationId; note: string; error: string } | null = null;
   protected gateQueue: Promise<unknown> = Promise.resolve();

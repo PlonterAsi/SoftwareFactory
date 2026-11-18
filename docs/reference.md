@@ -267,6 +267,8 @@ The installed app sets what it needs itself. These matter in development, tests 
 | Design: pass score, rounds, budget share | 4, 3, 35% | `PASS_SCORE`, `MAX_DISCOVERY_ROUNDS`, `DISCOVERY_BUDGET_SHARE` in `factory/discovery.ts` |
 | Views kept in a plan | 6 | `MAX_VIEWS` in `factory/loop.ts` |
 | Feature loop: starts at, budget share, least per feature | $3, 55%, $0.15 | `FEATURE_LOOP_MIN_USD`, `BUILD_BUDGET_SHARE`, `FEATURE_MIN_USD` in `factory/features.ts` |
+| Plan fits the money (SF-64): a feature session needs, one session per feature | $0.45, $0.27 | `FEATURE_FIT_USD`, `ONE_SESSION_FEATURE_USD`, `buildFit` in `factory/features.ts` |
+| Auto-work limits: ready bug or task, asked-for work, per day, at once | $0.60, $3, $3, 2 | `AUTO_WORK_DEFAULT` in `tickets/tickets.ts`; Limits in the Tickets header |
 | Engine run in a repo: least it needs (below it the work takes one Builder session) | $1.50 | `REPO_ENGINE_MIN_USD` in `factory/reporun.ts` |
 | Judge: pass score, looks, per-screen look | 4, 2, $0.15 | `PRODUCT_PASS_SCORE`, `MAX_EVALUATION_ROUNDS`, `SCREEN_LOOK_USD` in `factory/evaluate.ts` |
 | Repair: budget share, per feature, least to start | 25%, $0.40, $0.30 | `REPAIR_BUDGET_SHARE`, `REPAIR_FEATURE_USD`, `REPAIR_FEATURE_MIN_USD` |

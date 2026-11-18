@@ -169,7 +169,7 @@ Now, for a real crew on a product-sized run (`maxUsd` of $3 or more), the build 
 2. Each feature gets its own fresh Builder session. It is told its one feature and where the spine is (`SPEC.md`, `docs/product/`, `features.json`, `PROGRESS.md`); it reads only what it needs.
 3. After each session the core runs the locked tests for free. A test that passed before and fails now sends the feature back once, with that evidence. A screen feature is also opened in a real browser, its schema and links are checked, and then the product judge looks at that one screen (at most $0.15) against what the design says it shows and lets the person do. What the judge did not find goes back to the same session once, as the list of missing items (`factory.screen.look`), and after that retry the judge looks again: a screen still missing items ends "broken", never "built" on the Builder's word. A view is matched to its designed screen by id, then by name. Run 3185 showed why: every check passed per feature, and the judge only saw a hollow product at the very end, when most of the money was gone.
 4. The core commits (`Feature F3: Screen: Today`), appends the session's closing note to `PROGRESS.md` for the next session, and updates `features.json`. Only the core writes those two files.
-5. Each session's cap is its share of 55% of the run's budget, never under $0.15 or over the Builder's own cap. A retried build picks up at the first feature not built.
+5. Each session's cap is its share of the build pool (55% of the run's budget, and never more than 80% of what is left), never under what a feature needs ($0.45, SF-64) or over the Builder's own cap. When the pool runs short, the features in front are built whole and the rest stay to do, instead of all of them stopping half way. A retried build picks up at the first feature not built.
 
 Whatever still fails at the end goes to the test and fix loop as before. Small runs (a ticket at $0.60) and the practice crew still build in one call. In the app: a Build tab on every run with a row per feature and the locked tests passing after it (`factory.feature`).
 
@@ -292,3 +292,19 @@ Every ask in a repo project becomes a ticket first (`Tickets.askInRepo`), whiche
 Runs of this kind carry `kind: "repo"` and `repo: { source, name, branch, projectId, ticket? }` on `factory.run.started`. Other kinds of run can be added the same way: `Factory.kinds` maps a kind to the class that runs it, and a resume builds the right one again.
 
 In the app: the ticket page (the suggested route, Work it on the engine, One session instead), the repo's home tab (Features on the engine, with the approval in place), and the run itself on Mission and the run deck, which say which repo and branch it works in and where the branch went.
+
+## A plan is checked against the money (SF-64)
+
+Run 5669 (2026-11-18) split $3 over six features: 55% of the limit divided by six gave each Builder call $0.27 or less, down to the $0.15 floor, and every one of them stopped half way. $2.05 spent, nothing built, and the plan gate never said the plan could not fit.
+
+Now, before the plan gate, the core counts what the build loop can afford (`buildFit` in `factory/features.ts`, free, no agent call): the build pool after what design and the plan already spent, divided by what a feature session needs ($0.45 each in the feature loop, $0.27 when one session builds everything). The numbers go on the record as `factory.plan.fit`.
+
+- **In a repo** (the engine route), a plan that does not fit is **sliced**: the features in front are kept for this run, the rest are written to `.sf/SPEC.md` as "left to the next slice" and become a ticket of their own (`factory.plan.sliced`), under the same epic, blocked by this ticket until it is done, and asked for when this one was, so the crew starts it by itself once slice 1 is merged. The plan gate says it in words ("this run builds F1, F2, F3 and F4, F5, F6 wait for the next slice; all in one run would need about $5.75"), and the Reviewer passes criteria only the later slice can meet with the evidence "next slice". A doomed run is never started.
+- **A new app** shows the same numbers at its plan gate, and its build loop builds the features in front whole.
+
+## Retry picks up where the run stopped (SF-65)
+
+Retry used to repeat the failed step with what was left of the old limit, so a build starved of money died the same way again.
+
+- **Inside a run**, a step that ran out of money inside one call is retried with a bigger cap for that call (double its last cap, at least a whole feature session), never the same one, and the question says what it adds to the run to afford it ("Retry it with $0.90 for that call, adding $0.40 to the run?"). An unattended run never repeats a failure nothing changed, and never adds money by itself.
+- **After a run stopped or failed**, `Factory.retry` picks it up at the step it stopped at (`factory.run.retried`): same folder, same branch, what was built stays built, with fresh money sized to what is left (`retryAddUsd`), bounded by the project's budget. The run page and the ticket page both have the button.
