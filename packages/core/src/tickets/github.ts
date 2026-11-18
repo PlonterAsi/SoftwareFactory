@@ -100,6 +100,19 @@ export class GitHub {
     return j as T;
   }
 
+  /**
+   * A repository's code at a branch, tag or commit, as one .tar.gz (for add-ons installed from GitHub). With a token
+   * it can read private repositories; without one only public ones.
+   */
+  async tarball(repo: string, ref: string): Promise<Buffer> {
+    const token = this.token();
+    const r = await this.http(`${this.api}/repos/${repo}/tarball/${encodeURIComponent(ref)}`, {
+      headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "SoftwareFactory" },
+    });
+    if (!r.ok) throw new Error(r.status === 404 ? `GitHub has no ${repo} at ${ref}${token ? "" : ", or it is private: add GitHub access in Systems"}` : hideTokens(`GitHub said ${r.status}`));
+    return Buffer.from(await r.arrayBuffer());
+  }
+
   /** Can the token push to this repo? Answers in a sentence when it cannot. */
   async check(repo: GitHubRepo): Promise<{ ok: boolean; why?: string }> {
     if (!this.hasToken()) return { ok: false, why: "No GitHub access yet: add a token in Systems, GitHub access." };

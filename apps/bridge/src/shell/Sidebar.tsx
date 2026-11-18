@@ -9,9 +9,9 @@ import { shortName } from "../projects/shortName";
  * The left rail of the Foundry Glass shell: where you are, what needs you, and the projects you
  * were last in. Amber appears here only when something waits for you.
  */
-export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0, proposals = 0, tickets = 0, children }: {
+export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0, proposals = 0, tickets = 0, addons = [], children }: {
   route: Route; needs: number; projects: ProjectSummary[] | null; crewBusy: boolean; base?: string;
-  conflicts?: number; proposals?: number; tickets?: number; children?: ReactNode;
+  conflicts?: number; proposals?: number; tickets?: number; addons?: { id: string; panel: string; title: string }[]; children?: ReactNode;
 }) {
   const at = (r: Route["page"], view?: string) => route.page === r && (view == null || (route.page === "factory" && route.view === view));
   const recent = (projects ?? []).filter((p) => p.status !== "archived")
@@ -36,6 +36,15 @@ export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0,
               </a>
             );
           })}
+        </div>
+      )}
+      {addons.length > 0 && (
+        <div className="sb-group">
+          <div className="sb-label">Add-ons</div>
+          {addons.map((a) => (
+            <Item key={`${a.id}:${a.panel}`} to={{ page: "addon", id: a.id, panel: a.panel }} on={route.page === "addon" && route.id === a.id && (route.panel ?? addons.find((x) => x.id === a.id)!.panel) === a.panel}
+              icon={<Ico d="M8 2.5 13.5 5.5v5L8 13.5 2.5 10.5v-5zM8 8v5.5M8 8l5.5-2.5M8 8 2.5 5.5" />}>{a.title}</Item>
+          ))}
         </div>
       )}
       <div className="sb-group">

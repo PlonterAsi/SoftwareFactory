@@ -35,7 +35,7 @@ import "./projects/GitPanel";
 import "./CodeMap";
 import "./RepoReview";
 import { FeaturesPage, useIntegrations } from "./Features";
-import { PluginsPage, syncPluginPanels, usePlugins } from "./Plugins";
+import { AddonPage, PluginsPage, addonNav, syncPluginPanels, usePlugins } from "./Plugins";
 import { usePref } from "./shell/prefs";
 import { Sidebar } from "./shell/Sidebar";
 import { Helm, HelmButton } from "./shell/Helm";
@@ -171,6 +171,8 @@ export function App() {
     ? <FeatureMapPage events={f.events} id={route.id} go={(id) => go({ page: "map", id })} />
     : route.page === "plugins"
     ? <PluginsPage events={f.events} list={plugins.data} err={plugins.err} refresh={plugins.refresh} id={route.id} panel={route.panel} />
+    : route.page === "addon"
+    ? <AddonPage list={plugins.data} id={route.id} panel={route.panel} events={f.events} />
     : route.page === "features"
     ? <FeaturesPage events={f.events} id={route.id} onOpenProject={(id) => go({ page: "project", id, panel: "integrate" })} />
     : route.page === "project"
@@ -191,7 +193,7 @@ export function App() {
   return (
     <div className="shell2">
       <Sidebar route={route} needs={needsCount} projects={projects.list} crewBusy={Object.values(bay.stats).some((s) => s.state === "thinking")} base={bases.current?.name}
-        conflicts={open} proposals={waiting} tickets={ticketCounts?.open ?? 0}>
+        conflicts={open} proposals={waiting} tickets={ticketCounts?.open ?? 0} addons={addonNav(plugins.data)}>
         <button className="sb-item sb-btn" onClick={() => setSetupOpen(true)}><span className="sb-icon"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden className="sb-ico"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" /></svg></span><span className="sb-text">Systems</span></button>
         <div className="sb-status">
           <span className={f.online ? "dot on" : "dot"} /> {f.online ? "Online" : "Offline"}

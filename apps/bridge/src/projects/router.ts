@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
  *   #/p/12/runs/57         project 12, Runs panel, run 57
  *   #/features[/7]         features added from finished projects (feature 7)
  *   #/plugins[/id[/panel]] plugins (one plugin, one of its pages)
+ *   #/a/id[/panel]         an add-on's own page from the main menu (its "nav" panel), the whole window
  *   #/brain                the Brain: the principles every loop follows
  *   #/map[/id]             the Feature map: every feature's record, wiring and proof of life (one feature)
  *   #/runners              build runners: GitHub's checks and builds, run on this PC
@@ -28,6 +29,7 @@ export type Route =
   | { page: "factory"; view: FactoryView }
   | { page: "features"; id?: number }
   | { page: "plugins"; id?: string; panel?: string }
+  | { page: "addon"; id: string; panel?: string }
   | { page: "brain" }
   | { page: "map"; id?: string }
   | { page: "bases" }
@@ -46,6 +48,7 @@ export function parse(hash: string): Route {
     return { page: "project", id: Number(parts[1]), panel: parts[2] || undefined, run: /^\d+$/.test(parts[3] ?? "") ? Number(parts[3]) : undefined };
   }
   if (parts[0] === "features") return { page: "features", id: /^\d+$/.test(parts[1] ?? "") ? Number(parts[1]) : undefined };
+  if (parts[0] === "a" && parts[1]) return { page: "addon", id: parts[1], panel: parts[2] || undefined };
   if (parts[0] === "plugins") return { page: "plugins", id: parts[1] || undefined, panel: parts[2] || undefined };
   if (parts[0] === "brain") return { page: "brain" };
   if (parts[0] === "map") return { page: "map", id: parts[1] ? decodeURIComponent(parts[1]) : undefined };
@@ -62,6 +65,7 @@ export function parse(hash: string): Route {
 export function href(r: Route): string {
   if (r.page === "project") return `#/p/${r.id}${r.panel ? `/${r.panel}${r.run ? `/${r.run}` : ""}` : ""}`;
   if (r.page === "features") return r.id ? `#/features/${r.id}` : "#/features";
+  if (r.page === "addon") return `#/a/${r.id}${r.panel ? `/${r.panel}` : ""}`;
   if (r.page === "plugins") return `#/plugins${r.id ? `/${r.id}${r.panel ? `/${r.panel}` : ""}` : ""}`;
   if (r.page === "brain") return "#/brain";
   if (r.page === "map") return r.id ? `#/map/${encodeURIComponent(r.id)}` : "#/map";

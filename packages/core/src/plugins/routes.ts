@@ -9,7 +9,10 @@ import { FRAME_CSS_SOURCE, FRAME_SDK_SOURCE } from "./runner.js";
  * The plugins API. Every change is an event, so the Bridge sees it on the stream.
  *
  *   GET  /api/plugins                         installed plugins, bundled examples, the folder, what each permission means
- *   POST /api/plugins/install                 { dir } or { example }   copy a plugin folder in (it starts off)
+ *   POST /api/plugins/install                 { dir } or { example } or { github: "owner/repo[/folder]", ref? }   (it starts off)
+ *   POST /api/plugins/:id/update              fetch a newer version from the GitHub repository it came from
+ *   GET  /api/plugins/:id/budget              its monthly Claude budget and what it spent (ai)
+ *   POST /api/plugins/:id/budget              { monthlyUsd }  your own monthly budget for it
  *   GET  /api/plugins/:id
  *   POST /api/plugins/:id/enable              the one approval: grants what its manifest asks for
  *   POST /api/plugins/:id/disable
@@ -31,7 +34,7 @@ export async function pluginsRoute(
   const { plugins } = ctx;
   const path = url.pathname;
   if (req.method === "GET" && path === "/api/plugins") {
-    return [200, { plugins: plugins.list(), examples: plugins.examples(), dir: plugins.root, permissions: PERMISSION_TEXT, actions: PLUGIN_ACTIONS }];
+    return [200, { plugins: plugins.list().map((p) => ({ ...p, budget: p.granted.includes("ai") || p.manifest.permissions.includes("ai") ? plugins.budget(p.id) : null })), examples: plugins.examples(), dir: plugins.root, permissions: PERMISSION_TEXT, actions: PLUGIN_ACTIONS }];
   }
   if (req.method === "POST" && path === "/api/plugins/install") {
     const body = await ctx.readJson(req);
@@ -41,11 +44,12 @@ export async function pluginsRoute(
         if (!ex) return [404, { error: `No example plugin "${body.example}"` }];
         return [201, plugins.install(ex.dir, { from: `example:${ex.id}` })];
       }
-      if (!body.dir) return [400, { error: "Send { dir } (a folder with a plugin.json) or { example }" }];
+      if (body.github) return [201, await plugins.installFromGithub(String(body.github), { ref: body.ref ? String(body.ref) : undefined })];
+      if (!body.dir) return [400, { error: "Send { dir } (a folder with a plugin.json), { github } or { example }" }];
       return [201, plugins.install(String(body.dir))];
     } catch (e) { return [409, { error: (e as Error).message }]; }
   }
-  const m = path.match(/^\/api\/plugins\/([a-z0-9-]+)(?:\/(enable|disable|remove|log|data|events|records|call|act))?$/);
+  const m = path.match(/^\/api\/plugins\/([a-z0-9-]+)(?:\/(enable|disable|remove|log|data|events|records|call|act|update|budget))?$/);
   if (!m) return null;
   const id = m[1];
   const op = m[2];
@@ -54,6 +58,7 @@ export async function pluginsRoute(
       if (!op) { const v = plugins.get(id); return v ? [200, v] : [404, { error: `No plugin ${id}` }]; }
       if (op === "log") return [200, { log: plugins.logOf(id) }];
       if (op === "data") return [200, { data: plugins.data(id) }];
+      if (op === "budget") return [200, plugins.budget(id)];
       if (op === "events") {
         const pid = url.searchParams.get("projectId");
         const types = url.searchParams.get("types")?.split(",").map((s) => s.trim()).filter(Boolean);
@@ -71,6 +76,8 @@ export async function pluginsRoute(
     if (op === "enable") return [200, plugins.enable(id)];
     if (op === "disable") return [200, plugins.disable(id)];
     if (op === "remove") return [200, await plugins.remove(id)];
+    if (op === "update") return [200, await plugins.updateFromGithub(id)];
+    if (op === "budget") { plugins.setBudget(id, Number(body.monthlyUsd)); return [200, plugins.budget(id)]; }
     if (op === "act") return [200, { value: plugins.act(id, String(body.verb ?? ""), (body.args && typeof body.args === "object" ? body.args : {}) as Record<string, unknown>) }];
     if (op === "call") return [200, { value: await plugins.call(id, String(body.method ?? ""), body.args ?? {}) }];
     return null;

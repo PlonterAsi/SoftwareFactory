@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { killTree } from "../launch/launcher.js";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, normalize, resolve, sep } from "node:path";
@@ -11,7 +11,27 @@ import { projectDetail } from "../projects/service.js";
 import { asksOf, matchesType, readManifest, PLUGIN_RECORDS, type PluginAction, type PluginManifest, type PluginPermission, type PluginRecordKind } from "./manifest.js";
 import type { PluginDoor } from "./door.js";
 import { RUNNER_SOURCE } from "./runner.js";
+import type { PluginStore } from "./store.js";
+import type { PluginAi } from "./ai.js";
 import "./tables.js";
+
+/** Where an add-on installed from GitHub came from: `github:owner/repo[/path]@ref#sha`. */
+export interface GithubSource { repo: string; path: string; ref: string; sha: string | null }
+export function parseGithubSource(from: string | null | undefined): GithubSource | null {
+  const m = String(from ?? "").match(/^github:([\w.-]+\/[\w.-]+)((?:\/[\w.-]+)*)@([^#]+)(?:#(\w+))?$/);
+  return m ? { repo: m[1], path: m[2].replace(/^\//, ""), ref: m[3], sha: m[4] ?? null } : null;
+}
+/** "owner/repo", "owner/repo/sub/folder", "https://github.com/owner/repo/tree/main/sub" → its parts. */
+export function parseGithubSpec(spec: string, ref?: string): { repo: string; path: string; ref: string } {
+  let s = spec.trim().replace(/\.git$/, "").replace(/\/+$/, "");
+  let r = ref?.trim() || "";
+  const url = s.match(/^https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)(?:\/tree\/([^/]+)((?:\/[\w.-]+)*))?/);
+  if (url) { s = `${url[1]}${url[3] ?? ""}`; r = r || url[2] || ""; }
+  const parts = s.split("/").filter(Boolean);
+  if (parts.length < 2 || !parts.every((p) => /^[\w.-]+$/.test(p) && p !== "." && p !== "..")) throw new Error("Give the add-on's GitHub repository as owner/repo (or its address)");
+  return { repo: `${parts[0]}/${parts[1]}`, path: parts.slice(2).join("/"), ref: r || "HEAD" };
+}
+export type DownloadTarball = (repo: string, ref: string) => Promise<Buffer>;
 
 /**
  * The plugin host: installs plugin folders, turns them on and off, and runs each enabled
@@ -88,7 +108,7 @@ export class PluginHost {
   private listening = false;
   readonly runnerPath: string;
 
-  constructor(private log: EventLog, readonly root: string, private opts: { bay?: AgentBay; examplesDir?: string; node?: string; door?: PluginDoor } = {}) {
+  constructor(private log: EventLog, readonly root: string, private opts: { bay?: AgentBay; examplesDir?: string; node?: string; door?: PluginDoor; store?: PluginStore; ai?: PluginAi; tarball?: DownloadTarball; tar?: string } = {}) {
     this.runnerPath = join(root, ".runtime", "runner.mjs");
   }
 
@@ -228,6 +248,81 @@ export class PluginHost {
     return this.get(manifest.id)!;
   }
 
+  /**
+   * Install (or update) an add-on from a GitHub repository: its code is downloaded as one archive (with your GitHub
+   * access in Systems when the repository is private), unpacked next to the plugins, and installed like a folder.
+   * The source is remembered, so it can update itself (updateFromGithub); an update that asks for nothing new
+   * stays on, one that asks for more waits for you to turn it on again.
+   */
+  async installFromGithub(spec: string, o: { ref?: string; by?: string; onlyIfNew?: string } = {}): Promise<PluginView & { updated: boolean }> {
+    const { repo, ref } = parseGithubSpec(spec, o.ref);
+    let { path } = parseGithubSpec(spec, o.ref);
+    const download = this.opts.tarball ?? (async (r: string, f: string) => {
+      const res = await fetch(`https://codeload.github.com/${r}/tar.gz/${encodeURIComponent(f)}`, { headers: { "user-agent": "SoftwareFactory" } });
+      if (!res.ok) throw new Error(res.status === 404 ? `GitHub has no ${r} at ${f}, or it is private: add GitHub access in Systems` : `GitHub answered ${res.status}`);
+      return Buffer.from(await res.arrayBuffer());
+    });
+    const buf = await download(repo, ref);
+    if (buf.length > 50 * 1024 * 1024) throw new Error(`${repo} is ${Math.round(buf.length / 1e6)} MB, over the 50 MB an add-on may be`);
+    const work = join(this.root, ".downloads", `${repo.replace("/", "-")}-${Date.now().toString(36)}`);
+    mkdirSync(work, { recursive: true });
+    try {
+      writeFileSync(join(work, "code.tar.gz"), buf);
+      mkdirSync(join(work, "x"));
+      const x = spawnSync(this.opts.tar ?? "tar", ["-xzf", "code.tar.gz", "-C", "x"], { cwd: work, windowsHide: true, encoding: "utf8", timeout: 120_000 });
+      if (x.status !== 0) throw new Error(`Could not unpack ${repo}: ${(x.stderr || x.error?.message || "").slice(0, 200)}`);
+      const top = readdirSync(join(work, "x"));
+      if (top.length !== 1) throw new Error(`${repo}'s archive is not one folder`);
+      const sha = top[0].match(/-([0-9a-f]{7,40})$/)?.[1] ?? null;
+      // A repository that keeps its add-on in a plugin/ folder (with tests and docs beside it) is found without naming it.
+      if (!path && !existsSync(join(work, "x", top[0], "plugin.json")) && existsSync(join(work, "x", top[0], "plugin", "plugin.json"))) path = "plugin";
+      const from = `github:${repo}${path ? `/${path}` : ""}@${ref}${sha ? `#${sha}` : ""}`;
+      if (o.onlyIfNew && sha && parseGithubSource(o.onlyIfNew)?.sha === sha) return { ...this.get(readManifest(join(work, "x", top[0], path)).id)!, updated: false };
+      const dir = resolve(work, "x", top[0], path);
+      if (!dir.startsWith(resolve(work, "x") + sep)) throw new Error("That folder leaves the repository");
+      return { ...this.install(dir, { by: o.by, from }), updated: true };
+    } finally {
+      rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  }
+
+  /** Bring an add-on installed from GitHub up to date (nothing happens when GitHub has nothing newer). */
+  async updateFromGithub(id: string, by = "you"): Promise<PluginView & { updated: boolean }> {
+    const v = this.get(id);
+    if (!v) throw new Error(`No plugin ${id}`);
+    const src = parseGithubSource(v.source);
+    if (!src) throw new Error(`${v.name} was not installed from GitHub, so it has nowhere to update from`);
+    const out = await this.installFromGithub(`${src.repo}${src.path ? `/${src.path}` : ""}`, { ref: src.ref, by, onlyIfNew: v.source ?? undefined });
+    if (out.id !== id) throw new Error(`${src.repo} now holds add-on ${out.id}, not ${id}`);
+    return out;
+  }
+
+  /** Update every add-on that came from GitHub; failures are logged on the add-on, never thrown. */
+  async updateAllFromGithub(): Promise<string[]> {
+    const done: string[] = [];
+    for (const v of this.list()) {
+      if (!parseGithubSource(v.source)) continue;
+      try { if ((await this.updateFromGithub(v.id, "auto-update")).updated) done.push(v.id); }
+      catch (e) { this.log.append("plugin.log", { id: v.id, level: "warn", text: `Update check failed: ${(e as Error).message.slice(0, 300)}` }); }
+    }
+    return done;
+  }
+
+  /** Its monthly Claude budget and spend (ai), or null when it has no ai. */
+  budget(id: string) {
+    const v = this.get(id);
+    if (!v) throw new Error(`No plugin ${id}`);
+    return this.opts.ai && v.manifest.permissions.includes("ai") ? this.opts.ai.budget(v) : null;
+  }
+
+  setBudget(id: string, monthlyUsd: number, by = "you") {
+    const v = this.get(id);
+    if (!v) throw new Error(`No plugin ${id}`);
+    if (!v.manifest.permissions.includes("ai")) throw new Error(`${v.name} does not ask Claude, so it has no budget`);
+    if (!this.opts.ai) throw new Error("Claude is not available here");
+    this.opts.ai.setBudget(id, monthlyUsd, by);
+  }
+
   /** The one approval: turn it on, granting what its manifest asks for. */
   enable(id: string, opts: { by?: string } = {}): PluginView {
     const v = this.get(id);
@@ -258,6 +353,7 @@ export class PluginHost {
     this.syncAgents(v, false);
     const dir = resolve(v.dir);
     if (dir.startsWith(resolve(this.root) + sep)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    this.opts.store?.clear(id);
     this.log.append("plugin.removed", { id, by: opts.by ?? "you" });
     return { id, removed: true };
   }
@@ -442,6 +538,9 @@ export class PluginHost {
         this.log.append("plugin.data", { id, key, value: m.value ?? null });
         return;
       }
+      case "req":
+        this.answer(id, r, m);
+        return;
       case "emit": {
         if (!v.granted.includes("events:write")) {
           this.log.append("plugin.log", { id, level: "error", text: `sf.emit("${String(m.name).slice(0, 40)}") refused: the plugin did not ask for events:write` });
@@ -453,6 +552,38 @@ export class PluginHost {
         return;
       }
     }
+  }
+
+  /** A backend asked the core for something only the core can do; the permission is checked here, not in the runner. */
+  private async answer(id: string, r: Running, m: Row) {
+    const reply = (ok: boolean, value?: unknown, error?: string) => this.send(r, { t: "res", rid: m.rid, ok, value: value ?? null, error });
+    try { reply(true, await this.serve(id, String(m.op ?? ""), (m.args && typeof m.args === "object" ? m.args : {}) as Row)); }
+    catch (e) { reply(false, null, (e as Error).message.slice(0, 1000)); }
+  }
+
+  /** What a backend's sf.ai, sf.store, sf.act and sf.records do. */
+  async serve(id: string, op: string, a: Row): Promise<unknown> {
+    const v = this.get(id);
+    if (!v || v.status !== "enabled") throw new Error(`Plugin ${id} is not turned on`);
+    if (op.startsWith("ai.")) {
+      if (!v.granted.includes("ai")) throw new Error(`Plugin ${id} may not ask Claude (it did not ask for the ai permission)`);
+      if (!this.opts.ai) throw new Error("Claude is not available here");
+      if (op === "ai.budget") return this.opts.ai.budget(v);
+      if (op === "ai.run") return this.opts.ai.run(v, a as never);
+    }
+    if (op.startsWith("store.")) {
+      if (!v.granted.includes("store")) throw new Error(`Plugin ${id} may not keep a catalog (it did not ask for the store permission)`);
+      const st = this.opts.store;
+      if (!st) throw new Error("The catalog is not available here");
+      if (op === "store.put") return st.put(id, a.coll, a.id, a.doc, a.text);
+      if (op === "store.get") return st.get(id, a.coll, a.id);
+      if (op === "store.delete") return st.delete(id, a.coll, a.id);
+      if (op === "store.count") return st.count(id, a.coll ?? undefined);
+      if (op === "store.query") return st.query(id, a as never);
+    }
+    if (op === "act") return this.act(id, String(a.verb ?? ""), (a.args && typeof a.args === "object" ? a.args : {}) as Record<string, unknown>);
+    if (op === "records") return this.records(id, String(a.kind ?? ""), { projectId: a.projectId == null ? null : Number(a.projectId), limit: Number(a.limit) || undefined });
+    throw new Error(`Unknown request "${op.slice(0, 40)}"`);
   }
 
   private onExit(id: string, r: Running, code: number | null, signal: NodeJS.Signals | null) {

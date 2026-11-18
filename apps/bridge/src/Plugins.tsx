@@ -13,16 +13,17 @@ import { inProject, registerProjectPanel, registeredPanelIds, unregisterProjectP
  * A plugin page runs in a sandboxed frame. It cannot call the core itself; it asks this window
  * through sf.js (postMessage), and the core checks its permissions again.
  */
-export type PluginPermission = "events:read" | "events:write" | "agents" | "records:read" | "actions";
-export interface PluginPanel { id: string; title: string; entry: string; where: "project" | "page"; order: number }
+export type PluginPermission = "events:read" | "events:write" | "agents" | "records:read" | "actions" | "ai" | "store";
+export interface PluginPanel { id: string; title: string; entry: string; where: "project" | "page" | "nav"; order: number }
+export interface PluginBudget { monthlyUsd: number; spentUsd: number; leftUsd: number; calls: number; setBy: "manifest" | "you" }
 export interface PluginManifest {
   id: string; name: string; version: string; description: string; permissions: PluginPermission[]; main: string | null;
-  subscribe: string[]; panels: PluginPanel[]; agents: string[]; actions?: string[];
+  subscribe: string[]; panels: PluginPanel[]; agents: string[]; actions?: string[]; budget?: { monthlyUsd: number } | null;
 }
 export interface PluginView {
   id: string; name: string; version: string; description: string; dir: string; source: string | null;
   status: "installed" | "enabled" | "disabled"; manifest: PluginManifest; granted: string[]; error: string | null; crashes: number;
-  installedAt: string; enabledAt: string | null; running: boolean | null; dataKeys: number;
+  installedAt: string; enabledAt: string | null; running: boolean | null; dataKeys: number; budget?: PluginBudget | null;
 }
 export interface PluginExample { id: string; name: string; description: string; dir: string; installed: boolean }
 export interface PluginList { plugins: PluginView[]; examples: PluginExample[]; dir: string; permissions: Record<PluginPermission, string>; actions?: Record<string, string> }
@@ -36,7 +37,9 @@ const get = async <T,>(path: string): Promise<T> => {
 
 export const pluginsApi = {
   list: () => get<PluginList>("/api/plugins"),
-  install: (body: { dir?: string; example?: string }) => post("/api/plugins/install", body) as Promise<PluginView>,
+  install: (body: { dir?: string; example?: string; github?: string; ref?: string }) => post("/api/plugins/install", body) as Promise<PluginView>,
+  update: (id: string) => post(`/api/plugins/${id}/update`) as Promise<PluginView & { updated: boolean }>,
+  setBudget: (id: string, monthlyUsd: number) => post(`/api/plugins/${id}/budget`, { monthlyUsd }) as Promise<PluginBudget>,
   enable: (id: string) => post(`/api/plugins/${id}/enable`) as Promise<PluginView>,
   disable: (id: string) => post(`/api/plugins/${id}/disable`) as Promise<PluginView>,
   remove: (id: string) => post(`/api/plugins/${id}/remove`),
@@ -175,11 +178,12 @@ export function PluginsPage({ events, list, err, refresh, id, panel }: {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [dir, setDir] = useState("");
+  const [gh, setGh] = useState("");
   const plugins = list?.plugins ?? [];
   const current = plugins.find((p) => p.id === id) ?? plugins[0];
   const act = async (fn: () => Promise<unknown>, done?: string) => {
     setBusy(true);
-    try { await fn(); setMsg(done ?? null); refresh(); } catch (x) { setMsg((x as Error).message); } finally { setBusy(false); }
+    try { await fn(); setMsg(done ?? null); refresh(); } catch (x) { setMsg((x as Error).message); refresh(); } finally { setBusy(false); }
   };
   const addFolder = (e: FormEvent) => {
     e.preventDefault();
@@ -209,6 +213,12 @@ export function PluginsPage({ events, list, err, refresh, id, panel }: {
             ))}
           </div>
         )}
+        <form className="pl-add" onSubmit={(e) => { e.preventDefault(); if (gh.trim()) act(async () => { const p = await pluginsApi.install({ github: gh.trim() }); setGh(""); location.hash = `#/plugins/${p.id}`; }, "Added. Check what it may do, then turn it on."); }}>
+          <h4>Add from GitHub</h4>
+          <input value={gh} onChange={(e) => setGh(e.target.value)} placeholder="owner/repo (a private one uses your GitHub access in Systems)" aria-label="GitHub repository" />
+          <button className="sm" disabled={busy || !gh.trim()}>{busy ? "Adding…" : "Add"}</button>
+          <span className="muted">It keeps itself up to date from there.</span>
+        </form>
         <form className="pl-add" onSubmit={addFolder}>
           <h4>Add from a folder</h4>
           <input value={dir} onChange={(e) => setDir(e.target.value)} placeholder="C:\path\to\my-plugin (has a plugin.json)" aria-label="Plugin folder" />
@@ -217,7 +227,7 @@ export function PluginsPage({ events, list, err, refresh, id, panel }: {
         </form>
       </aside>
       <section className="ft-main">
-        {msg && <p className={/^Added|is on\.$/.test(msg) ? "muted" : "error"} role="status">{msg}</p>}
+        {msg && <p className={/^Added|is on\.$|updated\.$|up to date\.$/.test(msg) ? "muted" : "error"} role="status">{msg}</p>}
         {current ? <PluginDetail key={current.id} p={current} list={list!} events={events} busy={busy} act={act} panelId={panel} /> : <div className="empty">Pick a plugin, or add one.</div>}
       </section>
     </div>
@@ -233,6 +243,7 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
   const m = p.manifest;
   const pages = m.panels.filter((x) => x.where === "page");
   const tabs = m.panels.filter((x) => x.where === "project");
+  const navs = m.panels.filter((x) => x.where === "nav");
   const page = pages.find((x) => x.id === panelId) ?? pages[0];
   const acts = m.actions ?? [];
   const [full, setFull] = useState(false);
@@ -249,6 +260,7 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
           {p.status === "enabled"
             ? <button className="sm ghost" disabled={busy} onClick={() => act(() => pluginsApi.disable(p.id))}>Turn off</button>
             : <button className="sm gate" disabled={busy} onClick={() => act(() => pluginsApi.enable(p.id), `${p.name} is on.`)}>Turn on</button>}
+          {p.source?.startsWith("github:") && <button className="sm ghost" disabled={busy} title={`From ${p.source.slice(7)}`} onClick={() => act(async () => { const r = await pluginsApi.update(p.id); if (!r.updated) throw Object.assign(new Error(`${p.name} is up to date.`), { quiet: true }); }, `${p.name} updated.`)}>Check for update</button>}
           <button className="sm ghost" disabled={busy} onClick={() => { if (confirm(`Remove ${p.name}? Its copy and its stored data are deleted.`)) act(() => pluginsApi.remove(p.id).then(() => { location.hash = "#/plugins"; })); }}>Remove</button>
         </div>
       </header>
@@ -269,7 +281,7 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
         <li className="ig-step s-pass"><b>Installed</b><span className="muted">{new Date(p.installedAt).toLocaleString()}</span></li>
         <li className={`ig-step s-${p.status === "enabled" ? "pass" : "waiting"}`}><span className="cm-arrow" aria-hidden>▸</span><b>Your approval</b><span className="muted">{p.status === "enabled" ? "given" : "turn it on below the list of what it may do"}</span></li>
         {m.main && <li className={`ig-step s-${p.running ? "pass" : p.status === "enabled" ? "warn" : "idle"}`}><span className="cm-arrow" aria-hidden>▸</span><b>Backend</b><span className="muted">{p.running ? "running in its own locked-down process" : p.status === "enabled" ? "starting" : "stopped"}</span></li>}
-        <li className={`ig-step s-${p.status === "enabled" ? "pass" : "idle"}`}><span className="cm-arrow" aria-hidden>▸</span><b>In the app</b><span className="muted">{[tabs.length ? `${tabs.length} project tab${tabs.length > 1 ? "s" : ""}` : "", pages.length ? `${pages.length} page${pages.length > 1 ? "s" : ""}` : "", m.agents.length ? `${m.agents.length} agent${m.agents.length > 1 ? "s" : ""}` : ""].filter(Boolean).join(", ") || "a backend only"}</span></li>
+        <li className={`ig-step s-${p.status === "enabled" ? "pass" : "idle"}`}><span className="cm-arrow" aria-hidden>▸</span><b>In the app</b><span className="muted">{[navs.length ? `${navs.length} main menu item${navs.length > 1 ? "s" : ""}` : "", tabs.length ? `${tabs.length} project tab${tabs.length > 1 ? "s" : ""}` : "", pages.length ? `${pages.length} page${pages.length > 1 ? "s" : ""}` : "", m.agents.length ? `${m.agents.length} agent${m.agents.length > 1 ? "s" : ""}` : ""].filter(Boolean).join(", ") || "a backend only"}</span></li>
       </ol>
       {p.error && <p className="error" role="alert">{p.error}</p>}
 
@@ -287,9 +299,11 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
           </ul>
           <p className="muted">Its backend can read only its own folder: no other files, no starting programs, no keys or tokens. Its pages cannot reach the network.</p>
         </div>
+        {p.budget && <BudgetCard p={p} budget={p.budget} busy={busy} act={act} />}
         <div className="pl-card">
           <h4>What it adds</h4>
           <ul className="pl-perms">
+            {navs.map((t) => <li key={t.id}><b>"{t.title}" in the main menu</b><span className="muted">{p.status === "enabled" ? <a href={`#/a/${p.id}/${t.id}`}>open it</a> : "once it is on"}</span></li>)}
             {tabs.map((t) => <li key={t.id}><b>Tab "{t.title}"</b><span className="muted">in every project</span></li>)}
             {pages.map((t) => <li key={t.id}><b>Page "{t.title}"</b><span className="muted">here, above</span></li>)}
             {m.main && <li><b>A backend</b><span className="muted mono">{m.main}{m.subscribe.length ? ` · hears ${m.subscribe.join(", ")}` : ""}</span></li>}
@@ -308,4 +322,45 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
       </details>
     </div>
   );
+}
+
+/** An add-on's monthly Claude budget: what it spent this month, and your own cap for it. */
+function BudgetCard({ p, budget, busy, act }: { p: PluginView; budget: PluginBudget; busy: boolean; act: (fn: () => Promise<unknown>, done?: string) => void }) {
+  const [val, setVal] = useState(String(budget.monthlyUsd));
+  const pct = budget.monthlyUsd > 0 ? Math.min(100, (budget.spentUsd / budget.monthlyUsd) * 100) : 100;
+  return (
+    <div className="pl-card">
+      <h4>Claude budget</h4>
+      <p><b className="num">${budget.spentUsd.toFixed(2)}</b> <span className="muted">of ${budget.monthlyUsd.toFixed(2)} this month, {budget.calls} call{budget.calls === 1 ? "" : "s"}</span></p>
+      <div className="pl-meter" role="meter" aria-valuemin={0} aria-valuemax={budget.monthlyUsd} aria-valuenow={budget.spentUsd} aria-label="Spent this month"><span style={{ width: `${pct}%` }} className={pct >= 90 ? "hot" : undefined} /></div>
+      <form className="pl-budget" onSubmit={(e) => { e.preventDefault(); const n = Number(val); if (Number.isFinite(n) && n >= 0) act(() => pluginsApi.setBudget(p.id, n), `${p.name}'s budget is $${n.toFixed(2)} a month.`); }}>
+        <label>Monthly budget $ <input type="number" min={0} step={1} value={val} onChange={(e) => setVal(e.target.value)} aria-label="Monthly budget in dollars" /></label>
+        <button className="sm" disabled={busy || Number(val) === budget.monthlyUsd}>Save</button>
+      </form>
+      <p className="muted">{budget.setBy === "you" ? "Set by you." : "As the add-on asked; set your own any time."} When it is used up, its Claude calls stop until next month.</p>
+    </div>
+  );
+}
+
+/** An add-on that is a tool of its own: its "nav" page, the whole window, from its item in the main menu. */
+export function AddonPage({ list, id, panel, events }: { list: PluginList | null; id: string; panel?: string; events: SfEvent[] }) {
+  const p = list?.plugins.find((x) => x.id === id);
+  if (!list) return <div className="empty">Loading…</div>;
+  const navs = p?.manifest.panels.filter((x) => x.where === "nav") ?? [];
+  const page = navs.find((x) => x.id === panel) ?? navs[0];
+  if (!p || !page) return <div className="empty">No add-on "{id}" with a page of its own. <a href="#/plugins">Add-ons</a></div>;
+  if (p.status !== "enabled") return <div className="empty">{p.name} is off. <a href={`#/plugins/${p.id}`}>Turn it on</a></div>;
+  return (
+    <section className="addon-page" aria-label={p.name}>
+      {navs.length > 1 && <nav className="pl-tabs">{navs.map((x) => <a key={x.id} href={`#/a/${p.id}/${x.id}`} className={x.id === page.id ? "on" : undefined}>{x.title}</a>)}</nav>}
+      <PluginFrame key={`${p.id}:${page.id}`} plugin={p} panel={page} project={null} events={events} />
+    </section>
+  );
+}
+
+/** The main menu items enabled add-ons ask for. */
+export function addonNav(list: PluginList | null | undefined): { id: string; panel: string; title: string }[] {
+  return (list?.plugins ?? []).filter((p) => p.status === "enabled")
+    .flatMap((p) => p.manifest.panels.filter((x) => x.where === "nav").map((x) => ({ id: p.id, panel: x.id, title: x.title, order: x.order })))
+    .sort((a, b) => a.order - b.order).map(({ id, panel, title }) => ({ id, panel, title }));
 }

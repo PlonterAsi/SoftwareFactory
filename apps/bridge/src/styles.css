@@ -2338,3 +2338,13 @@ button.fm-wire-node .muted { font: 12px/1.2 var(--mono); white-space: nowrap; }
 .mb-meter { height: 6px; border-radius: 3px; background: color-mix(in srgb, currentColor 12%, transparent); overflow: hidden; flex: none; }
 .mb-meter i { display: block; height: 100%; background: var(--accent, #4f8cff); }
 .mb-days { flex: none; }
+
+/* Add-ons with a page of their own (main menu) and their Claude budget. */
+.addon-page { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: calc(100vh - 120px); }
+.addon-page .pl-frame { flex: 1; min-height: 0; border-radius: 10px; }
+.addon-page .pl-tabs { display: flex; gap: 10px; }
+.pl-meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 6px 0 10px; }
+.pl-meter > span { display: block; height: 100%; background: var(--accent); }
+.pl-meter > span.hot { background: var(--gate, #f2b34b); }
+.pl-budget { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pl-budget input { width: 90px; }

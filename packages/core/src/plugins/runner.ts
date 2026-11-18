@@ -14,6 +14,12 @@
  *   sf.emit("milestone", {…}, { projectId })  post a timeline entry (needs events:write)
  *   sf.data.get(key) / set(key, value) / all()  its own small store, kept in the core's database
  *   sf.log(…)  (console.log goes there too)   its log, shown on the Plugins page
+ *   sf.ai.run({ prompt, system, model, tools, budgetUsd })   ask Claude (needs ai), from its monthly budget
+ *   sf.ai.budget()                               { monthlyUsd, spentUsd, leftUsd, calls }
+ *   sf.store.put(coll, id, doc, text) / get / delete / count / query({ coll, text, where, sort, limit, offset })
+ *                                                its searchable catalog (needs store)
+ *   sf.act(verb, args) / sf.records(kind, opts)  the same as its pages (needs actions / records:read)
+ * The ai, store, act and records calls return promises: the core answers them.
  */
 export const RUNNER_SOURCE = String.raw`// SoftwareFactory plugin runner (generated; do not edit).
 import { createInterface } from "node:readline";
@@ -26,6 +32,15 @@ const handlers = [];
 const methods = new Map();
 let data = {};
 let manifest = null;
+let reqN = 0;
+const pending = new Map();
+// Ask the core for something only it can do (Claude, the catalog, actions). The core checks the permission again.
+const ask = (op, args, ms) => new Promise((res, rej) => {
+  const rid = ++reqN;
+  const timer = setTimeout(() => { pending.delete(rid); rej(new Error("SoftwareFactory did not answer " + op + " in time")); }, ms || 60000);
+  pending.set(rid, { res, rej, timer });
+  out({ t: "req", rid, op, args: args ?? {} });
+});
 
 const matches = (p, t) => p === "*" || p === t || (p.endsWith(".*") && t.startsWith(p.slice(0, -1)));
 
@@ -40,6 +55,19 @@ globalThis.sf = Object.freeze({
     set(k, v) { k = String(k); if (v === undefined || v === null) delete data[k]; else data[k] = v; out({ t: "set", key: k, value: v ?? null }); },
   }),
   log: (...a) => out({ t: "log", level: "info", text: text(a) }),
+  ai: Object.freeze({
+    run: (req) => ask("ai.run", req, 16 * 60000),
+    budget: () => ask("ai.budget", {}),
+  }),
+  store: Object.freeze({
+    put: (coll, id, doc, text) => ask("store.put", { coll, id, doc, text }),
+    get: (coll, id) => ask("store.get", { coll, id }),
+    delete: (coll, id) => ask("store.delete", { coll, id }),
+    count: (coll) => ask("store.count", { coll }),
+    query: (q) => ask("store.query", q),
+  }),
+  act: (verb, args) => ask("act", { verb, args: args ?? {} }),
+  records: (kind, opts) => ask("records", { kind, ...(opts ?? {}) }),
 });
 console.log = console.info = console.debug = (...a) => out({ t: "log", level: "info", text: text(a) });
 console.warn = (...a) => out({ t: "log", level: "warn", text: text(a) });
@@ -68,6 +96,11 @@ rl.on("line", async (line) => {
     try { await import(pathToFileURL(main).href); }
     catch (err) { console.error("could not start:", err); process.exit(1); }
     out({ t: "ready" });
+  } else if (m.t === "res") {
+    const w = pending.get(m.rid);
+    if (!w) return;
+    pending.delete(m.rid); clearTimeout(w.timer);
+    m.ok ? w.res(m.value) : w.rej(new Error(m.error || "failed"));
   } else if (m.t === "event") onEvent(m.event);
   else if (m.t === "call") onCall(m);
   else if (m.t === "stop") process.exit(0);
