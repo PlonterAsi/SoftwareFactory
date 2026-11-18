@@ -23,11 +23,12 @@ import { FRAME_CSS_SOURCE, FRAME_SDK_SOURCE } from "./runner.js";
  *   POST /api/plugins/:id/call                { method, args }  its backend answers
  *   GET  /api/plugins/:id/records?kind=projects|tickets|agents&projectId=&limit=   needs records:read
  *   POST /api/plugins/:id/act                 { verb, args }    one listed action; needs actions
+ *   POST /api/plugins/:id/open                { url }  an enabled plugin's page opens a web link (http/https) in your browser
  *   GET  /plugins/:id/<path>                  an enabled plugin's pages and their files
  *   GET  /plugins/_sdk/sf.js, sf.css          the helper and base styles every plugin page can load
  */
 export async function pluginsRoute(
-  ctx: { plugins: PluginHost; readJson: (req: IncomingMessage) => Promise<Record<string, unknown>> },
+  ctx: { plugins: PluginHost; readJson: (req: IncomingMessage) => Promise<Record<string, unknown>>; openUrl?: (url: string) => void },
   req: IncomingMessage,
   url: URL,
 ): Promise<[number, unknown] | null> {
@@ -49,7 +50,7 @@ export async function pluginsRoute(
       return [201, plugins.install(String(body.dir))];
     } catch (e) { return [409, { error: (e as Error).message }]; }
   }
-  const m = path.match(/^\/api\/plugins\/([a-z0-9-]+)(?:\/(enable|disable|remove|log|data|events|records|call|act|update|budget))?$/);
+  const m = path.match(/^\/api\/plugins\/([a-z0-9-]+)(?:\/(enable|disable|remove|log|data|events|records|call|act|update|budget|open))?$/);
   if (!m) return null;
   const id = m[1];
   const op = m[2];
@@ -79,6 +80,14 @@ export async function pluginsRoute(
     if (op === "update") return [200, await plugins.updateFromGithub(id)];
     if (op === "budget") { plugins.setBudget(id, Number(body.monthlyUsd)); return [200, plugins.budget(id)]; }
     if (op === "act") return [200, { value: plugins.act(id, String(body.verb ?? ""), (body.args && typeof body.args === "object" ? body.args : {}) as Record<string, unknown>) }];
+    if (op === "open") {
+      const u = String(body.url ?? "");
+      if (!/^https?:\/\/[^\s]+$/i.test(u) || u.length > 2000) return [400, { error: "Only web links (http or https) open from a plugin" }];
+      if (plugins.get(id)?.status !== "enabled") return [409, { error: `Plugin ${id} is off` }];
+      if (!ctx.openUrl) return [501, { error: "Opening links is not available here" }];
+      ctx.openUrl(u);
+      return [200, { ok: true }];
+    }
     if (op === "call") return [200, { value: await plugins.call(id, String(body.method ?? ""), body.args ?? {}) }];
     return null;
   } catch (e) {

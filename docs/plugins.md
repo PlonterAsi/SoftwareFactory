@@ -9,7 +9,7 @@ A plugin adds a feature to SoftwareFactory without changing the app's own code. 
 
 | Part | What it is | Manifest |
 |---|---|---|
-| **Tabs** | a web page shown as a tab in every project (`where: "project"`) or as a page on the Plugins screen (`where: "page"`) | `panels` |
+| **Tabs** | a web page shown as a tab in every project (`where: "project"`), as a page on the Plugins screen (`where: "page"`), or as its own item in the main menu (`where: "nav"`, under Add-ons, route `#/a/<id>/<panel>`) | `panels` |
 | **A backend** | a script that hears factory events, keeps its own data, answers its pages, posts timeline entries | `main`, `subscribe` |
 | **Agents** | agent files (the Agent Bay format) that join the Bay as workers while the plugin is on | `agents` |
 
@@ -39,6 +39,8 @@ The full example is in `packages/core/plugin-examples/run-stats/` and ships with
 | `agents` | add its agents to the Agent Bay (ids prefixed with the plugin id; retired when it is off) |
 | `records:read` | read your real projects, tickets and agents: names, states, counts and spend, never file contents |
 | `actions` | do the things its manifest lists under `"actions"`, and nothing else |
+| `store` | keep its own searchable catalog in SoftwareFactory's database (full-text search, up to 200,000 documents of 256 KB) |
+| `ai` | ask Claude (it may search and read the web, nothing else), paid from its own monthly budget, which you set |
 
 ### Actions: a plugin that does real work
 
@@ -86,6 +88,41 @@ console.log("…");                               // its log on the Plugins page
 
 If it crashes three times, the host turns it off and says why on the Plugins page. Turning it on again starts afresh. Rate limits: 300 data writes, 60 timeline entries and 200 log lines a minute.
 
+### Add-ons: a catalog and Claude of its own
+
+An add-on is a plugin with its own menu item, usually with `store` and `ai`. Scout ([PlonterAsi/Scout](https://github.com/PlonterAsi/Scout)) is the first.
+
+```json
+{ "permissions": ["store", "ai"], "budget": { "monthlyUsd": 30 }, "main": "main.mjs",
+  "panels": [{ "id": "home", "title": "Scout", "entry": "ui/index.html", "where": "nav", "order": 10 }] }
+```
+
+From the backend:
+
+```js
+await sf.store.put("finds", id, doc, "text to search");      // store
+await sf.store.query({ coll: "finds", text: "mcp postgres", where: { verdict: "use" }, sort: "-score", limit: 50 });
+// → { items: [{ id, doc, updatedAt, rank, snippet }], total }
+await sf.store.get("finds", id); await sf.store.delete("finds", id); await sf.store.count("finds");
+
+await sf.ai.run({ prompt, system, model: "haiku", tools: ["WebSearch", "WebFetch"], budgetUsd: 0.4, practice: "[]" });  // ai
+// → { text, costUsd, practice }   refused when it would pass the month's budget
+await sf.ai.budget();   // { monthlyUsd, spentUsd, leftUsd }
+await sf.act("ticket.open", { … }); await sf.records("projects");   // the same as pages, from the backend
+```
+
+The rules for `ai`:
+
+- **Its own budget.** The manifest suggests a monthly cap (`budget.monthlyUsd`, default $5, at most $100); you change it on the Plugins page. A call is refused when what is left this month is less than its own cap, so the month never goes over.
+- **One call, one cap.** At most $2 a call (default $0.25), two at a time, 15 minutes each.
+- **Web only.** The only tools are WebSearch and WebFetch: Claude reads the web for the add-on and touches nothing on your computer.
+- **Practice crew.** When SoftwareFactory runs on the practice crew, no money is spent and the call returns the add-on's own `practice` answer, marked `practice: true`.
+- **Logged.** Every call is a run of agent `plugin:<id>`, with its cost, in the factory's spend.
+
+### Install from GitHub
+
+Plugins page → **Add from GitHub** → `owner/repo` (or `owner/repo/folder`, and a branch or tag). SoftwareFactory downloads the repository through its GitHub sign-in (so private repositories work), uses the `plugin/` folder when the root has no `plugin.json`, and installs it turned off. It checks every installed GitHub add-on for a newer version a minute after start and then every 6 hours (also the **Check for update** button); an update that asks for nothing new stays on.
+
 ## Pages
 
 Served at `/plugins/<id>/<path>` (only while the plugin is on; the backend's own file is never served) and shown in a sandboxed frame (`allow-scripts allow-forms`, no same origin). Pages cannot call the core themselves (the core refuses API calls from origin `null`, and the page's CSP blocks `connect-src`); they ask the Bridge through a small helper, and the core checks the permission again:
@@ -102,8 +139,12 @@ Served at `/plugins/<id>/<path>` (only while the plugin is on; the backend's own
   await sf.data();                      // its stored data
   await sf.records("tickets");          // real projects | tickets | agents (records:read)
   await sf.act("ticket.open", { title: "…", kind: "task" });  // a listed action (actions); in a project tab it lands in that project
+  await sf.open("https://github.com/…");  // opens a web link in your browser (the sandbox cannot open windows)
+  await sf.copy("text");                // copies to the clipboard
 </script>
 ```
+
+A page's sandbox blocks `alert`, `confirm` and `prompt`: confirm in the page itself (Scout uses a second click).
 
 ## From the factory: the Integrate tab
 
@@ -125,7 +166,10 @@ plugin.data      { id, key, value }
 plugin.log       { id, level, text }
 plugin.emitted   { id, name, payload, projectId? }
 plugin.acted     { id, verb, ok, projectId?, result? | error? }
+plugin.budget    { id, monthlyUsd, by }
 ```
+
+Catalogs (`store`) live in tables `plugin_docs` and `plugin_docs_fts` (FTS5), written directly rather than as events, since a catalog can hold many thousands of documents; removing a plugin clears its catalog.
 
 Installed copies live in `<data>/plugins/<id>/`.
 
@@ -133,7 +177,11 @@ Installed copies live in `<data>/plugins/<id>/`.
 
 ```
 GET  /api/plugins                    installed, bundled examples, the folder, permission texts
-POST /api/plugins/install            { dir } | { example }
+POST /api/plugins/install            { dir } | { example } | { github: "owner/repo[/folder]", ref? }
+POST /api/plugins/:id/update         a newer version from its GitHub repository
+GET  /api/plugins/:id/budget         { monthlyUsd, spentUsd, leftUsd }
+POST /api/plugins/:id/budget         { monthlyUsd }
+POST /api/plugins/:id/open           { url }  a web link, in your browser
 GET  /api/plugins/:id
 POST /api/plugins/:id/enable | disable | remove
 GET  /api/plugins/:id/log | data
@@ -149,5 +197,6 @@ GET  /plugins/_sdk/sf.js | sf.css
 
 - Page network access and a backend network switch: Node 22's permission model does not limit the network, so a backend can still make web requests. Pages cannot.
 - Actions that spend money (work a ticket, start a build), each with its price and a hold to confirm, and the Sector game reading real records and giving orders from its map.
-- Plugins calling agents directly (with a spend cap) and adding factory stations of their own.
-- A shared plugin catalog; for now a plugin comes from a folder, an example, or a finished project.
+- Plugins starting full agents (with files and tools) and adding factory stations of their own; for now `ai` is Claude with the web only.
+- A sandbox for trying a find (a throwaway Linux box with no access to your drives or keys).
+- A shared plugin catalog; for now a plugin comes from a folder, an example, GitHub, or a finished project.

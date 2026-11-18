@@ -489,7 +489,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (url.pathname.startsWith("/ext/") && serveExtension(integrations, req, res, url)) return;
       if (url.pathname === "/api/plugins" || url.pathname.startsWith("/api/plugins/")) {
-        const r = await pluginsRoute({ plugins, readJson }, req, url);
+        const r = await pluginsRoute({ plugins, readJson, openUrl: openFolder }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname.startsWith("/plugins/") && servePluginFile(plugins, req, res, url)) return;

@@ -60,6 +60,7 @@ export const pluginsApi = {
     return get<{ records: unknown[] }>(`/api/plugins/${id}/records?${s}`);
   },
   act: (id: string, verb: string, args: unknown) => post(`/api/plugins/${id}/act`, { verb, args }) as Promise<{ value: unknown }>,
+  open: (id: string, url: string) => post(`/api/plugins/${id}/open`, { url }),
 };
 
 const LIFECYCLE = (t: string) => t.startsWith("plugin.") && t !== "plugin.data" && t !== "plugin.emitted";
@@ -97,7 +98,7 @@ export function syncPluginPanels(list: PluginView[] | undefined, events: SfEvent
 
 // ---------------- One plugin page, in a sandboxed frame ----------------
 
-type Ask = { sf: 1; rid: number; op: "context" | "events" | "call" | "data" | "subscribe" | "records" | "act"; args?: Record<string, any> };
+type Ask = { sf: 1; rid: number; op: "context" | "events" | "call" | "data" | "subscribe" | "records" | "act" | "open" | "copy"; args?: Record<string, any> };
 
 export function PluginFrame({ plugin, panel, project, events }: { plugin: PluginView; panel: PluginPanel; project: ProjectDetail | null; events: SfEvent[] }) {
   const frame = useRef<HTMLIFrameElement>(null);
@@ -137,6 +138,15 @@ export function PluginFrame({ plugin, panel, project, events }: { plugin: Plugin
           return reply(m.rid, true, (await pluginsApi.act(plugin.id, String(a.verb ?? ""), args)).value);
         }
         if (m.op === "data") return reply(m.rid, true, (await pluginsApi.data(plugin.id)).data);
+        // A page cannot open windows or reach the clipboard from its sandbox: the app does it for web links and text only.
+        if (m.op === "open") {
+          const url = String(a.url ?? "");
+          if (!/^https?:\/\//i.test(url)) return reply(m.rid, false, undefined, "Only web links (http or https) can be opened");
+          // The core opens it in your default browser (the desktop window has no tabs); a plain browser tab is the fallback.
+          await pluginsApi.open(plugin.id, url).catch(() => { window.open(url, "_blank", "noopener,noreferrer"); });
+          return reply(m.rid, true, true);
+        }
+        if (m.op === "copy") { await navigator.clipboard.writeText(String(a.text ?? "").slice(0, 100_000)); return reply(m.rid, true, true); }
         if (m.op === "subscribe") {
           if (!canRead) return reply(m.rid, false, undefined, "This plugin did not ask to read events (events:read)");
           subscribed.current = true;

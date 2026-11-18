@@ -147,6 +147,10 @@ export const FRAME_SDK_SOURCE = String.raw`// SoftwareFactory plugin page helper
     act: function (verb, args) { return ask("act", { verb: verb, args: args || {} }); },
     /** The plugin's own stored data. */
     data: function () { return ask("data"); },
+    /** Open a web link (http or https) in the browser: the page's sandbox cannot open windows itself. */
+    open: function (url) { return ask("open", { url: String(url) }); },
+    /** Copy text to the clipboard. */
+    copy: function (text) { return ask("copy", { text: String(text) }); },
     /** New events as they happen (same filter as events). Needs events:read. */
     onEvent: function (fn) { listeners.push(fn); ask("subscribe").catch(function () {}); },
   };
