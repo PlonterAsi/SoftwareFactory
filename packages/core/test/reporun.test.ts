@@ -52,7 +52,7 @@ const PLAN = {
  * Planner returns a plan of two features, the Builder edits files with its tools (and breaks a test on its
  * first go at F2), and the Reviewer passes with the criteria it "ran".
  */
-function crew(o: { sloppy?: boolean } = {}) {
+function crew(o: { sloppy?: boolean; plan?: typeof PLAN } = {}) {
   const mock = new MockRuntime();
   const seen: { station: string; req: AgentRequest }[] = [];
   let f2 = 0;
@@ -61,7 +61,7 @@ function crew(o: { sloppy?: boolean } = {}) {
     seen.push({ station: st, req });
     const r = await mock.run(req);
     r.costUsd = 0.01;
-    if (st === "plan") r.text = block(PLAN);
+    if (st === "plan") r.text = block(o.plan ?? PLAN);
     else if (st === "review") r.text = block({ verdict: "pass", findings: [], criteria: PLAN.acceptance.map((text) => ({ text, pass: true, evidence: "ran pytest" })) });
     else if (st === "repo") {
       const put = (p: string, c: string) => { mkdirSync(dirname(join(req.cwd!, p)), { recursive: true }); writeFileSync(join(req.cwd!, p), c); };
@@ -80,7 +80,7 @@ function crew(o: { sloppy?: boolean } = {}) {
   return { rt, seen };
 }
 
-function world(o: { sloppy?: boolean; ship?: RepoTools["ship"]; site?: RepoTools["readSite"] } = {}) {
+function world(o: { sloppy?: boolean; plan?: typeof PLAN; ship?: RepoTools["ship"]; site?: RepoTools["readSite"] } = {}) {
   const log = new EventLog();
   const { rt, seen } = crew(o);
   const bay = new AgentBay(log, rt);
@@ -224,6 +224,29 @@ describe("the engine in an imported repo", () => {
     // The run draws like any other: every station it went through left what the run page needs.
     expect(events(w.log, "factory.visual").filter((v) => v.run === run && !v.pass)).toEqual([]);
     expect(events(w.log, "factory.visual").filter((v) => v.run === run).map((v) => v.station)).toEqual(expect.arrayContaining(["discover", "plan", "build", "review", "evaluate", "ship"]));
+  }, 60_000);
+
+  it("SF-64: a plan bigger than the money is sliced before the plan gate; the rest becomes the next slice's ticket", async () => {
+    const more = [3, 4, 5].map((n) => ({ id: `F${n}`, title: `Part ${n}`, what: `Part ${n} of the page.`, files: [`part${n}.py`], done: "It works." }));
+    const w = world({ plan: { ...PLAN, features: [...PLAN.features, ...more] } });
+    const t = w.tickets.open({ kind: "request", project: w.project, title: "Contact page with five parts", asked: true });
+    const r = w.tickets.work(t.id, { route: "engine", maxUsd: 3, autoApprove: true });
+    await w.factory.wait(r.run!);
+    const sliced = events(w.log, "factory.plan.sliced").at(-1);
+    expect(sliced).toMatchObject({ run: r.run, fit: { features: 5, fits: 3, ok: false } });
+    expect(sliced.later.map((f: any) => f.id)).toEqual(["F4", "F5"]);
+    // The plan gate said so in words, and only the features that fit were built.
+    const gate = events(w.log, "factory.gate").find((g) => g.gate === "gateA" && g.state === "waiting");
+    expect(gate.question).toMatch(/builds 3 of them whole/);
+    expect(gate.fit.later).toEqual(["F4 Part 4", "F5 Part 5"]);
+    expect([...new Set(events(w.log, "factory.feature").filter((f) => f.run === r.run).map((f) => f.id))]).toEqual(["F1", "F2", "F3"]);
+    const dir = events(w.log, "factory.run.finished").at(-1).dir;
+    expect(readFileSync(join(dir, ".sf", "SPEC.md"), "utf8")).toMatch(/Left to the next slice[\s\S]*F4 Part 4/);
+    // The next slice is a ticket of its own, waiting for this one, asked for like it.
+    const next = w.tickets.list({ view: "all", project: w.project }).find((x) => /next slice/.test(x.title))!;
+    expect(next.body).toMatch(/F4 Part 4[\s\S]*F5 Part 5/);
+    expect(next.blocked).toBe(true);
+    expect(w.tickets.detail(next.id)!.asked).toBe(true);
   }, 60_000);
 
   it("keeps the branch in the clone when no pull request can be opened, and skips the judge honestly when the site cannot start", async () => {

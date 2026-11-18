@@ -49,6 +49,8 @@ export interface OpenTicket {
   /** The `ticket.requested` event this ticket answers, and the requester's own reference. */
   request?: number;
   ref?: unknown;
+  /** You asked for this work: the crew starts it by itself within your standing auto-work limit. */
+  asked?: boolean;
 }
 
 export interface TicketFilter {
@@ -131,6 +133,10 @@ export interface TicketDetail {
   steps: TicketStep[];
   /** Where it stands in the ready queue, or why the crew leaves it to you. */
   queue: { position: number | null; why: string | null } | null;
+  /** You asked for it: the crew starts it within your standing auto-work limit. */
+  asked: boolean;
+  /** Its run stopped or failed and can be tried again from that step (SF-65), with what that adds. */
+  retry: { from: string; addUsd: number } | null;
 }
 
 type Row = Record<string, any>;
@@ -161,17 +167,28 @@ const toView = (r: Row): TicketView => ({
 /** The contract appended to any agent asked about a ticket. The practice crew answers it too. */
 export const TICKET_CONTRACT = "Station contract: ticket. You are reading one ticket of SoftwareFactory. Reply in at most 6 short lines: what you understand, the smallest next step, and anything missing. Then one line `SIZE: S`, `SIZE: M` or `SIZE: L` (S: one small change; M: a few files, one run; L: should be split). End with one line `STATUS: ready` if it can be built as written, or `STATUS: open` if it needs an answer first.";
 
-/** How the crew picks up ready tickets by itself (Systems can turn it off). */
+/**
+ * How the crew picks up tickets by itself (Systems can turn it off). Set once, it is your standing approval:
+ * the crew starts what the rule allows without a press, a card or a typed phrase (Assaf, 18 Nov 2026: "when I
+ * ask for work, that IS the approval").
+ */
 export interface AutoWork {
   on: boolean;
-  /** Cap for one ticket the crew starts on its own. */
+  /** Cap for one ready bug or task the crew starts on its own. */
   maxUsd: number;
-  /** All starts of a day together stay under this: starts x maxUsd <= dailyUsd. */
+  /**
+   * Cap for one start of work you asked for (a ticket marked "asked for"): any kind and size, on the engine
+   * when it is feature-sized. A plan that does not fit it is sliced (SF-64), never started doomed.
+   */
+  askedMaxUsd: number;
+  /** All starts of a day together stay under this: the caps of today's starts added up, never more. */
   dailyUsd: number;
   /** Tickets worked at once per project. */
   wip: number;
 }
-export const AUTO_WORK_DEFAULT: AutoWork = { on: true, maxUsd: 0.6, dailyUsd: 3, wip: 2 };
+export const AUTO_WORK_DEFAULT: AutoWork = { on: true, maxUsd: 0.6, askedMaxUsd: 3, dailyUsd: 3, wip: 2 };
+/** How often the crew starts or retries one ticket on its own before it leaves the rest to you. */
+export const AUTO_TRIES = 2;
 
 export interface QueueSpot {
   ticket: TicketView;
@@ -251,10 +268,45 @@ export class Tickets {
     return this.inRepo.has(t.id) || (t.run != null && !!this.opts.factory?.isActive(t.run));
   }
 
-  /** Auto starts today (by the dispatcher), for the daily cap. */
-  private autoStartsToday(): number {
+  /** What today's auto starts (by the dispatcher) may spend together: their caps added up, for the daily limit. */
+  autoUsdToday(): number {
     const day = new Date().toISOString().slice(0, 10);
-    return Number((this.log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND ts >= ?").get(day) as { n: number }).n);
+    const rows = this.log.db.prepare("SELECT json_extract(payload, '$.capUsd') AS cap FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND ts >= ?").all(day) as { cap: number | null }[];
+    // Starts written before caps were recorded count at the bug-and-task cap.
+    return rows.reduce((a, r) => a + (typeof r.cap === "number" ? r.cap : this.autoWork().maxUsd), 0);
+  }
+
+  /** How often the crew started or retried this ticket on its own. */
+  private autoTries(id: number): number {
+    return Number((this.log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND json_extract(payload, '$.id') = ?").get(id) as { n: number }).n);
+  }
+
+  /** Tickets you asked for (the last word on each, its own or its epic's), by id. */
+  private askedIds(): Set<number> {
+    const rows = this.log.db.prepare("SELECT json_extract(payload, '$.id') AS id, json_extract(payload, '$.on') AS on_ FROM events WHERE type = 'ticket.asked' ORDER BY id").all() as { id: number; on_: number }[];
+    const out = new Set<number>();
+    for (const r of rows) { if (r.on_) out.add(Number(r.id)); else out.delete(Number(r.id)); }
+    return out;
+  }
+
+  /** Did you ask for this work? Its own mark, or the mark on the epic it sits under. */
+  isAsked(t: Pick<TicketView, "id" | "parentId">, ids = this.askedIds()): boolean {
+    return ids.has(t.id) || (t.parentId != null && ids.has(t.parentId));
+  }
+
+  /**
+   * Mark a ticket as work you asked for (or take the mark off). The crew then starts it by itself within the
+   * standing auto-work limit: no Work it press, no card, no phrase. An epic's mark covers its tickets.
+   */
+  setAsked(id: number, on: boolean, by = "you"): TicketView {
+    const t = this.must(id);
+    if (on && isClosed(t.status)) throw new Error("This ticket is closed; reopen it first.");
+    const rule = this.autoWork();
+    this.log.append("ticket.asked", { id, on, by });
+    this.log.append("ticket.noted", { id, by, kind: "event", text: on
+      ? `Asked for: the crew starts it by itself, up to $${rule.askedMaxUsd.toFixed(2)} a run and $${rule.dailyUsd.toFixed(2)} a day for all its own starts${rule.on ? "" : " (once crew pick-up is on)"}. Write "hold" on the thread to keep it off.`
+      : "No longer asked for: it waits for your Work it press." });
+    return this.get(id)!;
   }
 
   /**
@@ -263,25 +315,47 @@ export class Tickets {
    * then the oldest first.
    */
   queue(project?: number | null): QueueSpot[] {
-    const ready = this.list({ view: "all", status: "ready", project: project ?? undefined, limit: 500 })
-      .sort((a, b) => pri(a.priority) - pri(b.priority) || a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
+    const asked = this.askedIds();
+    // Work you asked for is in line once it is open, and goes first; other work once it is ready.
+    const ready = [
+      ...this.list({ view: "all", status: "ready", project: project ?? undefined, limit: 500 }),
+      ...(asked.size ? this.list({ view: "all", status: "open", project: project ?? undefined, limit: 500 }).filter((t) => this.isAsked(t, asked)) : []),
+    ].sort((a, b) => Number(this.isAsked(b, asked)) - Number(this.isAsked(a, asked)) || pri(a.priority) - pri(b.priority) || a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
     const place = new Map<string, number>();
-    const cap = this.autoWork().maxUsd;
-    const money = new Map<string, string | null>();
+    const rule = this.autoWork();
+    const capOf = (t: TicketView) => (this.isAsked(t, asked) ? rule.askedMaxUsd : rule.maxUsd);
+    const money = new Map<string, { leftUsd: number | null; why: string | null } | undefined>();
     // The queue fits the monthly budgets: a ticket waits while its month has less left than one start may spend.
-    const short = (p: number | null): string | null => {
-      const k = String(p);
-      if (!money.has(k)) { const m = this.opts.monthLeft?.(p); money.set(k, m && m.leftUsd != null && m.leftUsd + 1e-9 < cap ? `Waits for money: ${m.why}, less than the $${cap.toFixed(2)} one start may spend.` : null); }
-      return money.get(k)!;
+    const short = (t: TicketView): string | null => {
+      const k = String(t.project);
+      if (!money.has(k)) money.set(k, this.opts.monthLeft?.(t.project));
+      const m = money.get(k);
+      const cap = capOf(t);
+      return m && m.leftUsd != null && m.leftUsd + 1e-9 < cap ? `Waits for money: ${m.why}, less than the $${cap.toFixed(2)} one start may spend.` : null;
     };
+    // And today's limit: what is left of it after the caps of today's own starts.
+    const dayLeft = rule.dailyUsd - this.autoUsdToday();
+    const today = (t: TicketView): string | null => (dayLeft + 1e-9 < capOf(t) ? `Waits for tomorrow: today's auto-work limit of $${rule.dailyUsd.toFixed(2)} has $${Math.max(0, dayLeft).toFixed(2)} left, less than the $${capOf(t).toFixed(2)} this start may spend. Raise it in Tickets, or press Work it.` : null);
     return ready.map((t) => {
-      const why = this.stuck.get(t.id) ?? autoWorkRefusal(t, this.handBrake(t.id)) ?? short(t.project);
+      const why = this.stuck.get(t.id) ?? (this.isAsked(t, asked) ? this.askedRefusal(t) : autoWorkRefusal(t, this.handBrake(t.id))) ?? short(t) ?? today(t);
       if (why) return { ticket: t, position: null, why };
       const k = String(t.project);
       const n = (place.get(k) ?? 0) + 1;
       place.set(k, n);
       return { ticket: t, position: n, why: null };
     });
+  }
+
+  /** Why the crew does not start this ticket you asked for, or null: only what makes a start wrong, not taste or size. */
+  private askedRefusal(t: TicketView): string | null {
+    if (t.blocked) return "Blocked: it starts when what blocks it is closed.";
+    if (t.assignee === "you") return "You took it, so the crew leaves it to you.";
+    if (this.handBrake(t.id)) return "The thread says to hold it.";
+    const epic = epicOfTickets(t);
+    if (epic) return "An epic you asked for: the crew starts its tickets one by one.";
+    if (this.autoTries(t.id) >= AUTO_TRIES) return `The crew already started it ${AUTO_TRIES} times on its own; the next try is yours (Retry or Work it).`;
+    if (t.run != null && this.opts.factory?.isActive(t.run)) return `Run #${t.run} is working it.`;
+    return null;
   }
 
   /** You wrote "hold", "don't close", "needs a look" on the thread: the crew keeps its hands off. */
@@ -300,22 +374,36 @@ export class Tickets {
     const started: number[] = [];
     const busy = new Map<string, number>();
     for (const t of this.list({ view: "all", status: "in_progress", limit: 500 })) if (this.isWorking(t)) busy.set(String(t.project), (busy.get(String(t.project)) ?? 0) + 1);
-    let today = this.autoStartsToday();
+    let spent = this.autoUsdToday();
+    const asked = this.askedIds();
     for (const spot of this.queue()) {
       if (spot.position == null) continue;
       const k = String(spot.ticket.project);
       if ((busy.get(k) ?? 0) >= rule.wip) continue;
-      if ((today + 1) * rule.maxUsd > rule.dailyUsd + 1e-9) break;
       const t = spot.ticket;
+      const mine = this.isAsked(t, asked);
+      const cap = mine ? rule.askedMaxUsd : rule.maxUsd;
+      if (spent + cap > rule.dailyUsd + 1e-9) continue;
       // The check before money holds a ticket with open questions: they wait in Needs you, said once on its timeline.
       const held = this.check(t.id);
       if (held.verdict === "ask") { this.recordCheck(t.id, held, "dispatcher"); continue; }
       try {
-        this.log.append("ticket.noted", { id: t.id, by: "dispatcher", auto: 1, kind: "event", text: `The crew picked it up on its own: a ready ${t.kind}, size ${t.size}, capped at $${rule.maxUsd.toFixed(2)}. Write "hold" on the thread to keep the crew off it.` });
-        this.work(t.id, { maxUsd: rule.maxUsd, autoApprove: true, by: "dispatcher" });
+        // SF-65: work you asked for whose run stopped or failed picks up from that step, with fresh money for what is left.
+        const again = mine && t.run != null && this.opts.factory?.retryable(t.run).ok;
+        if (again) {
+          const add = Math.min(cap, this.opts.factory!.retryAddUsd(t.run!));
+          this.log.append("ticket.noted", { id: t.id, by: "dispatcher", auto: 1, capUsd: add, kind: "event", text: `The crew tries run #${t.run} again on its own, from the step it stopped at, with $${add.toFixed(2)} more (work you asked for). Write "hold" on the thread to keep the crew off it.` });
+          this.retry(t.id, { addUsd: add, by: "dispatcher", auto: true });
+          spent += add;
+        } else {
+          this.log.append("ticket.noted", { id: t.id, by: "dispatcher", auto: 1, capUsd: cap, kind: "event", text: mine
+            ? `The crew picked it up on its own: you asked for it, capped at $${cap.toFixed(2)} by your standing limit. Write "hold" on the thread to keep the crew off it.`
+            : `The crew picked it up on its own: a ready ${t.kind}, size ${t.size}, capped at $${cap.toFixed(2)}. Write "hold" on the thread to keep the crew off it.` });
+          this.work(t.id, { maxUsd: cap, autoApprove: true, by: "dispatcher" });
+          spent += cap;
+        }
         started.push(t.id);
         busy.set(k, (busy.get(k) ?? 0) + 1);
-        today++;
       } catch (err) {
         const why = `The crew could not start it: ${(err as Error).message}`;
         this.log.append("ticket.noted", { id: t.id, by: "dispatcher", kind: "event", text: why });
@@ -491,7 +579,9 @@ export class Tickets {
       moves: nextMoves(t.status, t.kind), document: workDocument(t, notes, links, lines), run,
       repo, route: repo && this.opts.repoRuns && !epicOfTickets(t) ? this.routeOf(t, {}) : null, working: this.inRepo.has(id), steps: this.steps(id),
       flow: this.flowOf(t, !!repo),
-      queue: t.status === "ready" ? this.spot(t) : null,
+      queue: t.status === "ready" || (t.status === "open" && this.isAsked(t)) ? this.spot(t) : null,
+      asked: this.isAsked(t),
+      retry: this.retryInfo(t),
     };
   }
 
@@ -561,7 +651,31 @@ export class Tickets {
     });
     this.linkProject(id, project);
     for (const l of o.links ?? []) this.link(id, l.to, l.relation, by);
+    if (o.asked) this.log.append("ticket.asked", { id, on: true, by });
     return this.get(id)!;
+  }
+
+  /**
+   * SF-65: the ticket's run stopped or failed: try it again from the step it stopped at, with fresh money for
+   * what is left (Factory.retry), on the same branch, keeping what was built. Not a new run from the start.
+   */
+  retry(id: number, o: { addUsd?: number; by?: string; auto?: boolean } = {}): { ticket: TicketView; run: number; from: string; addUsd: number } {
+    const t = this.must(id);
+    const factory = this.opts.factory;
+    if (!factory || t.run == null) throw new Error("This ticket has no run to try again; press Work it.");
+    if (isClosed(t.status)) throw new Error("This ticket is closed; reopen it first.");
+    const r = factory.retry(t.run, { addUsd: o.addUsd, by: o.by ?? "you", auto: o.auto });
+    this.log.append("ticket.noted", { id, by: o.by ?? "you", status: t.status === "in_progress" ? undefined : "in_progress", kind: "event",
+      text: `Run #${r.run} tried again from ${r.from}, with $${r.addUsd.toFixed(2)} more (up to $${r.maxUsd.toFixed(2)} in all). What it built stays.` });
+    return { ticket: this.get(id)!, run: r.run, from: r.from, addUsd: r.addUsd };
+  }
+
+  /** Whether the ticket's run can be tried again from where it stopped, and with how much. */
+  retryInfo(t: TicketView): { from: string; addUsd: number } | null {
+    const f = this.opts.factory;
+    if (!f || t.run == null) return null;
+    const ok = f.retryable(t.run);
+    return ok.ok ? { from: ok.from!, addUsd: f.retryAddUsd(t.run) } : null;
   }
 
   /** The next ticket number inside a project. */
@@ -1051,7 +1165,7 @@ export class Tickets {
    */
   askInRepo(project: number, text: string, o: { maxUsd?: number; route?: WorkRoute; autoApprove?: boolean; by?: string } = {}): { ticket: TicketView; run: number | null; branch?: string; route?: Routed } | null {
     if (!repoOfProject(this.log, project)) return null;
-    const t = this.open({ kind: "request", body: text, project, by: o.by ?? "you", source: "project" });
+    const t = this.open({ kind: "request", body: text, project, by: o.by ?? "you", source: "project", asked: (o.by ?? "you") === "you" });
     return this.work(t.id, { maxUsd: o.maxUsd, route: o.route, autoApprove: o.autoApprove, where: "repo", by: o.by });
   }
 
@@ -1202,6 +1316,8 @@ export class Tickets {
           project: this.projectOfRun(run),
         });
       }
+    } else if (e.type === "factory.plan.sliced") {
+      this.sliced(Number(p.run), p);
     } else if (e.type === "factory.gate" && p.state === "waiting" && !p.auto) {
       const t = this.byRun(Number(p.run));
       if (t) this.log.append("ticket.noted", { id: t.id, by: "factory", kind: "event", text: `Run #${p.run} waits for you at the ${String(p.gate).replace("gateA", "plan gate").replace("gateB", "build gate")}: ${p.question ?? ""}`.trim() });
@@ -1277,6 +1393,35 @@ export class Tickets {
     } else if (brake) {
       this.log.append("ticket.noted", { id: t.id, by: "qa-rule", kind: "event", text: "Left built for your look: the thread asks for it." });
     }
+  }
+
+  /**
+   * SF-64: the run's plan was more than its money builds, so the rest became the next slice: a ticket of its
+   * own under the same epic, blocked by this one until it is done (its branch merged), and asked for when this
+   * one was. The crew then starts it by itself within your limit, on the main line that has slice 1 in it.
+   */
+  private sliced(run: number, p: Record<string, any>) {
+    const t = (p.ticket?.id != null ? this.get(Number(p.ticket.id)) : undefined) ?? this.byRun(run);
+    const later = (Array.isArray(p.later) ? p.later : []) as { id: string; title: string; what: string; done: string; files?: string[] }[];
+    if (!later.length) return;
+    const project = t?.project ?? this.projectOfRun(run);
+    const kept = (Array.isArray(p.kept) ? p.kept : []) as { id: string; title: string }[];
+    const body = [
+      `The next slice of ${t ? `${t.key} ` : ""}"${p.plan ?? "the change"}". Run #${run}'s money built ${kept.map((f) => `${f.id} ${f.title}`).join(", ") || "the first features"} (on branch ${p.branch ?? "its branch"}); these were left for a run of their own:`,
+      "", ...later.map((f) => `- ${f.id} ${f.title}: ${f.what}\n  Done when: ${f.done}`), "",
+      "Build on what slice 1 added once its branch is merged. The original ask:", "", String(p.ask ?? "").slice(0, 3000),
+    ].join("\n");
+    const next = this.open({
+      kind: t?.kind === "plan" ? "request" : t?.kind ?? "request", title: `${t?.title ?? p.plan ?? "The change"}: next slice (${later.map((f) => f.id).join(", ")})`.slice(0, 200),
+      body, project, parent: t?.kind === "plan" ? t.id : t?.parentId ?? null, by: "factory", source: "factory", fingerprint: `slice:${run}`,
+      priority: t?.priority ?? null, asked: t ? this.isAsked(t) : false,
+    });
+    if (t) {
+      try { this.link(t.id, next.id, "blocks", "factory"); this.link(next.id, t.id, "derived_from", "factory"); } catch { /* the slice stands without its links */ }
+      this.log.append("ticket.noted", { id: t.id, by: "factory", kind: "event", text: `The plan was more than run #${run}'s $${Number(p.fit?.poolUsd ?? 0).toFixed(2)} for building buys: it builds ${kept.length} of ${kept.length + later.length} features now, and ${next.key} holds the rest. All in one run would need about $${Number(p.fit?.needUsd ?? 0).toFixed(2)}.` });
+    }
+    try { this.edit(next.id, "size", later.length > 1 ? "M" : "S", "factory"); } catch { /* sized later */ }
+    try { this.say(next.id, "Sliced from an approved plan: ready to build once what blocks it is done.", { status: "ready", by: "factory", kind: "event" }); } catch { /* stays open */ }
   }
 
   private byRun(run: number): TicketView | undefined {

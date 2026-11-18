@@ -16,7 +16,7 @@ import type { CrewMember } from "./crew.js";
 import { roundsOf, type FlowStep } from "../flows/flow.js";
 import { critiquePrompt, docsFiles, mustRequirements, validateDocs, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation } from "./evaluate.js";
-import { BUILD_BUDGET_SHARE, FEATURE_LOOP_MIN_USD, FEATURE_MIN_USD, featureCapUsd, featuresFile, progressEntry, type Feature } from "./features.js";
+import { FEATURE_FIT_USD, FEATURE_LOOP_MIN_USD, ONE_SESSION_FEATURE_USD, buildFit, buildPoolUsd, featureSessionCap, featuresFile, progressEntry, type Feature } from "./features.js";
 import { Run, StopRun, type Factory, type Plan, type RestoredState, type RunMaker, type RunOptions } from "./loop.js";
 import { SF_DIR, prepareEnv, readSite, runRepoTests, siteProfile, type RepoEnv } from "./repoenv.js";
 import { WORKBENCH_COMMANDS, changedFiles, workbenchContract, writtenOnDisk } from "./workbench.js";
@@ -178,6 +178,7 @@ export function repoSpecMarkdown(ask: string, p: Plan, info: RepoRunInfo): strin
     "## Approach", "", p.interface, "",
     "## Features", "", ...(p.features ?? []).flatMap((f) => [`### ${f.id} ${f.title}`, "", f.what, "", f.files.length ? `Files: ${f.files.join(", ")}` : "", "", `Done when: ${f.done}`, ""]),
     "## Acceptance criteria", "", ...p.acceptance.map((a, i) => `${i + 1}. ${a}`), "",
+    ...(p.slice?.later.length ? ["## Left to the next slice", "", `This run's money builds the features above (slice ${p.slice.n} of about ${p.slice.of}). These come in a run of their own; do not build them now:`, "", ...p.slice.later.map((f) => `- ${f.id} ${f.title}`), ""] : []),
     ...(p.testing ? ["## Tests", "", p.testing, ""] : []),
     ...(p.risks?.length ? ["## Risks", "", ...p.risks.map((r) => `- ${r}`), ""] : []),
     "Kept by SoftwareFactory under .sf/, which git leaves out: this file is not part of the repo.", "",
@@ -305,6 +306,12 @@ export class RepoRun extends Run {
     }
     return out;
   }
+  /** A sliced plan (SF-64): what this run leaves to the next slice, so nobody holds it against this one. */
+  private laterNote(): string {
+    const later = this.plan.slice?.later ?? [];
+    return later.length ? `\n\nThis run builds slice ${this.plan.slice!.n} of the plan. These features are left to the next slice, a run of its own: ${later.map((f) => `${f.id} ${f.title}`).join("; ")}. An acceptance criterion that only they can meet passes here, with the evidence "next slice".` : "";
+  }
+
   protected fixBrief(): { spec: string; where: string } {
     return {
       spec: `The change being built, as approved:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, acceptance: this.plan.acceptance }, null, 2)}`,
@@ -316,7 +323,7 @@ export class RepoRun extends Run {
     try { diff = git(this.dir, "diff", "--no-color", this.base, "--", ".").slice(0, 40000); } catch { /* the Reviewer reads the folder */ }
     const site = siteProfile(this.dir);
     return {
-      prompt: `The approved plan:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, features: (this.plan.features ?? []).map((f) => `${f.id} ${f.title}`), acceptance: this.plan.acceptance }, null, 2)}\n\nThe diff against ${this.base}, where the work started (${this.info.source}, branch ${this.info.branch}):\n${diff || "(empty)"}`,
+      prompt: `The approved plan:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, features: (this.plan.features ?? []).map((f) => `${f.id} ${f.title}`), acceptance: this.plan.acceptance }, null, 2)}${this.laterNote()}\n\nThe diff against ${this.base}, where the work started (${this.info.source}, branch ${this.info.branch}):\n${diff || "(empty)"}`,
       verify: [
         "You also verify the change, not only read it. You have a shell in the clone (read and run only: do not change files).",
         `For EACH acceptance criterion below, check it by running something: ${this.env.testHint ? `the repo's tests (${this.env.testHint}), ` : ""}the code itself${site ? `, or the running site (start it in the background with \`${site.command}\`, read the address it prints, fetch its pages, then stop it)` : ""}.`,
@@ -364,6 +371,7 @@ export class RepoRun extends Run {
             acceptance: ["Practice crew: a note file for the change is on the branch.", "What worked before still works."],
           };
         }
+        plan = this.fitToBudget(plan);
         this.plan = plan;
         // The plan and the design live in the clone for every later session, under .sf/: never on the branch.
         writeFiles(this.dir, [
@@ -372,12 +380,42 @@ export class RepoRun extends Run {
         ], { lockTests: false });
         this.log.append("factory.plan", { run: this.id, plan, dir: this.dir, sha: this.base, written: [], repo: { source: this.info.source, branch: this.info.branch } });
       });
-      const d = await this.gate("gateA", "Approve the plan for this change");
+      const sl = this.plan.slice;
+      const d = await this.gate("gateA", sl
+        ? `Approve the plan for this change. It has ${sl.fit.features} features and this run's $${this.o.maxUsd.toFixed(2)} builds ${sl.fit.fits} of them whole ($${sl.fit.perFeatureUsd.toFixed(2)} or more each), so this run builds ${(this.plan.features ?? []).map((f) => f.id).join(", ")} and ${sl.later.map((f) => f.id).join(", ")} wait for the next slice, a ticket of its own. All in one run would need about $${sl.fit.needUsd.toFixed(2)}.`
+        : "Approve the plan for this change", sl ? { fit: { ...sl.fit, later: sl.later.map((f) => `${f.id} ${f.title}`) } } : {});
       this.verdict(this.one("plan"), "plan", d.approve, undefined, d.note);
       if (d.approve) return;
       if (!d.note) throw new StopRun("You rejected the plan.");
       feedback = d.note;
     }
+  }
+
+  /**
+   * SF-64: a plan that cannot be built with the money is never started as it is. Before the plan gate the core
+   * counts what the build loop can afford (features.ts buildFit): the features in front are kept for this run,
+   * and the rest become the next slice (a follow-up ticket the tickets module opens, blocked until this one is
+   * done). Free: no agent call. The plan gate says so in words, and the event carries the numbers.
+   */
+  private fitToBudget(plan: Plan): Plan {
+    const all = plan.features ?? [];
+    const loop = this.bench && this.o.maxUsd >= FEATURE_LOOP_MIN_USD && all.length > 1;
+    const fit = buildFit(all.length, this.o.maxUsd, this.spent, loop ? FEATURE_FIT_USD : ONE_SESSION_FEATURE_USD);
+    this.log.append("factory.plan.fit", { run: this.id, ...fit, spentUsd: Number(this.spent.toFixed(4)), maxUsd: this.o.maxUsd, mode: loop ? "feature-loop" : "one-session" });
+    if (fit.ok) return plan;
+    const kept = all.slice(0, fit.fits);
+    const later = all.slice(fit.fits);
+    const keptIds = new Set(kept.map((f) => f.id));
+    this.log.append("factory.plan.sliced", {
+      run: this.id, fit, kept: kept.map((f) => ({ id: f.id, title: f.title })), later, ask: this.idea.slice(0, 4000), plan: plan.name,
+      branch: this.info.branch, ...(this.info.ticket ? { ticket: this.info.ticket } : {}),
+    });
+    return {
+      ...plan, features: kept,
+      tasks: plan.tasks.filter((t) => keptIds.has(t.id)),
+      files: [...new Set(kept.flatMap((f) => f.files))],
+      slice: { n: 1, of: 1 + Math.ceil(later.length / Math.max(1, fit.fits)), fit, later },
+    };
   }
 
   /**
@@ -443,6 +481,7 @@ export class RepoRun extends Run {
     const progress = join(this.dir, SF_DIR, "PROGRESS.md");
     if (!existsSync(progress)) writeFileSync(progress, "# Progress\n\nOne entry per feature, written by SoftwareFactory after each build session.\n\n");
     const buildStart = this.spent;
+    const pool = buildPoolUsd(this.o.maxUsd, buildStart);
     const suite = async () => (this.env.tests.length ? this.tools.runTests(this.dir, this.env) : null);
     let passing = new Set(((await suite())?.cases ?? []).filter((c) => c.pass).map(key));
     let wroteAny = features.some((f) => f.state === "built");
@@ -453,7 +492,7 @@ export class RepoRun extends Run {
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
         const left = features.filter((x) => x.state !== "built").length;
-        const cap = Math.min(featureCapUsd(builder.budgetUsd, this.o.maxUsd), Math.max(FEATURE_MIN_USD, (this.o.maxUsd * BUILD_BUDGET_SHARE - (this.spent - buildStart)) / left));
+        const cap = featureSessionCap(builder.budgetUsd, this.o.maxUsd, pool - (this.spent - buildStart), left);
         this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: "building", attempt, capUsd: Number(cap.toFixed(3)) });
         const text = await this.askBench(builder, this.featurePrompt(features, f, retry), { round: i + 1 }, { capUsd: cap, raiseCap: cap > builder.budgetUsd });
         const res = this.takeWork(text);

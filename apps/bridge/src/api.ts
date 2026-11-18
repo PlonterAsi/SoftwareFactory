@@ -71,6 +71,14 @@ export async function resumeRun(run: number) {
   return j as { run: number; from: string };
 }
 
+/** SF-65: try a stopped or failed run again from the step it stopped at, with fresh money for what is left. */
+export async function retryRun(run: number) {
+  const r = await fetch(`${API}/api/factory/runs/${run}/retry`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? "could not retry the run");
+  return j as { run: number; from: string; addUsd: number; maxUsd: number };
+}
+
 export async function decideGate(run: number, gate: string, approve: boolean, note?: string) {
   const r = await fetch(`${API}/api/factory/runs/${run}/gate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ gate, approve, note }) });
   if (!r.ok) throw new Error((await r.json()).error ?? "gate failed");
