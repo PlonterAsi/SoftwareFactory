@@ -96,6 +96,7 @@ export type EventType =
   | "ticket.line.moved"
   | "ticket.keyed"
   | "ticket.pr"
+  | "ticket.file"
   | "ticket.requested"
   | "ticket.branch"
   | "ticket.pushed"
