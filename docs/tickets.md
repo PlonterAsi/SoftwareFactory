@@ -107,6 +107,14 @@ Not every idea is a project. "UI/UX improvement of SoftwareFactory" or "Error ha
 - **The intake reads an idea before it becomes a project.** "Create project" on the Projects page and "Build it" in the General chat ask the core first (`POST /api/tickets/intake`). The check is a word check, so it is free and instant. When the idea names a project you have, or is about SoftwareFactory or "all projects", or reads like a change to something that exists rather than a new thing to build, a card offers "File as a request on X" (the kind can be changed) next to "Start a new project anyway". It only offers; you choose. A project's own chat never asks: Build it there builds in that project.
 - **Turn into ticket.** A project whose name reads like an ask shows a banner on its Overview, and every project but SoftwareFactory's has Settings › Turn into a ticket. The ticket gets the project's name, description, notes and runs. The project's idea node folds into the other project's home node (one body on the star map), and its runs, tickets and chats move along. The project is archived, with "Turned into ticket #N on X" as its description. "Keep it a project" hides the banner for good on that computer.
 
+## The doors before the route: a question, another round (2026-11-18)
+
+An ask said in a project (its idea box, the Assistant) is read for its door before any route, by its words (`intakeDoor` in `factory/route.ts`, free):
+
+- **A question** ("Why does the login fail?", "Find out which pages are slow", "Is the form sending mail?") becomes a **question ticket** a reader answers on the thread, from a read-only copy of the repo, or from the ticket and its project when there is no repo. Nothing changes and no app is built, even in a project made from scratch. "Can you add…?" is work, not a question.
+- **Another round** ("another round on the landing page", "re-loop this project", "improve it again") becomes an **epic of the round**: a reader goes through a read-only copy of the repo and lists 3 to 6 findings, each filed as a ready bug or task with its size under that epic. The crew works them like any ticket (asked for when you asked, so they start within your limit), and the epic moves on by itself when they are done. Repo projects only.
+- **Anything else** is work: a request ticket on the light or engine route, as before. A route you choose always means work.
+
 ## Errors become bugs
 
 Nothing that goes wrong is lost in a log nobody reads, and nothing is sent to an outside service.

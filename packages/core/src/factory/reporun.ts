@@ -308,13 +308,30 @@ export class RepoRun extends Run {
   }
   /** A sliced plan (SF-64): what this run leaves to the next slice, so nobody holds it against this one. */
   private laterNote(): string {
-    const later = this.plan.slice?.later ?? [];
-    return later.length ? `\n\nThis run builds slice ${this.plan.slice!.n} of the plan. These features are left to the next slice, a run of its own: ${later.map((f) => `${f.id} ${f.title}`).join("; ")}. An acceptance criterion that only they can meet passes here, with the evidence "next slice".` : "";
+    const later = [...(this.plan.slice?.later ?? []), ...this.leftOver()];
+    return later.length ? `\n\nThis run builds part of the plan. These features are left to a run of their own (the next slice): ${later.map((f) => `${f.id} ${f.title}`).join("; ")}. Do not build them now. An acceptance criterion that only they can meet passes here, with the evidence "next slice".` : "";
+  }
+
+  /**
+   * The planned features this run did not finish (reliability pass after run 5669): a feature that broke
+   * passing tests twice is taken back off the branch, and the build stops before a feature it cannot afford,
+   * so what is on the branch works. They go to the next slice instead of sinking the run.
+   */
+  private left: { id: string; title: string; what: string; done: string; files: string[]; why: string }[] | null = null;
+  private leftOver(): { id: string; title: string; what: string; done: string; files: string[]; why: string }[] {
+    if (this.left) return this.left;
+    // Picked up again after the build: read what features.json says was not built.
+    try {
+      const kept = (JSON.parse(readFileSync(join(this.dir, SF_DIR, "features.json"), "utf8")).features ?? []) as { id: string; state: string }[];
+      const planned = this.plan.features ?? [];
+      if (planned.length > 1) return (this.left = planned.filter((f) => { const k = kept.find((x) => x.id === f.id); return k && k.state !== "built"; }).map((f) => ({ ...f, why: `not built (${kept.find((x) => x.id === f.id)!.state})` })));
+    } catch { /* no build yet */ }
+    return [];
   }
 
   protected fixBrief(): { spec: string; where: string } {
     return {
-      spec: `The change being built, as approved:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, acceptance: this.plan.acceptance }, null, 2)}`,
+      spec: `The change being built, as approved:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, acceptance: this.plan.acceptance }, null, 2)}${this.laterNote()}`,
       where: `You are in a clone of ${this.info.source} on branch ${this.info.branch}. The plan and the design of the change are under .sf/ (read only, not part of the repo).${this.env.testHint ? ` Its tests run with: ${this.env.testHint}.` : ""} See what changed so far with: git diff ${this.base}`,
     };
   }
@@ -485,9 +502,21 @@ export class RepoRun extends Run {
     const suite = async () => (this.env.tests.length ? this.tools.runTests(this.dir, this.env) : null);
     let passing = new Set(((await suite())?.cases ?? []).filter((c) => c.pass).map(key));
     let wroteAny = features.some((f) => f.state === "built");
+    const leftOver: { f: Feature; why: string }[] = [];
+    // Room kept for the review and the judge, so a run that built something always reaches them (run 5669 ran dry mid-build).
+    const reserve = Math.min(0.5, this.o.maxUsd * 0.12);
     for (let i = 0; i < features.length; i++) {
       const f = features[i];
       if (f.state === "built") continue;
+      if (features.length > 1 && features.some((x) => x.state === "built")) {
+        const left = features.filter((x) => x.state !== "built").length;
+        const need = Math.min(featureSessionCap(builder.budgetUsd, this.o.maxUsd, pool - (this.spent - buildStart), left), FEATURE_FIT_USD);
+        if (this.o.maxUsd - this.spent - reserve < need) {
+          for (const x of features.slice(i)) if (x.state !== "built") leftOver.push({ f: x, why: "the run's money ran short before it" });
+          this.log.append("factory.build.stopped", { run: this.id, reason: `$${Math.max(0, this.o.maxUsd - this.spent).toFixed(2)} left, under the $${(need + reserve).toFixed(2)} another feature and the review need`, left: leftOver.map((l) => l.f.id), spentUsd: Number(this.spent.toFixed(4)) });
+          break;
+        }
+      }
       let retry = "";
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
@@ -508,6 +537,16 @@ export class RepoRun extends Run {
           retry = `These tests of the repo passed before your call and fail after it:\n${broke.slice(0, 10).map((k) => `- ${k.replace(/^::/, "").replace("::", ": ")}`).join("\n")}\n\n${(t?.output ?? "").slice(-1500)}`;
           continue;
         }
+        // A feature that broke passing tests twice is taken back off the branch: later features build on code
+        // that works, and it goes to the next slice (run 5669: F1 regressed 9 to 15 tests and stayed on the branch).
+        if (f.state === "regressed" && features.length > 1) {
+          try { git(this.dir, "reset", "-q", "--hard"); git(this.dir, "clean", "-fdq"); } catch { /* the review will see it */ }
+          leftOver.push({ f, why: `it broke ${broke.length} test${broke.length === 1 ? "" : "s"} that passed before, twice, so it was taken back off the branch` });
+          writeFileSync(progress, readFileSync(progress, "utf8") + progressEntry(f, `${text}\n\nTaken back off the branch: it broke tests that passed before.`, []));
+          writeFileSync(path, featuresFile(features));
+          break;
+        }
+        if (f.state === "empty" && features.length > 1) leftOver.push({ f, why: "the Builder changed no file for it" });
         passing = now;
         writeFileSync(progress, readFileSync(progress, "utf8") + progressEntry(f, text, files));
         writeFileSync(path, featuresFile(features));
@@ -515,7 +554,16 @@ export class RepoRun extends Run {
         break;
       }
     }
-    if (!wroteAny) throw new Error("The Builder changed no file");
+    if (!features.some((f) => f.state === "built") && !(wroteAny && features.length === 1)) throw new Error(wroteAny ? "No feature was built without breaking tests that passed before" : "The Builder changed no file");
+    // What is not built goes to the next slice, a ticket of its own, so the run still hands over a branch that works.
+    const planned = new Map((this.plan.features ?? []).map((p) => [p.id, p]));
+    this.left = leftOver.map(({ f, why }) => { const p = planned.get(f.id); return { id: f.id, title: f.title, what: p?.what ?? f.what, done: f.done, files: p?.files ?? [], why }; });
+    if (this.left.length) {
+      this.log.append("factory.features.left", {
+        run: this.id, left: this.left, built: features.filter((f) => f.state === "built").map((f) => ({ id: f.id, title: f.title })), plan: this.plan.name, ask: this.idea.slice(0, 4000),
+        branch: this.info.branch, ...(this.info.ticket ? { ticket: this.info.ticket } : {}),
+      });
+    }
   }
 
   /** What an agent left in the clone: the files it changed there, and any whole files it answered as text blocks. Nothing under .sf/ or .git is taken. */
@@ -617,6 +665,7 @@ export class RepoRun extends Run {
       `Asked for in SoftwareFactory${this.info.ticket ? ` (ticket ${this.info.ticket.key})` : ""}: ${this.idea.split("\n")[0].slice(0, 300)}`, "",
       "## What was built", "", ...(this.plan.features ?? []).map((f) => `- ${f.title}`), "",
       "## Acceptance criteria", "", ...this.plan.acceptance.map((a) => `- ${unmet.some((c) => c.text === a) ? "[ ]" : "[x]"} ${a}`), "",
+      ...((): string[] => { const l = [...(this.plan.slice?.later ?? []).map((f) => ({ ...f, why: "the plan was more than this run's money builds" })), ...this.leftOver()]; return l.length ? ["## Left for the next slice", "", ...l.map((f) => `- ${f.id} ${f.title}: ${f.why}`), "", "_A follow-up ticket holds these; this branch works without them._", ""] : []; })(),
       `Changed ${files.length} file${files.length === 1 ? "" : "s"}. ${this.env.testHint ? `The repo's own tests (${this.env.testHint}) pass.` : "The repo has no tests SoftwareFactory could run."}`, "",
       "_Opened as a draft by SoftwareFactory's crew after a design, a plan you approved, a review and your acceptance of the build. It never pushes to the main line; merging is your call._",
     ].join("\n");

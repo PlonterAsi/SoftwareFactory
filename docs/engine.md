@@ -308,3 +308,11 @@ Retry used to repeat the failed step with what was left of the old limit, so a b
 
 - **Inside a run**, a step that ran out of money inside one call is retried with a bigger cap for that call (double its last cap, at least a whole feature session), never the same one, and the question says what it adds to the run to afford it ("Retry it with $0.90 for that call, adding $0.40 to the run?"). An unattended run never repeats a failure nothing changed, and never adds money by itself.
 - **After a run stopped or failed**, `Factory.retry` picks it up at the step it stopped at (`factory.run.retried`): same folder, same branch, what was built stays built, with fresh money sized to what is left (`retryAddUsd`), bounded by the project's budget. The run page and the ticket page both have the button.
+
+## A sliced run still hands over a branch that works (2026-11-18)
+
+Run 5669 also showed two ways a run with several features ended with nothing usable: F1 broke 9 to 15 of the repo's passing tests, was committed anyway, and every later feature built on a broken branch; and a run that ran dry mid-build stopped at the budget question, so the features it had built were never handed over.
+
+- A feature that breaks tests that passed before, on both of its attempts, is **taken back off the branch** (the clone goes back to the last good commit) and left for the next slice. Later features build on code that works.
+- Before each feature the build checks the money: when what is left, minus room for the review and the judge, cannot pay for another feature session, it **stops building** (`factory.build.stopped`) and goes on to review and hand over what it built.
+- What was not built is recorded (`factory.features.left`, with why), becomes a follow-up ticket like a slice (blocked by this one, asked for like it), is listed in the pull request under "Left for the next slice", and the Reviewer and Fixer are told not to build it now.
