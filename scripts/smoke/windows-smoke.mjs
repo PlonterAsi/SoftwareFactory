@@ -412,8 +412,11 @@ console.log("seeded", db);
   if (args.portable) {
     const zip = resolve(args.portable);
     const dir = join(OUT, `portable-${STAMP}`);
-    const x = ps(`Expand-Archive -Force -Path '${zip}' -DestinationPath '${dir}'`);
-    must("portable zip unpacks", x.status === 0, x.stderr);
+    // Windows' own tar (bsdtar) unpacks zips; PowerShell 7's Expand-Archive broke on the runner image of 2026-11-18
+    // ("Cannot find an overload for ExtractToDirectory") and still exited 0.
+    mkdirSync(dir, { recursive: true });
+    const x = spawnSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe"), ["-xf", zip, "-C", dir], { encoding: "utf8" });
+    must("portable zip unpacks", x.status === 0 && existsSync(join(dir, "SoftwareFactory")), x.stderr || String(x.error ?? ""));
     const pexe = join(dir, "SoftwareFactory", "SoftwareFactory.exe");
     must("portable exe present", existsSync(pexe), pexe);
     launch(pexe, "portable");
