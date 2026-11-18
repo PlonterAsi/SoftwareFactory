@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // sf: SoftwareFactory's tickets from any terminal, for you and for agents (Claude Code sessions in any repo).
 // It talks to the running core on this PC (http://127.0.0.1:4317, or SF_URL); no package, no sign-in.
 // Every write goes through the same API as the app, so it lands on the ticket's thread like a press there.
@@ -18,6 +17,8 @@
 //   sf say-project 7 "text"        an ask in a project: a question is answered, "another round" files tickets, else work
 //
 // Add --json to any command for the raw answer.
+
+import { pathToFileURL } from "node:url";
 
 const BASE = (process.env.SF_URL || "http://127.0.0.1:4317").replace(/\/+$/, "");
 
@@ -165,5 +166,5 @@ export async function run(argv, print = (s) => console.log(s)) {
   }
 }
 
-const isMain = process.argv[1] && import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, "/").replace(/^(?=[A-Za-z]:)/, "/")}`).href;
+const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) run(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exitCode = 1; });
