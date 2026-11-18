@@ -2345,3 +2345,12 @@ button.fm-wire-node .muted { font: 12px/1.2 var(--mono); white-space: nowrap; }
 .tk-pickall { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; }
 .tk-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; margin: 0 0 6px; border: 1px solid var(--accent-dim); border-radius: 6px; background: var(--panel-2); }
 .tk-bulk select { max-width: 140px; }
+
+/* Files on a ticket */
+.tk-files { margin: 10px 0; padding: 6px 0; border-radius: 6px; outline: none; }
+.tk-files:focus-visible { box-shadow: 0 0 0 2px var(--accent-dim); }
+.tk-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 6px; }
+.tk-gallery figure { margin: 0; }
+.tk-gallery img { width: 100%; height: 90px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line, #2a3340); display: block; }
+.tk-gallery figcaption { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-file { display: flex; gap: 8px; align-items: baseline; font-size: 13px; padding: 2px 0; }

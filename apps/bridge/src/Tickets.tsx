@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { API, flowsApi, type FlowSummaryView, type SfEvent } from "./api";
 import { peekPendingTicket, takePendingTicket } from "./BugReport";
 
@@ -22,6 +22,7 @@ interface NoteView { eventId: number; ts: string; by: string; kind: "note" | "re
 type TimelineCat = "said" | "status" | "step" | "agent" | "decision" | "retry" | "run" | "git" | "event";
 interface TimelineEntry { eventId: number; ts: string; by: string; cat: TimelineCat; text: string; costUsd: number | null; status: TicketStatus | null; run: number | null }
 interface LinkView { to: number; relation: string; title?: string; status?: TicketStatus; key?: string }
+export interface TicketFile { file: string; name: string; size: number; mime: string; by: string; at: string; path: string; image: boolean }
 interface Detail {
   ticket: TicketView; notes: NoteView[]; timeline?: TimelineEntry[]; links: LinkView[]; lines: TicketView[]; parent: TicketView | null; moves: { to: TicketStatus; label: string }[]; document: string;
   run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
@@ -33,6 +34,7 @@ interface Detail {
   /** The flow it follows if worked now, and why (you picked it, or its kind's). */
   flow?: { id: string; name: string; runner: string; why: string; chosen: boolean } | null;
   queue: { position: number | null; why: string | null } | null;
+  files?: TicketFile[];
   /** You asked for it: the crew starts it within your standing auto-work limit. */
   asked?: boolean;
   /** Its run stopped or failed and can be tried again from that step, with what that adds. */
@@ -93,6 +95,14 @@ export const ticketsApi = {
   ask: (id: number, agent?: string) => call<{ reply?: string; error?: string }>("POST", `/api/tickets/${id}/ask`, { agent }),
   asked: (id: number, on: boolean) => call<TicketView>("POST", `/api/tickets/${id}/asked`, { on }),
   retry: (id: number) => call<{ run: number; from: string; addUsd: number }>("POST", `/api/tickets/${id}/retry`, {}),
+  fileUrl: (id: number, file: string) => `${API}/api/tickets/${id}/files/${encodeURIComponent(file)}`,
+  attach: async (id: number, f: File | Blob, name: string) => {
+    const r = await fetch(`${API}/api/tickets/${id}/files?name=${encodeURIComponent(name)}`, { method: "POST", headers: { "content-type": f.type || "application/octet-stream" }, body: f });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error ?? "The file was not added.");
+    return j as TicketFile;
+  },
+  detach: (id: number, file: string) => call<TicketFile[]>("POST", `/api/tickets/${id}/files/${encodeURIComponent(file)}/remove`, {}),
   bulk: (ids: number[], action: BulkAction, value: unknown) => call<{ done: number[]; failed: { id: number; key: string | null; error: string }[] }>("POST", "/api/tickets/bulk", { ids, action, value }),
   exportMd: async (ids: number[]) => { const r = await fetch(`${API}/api/tickets/export?ids=${ids.join(",")}`); if (!r.ok) throw new Error("The export failed."); return r.text(); },
 };
@@ -262,6 +272,41 @@ function List({ tickets, view, sel, onSelect, crew, counts, pick, onPick }: { ti
         ))}
       </ul>
     </>
+  );
+}
+
+/** Files on a ticket: pictures as a gallery, the rest as links. Add with the button, by dropping, or by pasting a screenshot. */
+function TicketFiles({ id, files, busy, onAct }: { id: number; files: TicketFile[]; busy: boolean; onAct: (label: string, fn: () => Promise<unknown>) => Promise<void> }) {
+  const input = useRef<HTMLInputElement>(null);
+  const add = (list: FileList | File[]) => {
+    const all = Array.from(list);
+    if (all.length) void onAct("file", async () => { for (const f of all) await ticketsApi.attach(id, f, f.name || `screenshot-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.png`); });
+  };
+  const size = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+  const pics = files.filter((f) => f.image), rest = files.filter((f) => !f.image);
+  return (
+    <div className="tk-files" tabIndex={0} aria-label="Files on this ticket"
+      onPaste={(e) => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); add(fs); } }}
+      onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); add(e.dataTransfer.files); }}>
+      <div className="b-sub muted">Files{files.length ? ` · ${files.length}` : ""} <span className="muted">(drop, paste a screenshot here, or</span> <button className="link" disabled={busy} onClick={() => input.current?.click()}>{busy ? "adding…" : "add a file"}</button><span className="muted">)</span></div>
+      <input ref={input} type="file" multiple hidden onChange={(e) => { if (e.target.files) add(e.target.files); e.target.value = ""; }} />
+      {pics.length > 0 && (
+        <div className="tk-gallery">
+          {pics.map((f) => (
+            <figure key={f.file}>
+              <a href={ticketsApi.fileUrl(id, f.file)} target="_blank" rel="noreferrer"><img src={ticketsApi.fileUrl(id, f.file)} alt={f.name} loading="lazy" /></a>
+              <figcaption className="muted">{f.name} <button className="link" aria-label={`Remove ${f.name}`} onClick={() => void onAct("file", () => ticketsApi.detach(id, f.file))}>✕</button></figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
+      {rest.map((f) => (
+        <div key={f.file} className="tk-file">
+          <a href={ticketsApi.fileUrl(id, f.file)} target="_blank" rel="noreferrer">{f.name}</a> <span className="muted mono">{size(f.size)} · {f.by}</span>
+          <button className="link" aria-label={`Remove ${f.name}`} onClick={() => void onAct("file", () => ticketsApi.detach(id, f.file))}>✕</button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -613,6 +658,8 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
           {!closed && <AddLine placeholder={t.kind === "plan" ? "+ a ticket of this epic" : "+ a subtask"} onAdd={(title) => act("line", () => ticketsApi.open({ kind: "task", title, parent: t.id, project: t.project }))} />}
         </div>
       )}
+
+      <TicketFiles id={id} files={d.files ?? []} busy={busy === "file"} onAct={act} />
 
       <div className="tk-links">
         <div className="b-sub muted">Links</div>

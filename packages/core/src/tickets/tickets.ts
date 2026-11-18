@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git } from "../factory/workspace.js";
 import type { EventLog, SfEvent } from "../events.js";
@@ -137,6 +137,17 @@ export interface TicketDetail {
   asked: boolean;
   /** Its run stopped or failed and can be tried again from that step (SF-65), with what that adds. */
   retry: { from: string; addUsd: number } | null;
+  /** Files on the ticket: screenshots, logs, reports (gap 4), newest last. */
+  files: TicketFile[];
+}
+
+/** A file on a ticket. `file` is its name in the ticket's folder; `path` where it lies on this PC. */
+export interface TicketFile { file: string; name: string; size: number; mime: string; by: string; at: string; path: string; image: boolean }
+export const TICKET_FILE_MAX = 15 * 1024 * 1024;
+const MIME_BY_EXT: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", txt: "text/plain", log: "text/plain", md: "text/markdown", json: "application/json", csv: "text/csv", html: "text/html", pdf: "application/pdf", zip: "application/zip", mp4: "video/mp4", webm: "video/webm" };
+export function fileMime(name: string, given?: string): string {
+  const ext = name.toLowerCase().match(/\.([a-z0-9]{1,5})$/)?.[1] ?? "";
+  return MIME_BY_EXT[ext] ?? (given && /^[a-z]+\/[a-z0-9.+-]+$/i.test(given) ? given : "application/octet-stream");
 }
 
 type Row = Record<string, any>;
@@ -586,7 +597,7 @@ export class Tickets {
   detail(id: number): TicketDetail | undefined {
     const t = this.get(id);
     if (!t) return undefined;
-    const notes = this.notes(id), links = this.links(id), lines = this.lines(id);
+    const notes = this.notes(id), links = this.links(id), lines = this.lines(id), files = this.files(id);
     let run: TicketDetail["run"] = null;
     if (t.run != null) {
       const r = this.log.db.prepare("SELECT outcome, total_usd FROM factory_runs WHERE id = ?").get(t.run) as Row | undefined;
@@ -597,12 +608,15 @@ export class Tickets {
     const repo = repoOfProject(this.log, t.project);
     return {
       ticket: t, notes, timeline: this.timeline(id), links, lines, parent: t.parentId != null ? this.get(t.parentId) ?? null : null,
-      moves: nextMoves(t.status, t.kind), document: workDocument(t, notes, links, lines), run,
+      moves: nextMoves(t.status, t.kind), run,
+      // The files go in the work document by where they lie, so an agent that works the ticket can open them.
+      document: files.length ? `${workDocument(t, notes, links, lines)}\n\n## Files on this ticket\n\n${files.map((f) => `- ${f.name} (${f.mime}, ${f.size} bytes): ${f.path}`).join("\n")}` : workDocument(t, notes, links, lines),
       repo, route: repo && this.opts.repoRuns && !epicOfTickets(t) ? this.routeOf(t, {}) : null, working: this.inRepo.has(id), steps: this.steps(id),
       flow: this.flowOf(t, !!repo),
       queue: t.status === "ready" || (t.status === "open" && this.isAsked(t)) ? this.spot(t) : null,
       asked: this.isAsked(t),
       retry: this.retryInfo(t),
+      files,
     };
   }
 
@@ -626,6 +640,59 @@ export class Tickets {
   private spot(t: TicketView): { position: number | null; why: string | null } {
     const q = this.queue(t.project).find((x) => x.ticket.id === t.id);
     return q ? { position: q.position, why: q.why } : { position: null, why: null };
+  }
+
+  /** Where a ticket's files live: next to the work folder, one folder per ticket. Null without a work folder. */
+  private filesDir(id: number): string | null {
+    return this.opts.workRoot ? join(this.opts.workRoot, "..", "ticket-files", String(id)) : null;
+  }
+
+  /** The files on a ticket, from the log (a file whose bytes were removed by hand is left out). */
+  files(id: number): TicketFile[] {
+    const dir = this.filesDir(id);
+    if (!dir) return [];
+    const rows = this.log.db.prepare("SELECT ts, payload FROM events WHERE type = 'ticket.file' AND json_extract(payload, '$.id') = ? ORDER BY id").all(id) as { ts: string; payload: string }[];
+    const out: TicketFile[] = [];
+    for (const r of rows) {
+      const p = JSON.parse(r.payload);
+      const path = join(dir, String(p.file));
+      if (p.removed) { const i = out.findIndex((f) => f.file === p.file); if (i >= 0) out.splice(i, 1); continue; }
+      if (!existsSync(path)) continue;
+      out.push({ file: String(p.file), name: String(p.name), size: Number(p.size), mime: String(p.mime), by: String(p.by), at: r.ts, path, image: String(p.mime).startsWith("image/") });
+    }
+    return out;
+  }
+
+  /**
+   * Put a file on a ticket (gap 4): a screenshot, a log, a report. The bytes go to the ticket's folder on this PC,
+   * never into the log; the thread says it was added, and the work document lists it so an agent can read it.
+   */
+  attach(id: number, name: string, bytes: Buffer, o: { mime?: string; by?: string } = {}): TicketFile {
+    const t = this.must(id);
+    const dir = this.filesDir(id);
+    if (!dir) throw new Error("This core has no folder for ticket files.");
+    if (!bytes.length) throw new Error("The file is empty.");
+    if (bytes.length > TICKET_FILE_MAX) throw new Error(`The file is ${(bytes.length / 1048576).toFixed(1)} MB; a ticket takes files up to 15 MB.`);
+    const clean = String(name ?? "").split(/[\\/]/).pop()!.replace(/[^\w.\- ]+/g, "_").replace(/^\.+/, "").trim().slice(0, 100) || "file";
+    const n = this.log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'ticket.file' AND json_extract(payload, '$.id') = ?").get(id) as { n: number };
+    const file = `${Number(n.n) + 1}-${clean}`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, file), bytes);
+    const by = o.by ?? "you";
+    const mime = fileMime(clean, o.mime);
+    this.log.append("ticket.file", { id, file, name: clean, size: bytes.length, mime, by });
+    this.log.append("ticket.noted", { id, by, kind: "event", text: `Added the file ${clean} (${bytes.length < 1024 ? `${bytes.length} bytes` : bytes.length < 1048576 ? `${Math.round(bytes.length / 1024)} KB` : `${(bytes.length / 1048576).toFixed(1)} MB`}).` });
+    void t;
+    return this.files(id).find((f) => f.file === file)!;
+  }
+
+  /** Take a file off a ticket. The bytes stay in the folder; the ticket no longer shows it. */
+  detach(id: number, file: string, by = "you"): TicketFile[] {
+    const f = this.files(id).find((x) => x.file === file);
+    if (!f) throw new Error(`There is no file ${file} on this ticket.`);
+    this.log.append("ticket.file", { id, file, removed: true, by });
+    this.log.append("ticket.noted", { id, by, kind: "event", text: `Took the file ${f.name} off.` });
+    return this.files(id);
   }
 
   /**

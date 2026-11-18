@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createServer } from "node:http";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventLog, MockRuntime, Tickets, createCore } from "../src/index.js";
@@ -33,6 +33,25 @@ describe("sf: the tickets from any terminal (gap 10, agent interfaces outside th
       expect(await sf("doc", key)).toContain("Footer link is broken");
       await sf("open", "Should we keep the old logo?", "--kind", "question");
       expect(await sf("inbox")).toMatch(/answer .*old logo/);
+      // Files: a screenshot goes on the ticket, the work document says where it lies, and it can be read back.
+      const shot = join(tmp(), "screen shot.png");
+      writeFileSync(shot, Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]));
+      expect(await sf("attach", key, shot)).toMatch(/Added screen shot.png/);
+      const d = JSON.parse(await sf("show", key, "--json"));
+      expect(d.files).toMatchObject([{ name: "screen shot.png", mime: "image/png", size: 7, image: true }]);
+      expect(d.document).toMatch(/## Files on this ticket[\s\S]*screen shot.png/);
+      const got = await fetch(`http://127.0.0.1:${port}/api/tickets/${d.ticket.id}/files/${encodeURIComponent(d.files[0].file)}`);
+      expect(got.headers.get("content-type")).toBe("image/png");
+      expect(Buffer.from(await got.arrayBuffer()).length).toBe(7);
+      // An HTML file never runs in place: it is downloaded.
+      const page = await fetch(`http://127.0.0.1:${port}/api/tickets/${d.ticket.id}/files?name=../../evil.html`, { method: "POST", headers: { "content-type": "text/html" }, body: "<script>alert(1)</script>" });
+      const pf = await page.json();
+      expect(pf.file).toBe("2-evil.html");
+      const evil = await fetch(`http://127.0.0.1:${port}/api/tickets/${d.ticket.id}/files/${pf.file}`);
+      expect(evil.headers.get("content-type")).toBe("application/octet-stream");
+      expect(evil.headers.get("content-disposition")).toMatch(/^attachment/);
+      const off = await (await fetch(`http://127.0.0.1:${port}/api/tickets/${d.ticket.id}/files/${pf.file}/remove`, { method: "POST" })).json();
+      expect(off.map((f: { name: string }) => f.name)).toEqual(["screen shot.png"]);
       await expect(sf("show", "SF-9999")).rejects.toThrow(/No ticket/);
       await expect(sf("nope")).rejects.toThrow(/No command/);
     } finally {

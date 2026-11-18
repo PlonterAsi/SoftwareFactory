@@ -13,6 +13,7 @@
 //   sf work SF-12 [--max 1.5] [--route light|engine]
 //   sf retry SF-12                 pick a stopped run up from its step
 //   sf pr SF-12 123                link a pull request made outside SF; its merge moves the ticket
+//   sf attach SF-12 shot.png        put a file on the ticket (a screenshot, a log), up to 15 MB
 //   sf queue                       the crew's line, and why a ticket waits
 //   sf say-project 7 "text"        an ask in a project: a question is answered, "another round" files tickets, else work
 //
@@ -65,6 +66,7 @@ function showDetail(d) {
   if (d.queue) out.push(d.queue.position != null ? `In the crew's line: ${d.queue.position}` : `Waits: ${d.queue.why}`);
   if (d.retry) out.push(`Can be retried from ${d.retry.from}, with ${money(d.retry.addUsd)} more`);
   if (t.body) out.push("", t.body);
+  if (d.files?.length) out.push("", "Files:", ...d.files.map((f) => `  ${f.name} (${f.size} bytes): ${f.path}`));
   if (d.links?.length) out.push("", "Links:", ...d.links.map((l) => `  ${l.relation} ${l.key ?? `#${l.to}`} ${l.title ?? ""}`.trimEnd()));
   if (d.notes?.length) {
     out.push("", "Thread:");
@@ -134,6 +136,20 @@ export async function run(argv, print = (s) => console.log(s)) {
       const t = await call("POST", `/api/tickets/${d.ticket.id}/pr`, { pr: b });
       return say(t, (t) => `${d.ticket.key} is linked to PR #${t.pr?.number ?? b}.`);
     }
+    case "attach": {
+      if (!b) throw new Error("Say the file: sf attach SF-12 path/to/file.");
+      const { readFileSync } = await import("node:fs");
+      const { basename } = await import("node:path");
+      const d = await ticketOf(a);
+      let bytes;
+      try { bytes = readFileSync(b); } catch { throw new Error(`Cannot read ${b}.`); }
+      let res;
+      try { res = await fetch(`${BASE}/api/tickets/${d.ticket.id}/files?name=${encodeURIComponent(basename(b))}`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: bytes }); }
+      catch { throw new Error(`SoftwareFactory is not running at ${BASE}. Open the app (or set SF_URL), then try again.`); }
+      const f = await res.json();
+      if (!res.ok) throw new Error(f.error ?? "The file was not added.");
+      return say(f, (f) => `Added ${f.name} to ${d.ticket.key}.`);
+    }
     case "queue": {
       const r = await call("GET", `/api/tickets/queue?${project.slice(1)}`);
       return say(r, (r) => r.queue.length ? r.queue.map((q) => `${q.position != null ? String(q.position).padStart(3) : "  -"} ${String(q.key).padEnd(8)} ${q.title}${q.why ? `\n      ${q.why}` : ""}`).join("\n") : "The line is empty.");
@@ -144,7 +160,7 @@ export async function run(argv, print = (s) => console.log(s)) {
       return say(r, (r) => r.ticket ? `${r.ticket.key} ${r.ticket.title} (${r.door ?? "work"})${r.run != null ? `, run #${r.run}` : ""}` : `Run #${r.runId ?? r.run ?? "?"} started.`);
     }
     case undefined: case "help": case "-h": case "--help":
-      return print("sf inbox | list | show KEY | doc KEY | open \"Title\" | reply KEY \"text\" | asked KEY [off] | work KEY | retry KEY | pr KEY N | queue | say-project ID \"text\"   (--json for raw; SF_URL to point elsewhere)");
+      return print("sf inbox | list | show KEY | doc KEY | open \"Title\" | reply KEY \"text\" | asked KEY [off] | work KEY | retry KEY | pr KEY N | attach KEY FILE | queue | say-project ID \"text\"   (--json for raw; SF_URL to point elsewhere)");
     default: throw new Error(`No command "${cmd}". Run sf help.`);
   }
 }

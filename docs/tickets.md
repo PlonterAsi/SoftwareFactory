@@ -115,6 +115,10 @@ An ask said in a project (its idea box, the Assistant) is read for its door befo
 - **Another round** ("another round on the landing page", "re-loop this project", "improve it again") becomes an **epic of the round**: a reader goes through a read-only copy of the repo and lists 3 to 6 findings, each filed as a ready bug or task with its size under that epic. The crew works them like any ticket (asked for when you asked, so they start within your limit), and the epic moves on by itself when they are done. Repo projects only.
 - **Anything else** is work: a request ticket on the light or engine route, as before. A route you choose always means work.
 
+## Files on a ticket (2026-11-18)
+
+A ticket holds files: screenshots, logs, reports. On the ticket page, drop them on Files, paste a screenshot there, or press add a file; pictures show as a gallery and the rest as links. From a terminal: `sf attach SF-12 shot.png`. The bytes live on this PC in `ticket-files/<ticket id>/` next to the crew's work folder, never in the log (event `ticket.file` records the name, size and type; a removed file is only hidden). Up to 15 MB a file. The work document lists each file with where it lies, so an agent that works the ticket can open it. Pictures, video, PDF and plain text open in place; HTML, SVG and anything else are downloaded, never run. API: `POST /api/tickets/<id>/files?name=<name>` with the raw bytes, `GET /api/tickets/<id>/files/<file>`, `POST /api/tickets/<id>/files/<file>/remove`.
+
 ## Many at once (2026-11-18)
 
 Tick rows in the list (or Pick all) and a bar appears: move them to Open, Ready, Closed or Rejected, size them, set a priority, mark them asked for, or copy them as Markdown. Each ticket moves by the same rules as alone; one that refuses is named with why, and the rest still move. A sort menu orders the list by priority (the default), newest, oldest, last changed or smallest first. API: `POST /api/tickets/bulk { ids, action: status|asked|size|priority|parent|assignee, value }`, `GET /api/tickets/export?ids=1,2[&format=json]`.
