@@ -144,12 +144,13 @@ const pri = (p: string | null) => ({ now: 0, this_week: 1, next: 2, someday: 3 }
 
 /**
  * Every read of a ticket goes through this select: the row, its project's key,
- * its parent's kind (for its level), whether an open ticket blocks it, and how
+ * its parent's kind (for its level), whether an open ticket blocks it (one whose pull request merged no
+ * longer does: its work is on the main line, though a request stays built for your look), and how
  * many of its children are done. Columns of the ticket itself are `t.`.
  */
 const SELECT = `SELECT t.*, k.key AS project_key, p.kind AS parent_kind,
   EXISTS (SELECT 1 FROM ticket_links l JOIN tickets b ON b.id = l.from_id
-          WHERE l.to_id = t.id AND l.relation = 'blocks' AND b.status NOT IN ('closed', 'rejected')) AS is_blocked,
+          WHERE l.to_id = t.id AND l.relation = 'blocks' AND b.status NOT IN ('closed', 'rejected') AND coalesce(b.pr_state, '') != 'merged') AS is_blocked,
   (SELECT count(*) FROM tickets c WHERE c.parent_id = t.id) AS n_children,
   (SELECT count(*) FROM tickets c WHERE c.parent_id = t.id AND c.status IN ('built', 'closed', 'rejected')) AS n_done
   FROM tickets t LEFT JOIN ticket_keys k ON k.project = t.project LEFT JOIN tickets p ON p.id = t.parent_id`;
@@ -368,7 +369,7 @@ export class Tickets {
 
   /** Why the crew does not start this ticket you asked for, or null: only what makes a start wrong, not taste or size. */
   private askedRefusal(t: TicketView): string | null {
-    if (t.blocked) return "Blocked: it starts when what blocks it is closed.";
+    if (t.blocked) return "Blocked: it starts when what blocks it is closed or its pull request is merged.";
     if (t.assignee === "you") return "You took it, so the crew leaves it to you.";
     if (this.handBrake(t.id)) return "The thread says to hold it.";
     const epic = epicOfTickets(t);

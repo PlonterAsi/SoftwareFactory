@@ -114,7 +114,7 @@ export const AUTO_KINDS: TicketKind[] = ["bug", "task"];
 export function autoWorkRefusal(t: Pick<TicketView, "kind" | "status" | "size" | "blocked" | "assignee">, handBrake = false): string | null {
   if (t.status !== "ready") return t.status === "open" ? "Not ready yet: once it is ready, the crew can take it." : null;
   if (!AUTO_KINDS.includes(t.kind)) return `${cap(aKind(t.kind))} waits for your Work it press.`;
-  if (t.blocked) return "Blocked: it starts when what blocks it is closed.";
+  if (t.blocked) return "Blocked: it starts when what blocks it is closed or its pull request is merged.";
   if (t.assignee === "you") return "You took it, so the crew leaves it to you.";
   if (handBrake) return "The thread says to hold it.";
   if (t.size == null) return "Not sized yet: Ask an agent sizes it, or set S, M or L.";

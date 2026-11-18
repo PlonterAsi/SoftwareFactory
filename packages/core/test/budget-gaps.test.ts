@@ -204,5 +204,10 @@ describe("the standing auto-work limit: work you asked for starts by itself", ()
     expect(next.blocked).toBe(true);
     expect(t.detail(next.id)!.asked).toBe(true);
     expect(t.notes(mine.id).some((n) => /builds 3 of 5 features now/.test(n.text))).toBe(true);
+    // Slice 1's pull request merges: the request stays built for a look, but slice 2 is no longer blocked and starts.
+    log.append("ticket.pr", { id: mine.id, by: "github", repo: "acme/scout", number: 9, url: "https://github.com/acme/scout/pull/9", state: "merged" });
+    expect(t.get(next.id)!.blocked).toBe(false);
+    t.dispatch();
+    expect(t.get(next.id)!.status).toBe("in_progress");
   });
 });
