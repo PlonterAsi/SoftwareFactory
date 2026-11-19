@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { setupApi, type CrewMode, type SetupView, type ToolCheck } from "./api";
 import { UpdatesSection, type Updates } from "./Updates";
 import { CrewAdvisor } from "./CrewAdvisor";
+import { Videos } from "./Videos";
 import { CrewGitHub } from "./CrewGitHub";
 
 /**
@@ -103,6 +104,7 @@ export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onCl
           {updates && <UpdatesSection u={updates} />}
           <CrewAdvisor />
           <CrewGitHub />
+          <Videos />
           {err && <div className="err">{err}</div>}
         </>}
       </aside>

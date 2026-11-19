@@ -40,6 +40,8 @@ import { brainRoute } from "./brain/routes.js";
 import { featureMapRoute } from "./featuremap/routes.js";
 import { flowsRoute } from "./flows/routes.js";
 import { watchRoute } from "./watch/routes.js";
+import { videosRoute } from "./video/routes.js";
+import { Videos } from "./video/videos.js";
 import { monthLeft } from "./watch/spend.js";
 import { Watchers } from "./watch/watchers.js";
 import { FlowImprover } from "./flows/improver.js";
@@ -164,8 +166,11 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   // Add-ons may keep a searchable catalog (store) and ask Claude from their own monthly budget (ai): docs/plugins.md.
   const pluginStore = new PluginStore(log.db);
   const pluginAi = new PluginAi(log, () => runtime);
+  // Videos: Gemini watches a YouTube link or a file you saved, and the notes are kept and searchable (docs/videos.md).
+  // Tests never read or write the real ~/.config/watch/.env, nor see a GEMINI_API_KEY from the shell.
+  const videos = new Videos(log, process.env.VITEST ? { homeDir: join(dataDir ?? dirname(projectsDir), "home"), env: {} } : {});
   const plugins = new PluginHost(log, join(dirname(projectsDir), "plugins"), {
-    bay, door: coreDoor({ log, tickets, bay }), store: pluginStore, ai: pluginAi,
+    bay, door: coreDoor({ log, tickets, bay }), store: pluginStore, ai: pluginAi, videos,
     ...(github ? { tarball: (repo: string, ref: string) => github.tarball(repo, ref) } : {}),
   });
   const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"), plugins);
@@ -509,6 +514,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (url.pathname === "/api/flows" || url.pathname.startsWith("/api/flows/")) {
         const r = await flowsRoute({ flows: factory.flows, improver: flowImprover, readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
+      if (url.pathname === "/api/videos" || url.pathname.startsWith("/api/videos/")) {
+        const r = await videosRoute({ videos, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/watchers" || url.pathname.startsWith("/api/watchers/") || url.pathname === "/api/budget/month") {

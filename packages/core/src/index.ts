@@ -77,6 +77,8 @@ export * from "./plugins/tables.js";
 export * from "./plugins/host.js";
 export * from "./plugins/door.js";
 export * from "./plugins/store.js";
+export * from "./video/gemini.js";
+export * from "./video/videos.js";
 export * from "./plugins/ai.js";
 export * from "./plugins/routes.js";
 export { RUNNER_SOURCE, FRAME_SDK_SOURCE } from "./plugins/runner.js";
