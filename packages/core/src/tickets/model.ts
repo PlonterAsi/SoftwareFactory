@@ -112,7 +112,7 @@ export const AUTO_KINDS: TicketKind[] = ["bug", "task"];
  * and no hand-brake words on its thread.
  */
 export function autoWorkRefusal(t: Pick<TicketView, "kind" | "status" | "size" | "blocked" | "assignee">, handBrake = false): string | null {
-  if (t.status !== "ready") return t.status === "open" ? "Not ready yet: once it is ready, the crew can take it." : null;
+  if (t.status !== "ready") return t.status === "open" ? "Not ready yet: the Overseer reads open bugs and tasks on its own and readies what is clear; then the crew can take it." : null;
   if (!AUTO_KINDS.includes(t.kind)) return `${cap(aKind(t.kind))} waits for your Work it press.`;
   if (t.blocked) return "Blocked: it starts when what blocks it is closed or its pull request is merged.";
   if (t.assignee === "you") return "You took it, so the crew leaves it to you.";
