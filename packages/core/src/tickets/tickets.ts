@@ -252,7 +252,7 @@ export function reloopFindings(text: string): { size: Size; kind: "bug" | "task"
 /** Ticket numbers a line of text names for one key: "SF-13", "SF-16, 17, 18", "sf/SF-24-h3-guard". */
 export function ticketNumbersIn(text: string, key: string): number[] {
   const out = new Set<number>();
-  const re = new RegExp(`(?<![A-Za-z0-9])${key}-(\\d+)((?:\\s*(?:,|and|&)\\s*(?:${key}-)?\\d+(?![\\d.]))*)`, "gi");
+  const re = new RegExp(`(?<![A-Za-z0-9])${key}-(\\d+)((?:\\s*(?:,|\/|and|&)\\s*(?:${key}-)?\\d+(?![\\d.]))*)`, "gi");
   for (const m of String(text ?? "").matchAll(re)) {
     out.add(Number(m[1]));
     for (const n of m[2].matchAll(/\d+/g)) out.add(Number(n[0]));
@@ -1072,7 +1072,7 @@ export class Tickets {
 
   /**
    * Work merged outside the ticket's own PR still moves its ticket: a merged pull
-   * request whose title or branch names a ticket ("SF-13", "SF-16, 17, 18",
+   * request whose title or branch names a ticket ("SF-13", "SF-16, 17, 18", "SF-57/58",
    * "sf/SF-24-...") is linked to it, and the ticket moves on as if the crew's PR
    * had merged. Each PR counts once per ticket, so a ticket you reopen stays open.
    */
