@@ -1,285 +1,41 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { git } from "../factory/workspace.js";
 import type { EventLog, SfEvent } from "../events.js";
 import { kitArgs, kitOf } from "../factory/crew.js";
 import { runAgent } from "../agents.js";
-import type { AgentRuntime } from "../runtime.js";
-import type { Factory } from "../factory/loop.js";
-import type { AgentBay } from "../bay/bay.js";
-import "./tables.js";
-import { projectOf, registerProjectFacet } from "../projects/service.js";
-import { EDITABLE, type TimelineCat } from "./tables.js";
+import { registerProjectFacet } from "../projects/service.js";
+import { EDITABLE } from "./tables.js";
 import { branchFor, harnessChecks, repoOfProject, workInRepo, type RepoRef } from "./repowork.js";
-import { hideTokens, parseGitHubRepo, type GitHub, type MergedPr } from "./github.js";
+import { hideTokens } from "./github.js";
 import { intakeDoor, routeWork, type Routed, type WorkRoute } from "../factory/route.js";
-import { REPO_ENGINE_MIN_USD, type RepoRuns } from "../factory/reporun.js";
+import { REPO_ENGINE_MIN_USD } from "../factory/reporun.js";
 import { DEFAULT_NEXT_USD, buildAllowance } from "../projects/budget.js";
-import { selfProject } from "./intake.js";
 import { FlowLibrary } from "../flows/library.js";
 import { RESEARCH_FLOW, runnerOf, type FlowDef } from "../flows/flow.js";
 import { pickFlow, routeOfFlow, type FlowPick } from "./flowpick.js";
 import { answerTicket } from "./research.js";
 import { checkTicket, type TicketCheck } from "./precheck.js";
-import {
-  FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS,
-  SIZES, autoWorkRefusal, ideaFromTicket, isClosed, keyFromName, keyText, nextMoves, refuseMove, refuseParent, titleFrom, workDocument,
-  type LinkView, type NoteView, type Priority, type Size, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView,
-  aKind, AUTO_KINDS,
-} from "./model.js";
+import { FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS, SIZES, autoWorkRefusal, ideaFromTicket, isClosed, nextMoves, refuseMove, refuseParent, titleFrom, workDocument, type Priority, type Size, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView, aKind, AUTO_KINDS } from "./model.js";
+import { TicketPrs } from "./prs.js";
+import { pri, type Row } from "./rows.js";
+import { AUTO_TRIES, AUTO_WORK_DEFAULT, RELOOP_BRIEF, TICKET_CONTRACT, WAITING_ON_YOU, reloopFindings, epicOfTickets, type AutoWork, type OpenTicket, type QueueSpot, type TicketDetail, type TicketsOptions } from "./shapes.js";
 
-export interface OpenTicket {
-  kind?: TicketKind;
-  title?: string;
-  body?: string;
-  answers?: Record<string, string>;
-  project?: number | null;
-  priority?: Priority | null;
-  severity?: TicketSeverity | null;
-  assignee?: string | null;
-  parent?: number | null;
-  tags?: string[];
-  /** Who opened it: "you", or an agent id. */
-  by?: string;
-  /** Where it came from: you, order, council, agent, factory, improve. */
-  source?: string;
-  /** The same fingerprint twice adds a note to the open ticket instead of a second ticket. */
-  fingerprint?: string;
-  links?: { relation: Relation; to: number }[];
-  /** The `ticket.requested` event this ticket answers, and the requester's own reference. */
-  request?: number;
-  ref?: unknown;
-  /** You asked for this work: the crew starts it by itself within your standing auto-work limit. */
-  asked?: boolean;
-}
+export * from "./shapes.js";
 
-export interface TicketFilter {
-  project?: number | null;
-  /** open (default), look (built, for your look), agents (an agent works it), plans, closed, all. */
-  view?: "open" | "look" | "you" | "agents" | "plans" | "closed" | "all";
-  /** Only the children of this epic or ticket. */
-  parent?: number;
-  kind?: TicketKind;
-  status?: TicketStatus;
-  q?: string;
-  limit?: number;
-}
-
-/**
- * Waiting on you: built (take a look), a question (answer it), or an idea or
- * request an agent opened (build it or not). Taste stays yours.
- */
-export const WAITING_ON_YOU = `t.status NOT IN ('closed', 'rejected') AND (
-  t.status = 'built'
-  OR (t.kind = 'question')
-  OR (t.kind IN ('idea', 'request') AND t.status = 'open' AND t.opened_by != 'you'))`;
-
-export type BoardLane = "needs" | "running" | "review" | "done";
-export interface BoardCard {
-  id: number; key: string; title: string; kind: string; status: TicketStatus; project: number | null; projectName: string | null;
-  flow: { id: string; name: string; runner: string } | null; run: number | null; pr: { number: number; url: string; state: string } | null; updatedAt: string;
-  /** In Needs you: what it needs (check: questions before money; gate: a run waits for your OK; look, answer, decide). */
-  need?: "check" | "gate" | "look" | "answer" | "decide" | "merge"; say?: string; questions?: number;
-  /** A PR whose CI passed: SF's merge review (git/confidence.ts), when it waits for your merge. */
-  merge?: { confident: boolean; score: number; number: number } | null;
-  /** While it runs: the flow step it is on (an engine station, or a session flow's step id), and whether the crew is on it now. */
-  step?: string | null; stepName?: string | null; live?: boolean;
-}
-
-/** The session flow step a light-route harness step belongs to (tickets/repowork.ts names them). */
-export function stepOfSession(name: string): string {
-  if (name === "install" || name === "orient") return "orient";
-  if (name === "build") return "build";
-  if (/^fix\b/.test(name) || ["secrets", "gates", "test integrity", "tests"].includes(name)) return "checks";
-  if (name === "review" || name === "review fix") return "review";
-  return name;
-}
-
-export interface WaitingItem {
-  ticket: TicketView;
-  projectName: string | null;
-  /** look: it is built; answer: a question; decide: an agent's idea or request, build it or not. */
-  need: "look" | "answer" | "decide";
-  /** One line for the row. */
-  say: string;
-  /** The moves that answer it from the row itself. */
-  moves: { to: TicketStatus; label: string }[];
-}
-
-export interface TicketStep { step: string; state: "running" | "passed" | "failed" | "skipped"; note: string; at: string }
-/** One row of a ticket's timeline (Tickets.timeline). */
-export interface TimelineEntry { eventId: number; ts: string; by: string; cat: TimelineCat; text: string; costUsd: number | null; status: string | null; run: number | null }
-
-export interface TicketDetail {
-  ticket: TicketView;
-  notes: NoteView[];
-  /** The one timeline: the thread and what the crew did, in order. */
-  timeline: TimelineEntry[];
-  links: LinkView[];
-  lines: TicketView[];
-  parent: TicketView | null;
-  moves: { to: TicketStatus; label: string }[];
-  document: string;
-  run: { id: number; outcome: string | null; station: string | null; state: string | null; spentUsd: number | null } | null;
-  /** The imported repo this ticket's project came from: "Work it" works there, on a branch of a clone. */
-  repo: RepoRef | null;
-  /** The flow it follows if worked now (flows/flow.ts), and why. */
-  flow: { id: string; name: string; runner: string; why: string; chosen: boolean } | null;
-  /** In a repo project: the route "Work it" takes when you do not choose (one session, or the whole engine), with why. */
-  route: Routed | null;
-  /** The Builder is working it in the repo right now. */
-  working: boolean;
-  /** The harness steps of its latest pass in the repo (preflight, build, checks, review), each with its state. */
-  steps: TicketStep[];
-  /** Where it stands in the ready queue, or why the crew leaves it to you. */
-  queue: { position: number | null; why: string | null } | null;
-  /** You asked for it: the crew starts it within your standing auto-work limit. */
-  asked: boolean;
-  /** Its run stopped or failed and can be tried again from that step (SF-65), with what that adds. */
-  retry: { from: string; addUsd: number } | null;
-  /** Files on the ticket: screenshots, logs, reports (gap 4), newest last. */
-  files: TicketFile[];
-}
-
-/** A file on a ticket. `file` is its name in the ticket's folder; `path` where it lies on this PC. */
-export interface TicketFile { file: string; name: string; size: number; mime: string; by: string; at: string; path: string; image: boolean }
-export const TICKET_FILE_MAX = 15 * 1024 * 1024;
-const MIME_BY_EXT: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", txt: "text/plain", log: "text/plain", md: "text/markdown", json: "application/json", csv: "text/csv", html: "text/html", pdf: "application/pdf", zip: "application/zip", mp4: "video/mp4", webm: "video/webm" };
-export function fileMime(name: string, given?: string): string {
-  const ext = name.toLowerCase().match(/\.([a-z0-9]{1,5})$/)?.[1] ?? "";
-  return MIME_BY_EXT[ext] ?? (given && /^[a-z]+\/[a-z0-9.+-]+$/i.test(given) ? given : "application/octet-stream");
-}
-
-type Row = Record<string, any>;
-const pri = (p: string | null) => ({ now: 0, this_week: 1, next: 2, someday: 3 } as Record<string, number>)[p ?? ""] ?? 4;
-
-/**
- * Every read of a ticket goes through this select: the row, its project's key,
- * its parent's kind (for its level), whether an open ticket blocks it (one whose pull request merged no
- * longer does: its work is on the main line, though a request stays built for your look), and how
- * many of its children are done. Columns of the ticket itself are `t.`.
- */
-const SELECT = `SELECT t.*, k.key AS project_key, p.kind AS parent_kind,
-  EXISTS (SELECT 1 FROM ticket_links l JOIN tickets b ON b.id = l.from_id
-          WHERE l.to_id = t.id AND l.relation = 'blocks' AND b.status NOT IN ('closed', 'rejected') AND coalesce(b.pr_state, '') != 'merged') AS is_blocked,
-  (SELECT count(*) FROM tickets c WHERE c.parent_id = t.id) AS n_children,
-  (SELECT count(*) FROM tickets c WHERE c.parent_id = t.id AND c.status IN ('built', 'closed', 'rejected')) AS n_done
-  FROM tickets t LEFT JOIN ticket_keys k ON k.project = t.project LEFT JOIN tickets p ON p.id = t.parent_id`;
-
-const toView = (r: Row): TicketView => ({
-  id: Number(r.id), key: keyText(r.project_key ?? null, r.number == null ? null : Number(r.number), Number(r.id)), number: r.number == null ? null : Number(r.number),
-  level: r.kind === "plan" ? "epic" : r.parent_id == null || r.parent_kind === "plan" ? "ticket" : "subtask",
-  blocked: !!r.is_blocked, children: { total: Number(r.n_children ?? 0), done: Number(r.n_done ?? 0) }, kind: r.kind, title: r.title, body: r.body ?? "", answers: JSON.parse(r.answers ?? "{}"), project: r.project == null ? null : Number(r.project),
-  status: r.status, priority: r.priority ?? null, severity: r.severity ?? null, size: r.size ?? null, flow: r.flow ?? null, assignee: r.assignee ?? null, parentId: r.parent_id == null ? null : Number(r.parent_id),
-  lineOrder: r.line_order == null ? null : Number(r.line_order), tags: JSON.parse(r.tags ?? "[]"), source: r.source, openedBy: r.opened_by, fingerprint: r.fingerprint ?? null,
-  run: r.run == null ? null : Number(r.run), branch: r.branch ?? null, branchDir: r.branch_dir ?? null, pushedUrl: r.pushed_url ?? null,
-  pr: r.pr_number != null ? { repo: r.pr_repo, number: Number(r.pr_number), url: r.pr_url, state: r.pr_state } : null, createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at ?? null, lastNote: r.last_note ?? null,
-});
-
-/** The contract appended to any agent asked about a ticket. The practice crew answers it too. */
-export const TICKET_CONTRACT = "Station contract: ticket. You are reading one ticket of SoftwareFactory. Reply in at most 6 short lines: what you understand, the smallest next step, and anything missing. Then one line `SIZE: S`, `SIZE: M` or `SIZE: L` (S: one small change; M: a few files, one run; L: should be split). End with one line `STATUS: ready` if it can be built as written, or `STATUS: open` if it needs an answer first.";
-
-/**
- * How the crew picks up tickets by itself (Systems can turn it off). Set once, it is your standing approval:
- * the crew starts what the rule allows without a press, a card or a typed phrase (Assaf, 18 Nov 2026: "when I
- * ask for work, that IS the approval").
- */
-export interface AutoWork {
-  on: boolean;
-  /** Cap for one ready bug or task the crew starts on its own. */
-  maxUsd: number;
-  /**
-   * Cap for one start of work you asked for (a ticket marked "asked for"): any kind and size, on the engine
-   * when it is feature-sized. A plan that does not fit it is sliced (SF-64), never started doomed.
-   */
-  askedMaxUsd: number;
-  /** All starts of a day together stay under this: the caps of today's starts added up, never more. */
-  dailyUsd: number;
-  /** Tickets worked at once per project. */
-  wip: number;
-}
 /** How many open tickets the Overseer reads at the same time on its own. */
 const TRIAGE_AT_ONCE = 2;
 /** The part of the daily auto-work limit the Overseer's reads may use. */
 const TRIAGE_SHARE = 0.25;
 
-export const AUTO_WORK_DEFAULT: AutoWork = { on: true, maxUsd: 1.5, askedMaxUsd: 3, dailyUsd: 10, wip: 2 };
-/** How often the crew starts or retries one ticket on its own before it leaves the rest to you. */
-export const AUTO_TRIES = 2;
-
-export interface QueueSpot {
-  ticket: TicketView;
-  /** 1 = next in line in its project. Null when the crew will not take it on its own. */
-  position: number | null;
-  /** Why it is not in line, in a sentence. */
-  why: string | null;
-}
-
-/**
- * In a repo an epic that holds tickets is worked through them: each ticket gets its own branch and pull
- * request, and one run over the whole epic would build what its done tickets already built. Says so, or null.
- */
-export const epicOfTickets = (t: Pick<TicketView, "kind" | "children">): string | null =>
-  t.kind === "plan" && t.children.total > 0
-    ? `This epic is worked through its tickets (${t.children.done} of ${t.children.total} done): open one and press Work it. Each gets its own branch.`
-    : null;
-
-/**
- * Tickets: open, edit one field at a time, talk, move, link, plan, and hand a
- * ticket to the crew. Every write is one event; the `tickets` projection keeps
- * the tables. Agents and the factory write back onto the ticket by themselves.
- */
-/** What the reader of a re-loop is asked for: findings in a shape the core files as tickets. */
-export const RELOOP_BRIEF = [
-  "This is another round on the project as it stands. Read the code that matters and list the improvements most worth making now: bugs you can see, rough edges a user meets, missing tests for code that matters, risky code.",
-  "Answer with 3 to 6 findings, most valuable first, each on one line exactly like this:",
-  "- [S] bug: Short title: what to change and where (files)",
-  "S is one small change, M a few files, L more than one session. The kind is bug or task. Only what you saw in the code, never a guess.",
-].join("\n");
-
-/** The findings of a re-loop reader, as tickets to open. At most 6. */
-export function reloopFindings(text: string): { size: Size; kind: "bug" | "task"; title: string; what: string }[] {
-  const out: { size: Size; kind: "bug" | "task"; title: string; what: string }[] = [];
-  for (const m of String(text ?? "").matchAll(/^\s*[-*]\s*\[(S|M|L)\]\s*(?:(bug|task)\s*:\s*)?([^:\n]{3,120})(?::\s*(.+))?$/gim)) {
-    const title = m[3].trim();
-    if (!title) continue;
-    out.push({ size: m[1].toUpperCase() as Size, kind: (m[2]?.toLowerCase() === "bug" ? "bug" : "task"), title, what: (m[4] ?? title).trim().slice(0, 2000) });
-    if (out.length === 6) break;
-  }
-  return out;
-}
-
-/** Ticket numbers a line of text names for one key: "SF-13", "SF-16, 17, 18", "sf/SF-24-h3-guard". */
-export function ticketNumbersIn(text: string, key: string): number[] {
-  const out = new Set<number>();
-  const re = new RegExp(`(?<![A-Za-z0-9])${key}-(\\d+)((?:\\s*(?:,|\/|and|&)\\s*(?:${key}-)?\\d+(?![\\d.]))*)`, "gi");
-  for (const m of String(text ?? "").matchAll(re)) {
-    out.add(Number(m[1]));
-    for (const n of m[2].matchAll(/\d+/g)) out.add(Number(n[0]));
-  }
-  return [...out];
-}
-
-export class Tickets {
+export class Tickets extends TicketPrs {
   /** Ticket ids being asked of an agent right now (one call at a time per ticket). */
   private asking = new Set<number>();
-  /** Tickets the Builder is working in a repo clone right now. */
-  private inRepo = new Map<number, Promise<void>>();
-
   /** Tickets the dispatcher could not start, with why, until something about them changes. */
   private stuck = new Map<number, string>();
   private dispatchSoon: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private log: EventLog, private opts: { runtime?: AgentRuntime; factory?: Factory; bay?: AgentBay; budgetUsd?: number; workRoot?: string; autoWork?: () => AutoWork; canWork?: () => string | null;
-    /** GitHub write access: push a ticket's branch and open a draft PR. */
-    github?: GitHub;
-    /** Why the crew may not open PRs right now (the practice crew never does), or null. */
-    canShip?: () => string | null;
-    /** The engine in an existing codebase: feature-sized tickets of a repo project go there. */
-    repoRuns?: RepoRuns;
-    /** What the monthly budgets leave for work on a project (watch/spend.ts); leftUsd null: no monthly limit. */
-    monthLeft?: (project: number | null) => { leftUsd: number | null; why: string | null };
-  } = {}) {
+  constructor(log: EventLog, opts: TicketsOptions = {}) {
+    super(log, opts);
     log.on("event", (e: SfEvent) => {
       try { this.react(e); } catch (err) { console.error("tickets: reacting to", e.type, "failed:", err); }
       if (e.type.startsWith("ticket.") || e.type === "factory.run.finished") {
@@ -301,7 +57,7 @@ export class Tickets {
   }
 
   /** A ticket the crew is working right now: a factory run still going, or the Builder in its repo clone. */
-  private isWorking(t: TicketView): boolean {
+  protected isWorking(t: TicketView): boolean {
     return this.inRepo.has(t.id) || (t.run != null && !!this.opts.factory?.isActive(t.run));
   }
 
@@ -458,153 +214,11 @@ export class Tickets {
     return started;
   }
 
-  // ---- reading -------------------------------------------------------------
-
-  get(id: number): TicketView | undefined {
-    const r = this.log.db.prepare(`${SELECT} WHERE t.id = ?`).get(id) as Row | undefined;
-    return r ? toView(r) : undefined;
-  }
-
-  /** A ticket by what people say: "SF-42", "#7" or "7". */
-  byKey(text: string): TicketView | undefined {
-    const s = String(text ?? "").trim().toUpperCase();
-    const k = s.match(/^([A-Z][A-Z0-9]{1,5})-(\d+)$/);
-    if (k) {
-      const r = this.log.db.prepare(`${SELECT} WHERE k.key = ? AND t.number = ?`).get(k[1], Number(k[2])) as Row | undefined;
-      return r ? toView(r) : undefined;
-    }
-    const n = s.match(/^#?(\d+)$/);
-    return n ? this.get(Number(n[1])) : undefined;
-  }
-
-  /**
-   * A project's ticket key, given the first time a ticket lands there and kept
-   * when the project is renamed: SoftwareFactory's own project is SF; others
-   * take letters from their name.
-   */
-  keyFor(project: number | null): string | null {
-    if (project == null) return null;
-    const have = this.log.db.prepare("SELECT key FROM ticket_keys WHERE project = ?").get(project) as { key: string } | undefined;
-    if (have) return have.key;
-    const taken = new Set((this.log.db.prepare("SELECT key FROM ticket_keys").all() as { key: string }[]).map((r) => r.key));
-    let key: string;
-    if (project === selfProject(this.log) && !taken.has("SF")) key = "SF";
-    else {
-      const row = this.log.db.prepare("SELECT name FROM projects WHERE id = ?").get(project) as { name: string } | undefined;
-      // SF stays free for SoftwareFactory's own project, even before it exists.
-      key = keyFromName(row?.name ?? `P${project}`, new Set([...taken, "SF"]));
-    }
-    this.log.append("ticket.keyed", { project, key });
-    return key;
-  }
-
   /** Give a key to every project that has tickets but none yet (tickets opened before keys existed). */
   backfillKeys(): number {
     const rows = this.log.db.prepare("SELECT DISTINCT t.project FROM tickets t LEFT JOIN ticket_keys k ON k.project = t.project WHERE t.project IS NOT NULL AND k.key IS NULL ORDER BY t.project").all() as { project: number }[];
     for (const r of rows) this.keyFor(Number(r.project));
     return rows.length;
-  }
-
-  list(f: TicketFilter = {}): TicketView[] {
-    const where: string[] = [];
-    const args: (string | number)[] = [];
-    const view = f.view ?? "open";
-    if (f.project != null) { where.push("t.project = ?"); args.push(f.project); }
-    if (view === "open") where.push("t.status NOT IN ('closed', 'rejected')");
-    else if (view === "look") where.push("t.status = 'built'");
-    else if (view === "you") where.push(WAITING_ON_YOU);
-    else if (view === "agents") where.push("t.status NOT IN ('closed', 'rejected') AND (t.run IS NOT NULL OR (t.assignee IS NOT NULL AND t.assignee != 'you'))");
-    else if (view === "plans") where.push("(t.kind = 'plan' OR t.parent_id IS NOT NULL)");
-    else if (view === "closed") where.push("t.status IN ('closed', 'rejected')");
-    if (f.kind) { where.push("t.kind = ?"); args.push(f.kind); }
-    if (f.status) { where.push("t.status = ?"); args.push(f.status); }
-    if (f.parent != null) { where.push("t.parent_id = ?"); args.push(f.parent); }
-    if (f.q && f.q.trim()) {
-      // Reads the title, the description, the answers, the tags and the thread; "#12" finds ticket 12, "SF-4" ticket 4 of SF.
-      const q = f.q.trim();
-      const n = q.match(/^#?(\d+)$/);
-      const k = q.toUpperCase().match(/^([A-Z][A-Z0-9]{1,5})-(\d+)$/);
-      const like = `%${q.replace(/[%_]/g, "")}%`;
-      where.push(`(${n ? "t.id = ? OR " : ""}${k ? "(k.key = ? AND t.number = ?) OR " : ""}t.title LIKE ? OR t.body LIKE ? OR t.answers LIKE ? OR t.tags LIKE ? OR t.id IN (SELECT ticket_id FROM ticket_notes WHERE text LIKE ?))`);
-      if (n) args.push(Number(n[1]));
-      if (k) args.push(k[1], Number(k[2]));
-      args.push(like, like, like, like, like);
-    }
-    const order = "CASE t.priority WHEN 'now' THEN 0 WHEN 'this_week' THEN 1 WHEN 'next' THEN 2 WHEN 'someday' THEN 3 ELSE 4 END, t.updated_at DESC";
-    // Plans view: each epic, then its tickets in their order, then each ticket's subtasks.
-    const tree = "coalesce(p.parent_id, t.parent_id, t.id), CASE WHEN t.parent_id IS NULL THEN 0 ELSE 1 END, coalesce(p.line_order, t.line_order), CASE WHEN p.parent_id IS NULL THEN 0 ELSE 1 END, t.line_order";
-    const sql = `${SELECT} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${view === "plans" ? tree : order} LIMIT ?`;
-    args.push(f.limit ?? 200);
-    return (this.log.db.prepare(sql).all(...args) as Row[]).map(toView);
-  }
-
-  /**
-   * Waiting on you, across every project: each ticket with the one thing it
-   * needs from you and the moves that answer it, so most take a single tap.
-   */
-  waiting(project?: number | null): WaitingItem[] {
-    const rows = this.list({ view: "you", project: project ?? undefined, limit: 300 });
-    const names = new Map((this.log.db.prepare("SELECT id, name FROM projects").all() as { id: number; name: string }[]).map((r) => [Number(r.id), r.name]));
-    const why = (t: TicketView): WaitingItem["need"] =>
-      t.status === "built" ? "look" : t.kind === "question" ? "answer" : "decide";
-    const rank = { look: 0, answer: 1, decide: 2 } as const;
-    return rows
-      .map((t) => {
-        const need = why(t);
-        const moves: WaitingItem["moves"] = need === "look" ? nextMoves(t.status, t.kind)
-          : need === "decide" ? [{ to: "ready", label: "Yes, build it" }, { to: "rejected", label: "No" }]
-          : [];
-        return { ticket: t, projectName: t.project != null ? names.get(t.project) ?? null : null, need, moves,
-          say: need === "look" ? "Built: take a look" : need === "answer" ? (t.answers.ask && t.answers.ask !== t.title ? t.answers.ask : "Needs your answer") : `${t.kind === "idea" ? "An idea" : "A request"} from ${t.openedBy}: build it?` };
-      })
-      .sort((a, b) => rank[a.need] - rank[b.need] || b.ticket.updatedAt.localeCompare(a.ticket.updatedAt));
-  }
-
-  /** Counts for the chips and the summary line: by status, by kind, waiting for your look. */
-  counts(project?: number | null) {
-    const scope = project != null ? "WHERE project = ?" : "";
-    const args = project != null ? [project] : [];
-    const byStatus = Object.fromEntries((this.log.db.prepare(`SELECT status, count(*) AS n FROM tickets ${scope} GROUP BY status`).all(...args) as { status: string; n: number }[]).map((r) => [r.status, Number(r.n)]));
-    const byKind = Object.fromEntries((this.log.db.prepare(`SELECT kind, count(*) AS n FROM tickets ${scope ? `${scope} AND` : "WHERE"} status NOT IN ('closed', 'rejected') GROUP BY kind`).all(...args) as { kind: string; n: number }[]).map((r) => [r.kind, Number(r.n)]));
-    const open = STATUSES.filter((s) => !isClosed(s)).reduce((n, s) => n + (byStatus[s] ?? 0), 0);
-    const oldest = this.log.db.prepare(`SELECT id, title, created_at FROM tickets ${scope ? `${scope} AND` : "WHERE"} status NOT IN ('closed', 'rejected') ORDER BY created_at LIMIT 1`).get(...args) as Row | undefined;
-    const you = Number((this.log.db.prepare(`SELECT count(*) AS n FROM tickets t WHERE ${WAITING_ON_YOU}${project != null ? " AND t.project = ?" : ""}`).get(...args) as { n: number }).n);
-    return { byStatus, byKind, open, look: byStatus.built ?? 0, you, total: Object.values(byStatus).reduce((a, b) => a + b, 0), oldest: oldest ? { id: Number(oldest.id), title: oldest.title, createdAt: oldest.created_at } : null };
-  }
-
-  notes(id: number): NoteView[] {
-    return (this.log.db.prepare("SELECT * FROM ticket_notes WHERE ticket_id = ? ORDER BY event_id").all(id) as Row[]).map((r) => ({
-      eventId: Number(r.event_id), ts: r.ts, by: r.by_name, kind: r.kind, text: r.text, status: r.status ?? null, costUsd: r.cost_usd ?? null,
-    }));
-  }
-
-  /**
-   * The ticket's one timeline, oldest first and append-only: its thread (what people said, status moves,
-   * branch, push and PR) and what the crew did for it (each step of its runs, agent calls, decisions at the
-   * gates, retries, the run starting and ending), merged in the order it happened.
-   */
-  timeline(id: number): TimelineEntry[] {
-    const rows = this.log.db.prepare(`SELECT event_id, ts, by_name, cat, text, cost_usd, status, NULL AS run FROM ticket_notes WHERE ticket_id = ?
-      UNION ALL SELECT event_id, ts, by_name, cat, text, cost_usd, NULL AS status, run FROM ticket_trace WHERE ticket_id = ? ORDER BY event_id`).all(id, id) as Row[];
-    return rows.map((r) => ({ eventId: Number(r.event_id), ts: r.ts, by: r.by_name, cat: r.cat as TimelineCat, text: r.text, costUsd: r.cost_usd ?? null, status: r.status ?? null, run: r.run == null ? null : Number(r.run) }));
-  }
-
-  /** Links seen from this ticket, both ways (a link made on one side shows on the other). */
-  links(id: number): LinkView[] {
-    const rows = this.log.db.prepare(`SELECT l.from_id, l.to_id, l.relation, t.title, t.status, t.number, k.key FROM ticket_links l JOIN tickets t ON t.id = CASE WHEN l.from_id = ? THEN l.to_id ELSE l.from_id END
-      LEFT JOIN ticket_keys k ON k.project = t.project WHERE l.from_id = ? OR l.to_id = ? ORDER BY l.ts`).all(id, id, id) as Row[];
-    return rows.map((r) => {
-      const out = Number(r.from_id) === id;
-      const rel = r.relation as Relation;
-      // Seen from the other side, "duplicate of" and "blocks" read backwards.
-      const back: Partial<Record<Relation, string>> = { duplicate_of: "duplicated_by", blocks: "blocked_by", derived_from: "spawned" };
-      return { from: id, to: out ? Number(r.to_id) : Number(r.from_id), relation: (out ? rel : (back[rel] ?? rel)) as Relation, title: r.title, status: r.status,
-        key: keyText(r.key ?? null, r.number == null ? null : Number(r.number), out ? Number(r.to_id) : Number(r.from_id)) };
-    });
-  }
-
-  lines(planId: number): TicketView[] {
-    return (this.log.db.prepare(`${SELECT} WHERE t.parent_id = ? ORDER BY t.line_order`).all(planId) as Row[]).map(toView);
   }
 
   detail(id: number): TicketDetail | undefined {
@@ -633,79 +247,9 @@ export class Tickets {
     };
   }
 
-  /** The harness steps of the ticket's latest pass in its repo, in order, each with where it stands. */
-  steps(id: number): TicketStep[] {
-    const rows = this.log.db.prepare("SELECT ts, payload FROM events WHERE type = 'ticket.step' AND json_extract(payload, '$.id') = ? ORDER BY id").all(id) as { ts: string; payload: string }[];
-    let out: TicketStep[] = [];
-    let first: string | null = null;
-    for (const r of rows) {
-      const p = JSON.parse(r.payload) as { step: string; state: TicketStep["state"]; note?: string };
-      first ??= p.step;
-      // The first step running again is a new pass: show that one.
-      if (p.step === first && p.state === "running") out = [];
-      const at = out.find((x) => x.step === p.step);
-      if (at) Object.assign(at, { state: p.state, note: p.note ?? "", at: r.ts });
-      else out.push({ step: p.step, state: p.state, note: p.note ?? "", at: r.ts });
-    }
-    return out;
-  }
-
   private spot(t: TicketView): { position: number | null; why: string | null } {
     const q = this.queue(t.project).find((x) => x.ticket.id === t.id);
     return q ? { position: q.position, why: q.why } : { position: null, why: null };
-  }
-
-  /** Where a ticket's files live: next to the work folder, one folder per ticket. Null without a work folder. */
-  private filesDir(id: number): string | null {
-    return this.opts.workRoot ? join(this.opts.workRoot, "..", "ticket-files", String(id)) : null;
-  }
-
-  /** The files on a ticket, from the log (a file whose bytes were removed by hand is left out). */
-  files(id: number): TicketFile[] {
-    const dir = this.filesDir(id);
-    if (!dir) return [];
-    const rows = this.log.db.prepare("SELECT ts, payload FROM events WHERE type = 'ticket.file' AND json_extract(payload, '$.id') = ? ORDER BY id").all(id) as { ts: string; payload: string }[];
-    const out: TicketFile[] = [];
-    for (const r of rows) {
-      const p = JSON.parse(r.payload);
-      const path = join(dir, String(p.file));
-      if (p.removed) { const i = out.findIndex((f) => f.file === p.file); if (i >= 0) out.splice(i, 1); continue; }
-      if (!existsSync(path)) continue;
-      out.push({ file: String(p.file), name: String(p.name), size: Number(p.size), mime: String(p.mime), by: String(p.by), at: r.ts, path, image: String(p.mime).startsWith("image/") });
-    }
-    return out;
-  }
-
-  /**
-   * Put a file on a ticket (gap 4): a screenshot, a log, a report. The bytes go to the ticket's folder on this PC,
-   * never into the log; the thread says it was added, and the work document lists it so an agent can read it.
-   */
-  attach(id: number, name: string, bytes: Buffer, o: { mime?: string; by?: string } = {}): TicketFile {
-    const t = this.must(id);
-    const dir = this.filesDir(id);
-    if (!dir) throw new Error("This core has no folder for ticket files.");
-    if (!bytes.length) throw new Error("The file is empty.");
-    if (bytes.length > TICKET_FILE_MAX) throw new Error(`The file is ${(bytes.length / 1048576).toFixed(1)} MB; a ticket takes files up to 15 MB.`);
-    const clean = String(name ?? "").split(/[\\/]/).pop()!.replace(/[^\w.\- ]+/g, "_").replace(/^\.+/, "").trim().slice(0, 100) || "file";
-    const n = this.log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'ticket.file' AND json_extract(payload, '$.id') = ?").get(id) as { n: number };
-    const file = `${Number(n.n) + 1}-${clean}`;
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, file), bytes);
-    const by = o.by ?? "you";
-    const mime = fileMime(clean, o.mime);
-    this.log.append("ticket.file", { id, file, name: clean, size: bytes.length, mime, by });
-    this.log.append("ticket.noted", { id, by, kind: "event", text: `Added the file ${clean} (${bytes.length < 1024 ? `${bytes.length} bytes` : bytes.length < 1048576 ? `${Math.round(bytes.length / 1024)} KB` : `${(bytes.length / 1048576).toFixed(1)} MB`}).` });
-    void t;
-    return this.files(id).find((f) => f.file === file)!;
-  }
-
-  /** Take a file off a ticket. The bytes stay in the folder; the ticket no longer shows it. */
-  detach(id: number, file: string, by = "you"): TicketFile[] {
-    const f = this.files(id).find((x) => x.file === file);
-    if (!f) throw new Error(`There is no file ${file} on this ticket.`);
-    this.log.append("ticket.file", { id, file, removed: true, by });
-    this.log.append("ticket.noted", { id, by, kind: "event", text: `Took the file ${f.name} off.` });
-    return this.files(id);
   }
 
   /**
@@ -727,25 +271,6 @@ export class Tickets {
       } catch (e) { failed.push({ id, key: this.get(id)?.key ?? null, error: (e as Error).message }); }
     }
     return { done, failed };
-  }
-
-  /** Tickets as Markdown (a list to paste anywhere) or JSON (each ticket's detail without its long work document). */
-  exportTickets(ids: number[], format: "md" | "json" = "md"): string {
-    const rows = [...new Set(ids.map(Number))].map((id) => this.detail(id)).filter((d): d is TicketDetail => !!d);
-    if (format === "json") return JSON.stringify(rows.map(({ document: _d, timeline: _t, ...d }) => d), null, 2);
-    return rows.map(({ ticket: t, notes, links }) => [
-      `## ${t.key} ${t.title}`,
-      `${t.kind}, ${t.status}${t.size ? `, size ${t.size}` : ""}${t.priority ? `, ${t.priority.replace("_", " ")}` : ""}${t.pr ? `, PR #${t.pr.number} (${t.pr.state}) ${t.pr.url}` : ""}`,
-      ...(t.body ? ["", t.body] : []),
-      ...(links.length ? ["", ...links.map((l) => `- ${l.relation.replace("_", " ")} ${l.key ?? `#${l.to}`} ${l.title ?? ""}`.trimEnd())] : []),
-      ...(notes.filter((n) => n.text).length ? ["", "Thread:", ...notes.filter((n) => n.text).slice(-10).map((n) => `- ${n.ts.slice(0, 16).replace("T", " ")} ${n.by}${n.status ? ` (${n.status})` : ""}: ${n.text.split("\n")[0].slice(0, 300)}`)] : []),
-    ].join("\n")).join("\n\n");
-  }
-
-  document(id: number): string {
-    const d = this.detail(id);
-    if (!d) throw new Error(`No ticket #${id}`);
-    return d.document;
   }
 
   // ---- writing -------------------------------------------------------------
@@ -968,169 +493,6 @@ export class Tickets {
     return { ticket: this.get(id)!, run, flow: named(first.flow) };
   }
 
-  /**
-   * The branch goes to GitHub as a draft PR, when the crew may ship: the real
-   * crew, a token that can write, and never main. The ticket waits for your
-   * look; CI runs on the PR, and its merge moves the ticket on (followPrs).
-   * Returns false when it stays a local branch, after saying why.
-   */
-  private async openPr(id: number, repo: RepoRef, r: { dir: string; branch: string; base: string; files: string[]; summary: string; costUsd: number; checks?: string[] }): Promise<boolean> {
-    const gh = this.opts.github;
-    const t = this.get(id)!;
-    const why = !gh ? "GitHub access is not set up in this core." : this.opts.canShip?.() ?? (gh.hasToken() ? null : "No GitHub access yet: add a token in Systems, GitHub access, and the crew opens a PR next time.");
-    if (why) { this.log.append("ticket.noted", { id, by: "factory", kind: "event", text: `The branch stays on this computer: ${why}` }); return false; }
-    let baseBranch = "main";
-    try { baseBranch = gh!.git(r.dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(/^origin\//, ""); } catch { /* main */ }
-    const pr = await gh!.openPr({
-      repo: repo.github!, dir: r.dir, branch: r.branch, base: baseBranch, title: `${t.key}: ${t.title}`.slice(0, 200),
-      body: [`Ticket **${t.key}** (${t.kind}) from SoftwareFactory, worked by the crew.`, "", r.summary || "", "", `Changed ${r.files.length} file(s).`, "", r.checks?.length ? `Checks passed: ${r.checks.join(", ")}.` : "", "", "_Opened as a draft by SoftwareFactory's crew. It never pushes to main; merging is a person's call or the auto-merge rule._"].join("\n").slice(0, 6000),
-    });
-    this.log.append("ticket.pr", { id, by: "factory", repo: `${repo.github!.owner}/${repo.github!.name}`, number: pr.number, url: pr.url, branch: r.branch, state: "open" });
-    const now = this.get(id)!;
-    this.log.append("ticket.noted", {
-      id, by: "factory", kind: "reply", costUsd: r.costUsd, status: now.status !== "built" && !isClosed(now.status) ? "built" : undefined,
-      text: `${r.summary || "Done."}\n\nOpened draft PR #${pr.number}: ${pr.url}. Windows CI runs on it; when it merges, this ticket moves on by itself.`,
-    });
-    return true;
-  }
-
-  /**
-   * Your press on a built ticket whose branch stayed on this computer: send that
-   * branch to GitHub. With a token it becomes a draft PR like the crew's own.
-   * Without one, this PC's own Git sign-in pushes it and the ticket carries the
-   * address that starts the pull request. Only the ticket's branch, never main.
-   */
-  async send(id: number, by = "you"): Promise<TicketView> {
-    const t = this.must(id);
-    const gh = this.opts.github;
-    const repo = repoOfProject(this.log, t.project);
-    if (!repo) throw new Error("This ticket's project has no repo to send a branch to.");
-    if (t.pr) throw new Error(`This ticket already has pull request #${t.pr.number}.`);
-    if (!t.branch || !t.branchDir) throw new Error("There is no branch yet: press Work it first.");
-    if (this.inRepo.has(id)) throw new Error("The Builder is still working this ticket.");
-    if (this.sending.has(id)) throw new Error("This branch is already on its way to GitHub.");
-    if (!existsSync(join(t.branchDir, ".git"))) throw new Error("The folder with this branch is gone. Press Work it to build it again.");
-    if (!repo.github) {
-      // A folder on this computer: the branch is added to it and nothing else moves (not its files, not its current branch).
-      if (!existsSync(join(repo.source, ".git"))) throw new Error(`The original folder (${repo.source}) is not on this computer any more.`);
-      try { git(repo.source, "fetch", "-q", t.branchDir, `${t.branch}:${t.branch}`); }
-      catch (e) { throw new Error(/checked out|non-fast-forward|rejected/i.test((e as Error).message) ? `Your folder already has a branch ${t.branch} that differs or is open in it. Switch away from it there, then press again.` : `Could not add the branch to your folder: ${(e as Error).message.slice(0, 300)}`); }
-      this.log.append("ticket.pushed", { id, by, repo: repo.source, branch: t.branch, url: null });
-      this.log.append("ticket.noted", { id, by: "factory", kind: "event", text: `Branch ${t.branch} is now in ${repo.source}. Your files there did not change; merge the branch when you want it.` });
-      return this.get(id)!;
-    }
-    if (!gh) throw new Error("GitHub access is not set up in this core.");
-    const why = this.opts.canShip?.();
-    if (why) throw new Error(`Not sent: ${why}.`);
-    this.sending.add(id);
-    try {
-      let base = "main";
-      try { base = gh.git(t.branchDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(/^origin\//, ""); } catch { /* main */ }
-      if (gh.hasToken()) {
-        let files: string[] = [];
-        try { files = gh.git(t.branchDir, "diff", "--name-only", `origin/${base}...${t.branch}`).split("\n").filter(Boolean); } catch { /* unknown */ }
-        gh.git(t.branchDir, "checkout", "-q", t.branch);
-        await this.openPr(id, repo, { dir: t.branchDir, branch: t.branch, base, files, summary: "", costUsd: 0 });
-      } else {
-        await gh.pushBranch({ repo: repo.github, dir: t.branchDir, branch: t.branch, base });
-        const url = gh.compareUrl(repo.github, base, t.branch);
-        this.log.append("ticket.pushed", { id, by, repo: `${repo.github.owner}/${repo.github.name}`, branch: t.branch, base, url });
-        this.log.append("ticket.noted", { id, by: "factory", kind: "event", text: `The branch is on GitHub. Open the pull request there (${url}), name it ${t.key}, and its merge moves this ticket on by itself.` });
-      }
-    } finally { this.sending.delete(id); }
-    return this.get(id)!;
-  }
-  private sending = new Set<number>();
-
-  /** Follow every open PR of a ticket: merged moves it on, closed without a merge sends it back. */
-  async followPrs(): Promise<number> {
-    const gh = this.opts.github;
-    if (!gh?.hasToken()) return 0;
-    const rows = this.log.db.prepare("SELECT id, pr_repo, pr_number FROM tickets WHERE pr_state = 'open' AND pr_number IS NOT NULL").all() as Row[];
-    let moved = 0;
-    for (const row of rows) {
-      const [owner, name] = String(row.pr_repo).split("/");
-      try {
-        const pr = await gh.pr({ owner, name }, Number(row.pr_number));
-        if (pr.state === "open") continue;
-        const id = Number(row.id);
-        this.log.append("ticket.pr", { id, by: "github", repo: row.pr_repo, number: pr.number, url: pr.url, state: pr.merged ? "merged" : "closed", sha: pr.mergeSha });
-        const t = this.get(id)!;
-        moved++;
-        if (isClosed(t.status)) continue;
-        if (pr.merged) {
-          // Merged after CI: work kinds are done; taste kinds wait for your look on the next version.
-          const done = !TASTE_KINDS.includes(t.kind);
-          this.log.append("ticket.noted", { id, by: "github", status: done ? "closed" : t.status === "built" ? undefined : "built", text: `PR #${pr.number} was merged.${done ? " Closed: it ships with the next version." : " It ships with the next version; take a look then."}` });
-        } else {
-          this.log.append("ticket.noted", { id, by: "github", status: "open", text: `PR #${pr.number} was closed without merging, so this ticket is open again.` });
-        }
-      } catch (e) { console.error("tickets: following PR", row.pr_number, "failed:", hideTokens((e as Error).message)); }
-    }
-    return moved;
-  }
-
-  /**
-   * Work merged outside the ticket's own PR still moves its ticket: a merged pull
-   * request whose title or branch names a ticket ("SF-13", "SF-16, 17, 18", "SF-57/58",
-   * "sf/SF-24-...") is linked to it, and the ticket moves on as if the crew's PR
-   * had merged. Each PR counts once per ticket, so a ticket you reopen stays open.
-   */
-  async followMerges(): Promise<number> {
-    const gh = this.opts.github;
-    if (!gh) return 0;
-    const has = (t: string) => !!this.log.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
-    if (!has("project_links")) return 0;
-    const projects = this.log.db.prepare("SELECT k.project, k.key, l.ref FROM ticket_keys k JOIN project_links l ON l.project_id = k.project AND l.kind = 'github' GROUP BY k.project").all() as { project: number; key: string; ref: string }[];
-    const seen = this.log.db.prepare("SELECT 1 FROM events WHERE type = 'ticket.pr' AND json_extract(payload, '$.id') = ? AND json_extract(payload, '$.number') = ? AND json_extract(payload, '$.state') = 'merged' LIMIT 1");
-    let moved = 0;
-    for (const p of projects) {
-      const repo = parseGitHubRepo(p.ref);
-      if (!repo) continue;
-      let prs: MergedPr[];
-      try { prs = await gh.mergedPrs(repo); } catch (e) { console.error("tickets: reading merged PRs of", p.ref, "failed:", hideTokens((e as Error).message)); continue; }
-      // Oldest first, so a ticket named by several PRs ends on the newest.
-      for (const pr of prs.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt))) {
-        for (const number of ticketNumbersIn(`${pr.title}\n${pr.branch}`, p.key)) {
-          const t = this.byKey(`${p.key}-${number}`);
-          if (!t || seen.get(t.id, pr.number)) continue;
-          // A ticket opened after the merge only mentions old work; it is not done by it.
-          if (t.createdAt > pr.mergedAt) continue;
-          this.log.append("ticket.pr", { id: t.id, by: "github", repo: `${repo.owner}/${repo.name}`, number: pr.number, url: pr.url, state: "merged", sha: pr.mergeSha });
-          moved++;
-          if (isClosed(t.status)) continue;
-          const done = !TASTE_KINDS.includes(t.kind);
-          this.log.append("ticket.noted", { id: t.id, by: "github", status: done ? "closed" : t.status === "built" ? undefined : "built", text: `PR #${pr.number} "${pr.title.slice(0, 120)}" names this ticket and was merged.${done ? " Closed: it is in the app." : " It is in the app; take a look and close it."}` });
-        }
-      }
-    }
-    return moved;
-  }
-
-  /**
-   * Link a ticket to a pull request that was opened outside SoftwareFactory (a thread's PR, your own).
-   * From then on it is followed like the crew's own: already merged moves the ticket now, open waits for the merge.
-   */
-  async linkPr(id: number, ref: string | number, by = "you"): Promise<TicketView> {
-    const t = this.must(id);
-    const gh = this.opts.github;
-    const repo = repoOfProject(this.log, t.project)?.github;
-    if (!gh || !repo) throw new Error("This ticket's project has no GitHub repo, so there is no pull request to link.");
-    const m = String(ref ?? "").trim().match(/(?:^#?|\/pull\/)(\d+)\/?$/);
-    if (!m) throw new Error("Give the pull request's number (84) or its GitHub address.");
-    const pr = await gh.pr(repo, Number(m[1]));
-    const state = pr.merged ? "merged" : pr.state;
-    this.log.append("ticket.pr", { id, by, repo: `${repo.owner}/${repo.name}`, number: pr.number, url: pr.url, state, sha: pr.mergeSha });
-    if (pr.merged && !isClosed(t.status)) {
-      const done = !TASTE_KINDS.includes(t.kind);
-      this.log.append("ticket.noted", { id, by: "github", status: done ? "closed" : t.status === "built" ? undefined : "built", text: `PR #${pr.number} "${pr.title.slice(0, 120)}" was linked and is already merged.${done ? " Closed: it is in the app." : " It is in the app; take a look and close it."}` });
-    }
-    return this.get(id)!;
-  }
-
-  /** Wait for a ticket's repo work to finish (tests, the CLI). */
-  waitRepo(id: number): Promise<void> { return this.inRepo.get(id) ?? Promise.resolve(); }
-
   /** Which way this ticket goes in its repo: what was chosen, else its kind, size and words (factory/route.ts). */
   private routeOf(t: TicketView, o: { route?: WorkRoute; maxUsd?: number }): Routed {
     if (!this.opts.repoRuns || !this.opts.factory) return { route: "light", why: "this core has no engine for repos" };
@@ -1198,62 +560,6 @@ export class Tickets {
       catch (e) { held.push({ id, error: (e as Error).message }); }
     }
     return { answered, started, held };
-  }
-
-  // ---- the home board (SF behavior brief 4.1) ---------------------------------
-
-  /**
-   * Every ticket across projects in four lanes: Needs you (first), Running, In review, Done. Each card says
-   * the flow it follows and, while it runs, the step it is on, so the board can draw the live flow beside it.
-   */
-  board(o: { project?: number | null; doneDays?: number } = {}): { lanes: Record<BoardLane, BoardCard[]>; counts: Record<BoardLane, number> } {
-    const names = new Map((this.log.db.prepare("SELECT id, name FROM projects").all() as { id: number; name: string }[]).map((r) => [Number(r.id), r.name]));
-    const lanes: Record<BoardLane, BoardCard[]> = { needs: [], running: [], review: [], done: [] };
-    const placed = new Set<number>();
-    const card = (t: TicketView, extra: Partial<BoardCard> = {}): BoardCard => {
-      const f = this.flowOf(t);
-      return { id: t.id, key: t.key, title: t.title, kind: t.kind, status: t.status, project: t.project, projectName: t.project != null ? names.get(t.project) ?? null : null,
-        flow: f ? { id: f.id, name: f.name, runner: f.runner } : null, run: t.run, pr: t.pr ? { number: t.pr.number, url: t.pr.url, state: t.pr.state } : null, updatedAt: t.updatedAt, ...extra };
-    };
-    const put = (lane: BoardLane, c: BoardCard) => { if (placed.has(c.id)) return; placed.add(c.id); lanes[lane].push(c); };
-    const station = this.log.db.prepare("SELECT payload FROM events WHERE type = 'factory.station' AND json_extract(payload, '$.run') = ? ORDER BY id DESC LIMIT 1");
-    const lastStep = this.log.db.prepare("SELECT payload FROM events WHERE type = 'ticket.step' AND json_extract(payload, '$.id') = ? ORDER BY id DESC LIMIT 1");
-    const scope = o.project ?? undefined;
-    // Running first, so a run waiting at your OK moves to Needs you with the step it waits on.
-    for (const t of this.list({ view: "all", status: "in_progress", project: scope, limit: 300 })) {
-      if (t.run != null) {
-        const sp = station.get(t.run) as { payload: string } | undefined;
-        const st = sp ? JSON.parse(sp.payload) as { station?: string; state?: string } : null;
-        const live = this.isWorking(t);
-        if (st?.state === "waiting") { put("needs", card(t, { need: "gate", say: `Waiting for your OK at ${st.station === "gateA" ? "the plan" : st.station === "gateB" ? "the build" : st.station}`, step: st.station ?? null, live: true })); continue; }
-        put("running", card(t, { step: st?.station ?? null, live }));
-      } else {
-        const sp = lastStep.get(t.id) as { payload: string } | undefined;
-        const name = sp ? String(JSON.parse(sp.payload).step) : null;
-        put("running", card(t, { step: name ? stepOfSession(name) : null, stepName: name, live: this.inRepo.has(t.id) }));
-      }
-    }
-    for (const c of this.checks(scope)) put("needs", card(c.ticket, { need: "check", say: c.check.questions[0]?.ask ?? "Questions before it costs money", questions: c.check.questions.length }));
-    for (const w of this.waiting(scope)) {
-      if (w.ticket.status === "built" && w.ticket.pr?.state === "open") continue; // its PR is in review
-      put("needs", card(w.ticket, { need: w.need, say: w.say }));
-    }
-    // A crew PR whose CI passed waits for a merge: on Needs you with SF's merge review (docs/git.md). The rest are in review.
-    const hasChecks = !!this.log.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'merge_checks'").get();
-    const mergeRow = hasChecks ? this.log.db.prepare("SELECT number, ci, confident, score, reasons, merged_by FROM merge_checks WHERE ticket_id = ?") : null;
-    for (const t of this.list({ view: "all", project: scope, limit: 500 })) {
-      if (t.pr?.state !== "open" || isClosed(t.status)) continue;
-      const m = mergeRow?.get(t.id) as { number: number; ci: string; confident: number; score: number; reasons: string; merged_by: string | null } | undefined;
-      if (m && m.number === t.pr.number && m.ci === "green" && !m.merged_by && t.source !== "outside") {
-        const miss = (JSON.parse(m.reasons) as { ok: boolean; text: string }[]).filter((r) => !r.ok);
-        put("needs", card(t, { need: "merge", say: m.confident ? `PR #${t.pr.number} is ready to merge: every check of SF's review passed` : `PR #${t.pr.number} passed CI. ${miss[0]?.text ?? ""}`.trim(), merge: { confident: !!m.confident, score: m.score, number: m.number } }));
-      } else put("review", card(t, { say: m?.ci === "red" ? `PR #${t.pr.number}: CI failed` : t.source === "outside" ? `PR #${t.pr.number}, made outside SF` : `Draft PR #${t.pr.number}: checks run, its merge moves it on` }));
-    }
-    const since = new Date(Date.now() - (o.doneDays ?? 14) * 86_400_000).toISOString();
-    for (const t of this.list({ view: "closed", project: scope, limit: 200 })) if (t.status === "closed" && (t.closedAt ?? t.updatedAt) >= since) put("done", card(t));
-    lanes.done.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    lanes.done.splice(40);
-    return { lanes, counts: { needs: lanes.needs.length, running: lanes.running.length, review: lanes.review.length, done: lanes.done.length } };
   }
 
   /** The flow library (the factory's when it has one, so both read the same saved flows). */
@@ -1652,32 +958,12 @@ export class Tickets {
     try { this.say(next.id, "Sliced from an approved plan: ready to build once what blocks it is done.", { status: "ready", by: "factory", kind: "event" }); } catch { /* stays open */ }
   }
 
-  private byRun(run: number): TicketView | undefined {
-    const r = this.log.db.prepare("SELECT * FROM tickets WHERE run = ?").get(run) as Row | undefined;
-    return r ? toView(r) : undefined;
-  }
-
-  /** The project a run belongs to (the projects model knows; a run started from a ticket joins the ticket's). */
-  private projectOfRun(run: number): number | null {
-    return projectOf(this.log, { kind: "factory_run", ref: run });
-  }
-
-  /** The project an Order Engine node belongs to. */
-  private rootOf(nodeId: number): number | null {
-    return projectOf(this.log, { kind: "order_node", ref: nodeId });
-  }
-
   /** Tell the projects model this ticket belongs to a project, so the project's rollup counts it. */
   private linkProject(id: number, project: number | null) {
     if (project == null || !this.log.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(project)) return;
     this.log.append("project.linked", { projectId: project, kind: "ticket", ref: String(id) });
   }
 
-  private must(id: number): TicketView {
-    const t = this.get(Number(id));
-    if (!t) throw new Error(`No ticket #${id}`);
-    return t;
-  }
 }
 
 /** Every project's page shows its tickets: open, for your look, and the newest few. */
