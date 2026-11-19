@@ -10,7 +10,8 @@ import { RunnerManager, readRunnerLine, runnerPlatform, runnerProblems, shaFromR
 
 const tmp = (p = "sf-runners-") => mkdtempSync(join(tmpdir(), p));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until<T>(fn: () => T | null | undefined | false, ms = 10_000): Promise<T> {
+// Generous: the Windows runner runs every test file at once, and a fake runner process can wait well past 10 s for its turn.
+async function until<T>(fn: () => T | null | undefined | false, ms = 60_000): Promise<T> {
   const end = Date.now() + ms;
   for (;;) {
     const v = fn();
