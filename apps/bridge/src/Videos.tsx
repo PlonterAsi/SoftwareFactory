@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { API } from "./api";
 
-interface Status { hasKey: boolean; keySource: "env" | "file" | null; keyHint: string | null; keyFile: string; settings: { dailyMax: number; models: string[] }; today: number; notes: number }
+interface Status { hasKey: boolean; keySource: "env" | "file" | null; keyHint: string | null; keyFile: string; settings: { dailyMax: number; models: string[]; inbox: string }; today: number; notes: number; waiting: number }
 interface Note { id: number; source: string; kind: "youtube" | "file"; title: string | null; question: string | null; notes: string; model: string; tokensIn: number; tokensOut: number; paidUsd: number; by: string; at: string; snippet?: string; cached?: boolean }
 
 async function call<T>(path: string, body?: unknown): Promise<T> {
@@ -70,8 +70,15 @@ export function Videos() {
           </div>
         </>}
         <div className="place-hint">
-          A YouTube link is watched by Google directly, with nothing downloaded. For TikTok, Instagram or X, save the clip from the app and give its file's full path: those sites forbid automated downloading.
-          The same video and question again is answered from the notes, free.
+          A YouTube link is watched by Google directly, with nothing downloaded. TikTok, Instagram and X forbid automated downloading, so save the clip from the app
+          (Instagram: Share, Download, or a screen recording) into the Watch folder below. Anything saved there is watched within a minute and moved to Watched; a .txt file with the same name is the question.
+          Point the folder at a Google Drive or OneDrive folder your phone saves to, and a reel is one share away. The same video and question again is answered from the notes, free.
+        </div>
+        <div className="place-edit">
+          <label className="muted">Watch folder{s.waiting ? ` (${s.waiting} waiting)` : ""}
+            <input defaultValue={s.settings.inbox} key={s.settings.inbox} aria-label="Watch folder"
+              onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== s.settings.inbox) run("saving", async () => setS(await call<Status>("/api/videos/settings", { inbox: v }))); }} />
+          </label>
         </div>
         <div className="place-edit">
           <input value={src} onChange={(e) => setSrc(e.target.value)} placeholder="https://www.youtube.com/watch?v=…  or  C:\Users\…\clip.mp4" aria-label="YouTube link or video file" />

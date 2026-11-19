@@ -40,6 +40,16 @@ SoftwareFactory refuses their links; save the clip from the app and give its fil
 API (up to 1 GB), watched, and deleted there right after. Add-ons may watch links only, never files, so an add-on cannot
 send a file from this computer to Google.
 
+## The Watch folder (Instagram, TikTok, X)
+
+Instagram, TikTok and X forbid automated downloading, so SoftwareFactory never fetches their links. The fast lawful
+route is a folder: save the clip yourself (Instagram's Share, Download where offered, or a screen recording) into the
+Watch folder, `~/SoftwareFactory/Watch` by default, changeable in Systems, Videos. Every minute SoftwareFactory watches
+up to three new videos there (each once it has not changed for 15 seconds, so a sync can finish), then moves each to
+`Watched/`. A text file with the same name (`reel.txt` beside `reel.mp4`) is the question; without one, Gemini takes
+general notes. A video that fails is not tried again until the file changes. Point the folder at a Google Drive or
+OneDrive folder your phone saves to, and a reel on the phone is one share away from being watched on the PC.
+
 ## Storage
 
 Notes live in `video_notes` and `video_notes_fts` (FTS5), written directly like add-on catalogs. Events:

@@ -89,6 +89,8 @@ describe("Videos", () => {
     expect(readFileSync(file, "utf8")).toBe(`WATCH_DETAIL=balanced\nGEMINI_API_KEY=${KEY}\n`);
     expect(JSON.stringify((v as any).log.db.prepare("SELECT payload FROM events").all())).not.toContain(KEY);
     expect(() => v.setKey("not a key")).toThrow(/does not look like a Gemini API key/);
+    writeFileSync(file, `WATCH_DETAIL=balanced\n${KEY}\n`);
+    expect(v.status()).toMatchObject({ hasKey: true, keyHint: "…0000" });
     v.setKey(null);
     expect(readFileSync(file, "utf8")).toBe("WATCH_DETAIL=balanced\n");
   });
@@ -143,5 +145,47 @@ describe("Videos", () => {
     expect(gen.body.contents[0].parts[0].file_data).toEqual({ file_uri: "https://g/files/abc", mime_type: "video/mp4" });
     expect(seen[seen.length - 1]).toMatchObject({ method: "DELETE", url: expect.stringContaining("/v1beta/files/abc") });
     await expect(v.watch({ file: join(dir, "notes.txt") })).rejects.toThrow(/no file|not a video/);
+  });
+});
+
+describe("the Watch folder", () => {
+  it("watches a saved clip by itself, with the question from its .txt, and moves both to Watched", async () => {
+    const home = tmp();
+    const g = fakeGoogle((url, s) => {
+      if (url.endsWith("/upload/v1beta/files")) return { status: 200, body: {}, headers: { "x-goog-upload-url": "https://upload.example/u1" } };
+      if (url === "https://upload.example/u1") return { status: 200, body: { file: { name: "files/r1", uri: "https://g/files/r1", mimeType: "video/mp4", state: "ACTIVE" } } };
+      if (url.endsWith("/v1beta/files/r1")) return { status: 200, body: {} };
+      return null;
+    });
+    const v = new Videos(new EventLog(":memory:"), { homeDir: home, env: {}, fetch: g.f, pollMs: 1 });
+    const dir = v.settings().inbox;
+    expect(dir).toBe(join(home, "SoftwareFactory", "Watch"));
+    const { mkdirSync, existsSync } = await import("node:fs");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "reel.mp4"), Buffer.alloc(500));
+    writeFileSync(join(dir, "reel.txt"), "What is the hook in the first 3 seconds?");
+    writeFileSync(join(dir, "notes.md"), "not a video");
+    expect(await v.scanInbox(Date.now() + 60_000)).toEqual({ watched: 0, failed: 0 }); // no key yet
+    v.setKey(KEY);
+    expect(v.status().waiting).toBe(1);
+    expect(await v.scanInbox(Date.now())).toEqual({ watched: 0, failed: 0 }); // just saved: may still be syncing
+    expect(await v.scanInbox(Date.now() + 60_000)).toEqual({ watched: 1, failed: 0 });
+    expect(existsSync(join(dir, "Watched", "reel.mp4"))).toBe(true);
+    expect(existsSync(join(dir, "Watched", "reel.txt"))).toBe(true);
+    expect(existsSync(join(dir, "notes.md"))).toBe(true);
+    expect(v.search("cargo")[0]).toMatchObject({ kind: "file", question: "What is the hook in the first 3 seconds?", by: "watch folder" });
+  });
+
+  it("does not try a failed clip again until the file changes", async () => {
+    const home = tmp();
+    const g = fakeGoogle(() => ({ status: 500, body: { error: { message: "boom" } } }));
+    const v = new Videos(new EventLog(":memory:"), { homeDir: home, env: {}, fetch: g.f, pollMs: 1 });
+    v.setKey(KEY);
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(v.settings().inbox, { recursive: true });
+    writeFileSync(join(v.settings().inbox, "bad.mov"), Buffer.alloc(10));
+    expect(await v.scanInbox(Date.now() + 60_000)).toEqual({ watched: 0, failed: 1 });
+    expect(await v.scanInbox(Date.now() + 60_000)).toEqual({ watched: 0, failed: 0 });
+    expect(v.status().waiting).toBe(0);
   });
 });

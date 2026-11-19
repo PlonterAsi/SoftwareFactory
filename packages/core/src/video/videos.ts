@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { ftsQuery } from "../plugins/store.js";
 import { canonicalUrl, Gemini, GeminiError, GEMINI_MODELS, isYouTube, videoMime, type WatchClip } from "./gemini.js";
@@ -18,7 +18,9 @@ import { canonicalUrl, Gemini, GeminiError, GEMINI_MODELS, isYouTube, videoMime,
  * plugin reads, so pasting it once in Systems serves both. It is never logged and never sent back to a screen.
  *
  * Only YouTube links are fetched. TikTok, Instagram and X forbid automated downloading in their terms, so clips from
- * there come in as files you saved yourself.
+ * there come in as files you saved yourself. The fastest way in is the Watch folder (~/SoftwareFactory/Watch, or any
+ * folder you choose, like a phone-synced Google Drive or OneDrive folder): a video saved there is watched by itself
+ * within a minute and moved to Watched/. A text file with the same name (reel.txt beside reel.mp4) is the question.
  */
 export const VIDEO_LIMITS = { dailyDefault: 40, dailyMax: 1000, concurrent: 2, questionChars: 4000, notesChars: 200_000 };
 
@@ -39,7 +41,7 @@ export interface VideoNote {
   snippet?: string;
 }
 export interface WatchRequest { url?: string; file?: string; question?: string | null; start?: number | null; end?: number | null; fps?: number | null; refresh?: boolean }
-export interface VideoSettings { dailyMax: number; models: string[] }
+export interface VideoSettings { dailyMax: number; models: string[]; inbox: string }
 export interface VideoStatus {
   hasKey: boolean;
   keySource: "env" | "file" | null;
@@ -48,6 +50,8 @@ export interface VideoStatus {
   settings: VideoSettings;
   today: number;
   notes: number;
+  /** Videos waiting in the Watch folder. */
+  waiting: number;
 }
 
 type Row = Record<string, any>;
@@ -94,7 +98,11 @@ export class Videos {
   private key(): { key: string; source: "env" | "file" } | null {
     const env = (this.o.env ?? process.env).GEMINI_API_KEY?.trim();
     if (env) return { key: env, source: "env" };
-    const f = this.envFile().GEMINI_API_KEY?.trim();
+    let f: string | undefined = this.envFile().GEMINI_API_KEY?.trim();
+    if (!f) {
+      // A key pasted on its own line, without "GEMINI_API_KEY=", still counts (an easy slip when pasting).
+      try { f = readFileSync(this.keyFile, "utf8").split(/\r?\n/).map((l) => l.trim()).find((l) => !l.includes("=") && !l.startsWith("#") && KEY_RE.test(l)); } catch { /* no file */ }
+    }
     return f ? { key: f, source: "file" } : null;
   }
 
@@ -103,7 +111,7 @@ export class Videos {
     const k = key == null ? "" : String(key).trim();
     if (k && !KEY_RE.test(k)) throw new Error("That does not look like a Gemini API key. Copy it from aistudio.google.com/apikey.");
     const file = this.keyFile;
-    const lines = existsSync(file) ? readFileSync(file, "utf8").split(/\r?\n/).filter((l) => !/^\s*(?:export\s+)?GEMINI_API_KEY\s*=/.test(l)) : [];
+    const lines = existsSync(file) ? readFileSync(file, "utf8").split(/\r?\n/).filter((l) => !/^\s*(?:export\s+)?GEMINI_API_KEY\s*=/.test(l) && !(!l.includes("=") && !l.trim().startsWith("#") && KEY_RE.test(l.trim()))) : [];
     while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
     if (k) lines.push(`GEMINI_API_KEY=${k}`);
     mkdirSync(dirname(file), { recursive: true });
@@ -120,9 +128,10 @@ export class Videos {
     const p = r ? JSON.parse(r.payload) : {};
     const dailyMax = Number.isInteger(p.dailyMax) && p.dailyMax >= 0 ? p.dailyMax : VIDEO_LIMITS.dailyDefault;
     const models = Array.isArray(p.models) && p.models.length ? p.models.map(String) : [...GEMINI_MODELS];
-    return { dailyMax, models };
+    const inbox = typeof p.inbox === "string" && p.inbox ? p.inbox : join(this.o.homeDir ?? homedir(), "SoftwareFactory", "Watch");
+    return { dailyMax, models, inbox };
   }
-  setSettings(b: { dailyMax?: unknown; models?: unknown }, by = "you"): VideoStatus {
+  setSettings(b: { dailyMax?: unknown; models?: unknown; inbox?: unknown }, by = "you"): VideoStatus {
     const cur = this.settings();
     const next = { ...cur };
     if (b.dailyMax !== undefined) {
@@ -134,6 +143,12 @@ export class Videos {
       const m = (Array.isArray(b.models) ? b.models : String(b.models).split(",")).map((x) => String(x).trim()).filter((x) => /^[a-z0-9][a-z0-9.\-]{2,60}$/.test(x)).slice(0, 5);
       if (!m.length) throw new Error("Name at least one Gemini model, like gemini-3.8-flash");
       next.models = m;
+    }
+    if (b.inbox !== undefined) {
+      const d = String(b.inbox ?? "").trim().replace(/^"(.*)"$/, "$1");
+      if (!d || !isAbsolute(d)) throw new Error("Give the Watch folder's full path");
+      mkdirSync(d, { recursive: true });
+      next.inbox = resolve(d);
     }
     this.log.append("video.settings", { ...next, by });
     return this.status();
@@ -147,7 +162,8 @@ export class Videos {
   status(): VideoStatus {
     const k = this.key();
     const n = (this.log.db.prepare("SELECT count(*) AS n FROM video_notes").get() as { n: number }).n;
-    return { hasKey: !!k, keySource: k?.source ?? null, keyHint: k ? `…${k.key.slice(-4)}` : null, keyFile: this.keyFile, settings: this.settings(), today: this.todayCount(), notes: Number(n) };
+    const settings = this.settings();
+    return { hasKey: !!k, keySource: k?.source ?? null, keyHint: k ? `…${k.key.slice(-4)}` : null, keyFile: this.keyFile, settings, today: this.todayCount(), notes: Number(n), waiting: this.waiting(settings.inbox).length };
   }
 
   // ---- notes ----------------------------------------------------------------------------------
@@ -180,7 +196,7 @@ export class Videos {
     if (url && file) throw new Error("Give a YouTube link or a video file, not both");
     if (url) {
       if (isYouTube(url)) return { kind: "youtube", source: canonicalUrl(url), stamp: "" };
-      if (/^https?:\/\//i.test(url)) throw new Error("Gemini watches YouTube links only. For a TikTok, Instagram or X video, save the clip from the app and give its file: those sites forbid automated downloading.");
+      if (/^https?:\/\//i.test(url)) throw new Error("Gemini watches YouTube links only. For a TikTok, Instagram or X video, save the clip from the app into your Watch folder (Systems, Videos), or give its file: those sites forbid automated downloading.");
       throw new Error("That is not a YouTube link");
     }
     if (file) {
@@ -259,5 +275,56 @@ export class Videos {
       this.busy--;
       if (uploaded) await g.remove(uploaded);
     }
+  }
+
+  // ---- the Watch folder -------------------------------------------------------------------------
+
+  /** Video files in the Watch folder that nobody has tried yet (a failed one waits until the file changes). */
+  private waiting(dir: string, now = Date.now()): { path: string; stamp: string; ready: boolean }[] {
+    let names: string[];
+    try { names = readdirSync(dir); } catch { return []; }
+    const out: { path: string; stamp: string; ready: boolean }[] = [];
+    for (const n of names) {
+      const p = join(dir, n);
+      if (!videoMime(p)) continue;
+      let st;
+      try { st = statSync(p); } catch { continue; }
+      if (!st.isFile()) continue;
+      const stamp = `${st.size}:${Math.floor(st.mtimeMs)}`;
+      const failed = this.log.db.prepare("SELECT 1 FROM events WHERE type = 'video.failed' AND json_extract(payload, '$.source') = ? AND json_extract(payload, '$.stamp') = ? LIMIT 1").get(p, stamp);
+      if (failed) continue;
+      // Still being copied or synced: wait until it has not changed for 15 seconds.
+      out.push({ path: p, stamp, ready: st.size > 0 && now - st.mtimeMs > 15_000 });
+    }
+    return out;
+  }
+
+  /**
+   * Watch what is waiting in the Watch folder (at most three a look), each then moved to Watched/ with its question
+   * file. Called every minute by the core; does nothing without a key or while the daily limit is reached.
+   */
+  async scanInbox(now = Date.now()): Promise<{ watched: number; failed: number }> {
+    const s = this.settings();
+    if (!this.key() || this.todayCount() >= s.dailyMax) return { watched: 0, failed: 0 };
+    let watched = 0, failed = 0;
+    for (const f of this.waiting(s.inbox, now).filter((x) => x.ready).slice(0, 3)) {
+      const side = join(dirname(f.path), `${basename(f.path, extname(f.path))}.txt`);
+      let question: string | null = null;
+      try { question = readFileSync(side, "utf8").trim().slice(0, VIDEO_LIMITS.questionChars) || null; } catch { /* no question: general notes */ }
+      try {
+        await this.watch({ file: f.path, question }, "watch folder");
+        const done = join(dirname(f.path), "Watched");
+        mkdirSync(done, { recursive: true });
+        const free = (name: string) => { let t = join(done, name); for (let i = 2; existsSync(t); i++) t = join(done, `${basename(name, extname(name))} (${i})${extname(name)}`); return t; };
+        try { renameSync(f.path, free(basename(f.path))); } catch { /* left in place; the notes answer it free next time */ }
+        if (question) try { renameSync(side, free(basename(side))); } catch { /* stays */ }
+        watched++;
+      } catch (e) {
+        failed++;
+        this.log.append("video.failed", { source: f.path, stamp: f.stamp, kind: "watch-folder", error: String((e as Error).message).slice(0, 500), by: "watch folder" });
+        if (/daily limit|No Gemini key/.test((e as Error).message)) break;
+      }
+    }
+    return { watched, failed };
   }
 }
