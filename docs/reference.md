@@ -265,7 +265,7 @@ The installed app sets what it needs itself. These matter in development, tests 
 | Automatic resumes | 3 | `MAX_AUTO_RESUMES` |
 | Council rounds | 2 | `MAX_COUNCIL_ROUNDS` in `factory/council.ts` |
 | Design: pass score, rounds, budget share | 4, 3, 35% | `PASS_SCORE`, `MAX_DISCOVERY_ROUNDS`, `DISCOVERY_BUDGET_SHARE` in `factory/discovery.ts` |
-| Views kept in a plan | 6 | `MAX_VIEWS` in `factory/loop.ts` |
+| Views kept in a plan | 6 | `MAX_VIEWS` in `factory/runkit.ts` |
 | Feature loop: starts at, budget share, least per feature | $3, 55%, $0.15 | `FEATURE_LOOP_MIN_USD`, `BUILD_BUDGET_SHARE`, `FEATURE_MIN_USD` in `factory/features.ts` |
 | Plan fits the money (SF-64): a feature session needs, one session per feature | $0.45, $0.27 | `FEATURE_FIT_USD`, `ONE_SESSION_FEATURE_USD`, `buildFit` in `factory/features.ts` |
 | Auto-work limits: ready bug or task, asked-for work, per day, at once | $1.50, $3, $10, 2 | `AUTO_WORK_DEFAULT` in `tickets/shapes.ts`; Limits in the Tickets header |
@@ -273,7 +273,7 @@ The installed app sets what it needs itself. These matter in development, tests 
 | Judge: pass score, looks, per-screen look | 4, 2, $0.15 | `PRODUCT_PASS_SCORE`, `MAX_EVALUATION_ROUNDS`, `SCREEN_LOOK_USD` in `factory/evaluate.ts` |
 | Repair: budget share, per feature, least to start | 25%, $0.40, $0.30 | `REPAIR_BUDGET_SHARE`, `REPAIR_FEATURE_USD`, `REPAIR_FEATURE_MIN_USD` |
 | Run time | 30 min up to $2, in proportion above, 240 min at most | `factory/stoprules.ts` |
-| Stronger model needs | opus $0.40, sonnet $0.15 left | `modelFloorUsd` in `factory/loop.ts` |
+| Stronger model needs | opus $0.40, sonnet $0.15 left | `modelFloorUsd` in `factory/runkit.ts` |
 | Tickets: per ticket, per day, at once | $0.60, $3, 2 | `AUTO_WORK_DEFAULT` in `tickets/` |
 
 ### The built-in crew
