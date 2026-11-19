@@ -102,6 +102,16 @@ describe("reading an app from its code", () => {
     expect(r[0].level === "critical" || r[0].level === "high").toBe(true);
   });
 
+  it("does not take a delete prompt for SQL, nor circle its own rules (SF-57, SF-58)", () => {
+    const r = riskScan(new Map([
+      ["web/kit/shell.js", `if (!confirm("Delete " + single(e).toLowerCase() + " \\"" + title + "\\"?")) return;`],
+      ["src/appkit.ts", `out.problems.push("create, edit or delete of a " + e.name + " fails: " + err.message);`],
+      ["src/rules.ts", `// sf-scan: rules\nconst R = [/shell\\s*=\\s*True|os\\.system\\(/];`],
+      ["src/db.js", `db.all("SELECT * FROM users WHERE id = " + id);`],
+    ]));
+    expect(r.map((x) => `${x.id} ${x.file}`)).toEqual(["sql-format src/db.js"]);
+  });
+
   it("reads the audit tools' reports", () => {
     expect(parseNpmAudit(JSON.stringify({ vulnerabilities: { lodash: { name: "lodash", severity: "high", via: [{ title: "Prototype pollution" }], fixAvailable: true } } }))).toEqual([{ name: "lodash", severity: "high", detail: "Prototype pollution" }]);
     expect(parseNpmAudit("npm ERR! network")).toBeNull();

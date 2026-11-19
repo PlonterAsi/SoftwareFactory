@@ -111,6 +111,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   recordAppVersion(log, appVersion);
   const order = new OrderEngine(log, runtime, { crew: bay, ...orderOpts });
   // The crew picks up ready bugs and tasks on its own, within your caps (docs/tickets.md, "The ready queue").
+  liftAutoWorkLimits(log);
   const autoWork = (): AutoWork => {
     const st = readSettings(log);
     return {
@@ -488,7 +489,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await importsRoute({ log, explorer, reviewer, readJson, canImport }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
-      if (url.pathname.startsWith("/api/launch/") || url.pathname.startsWith("/preview/")) {
+      if (url.pathname === "/api/launch" || url.pathname.startsWith("/api/launch/") || url.pathname.startsWith("/preview/")) {
         const r = await launchRoute({ log, launcher, readJson, openUrl: openFolder }, req, res, url);
         if (r === "handled") return;
         if (r) return json(res, r[0], r[1]);
@@ -615,6 +616,19 @@ export function readSettings(log: EventLog): {
 } {
   const rows = log.db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]));
+}
+
+/**
+ * Once: Assaf raised the standing auto-work limits on 19 Nov 2026 ("yes" to $10 a day, so SF's tickets stop waiting
+ * for tomorrow; a crew start capped at $0.60 ran out of money mid-fix on SF-53). A limit still at the old default is
+ * lifted to the new one; a limit set to anything else is yours and stays.
+ */
+export function liftAutoWorkLimits(log: EventLog): void {
+  const st = readSettings(log) as Record<string, unknown>;
+  if (st.ticketsLimitsLifted) return;
+  if (st.ticketsAutoDailyUsd === 3) log.append("settings.changed", { key: "ticketsAutoDailyUsd", value: AUTO_WORK_DEFAULT.dailyUsd });
+  if (st.ticketsAutoMaxUsd === 0.6) log.append("settings.changed", { key: "ticketsAutoMaxUsd", value: AUTO_WORK_DEFAULT.maxUsd });
+  log.append("settings.changed", { key: "ticketsLimitsLifted", value: true });
 }
 
 /** Show a folder in the system file manager (Explorer on Windows). */

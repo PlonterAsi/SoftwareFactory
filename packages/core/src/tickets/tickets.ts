@@ -203,7 +203,7 @@ const TRIAGE_AT_ONCE = 2;
 /** The part of the daily auto-work limit the Overseer's reads may use. */
 const TRIAGE_SHARE = 0.25;
 
-export const AUTO_WORK_DEFAULT: AutoWork = { on: true, maxUsd: 0.6, askedMaxUsd: 3, dailyUsd: 3, wip: 2 };
+export const AUTO_WORK_DEFAULT: AutoWork = { on: true, maxUsd: 1.5, askedMaxUsd: 3, dailyUsd: 10, wip: 2 };
 /** How often the crew starts or retries one ticket on its own before it leaves the rest to you. */
 export const AUTO_TRIES = 2;
 
