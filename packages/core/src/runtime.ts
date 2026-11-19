@@ -67,6 +67,8 @@ export interface AgentResult {
   cacheWriteTokens?: number;
   /** The CLI session, so a follow-up can continue the same conversation (--resume). */
   sessionId?: string;
+  /** The advisor model this call asked for, if any. */
+  advisor?: string;
 }
 
 export interface AgentRuntime {
@@ -99,7 +101,7 @@ export interface ClaudeCodeOptions {
 }
 
 /** An agent that edits files in a working copy (a ticket's repo work) rather than answering in its contract. */
-const edits = (req: AgentRequest) => !!req.cwd && !!req.tools?.some((t) => t === "Edit" || t === "Write");
+export const edits = (req: AgentRequest) => !!req.cwd && !!req.tools?.some((t) => t === "Edit" || t === "Write");
 
 /** Option A of the spike: drive Claude Code headless (`claude -p`). */
 /** Longest role kept on the command line; longer ones go on stdin (Windows command lines stop near 32,000 characters). */
@@ -223,14 +225,19 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     // An agent that only reads a project's files is still a station agent: its contract, not the person's memory.
     // A factory build agent edits a folder SF made, which has no memory of its own: the person's CLAUDE.md is
     // written for them, not for a station agent (run 2623's Builder ended with "Assaf, press Start").
-    const env = edits(req) && !req.noMemory ? { ...base } : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
+    const env: NodeJS.ProcessEnv = edits(req) && !req.noMemory ? { ...base } : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
     return req.pathFirst?.length ? withPathFirst(env, req.pathFirst) : env;
   }
 
   run(req: AgentRequest): Promise<AgentResult> {
     const started = Date.now();
     return new Promise((resolve, reject) => {
-      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...this.buildArgs(req)], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: this.envFor(req), ...(req.cwd ? { cwd: req.cwd } : {}) });
+      const args = this.buildArgs(req);
+      const advisor = args.includes("--advisor") ? args[args.indexOf("--advisor") + 1] : undefined;
+      const env = this.envFor(req);
+      // Claude Code keeps `--advisor` behind a gate on some accounts; a call that passes it opens the gate.
+      if (advisor) env.CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL = "1";
+      const child = spawn(this.opts.command, [...this.opts.commandArgs, ...args], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env, ...(req.cwd ? { cwd: req.cwd } : {}) });
       // A CLI that dies before reading stdin closes the pipe; the exit code says what happened.
       child.stdin.on("error", () => {});
       child.stdin.end(this.stdinFor(req), "utf8");
@@ -244,7 +251,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       child.on("close", (code) => {
         clearTimeout(timer);
         try {
-          resolve(parseClaudeJson(out, this.name, Date.now() - started));
+          const r = parseClaudeJson(out, this.name, Date.now() - started);
+          resolve(advisor ? { ...r, advisor } : r);
         } catch (e) {
           reject(Object.assign(new Error(`claude exited ${code}: ${(e as Error).message}${err ? ` | ${err.slice(0, 300)}` : ""}`), { costUsd: (e as { costUsd?: number }).costUsd ?? 0 }));
         }
