@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { secretHookFile, secretHookSettings } from "./safety/secrets.js";
@@ -46,6 +46,12 @@ export interface AgentRequest {
   resume?: string;
   /** Folders put first on the agent's PATH (a codebase's own tools, such as its Python environment), so its shell finds them. */
   pathFirst?: string[];
+  /**
+   * The advisor (Claude's advisor tool): a stronger model the agent consults before it commits to an approach and
+   * before it declares done. A model alias ("opus") sets it, null turns it off for this call, absent leaves the
+   * runtime's rule (see `advisorFor`).
+   */
+  advisor?: string | null;
 }
 
 export interface AgentResult {
@@ -84,6 +90,12 @@ export interface ClaudeCodeOptions {
   profile?: "lean" | "full";
   defaultModel?: string;
   timeoutMs?: number;
+  /**
+   * The advisor for working sessions on a cheaper model: "opus" by default, "off" for none (SF_ADVISOR overrides).
+   */
+  advisor?: string;
+  /** Whether the CLI has `--advisor`. Absent: asked once from `claude --help`. */
+  advisorSupported?: boolean;
 }
 
 /** An agent that edits files in a working copy (a ticket's repo work) rather than answering in its contract. */
@@ -100,9 +112,51 @@ export const READ_TOOLS = ["Read", "Glob", "Grep"];
 /** Tools that touch files: only with a folder, and only in it. */
 const FILE_TOOLS = [...READ_TOOLS, "Edit", "Write", "NotebookEdit"];
 
+/** Models the advisor ranks above. An advisor must be at least as capable as the agent it advises. */
+const ADVISOR_RANK: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3, fable: 4 };
+const rankOf = (model: string): number => {
+  const m = model.toLowerCase();
+  const hit = Object.keys(ADVISOR_RANK).find((k) => m === k || m.startsWith(`claude-${k}`) || m.startsWith(k));
+  return hit ? ADVISOR_RANK[hit] : 0;
+};
+
+/**
+ * Which advisor a call gets. An explicit request wins (null is off). Otherwise only a working session (an agent with
+ * edit tools in a folder: Builder, Fixer, a ticket's repo work) on a cheaper model gets the default advisor: those are
+ * long, multi-step turns where a plan check up front and a review before "done" pay back. Short answer-only station
+ * calls stay without one. An advisor that is not stronger than the agent's own model is dropped.
+ */
+export function advisorFor(req: AgentRequest, model: string, fallback: string): string | null {
+  if (req.advisor === null) return null;
+  const pick = req.advisor ?? (fallback !== "off" && edits(req) ? fallback : null);
+  if (!pick || pick === "off") return null;
+  const a = rankOf(pick), m = rankOf(model);
+  if (req.advisor === undefined && a && m && a <= m) return null;
+  return pick;
+}
+
+const advisorProbe = new Map<string, boolean>();
+/**
+ * Ask the CLI once whether it knows `--advisor` (Claude Code added it in 2026; an older CLI refuses the flag and the
+ * whole call fails). `--help` does not list it, so the probe passes it with a made-up flag after it: the CLI stops at
+ * the first option it does not know, before any model call, and names it.
+ */
+export function cliHasAdvisor(command: string, commandArgs: string[]): boolean {
+  const key = [command, ...commandArgs].join(" ");
+  let has = advisorProbe.get(key);
+  if (has === undefined) {
+    try {
+      const r = spawnSync(command, [...commandArgs, "--advisor", "opus", "--sf-advisor-probe", "-p"], { encoding: "utf8", timeout: 15_000, windowsHide: true, input: "" });
+      has = /unknown option '--sf-advisor-probe'/.test(`${r.stdout ?? ""}${r.stderr ?? ""}`);
+    } catch { has = false; }
+    advisorProbe.set(key, has);
+  }
+  return has;
+}
+
 export class ClaudeCodeRuntime implements AgentRuntime {
   readonly name: string;
-  private readonly opts: Required<ClaudeCodeOptions>;
+  private readonly opts: Required<Omit<ClaudeCodeOptions, "advisorSupported">> & { advisorSupported?: boolean };
 
   constructor(opts: ClaudeCodeOptions = {}) {
     this.opts = {
@@ -111,6 +165,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       profile: opts.profile ?? "lean",
       defaultModel: opts.defaultModel ?? "haiku",
       timeoutMs: opts.timeoutMs ?? Number(process.env.SF_AGENT_TIMEOUT_MS ?? 600_000),
+      advisor: opts.advisor ?? process.env.SF_ADVISOR ?? "opus",
+      ...(opts.advisorSupported !== undefined ? { advisorSupported: opts.advisorSupported } : {}),
     };
     this.name = `claude-code:${this.opts.profile}`;
   }
@@ -121,7 +177,10 @@ export class ClaudeCodeRuntime implements AgentRuntime {
    * ("spawn ENAMETOOLONG"). A very long role moves to stdin too, ahead of the prompt.
    */
   buildArgs(req: AgentRequest): string[] {
-    const args = ["-p", "--output-format", "json", "--model", req.model ?? this.opts.defaultModel];
+    const model = req.model ?? this.opts.defaultModel;
+    const args = ["-p", "--output-format", "json", "--model", model];
+    const advisor = advisorFor(req, model, this.opts.advisor);
+    if (advisor && (this.opts.advisorSupported ?? cliHasAdvisor(this.opts.command, this.opts.commandArgs))) args.push("--advisor", advisor);
     if (req.resume) args.push("--resume", req.resume);
     if (req.budgetUsd !== undefined) args.push("--max-budget-usd", String(req.budgetUsd));
     if (req.systemPrompt && req.systemPrompt.length <= MAX_ARG_ROLE) args.push("--append-system-prompt", req.systemPrompt);

@@ -64,6 +64,10 @@ Cleaning works the way Claude Code's Auto Dream cleans its own memory: it merges
 The official Dreams API comes later, with an API key. Switching billing to an API key is your
 decision.
 
+## The advisor
+
+Agents that work in a folder with edit tools (the Builder, the Fixer, a ticket's work in a repo) on a cheaper model (haiku or sonnet) get Claude's advisor tool: Claude Code's `--advisor opus`. The agent consults Opus before it commits to an approach and before it says it is done; the agent itself still writes the tokens, so most of the cost stays at the cheaper model's price. Advisor tokens count toward the same per-run cap. Short answer-only station calls run without one, and an advisor that is not stronger than the agent's own model is dropped. `SF_ADVISOR=off` turns it off, `SF_ADVISOR=fable` picks another model, and a call can set `advisor` itself (`null` for none). SF probes the CLI once and skips the flag on a Claude Code too old to know it.
+
 ## Events and tables
 
 | Event | Payload |
