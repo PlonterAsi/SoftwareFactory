@@ -50,6 +50,10 @@ export function fastGates(dir: string, files: string[]): FastGates {
   // 2. tsc --noEmit, when the folder is a TypeScript project.
   if (!existsSync(join(dir, "tsconfig.json"))) done({ gate: "tsc", state: "skipped", note: "no tsconfig.json", messages: [] });
   else {
+    // A codebase that generates files before it typechecks (SoftwareFactory's own wiring.generated.js) says so in a
+    // pretypecheck script: run it first, or tsc fails on a file that is simply not generated yet (SF-55's run).
+    const pre = readJson(join(dir, "package.json"))?.scripts?.pretypecheck;
+    if (typeof pre === "string" && existsSync(join(dir, "node_modules"))) run("npm", ["run", "--silent", "pretypecheck"], dir);
     const bin = localBin(dir, "tsc");
     const r = bin ? run(bin, ["--noEmit", "--pretty", "false"], dir) : run("tsc", ["--noEmit", "--pretty", "false"], dir);
     if (r.error || (!bin && r.status !== 0 && /not (found|recognized)|ENOENT/i.test(`${r.stderr}${r.stdout}`))) done({ gate: "tsc", state: "skipped", note: "tsc is not installed", messages: [] });

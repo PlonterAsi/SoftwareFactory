@@ -139,3 +139,24 @@ describe("tickets: open bugs and tasks get read by themselves", () => {
     expect(poor.triage()).toEqual([]);
   });
 });
+
+describe("tickets: reads that leave money for the crew", () => {
+  it("counts what a read really cost, keeps reads to a quarter of the day, and skips tickets in no project", async () => {
+    const log = new EventLog();
+    const runtime: AgentRuntime = { name: "stub", run: async () => ({ text: "Clear.\nSIZE: S\nSTATUS: open", costUsd: 0.02, durationMs: 1, models: ["stub"], runtime: "stub", contextTokens: 0 }) as any };
+    const t = new Tickets(log, { runtime, autoWork: () => ({ ...AUTO_WORK_DEFAULT, dailyUsd: 0.4 }) });
+    const nowhere = t.open({ kind: "bug", title: "Filed by an add-on in no project" });
+    const a = t.open({ project: 7, kind: "bug", title: "One" });
+    t.open({ project: 7, kind: "bug", title: "Two" });
+    // A quarter of $0.40 is $0.10: one read at its $0.10 cap fits, the second waits.
+    expect(t.triage()).toEqual([a.id]);
+    for (let i = 0; i < 100 && t.notes(a.id).every((n) => !/Read by the Overseer/.test(n.text)); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(t.autoUsdToday()).toBeCloseTo(0.02, 5);
+    expect(t.get(nowhere.id)!.status).toBe("open");
+  });
+
+  it("never starts a ready ticket in no project on its own", () => {
+    expect(autoWorkRefusal({ kind: "bug", status: "ready", size: "S", blocked: false, assignee: null, project: null })).toMatch(/In no project/);
+    expect(autoWorkRefusal({ kind: "bug", status: "ready", size: "S", blocked: false, assignee: null, project: 7 })).toBeNull();
+  });
+});
