@@ -103,3 +103,39 @@ describe("tickets: the ready queue", () => {
     expect(autoWorkRefusal({ ...base, kind: "request" })).toMatch(/^A request waits/);
   });
 });
+
+describe("tickets: open bugs and tasks get read by themselves", () => {
+  const stub = (calls: string[]): AgentRuntime => ({ name: "stub", run: async (req: any) => { calls.push(req.prompt); return { text: "Pin the packages.\nSIZE: S\nSTATUS: ready", costUsd: 0.01, durationMs: 1, models: ["stub"], runtime: "stub", contextTokens: 0 } as any; } });
+  const until = async (f: () => boolean) => { for (let i = 0; i < 200 && !f(); i++) await new Promise((r) => setTimeout(r, 5)); return f(); };
+
+  it("has the Overseer read open bugs and tasks once, most urgent first, then the queue takes them", async () => {
+    const log = new EventLog();
+    const factory = fakeFactory(log);
+    const calls: string[] = [];
+    const t = new Tickets(log, { runtime: stub(calls), factory: factory as unknown as Factory, autoWork: () => ({ ...AUTO_WORK_DEFAULT }) });
+    const later = t.open({ project: 7, kind: "task", title: "Split a big file", priority: "someday" });
+    const now = t.open({ project: 7, kind: "bug", title: "Update 8 vulnerable packages", priority: "now", body: "npm audit lists 8 packages with known vulnerabilities. Update them to fixed versions.", answers: { expected: "npm audit clean" } });
+    const idea = t.open({ project: 7, kind: "idea", title: "A new door" });
+    const mine = t.open({ project: 7, kind: "bug", title: "Mine" });
+    t.edit(mine.id, "assignee", "you");
+    expect(t.triage()).toEqual([now.id, later.id]);
+    expect(await until(() => t.get(now.id)!.status !== "open" && t.get(later.id)!.status !== "open")).toBe(true);
+    expect(t.get(idea.id)!.status).toBe("open");
+    expect(t.notes(now.id).some((n) => n.by === "dispatcher" && /Overseer reads it on its own/.test(n.text))).toBe(true);
+    // Read once: never again, and the read is not counted as a start.
+    expect(t.triage()).toEqual([]);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("stays within today's auto-work limit and does nothing when auto-work is off", () => {
+    const log = new EventLog();
+    const calls: string[] = [];
+    const off = new Tickets(log, { runtime: stub(calls), autoWork: () => ({ ...AUTO_WORK_DEFAULT, on: false }) });
+    off.open({ project: 7, kind: "bug", title: "A bug" });
+    expect(off.triage()).toEqual([]);
+    const log2 = new EventLog();
+    const poor = new Tickets(log2, { runtime: stub(calls), autoWork: () => ({ ...AUTO_WORK_DEFAULT, dailyUsd: 0.05 }) });
+    poor.open({ project: 7, kind: "bug", title: "A bug" });
+    expect(poor.triage()).toEqual([]);
+  });
+});

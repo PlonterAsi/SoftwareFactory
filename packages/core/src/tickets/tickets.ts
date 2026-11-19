@@ -25,7 +25,7 @@ import {
   FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS,
   SIZES, autoWorkRefusal, ideaFromTicket, isClosed, keyFromName, keyText, nextMoves, refuseMove, refuseParent, titleFrom, workDocument,
   type LinkView, type NoteView, type Priority, type Size, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView,
-  aKind,
+  aKind, AUTO_KINDS,
 } from "./model.js";
 
 export interface OpenTicket {
@@ -198,6 +198,9 @@ export interface AutoWork {
   /** Tickets worked at once per project. */
   wip: number;
 }
+/** How many open tickets the Overseer reads at the same time on its own. */
+const TRIAGE_AT_ONCE = 2;
+
 export const AUTO_WORK_DEFAULT: AutoWork = { on: true, maxUsd: 0.6, askedMaxUsd: 3, dailyUsd: 3, wip: 2 };
 /** How often the crew starts or retries one ticket on its own before it leaves the rest to you. */
 export const AUTO_TRIES = 2;
@@ -310,7 +313,7 @@ export class Tickets {
 
   /** How often the crew started or retried this ticket on its own. */
   private autoTries(id: number): number {
-    return Number((this.log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND json_extract(payload, '$.id') = ?").get(id) as { n: number }).n);
+    return Number((this.log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND json_extract(payload, '$.triage') IS NULL AND json_extract(payload, '$.id') = ?").get(id) as { n: number }).n);
   }
 
   /** Tickets you asked for (the last word on each, its own or its epic's), by id. */
@@ -442,6 +445,7 @@ export class Tickets {
         this.stuck.set(t.id, why);
       }
     }
+    this.triage(spent);
     return started;
   }
 
@@ -1410,6 +1414,35 @@ export class Tickets {
       .finally(() => this.inRepo.delete(t.id));
     this.inRepo.set(t.id, job);
     return { ticket: this.get(t.id)!, run: null, branch };
+  }
+
+  /**
+   * Open bugs and tasks that nobody has read stay "open" forever, and the crew only takes "ready" work, so a pile of
+   * them left the crew idle (19 Nov 2026: all 27 SoftwareFactory tickets open, the vulnerable-packages bug marked now
+   * and blocking among them). The dispatcher has the Overseer read each one once, most urgent first: one short call
+   * that sizes it and moves it to ready when it is clear, after which the queue takes it like any other. Each read
+   * counts against today's auto-work limit; a ticket you took, one that is blocked or held, and taste kinds are left
+   * alone. Returns the tickets sent for reading.
+   */
+  triage(spentToday = this.autoUsdToday()): number[] {
+    const rule = this.autoWork();
+    if (!rule.on || !this.opts.runtime || this.opts.canWork?.()) return [];
+    const cap = Math.min(this.opts.budgetUsd ?? 0.1, 0.1);
+    const read = new Set((this.log.db.prepare("SELECT json_extract(payload, '$.id') AS id FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.triage') = 1").all() as { id: number }[]).map((r) => Number(r.id)));
+    const rank = (p: Priority | null) => (p ? PRIORITIES.indexOf(p) : PRIORITIES.length);
+    const open = this.list({ view: "all", status: "open", limit: 500 })
+      .filter((t) => AUTO_KINDS.includes(t.kind) && !read.has(t.id) && !this.asking.has(t.id) && t.assignee !== "you" && !t.blocked && !this.handBrake(t.id))
+      .sort((a, b) => rank(a.priority) - rank(b.priority) || a.id - b.id);
+    const sent: number[] = [];
+    let spent = spentToday;
+    for (const t of open) {
+      if (this.asking.size >= TRIAGE_AT_ONCE || spent + cap > rule.dailyUsd + 1e-9) break;
+      this.log.append("ticket.noted", { id: t.id, by: "dispatcher", auto: 1, triage: 1, capUsd: cap, kind: "event", text: `The Overseer reads it on its own to size it and say whether it is ready for the crew (up to $${cap.toFixed(2)}, from today's auto-work limit). Write "hold" on the thread to keep the crew off it.` });
+      spent += cap;
+      sent.push(t.id);
+      this.ask(t.id).catch((e) => this.log.append("ticket.noted", { id: t.id, by: "dispatcher", kind: "event", text: `Reading it failed: ${(e as Error).message}` }));
+    }
+    return sent;
   }
 
   /**
