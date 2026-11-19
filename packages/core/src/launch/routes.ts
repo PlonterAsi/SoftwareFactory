@@ -104,6 +104,7 @@ export function projectFolders(log: EventLog, projectId: number): ProjectFolder[
  *   POST /api/launch/projects/:id/samples     { dir?, want? }  make sample input files from its tests and spec
  *   POST /api/launch/projects/:id/folder      { dir }   run it from a folder of yours (links kind "folder"); { dir, remove: true } forgets it
  *   POST /api/launch/projects/:id/terminal    { dir? }  open a terminal in the folder
+ *   GET  /api/launch/sessions                 every session running now, across projects (also GET /api/launch)
  *   GET  /api/launch/sessions/:sid?after=     the session and its output after line n
  *   GET  /api/launch/sessions/:sid/stream     server-sent events: output lines and state changes
  *   POST /api/launch/sessions/:sid/stop
@@ -128,6 +129,11 @@ export async function launchRoute(
     if (!at) { res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }); res.end("This project's preview is off. Press Start on its Run tab."); return "handled"; }
     serveStatic(res, resolve(at.dir, at.root), pv[2], req.method);
     return "handled";
+  }
+  // SF-46: everything running now, across projects, in one call (finding it took one call per project).
+  if (req.method === "GET" && (path === "/api/launch" || path === "/api/launch/sessions")) {
+    const names = new Map((log.db.prepare("SELECT id, name FROM projects").all() as { id: number; name: string }[]).map((p) => [Number(p.id), p.name]));
+    return [200, { sessions: launcher.running().map((s) => ({ ...s, projectName: names.get(s.projectId) ?? null })) }];
   }
   if (!path.startsWith("/api/launch/")) return null;
 

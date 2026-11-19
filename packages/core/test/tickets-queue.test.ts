@@ -36,7 +36,7 @@ describe("tickets: the ready queue", () => {
     const id = ready({ kind: "bug", title: "Run tab blank after restart" });
     expect(t.dispatch()).toEqual([id]);
     expect(t.get(id)!.status).toBe("in_progress");
-    expect(factory.started[0].opts).toMatchObject({ maxUsd: 0.6, autoApprove: true });
+    expect(factory.started[0].opts).toMatchObject({ maxUsd: AUTO_WORK_DEFAULT.maxUsd, autoApprove: true });
     expect(t.notes(id).some((n) => n.by === "dispatcher" && /picked it up on its own/.test(n.text))).toBe(true);
   });
 
@@ -158,5 +158,19 @@ describe("tickets: reads that leave money for the crew", () => {
   it("never starts a ready ticket in no project on its own", () => {
     expect(autoWorkRefusal({ kind: "bug", status: "ready", size: "S", blocked: false, assignee: null, project: null })).toMatch(/In no project/);
     expect(autoWorkRefusal({ kind: "bug", status: "ready", size: "S", blocked: false, assignee: null, project: 7 })).toBeNull();
+  });
+});
+
+describe("tickets: the 19 Nov limits", () => {
+  it("lifts limits still at the old defaults once, and keeps any you set", async () => {
+    const { liftAutoWorkLimits, readSettings } = await import("../src/server.js");
+    const log = new EventLog();
+    log.append("settings.changed", { key: "ticketsAutoDailyUsd", value: 3 });
+    log.append("settings.changed", { key: "ticketsAutoMaxUsd", value: 0.9 });
+    liftAutoWorkLimits(log);
+    expect(readSettings(log)).toMatchObject({ ticketsAutoDailyUsd: 10, ticketsAutoMaxUsd: 0.9 });
+    log.append("settings.changed", { key: "ticketsAutoDailyUsd", value: 3 });
+    liftAutoWorkLimits(log);
+    expect(readSettings(log).ticketsAutoDailyUsd).toBe(3);
   });
 });

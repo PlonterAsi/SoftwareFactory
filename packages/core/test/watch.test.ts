@@ -76,7 +76,7 @@ describe("the queue fits the monthly budgets", () => {
   it("holds the crew's own starts while the month has less left than one start, and says why", () => {
     const { t, id } = setup(0.4);
     expect(t.dispatch()).toEqual([]);
-    expect(t.queue(7)[0]).toMatchObject({ position: null, why: expect.stringMatching(/^Waits for money: this month's budget of \$3\.00 has \$0\.40 left.*\$0\.60 one start/) });
+    expect(t.queue(7)[0]).toMatchObject({ position: null, why: expect.stringMatching(/^Waits for money: this month's budget of \$3\.00 has \$0\.40 left.*\$1\.50 one start/) });
     expect(t.get(id)!.status).toBe("ready");
   });
 

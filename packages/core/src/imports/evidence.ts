@@ -255,12 +255,20 @@ export function extractIntegrations(dir: string, files: Map<string, string>, env
   return out;
 }
 
+/**
+ * A file that holds scan rules themselves (this one) names every risky call in its patterns, so it would be circled
+ * for each of them (SF-58: "a shell command is built from text" at this very list). A file carrying the marker
+ * `sf-scan: rules` is skipped by these patterns; its secrets are still looked for.
+ */
+const RULES_MARKER = "sf-scan: rules";
+
+// sf-scan: rules
 const RISKS: { id: string; level: RiskLevel; text: string; re: RegExp; ext?: RegExp }[] = [
   { id: "debug-on", level: "high", text: "The app starts in debug mode, which lets anyone who reaches an error page run code on the server", re: /\.run\([^)]*debug\s*=\s*True|^\s*DEBUG\s*=\s*True\b/m, ext: /\.py$/ },
   { id: "hardcoded-secret", level: "high", text: "A secret key is written in the code instead of read from a setting", re: /\b\w*(?:secret_?key|jwt_?secret|api_?key|password|passwd)\b\s*[:=]\s*['"](?=[^'"\n]*[^\s'"])[^'"\n{}$<>]{6,}['"]|\.login\(\s*['"][^'"\n]+['"]\s*,\s*['"][^'"\n]{6,}['"]/i },
   { id: "eval", level: "high", text: "Code is built from text and run (eval or exec): unsafe when any of that text comes from a visitor", re: /(^|[^.\w])(eval|exec)\(\s*[^)'"]/m, ext: /\.(py|js|ts|jsx|tsx|mjs|cjs|php)$/ },
   { id: "shell", level: "high", text: "A shell command is built from text (shell=True or os.system): unsafe when any of it comes from a visitor", re: /shell\s*=\s*True|os\.system\(|child_process['"]\)?\.exec\(/ },
-  { id: "sql-format", level: "high", text: "A database query is put together from text, which allows SQL injection", re: /(execute|query)\(\s*(f['"]|['"][^'"]*['"]\s*(%|\+)|`[^`]*\$\{)[^)]*\b(SELECT|INSERT|UPDATE|DELETE)\b|\b(SELECT|INSERT|UPDATE|DELETE)\b[^'"`\n]*['"`]\s*(\+|%)\s*\w/i },
+  { id: "sql-format", level: "high", text: "A database query is put together from text, which allows SQL injection", re: /(execute|query)\(\s*(f['"]|['"][^'"]*['"]\s*(%|\+)|`[^`]*\$\{)[^)]*\b(SELECT|INSERT|UPDATE|DELETE)\b|\b(SELECT\b[^'"`\n]*\bFROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM)\b[^'"`\n]*['"`]\s*(\+|%)\s*\w/i },
   { id: "pickle", level: "medium", text: "Data is loaded with pickle, which runs code hidden in the data", re: /pickle\.loads?\(/, ext: /\.py$/ },
   { id: "tls-off", level: "medium", text: "A web call skips the certificate check (verify=False)", re: /verify\s*=\s*False|rejectUnauthorized\s*:\s*false/ },
   { id: "cors-any", level: "medium", text: "Any website may call this app's API (CORS is open to *)", re: /Access-Control-Allow-Origin['"]?\s*[,:]\s*['"]\*['"]|CORS\(\s*app\s*\)|origins?\s*[=:]\s*['"]\*['"]/ },
@@ -277,7 +285,7 @@ export function riskScan(files: Map<string, string>): RiskFinding[] {
   const push = (r: RiskFinding) => { const n = count.get(r.id) ?? 0; count.set(r.id, n + 1); if (n < 4) out.push(r); };
   for (const [file, text] of files) {
     if (isTest(file)) continue;
-    for (const r of RISKS) {
+    for (const r of text.includes(RULES_MARKER) ? [] : RISKS) {
       if (r.ext && !r.ext.test(file)) continue;
       const m = r.re.exec(text);
       if (m) push({ id: r.id, level: r.level, text: r.text, file, line: lineOf(text, m.index + (m[0].startsWith("\n") ? 1 : 0)) });

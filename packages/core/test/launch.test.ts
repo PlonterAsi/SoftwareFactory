@@ -254,6 +254,18 @@ describe("launch: running a project from the Bridge", () => {
     core.launcher.stopAll();
   }, 30_000);
 
+  it("lists everything running now, across projects, in one call (SF-46)", async () => {
+    const { log, core, call } = await boot();
+    const pid = createProject(log, { name: "Echo tool" });
+    const dir = folder({ "package.json": JSON.stringify({ type: "module" }), "bin/echo.js": ECHO_CLI });
+    await call(`/api/launch/projects/${pid}/folder`, { dir });
+    expect((await call("/api/launch/sessions")).body.sessions).toEqual([]);
+    const s = (await call(`/api/launch/projects/${pid}/start`, { profileId: "bin:echo", args: "--stdin" })).body;
+    await until(async () => (await call(`/api/launch/sessions/${s.id}`)).body.session.state === "running");
+    expect((await call("/api/launch")).body.sessions).toEqual([expect.objectContaining({ id: s.id, projectId: pid, projectName: "Echo tool" })]);
+    core.launcher.stopAll();
+  }, 30_000);
+
   it("starts a web app on a free port, shows its address, and stops it with everything it started", async () => {
     const { log, core, call } = await boot();
     const pid = createProject(log, { name: "Web app" });
