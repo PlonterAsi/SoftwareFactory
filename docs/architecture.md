@@ -82,7 +82,11 @@ Beside `src/`: `kit/` is the app kit copied into every built app; `agent-skills/
 
 | File | Job |
 |---|---|
-| `loop.ts` | `Factory` (start, resume, gates) and `Run` (the station sequence, budgets, escalations, restore from the log) |
+| `loop.ts` | `Factory` (start, resume, gates); re-exports the run's parts below |
+| `run.ts` | `Run`: the station sequence (intake, council, discovery, plan, tests, build, test and fix) |
+| `runjudge.ts` | `RunJudge`: review, screen looks, product evaluation, the build gate and its send-backs |
+| `runbase.ts` | `RunBase`: a run's state, asking an agent, stations, budgets, escalations, gates, the suite, the finish |
+| `runkit.ts` | The run's shapes and pure helpers, and `restoreState()` (restore from the log) |
 | `council.ts` | Seats, votes, the brief |
 | `discovery.ts` | Product documents, the Critic's rubric, the design loop's rules |
 | `features.ts` | The plan as a feature list; the build loop's budget shares |

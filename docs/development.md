@@ -81,8 +81,8 @@ Register at module load and import the module once from `App.tsx`. `section` is 
 
 ### Add a station or a check to the engine
 
-1. A check that costs nothing (a scan, a test, a browser look) belongs in the core, in its own file under `factory/`, called from `loop.ts`. Make its result an event, and make a failure something the Fixer or the Builder can act on: say the file, the evidence and what to do.
-2. A station that calls an agent needs a slot (`bay/agentfile.ts`), a default agent and an output contract (`bay/builtin.ts`), a call in `Run.go()` in `loop.ts` wrapped in `this.station(...)`, and a place in `restoreState()` so a resumed run knows it is done.
+1. A check that costs nothing (a scan, a test, a browser look) belongs in the core, in its own file under `factory/`, called from the run (`run.ts`, `runjudge.ts`). Make its result an event, and make a failure something the Fixer or the Builder can act on: say the file, the evidence and what to do.
+2. A station that calls an agent needs a slot (`bay/agentfile.ts`), a default agent and an output contract (`bay/builtin.ts`), a call in `Run.go()` in `run.ts` wrapped in `this.station(...)`, and a place in `restoreState()` (`runkit.ts`) so a resumed run knows it is done.
 3. Give it a budget rule: a share of the run, a least amount below which it is skipped, and what happens when the money is not there. A run must always reach the build gate with what it has.
 4. Show it: the stop on the Mission track (`projects/mission/model.ts`), a tab in the run deck (`RunDeck.tsx`), and a line in the engine review (`factory/retro.ts`).
 5. Test it in `packages/core/test/engine.test.ts` with the mock runtime.

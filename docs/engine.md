@@ -25,7 +25,7 @@ one line
   └─ ship                commit, tag, and the engine's review of its own run
 ```
 
-The code is `Run.go()` in `packages/core/src/factory/loop.ts`. Station ids, in order: `intake`, `council`, `discover`, `plan`, `gateA`, `tests`, `build`, `test`, `fix`, `review`, `evaluate`, `gateB`, `ship`.
+The code is `Run.go()` in `packages/core/src/factory/run.ts`. Station ids, in order: `intake`, `council`, `discover`, `plan`, `gateA`, `tests`, `build`, `test`, `fix`, `review`, `evaluate`, `gateB`, `ship`.
 
 ### The pipeline is a flow (2026-11-17)
 

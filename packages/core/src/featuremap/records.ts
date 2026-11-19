@@ -120,7 +120,7 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     design: "Shown as the factory floor on All builds (stations lit per run), the run deck with a tab per station, the timeline of agent calls, and the approval bar at each gate.",
     screens: ["/factory"], docs: ["docs/engine.md", "docs/flows.md", "docs/loop-engineering.md"],
     stations: ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix"],
-    files: [`${C}factory/loop.ts`, `${C}factory/stoprules.ts`, `${C}factory/crew.ts`, `${C}factory/workspace.ts`, `${C}factory/workbench.ts`, `${C}factory/trim.ts`, `${C}factory-cli.ts`, `${B}FactoryFloor.tsx`, `${B}RunDeck.tsx`, `${B}Timeline.tsx`, `${B}DuplicateNotice.tsx`],
+    files: [`${C}factory/loop.ts`, `${C}factory/run.ts`, `${C}factory/runbase.ts`, `${C}factory/runjudge.ts`, `${C}factory/runkit.ts`, `${C}factory/stoprules.ts`, `${C}factory/crew.ts`, `${C}factory/workspace.ts`, `${C}factory/workbench.ts`, `${C}factory/trim.ts`, `${C}factory-cli.ts`, `${B}FactoryFloor.tsx`, `${B}RunDeck.tsx`, `${B}Timeline.tsx`, `${B}DuplicateNotice.tsx`],
     api: ["/api/factory"],
   },
   {
