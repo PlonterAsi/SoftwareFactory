@@ -203,6 +203,7 @@ describe("tickets: work merged outside the crew's own PR", () => {
     expect(ticketNumbersIn("Apply the adopt-now set (SF-16, 17, 18, 20, 21, 22) (#61)", "SF")).toEqual([16, 17, 18, 20, 21, 22]);
     expect(ticketNumbersIn("fix\nsf/SF-24-h3-test-integrity-guard", "SF")).toEqual([24]);
     expect(ticketNumbersIn("SF-3 and SF-4: seat a drafted agent", "SF")).toEqual([3, 4]);
+    expect(ticketNumbersIn("SF-57/58 scanner false positives", "SF")).toEqual([57, 58]);
     expect(ticketNumbersIn("Update to v0.2.13, WSF-9, SF-x", "SF")).toEqual([]);
   });
 
