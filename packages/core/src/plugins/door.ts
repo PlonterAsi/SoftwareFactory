@@ -55,6 +55,14 @@ export function coreDoor(deps: { log: EventLog; tickets: Tickets; bay?: AgentBay
         if (!tickets.get(id)) throw new Error(`No ticket ${id}`);
         return ticketRow(tickets.say(id, note, { by }));
       }
+      if (verb === "ticket.ask") {
+        // Your verdict in an add-on is your ask: the crew starts it within the standing auto-work limit, never past it.
+        const id = Number(args.id);
+        const t = Number.isFinite(id) ? tickets.get(id) : null;
+        if (!t) throw new Error(`No ticket ${args.id}`);
+        if (t.openedBy !== by) throw new Error("An add-on can ask only for tickets it opened itself");
+        return ticketRow(tickets.setAsked(id, args.on !== false, by));
+      }
       throw new Error(`Unknown action "${verb}"`);
     },
   };

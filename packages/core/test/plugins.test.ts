@@ -255,6 +255,21 @@ describe("the door to real records and actions", () => {
     expect(() => h.records("reader", "secrets")).toThrow(/Unknown records/);
   });
 
+  it("asks the crew for a ticket it opened itself, never for anyone else's", () => {
+    const { tickets, h } = doorHost();
+    h.install(plugin(page, { id: "asker", panels, permissions: ["actions"], actions: ["ticket.open", "ticket.ask"] }));
+    h.enable("asker");
+    const t = h.act("asker", "ticket.open", { title: "Adapt the advisor skill" }) as { id: number };
+    expect(tickets.isAsked(tickets.get(t.id)!)).toBe(false);
+    h.act("asker", "ticket.ask", { id: t.id });
+    expect(tickets.isAsked(tickets.get(t.id)!)).toBe(true);
+    h.act("asker", "ticket.ask", { id: t.id, on: false });
+    expect(tickets.isAsked(tickets.get(t.id)!)).toBe(false);
+    const yours = tickets.open({ kind: "task", title: "Yours", by: "you" });
+    expect(() => h.act("asker", "ticket.ask", { id: yours.id })).toThrow(/only for tickets it opened/);
+    expect(() => h.act("asker", "ticket.ask", { id: 99999 })).toThrow(/No ticket/);
+  });
+
   it("takes only the actions it listed, marks who did it, and logs every try", () => {
     const { log, tickets, h } = doorHost();
     h.install(plugin(page, { id: "doer", panels, permissions: ["actions"], actions: ["ticket.open", "project.create"] }));

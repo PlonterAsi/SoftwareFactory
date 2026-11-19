@@ -44,12 +44,14 @@ export const MAX_MANIFEST_MONTHLY_USD = 100;
 
 /**
  * What a plugin may do with the `actions` permission. Each is the same core command the app's own
- * screens call, so a plugin cannot do anything the screens cannot. None of these spends money.
+ * screens call, so a plugin cannot do anything the screens cannot. Only ticket.ask can lead to spending, and only
+ * within your standing auto-work limit, on tickets the plugin opened itself.
  */
 export const PLUGIN_ACTIONS = {
   "project.create": "Create a project",
   "ticket.open": "Open a ticket",
   "ticket.note": "Add a note to a ticket",
+  "ticket.ask": "Ask the crew to start a ticket it opened, within your auto-work limit (this can spend up to that limit)",
 } as const;
 export type PluginAction = keyof typeof PLUGIN_ACTIONS;
 

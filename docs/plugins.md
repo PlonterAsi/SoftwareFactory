@@ -55,13 +55,14 @@ With `actions`, a plugin's page can do real things in SoftwareFactory. This is w
 | `project.create` | creates a project | `name`, `kind?`, `summary?` |
 | `ticket.open` | opens a ticket | `title`, `kind?` (bug, task, request, idea, question), `body?`, `project?` |
 | `ticket.note` | adds a note to a ticket | `id`, `text` |
+| `ticket.ask` | marks a ticket the plugin opened as work you asked for: the crew starts it by itself within your standing auto-work limit (Tickets → Limits) | `id`, `on?` (false takes the mark off) |
 
 The rules:
 
 - **Named, one by one.** The manifest must list each action. The Plugins page shows every one in plain words above the Turn on button, and turning it on grants exactly those. An update that adds an action waits until you turn it on again.
 - **The same commands the screens use.** An action calls the core command the app's own screens call, so a plugin can do nothing the screens cannot.
 - **Marked and logged.** What it makes is marked `plugin:<id>` (a ticket's "opened by"), and every try, allowed or refused, is a `plugin.acted` event and a line in the plugin's log.
-- **Nothing that spends money yet.** No action starts a build or a crew run. Those come later, each with its price shown and a hold to confirm.
+- **Money only within your limit.** No action starts a build directly. `ticket.ask` only marks a ticket the plugin opened itself as asked for; the crew then starts it under your standing auto-work limit (per run and per day), the same as a ticket you mark yourself. Write "hold" on the ticket to keep it off.
 - **At most 60 actions a minute** per plugin.
 
 The example `field-desk` (Plugins page, Examples, Add) is the smallest plugin that reads real records and acts on them.
