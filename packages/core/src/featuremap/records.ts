@@ -225,6 +225,15 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     api: ["/api/agent", "/api/setup", "/api/cost", "/api/open"],
   },
   {
+    id: "crew-advisor", name: "Crew advisor (advisor tool)", group: "Agents",
+    purpose: "Lets a crew agent on a cheaper model consult a stronger one mid-task (Anthropic's advisor tool), so hard moments get the stronger model's judgment at close to the cheaper model's price.",
+    spec: ["Every paid call gets the advisor by one rule, in one place.", "An agent only gets an advisor stronger than its own model.", "Calls with a small cap get none, so a consultation never fails a small call.", "The advisor's tokens count inside the call's own cap.", "A CLI that refuses the advisor never fails a run: the call runs again without it.", "The person turns it off, or picks Sonnet or Opus, in Systems."],
+    flow: ["A station asks for a call", "The rule picks the advisor, or none", "Claude Code runs the agent with --advisor", "The agent consults the advisor before a plan, when stuck, and before it calls the work done", "The cost, with the advisor's share, is logged"],
+    design: "Systems drawer, Crew advisor: Off, Sonnet or Opus, and the smallest call cap that gets one.",
+    screens: [], docs: ["docs/advisor.md"], stations: [],
+    files: [`${C}advisor.ts`, `${B}CrewAdvisor.tsx`], api: ["/api/crew"],
+  },
+  {
     id: "agent-bay", name: "Agent Bay", group: "Agents",
     purpose: "Where the workers are made and managed: create, edit, version, test and assign agents to station seats, each with only the skills and tools it lists.",
     spec: ["An agent is a file with a name, a model, a cap per call, plugins, skills, tools, MCP servers and a prompt.", "Every save is a version, with diff and rollback.", "An agent can be tested on a sample task before it is assigned.", "Stations have seats; an agent is assigned to seats.", "Each agent loads only the skills and MCP servers it lists."],

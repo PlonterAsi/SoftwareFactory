@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { EventLog, type SfEvent } from "./events.js";
 import { captureSignal, listSignals } from "./signals.js";
 import { costSummary, runAgent } from "./agents.js";
+import { readAdvisorRule, setAdvisorRule } from "./advisor.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { duplicateReply, Factory, type GateId } from "./factory/loop.js";
 import { enableRepoRuns, githubShipper } from "./factory/reporun.js";
@@ -441,6 +442,14 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const b = await readJson(req);
         const to = typeof b.to === "number" ? b.to : ensureSelf();
         return json(res, 201, projectToTicket(log, tickets, order.state(), Number(turn[1]), { to, kind: b.kind ? String(b.kind) as TicketKind : undefined }));
+      }
+      if (url.pathname === "/api/crew/advisor") {
+        // The advisor tool (advisor.ts): GET reads the rule, POST changes model ("off", "sonnet", "opus") and/or minBudgetUsd.
+        if (req.method === "POST") {
+          try { return json(res, 200, setAdvisorRule(log, await readJson(req))); }
+          catch (e) { return json(res, 400, { error: (e as Error).message }); }
+        }
+        return json(res, 200, readAdvisorRule(log));
       }
       if (url.pathname === "/api/tickets" || url.pathname.startsWith("/api/tickets/")) {
         if (url.pathname === "/api/tickets/github") {
