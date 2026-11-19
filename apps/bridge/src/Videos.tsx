@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { API } from "./api";
 
-interface Status { hasKey: boolean; keySource: "env" | "file" | null; keyHint: string | null; keyFile: string; settings: { dailyMax: number; models: string[]; inbox: string }; today: number; notes: number; waiting: number }
+interface Status { hasKey: boolean; keySource: "env" | "file" | null; keyHint: string | null; keyFile: string; settings: { dailyMax: number; models: string[]; inbox: string }; today: number; notes: number; waiting: number; folders: string[] }
 interface Note { id: number; source: string; kind: "youtube" | "file"; title: string | null; question: string | null; notes: string; model: string; tokensIn: number; tokensOut: number; paidUsd: number; by: string; at: string; snippet?: string; cached?: boolean }
 
 async function call<T>(path: string, body?: unknown): Promise<T> {
@@ -72,7 +72,7 @@ export function Videos() {
         <div className="place-hint">
           A YouTube link is watched by Google directly, with nothing downloaded. TikTok, Instagram and X forbid automated downloading, so save the clip from the app
           (Instagram: Share, Download, or a screen recording) into the Watch folder below. Anything saved there is watched within a minute and moved to Watched; a .txt file with the same name is the question.
-          Point the folder at a Google Drive or OneDrive folder your phone saves to, and a reel is one share away. The same video and question again is answered from the notes, free.
+          Make a folder called "SF Watch" in Google Drive from your phone: once it syncs to this PC it is watched too, and a reel is one share away. The same video and question again is answered from the notes, free.
         </div>
         <div className="place-edit">
           <label className="muted">Watch folder{s.waiting ? ` (${s.waiting} waiting)` : ""}
@@ -80,6 +80,7 @@ export function Videos() {
               onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== s.settings.inbox) run("saving", async () => setS(await call<Status>("/api/videos/settings", { inbox: v }))); }} />
           </label>
         </div>
+        {s.folders.length > 1 && <div className="place-hint">Also watching: {s.folders.filter((f) => f !== s.settings.inbox).join(", ")} (an "SF Watch" folder in Google Drive or OneDrive, found by itself).</div>}
         <div className="place-edit">
           <input value={src} onChange={(e) => setSrc(e.target.value)} placeholder="https://www.youtube.com/watch?v=…  or  C:\Users\…\clip.mp4" aria-label="YouTube link or video file" />
           <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="What to learn from it (optional)" aria-label="Question about the video" />

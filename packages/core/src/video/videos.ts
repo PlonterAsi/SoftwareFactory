@@ -42,6 +42,21 @@ export interface VideoNote {
 }
 export interface WatchRequest { url?: string; file?: string; question?: string | null; start?: number | null; end?: number | null; fps?: number | null; refresh?: boolean }
 export interface VideoSettings { dailyMax: number; models: string[]; inbox: string }
+/**
+ * "SF Watch" folders in Google Drive or OneDrive on this computer, when they exist. Make the folder from the phone
+ * (Drive app: New, Folder, "SF Watch"); once it syncs down, SoftwareFactory watches it too, with nothing to set up here.
+ */
+export function cloudWatchFolders(home: string, platform = process.platform): string[] {
+  const roots = [join(home, "Google Drive", "My Drive"), join(home, "My Drive"), join(home, "OneDrive")];
+  if (platform === "win32") for (const l of "DEFGHIJKLMNOPQRSTUVWXYZ") roots.push(`${l}:\\My Drive`);
+  const out: string[] = [];
+  for (const r of roots) {
+    const d = join(r, "SF Watch");
+    try { if (statSync(d).isDirectory()) out.push(d); } catch { /* not there */ }
+  }
+  return out;
+}
+
 export interface VideoStatus {
   hasKey: boolean;
   keySource: "env" | "file" | null;
@@ -50,8 +65,10 @@ export interface VideoStatus {
   settings: VideoSettings;
   today: number;
   notes: number;
-  /** Videos waiting in the Watch folder. */
+  /** Videos waiting in the Watch folders. */
   waiting: number;
+  /** Every folder watched: yours, plus any "SF Watch" folder found in Google Drive or OneDrive. */
+  folders: string[];
 }
 
 type Row = Record<string, any>;
@@ -60,7 +77,7 @@ const KEY_RE = /^[A-Za-z0-9_.\-]{30,200}$/;
 
 export class Videos {
   private busy = 0;
-  constructor(private log: EventLog, private o: { homeDir?: string; env?: NodeJS.ProcessEnv; fetch?: typeof fetch; api?: string; pollMs?: number } = {}) {
+  constructor(private log: EventLog, private o: { homeDir?: string; env?: NodeJS.ProcessEnv; fetch?: typeof fetch; api?: string; pollMs?: number; cloudFolders?: () => string[] } = {}) {
     log.db.exec(`CREATE TABLE IF NOT EXISTS video_notes (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       ckey       TEXT NOT NULL UNIQUE,
@@ -163,7 +180,7 @@ export class Videos {
     const k = this.key();
     const n = (this.log.db.prepare("SELECT count(*) AS n FROM video_notes").get() as { n: number }).n;
     const settings = this.settings();
-    return { hasKey: !!k, keySource: k?.source ?? null, keyHint: k ? `…${k.key.slice(-4)}` : null, keyFile: this.keyFile, settings, today: this.todayCount(), notes: Number(n), waiting: this.waiting(settings.inbox).length };
+    return { hasKey: !!k, keySource: k?.source ?? null, keyHint: k ? `…${k.key.slice(-4)}` : null, keyFile: this.keyFile, settings, today: this.todayCount(), notes: Number(n), waiting: this.folders(settings).flatMap((d) => this.waiting(d)).length, folders: this.folders(settings) };
   }
 
   // ---- notes ----------------------------------------------------------------------------------
@@ -280,6 +297,11 @@ export class Videos {
   // ---- the Watch folder -------------------------------------------------------------------------
 
   /** Video files in the Watch folder that nobody has tried yet (a failed one waits until the file changes). */
+  private folders(s = this.settings()): string[] {
+    const found = this.o.cloudFolders ? this.o.cloudFolders() : cloudWatchFolders(this.o.homeDir ?? homedir());
+    return [...new Set([s.inbox, ...found])];
+  }
+
   private waiting(dir: string, now = Date.now()): { path: string; stamp: string; ready: boolean }[] {
     let names: string[];
     try { names = readdirSync(dir); } catch { return []; }
@@ -307,7 +329,7 @@ export class Videos {
     const s = this.settings();
     if (!this.key() || this.todayCount() >= s.dailyMax) return { watched: 0, failed: 0 };
     let watched = 0, failed = 0;
-    for (const f of this.waiting(s.inbox, now).filter((x) => x.ready).slice(0, 3)) {
+    for (const f of this.folders(s).flatMap((d) => this.waiting(d, now)).filter((x) => x.ready).slice(0, 3)) {
       const side = join(dirname(f.path), `${basename(f.path, extname(f.path))}.txt`);
       let question: string | null = null;
       try { question = readFileSync(side, "utf8").trim().slice(0, VIDEO_LIMITS.questionChars) || null; } catch { /* no question: general notes */ }

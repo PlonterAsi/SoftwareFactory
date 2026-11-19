@@ -176,6 +176,17 @@ describe("the Watch folder", () => {
     expect(v.search("cargo")[0]).toMatchObject({ kind: "file", question: "What is the hook in the first 3 seconds?", by: "watch folder" });
   });
 
+  it("also watches an \"SF Watch\" folder made in Google Drive, found by itself", async () => {
+    const { mkdirSync } = await import("node:fs");
+    const { cloudWatchFolders } = await import("../src/index.js");
+    const home = tmp();
+    expect(cloudWatchFolders(home, "linux")).toEqual([]);
+    mkdirSync(join(home, "Google Drive", "My Drive", "SF Watch"), { recursive: true });
+    expect(cloudWatchFolders(home, "linux")).toEqual([join(home, "Google Drive", "My Drive", "SF Watch")]);
+    const v = new Videos(new EventLog(":memory:"), { homeDir: home, env: {} });
+    expect(v.status().folders).toEqual([join(home, "SoftwareFactory", "Watch"), join(home, "Google Drive", "My Drive", "SF Watch")]);
+  });
+
   it("does not try a failed clip again until the file changes", async () => {
     const home = tmp();
     const g = fakeGoogle(() => ({ status: 500, body: { error: { message: "boom" } } }));

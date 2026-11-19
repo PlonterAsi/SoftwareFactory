@@ -168,7 +168,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const pluginAi = new PluginAi(log, () => runtime);
   // Videos: Gemini watches a YouTube link or a file you saved, and the notes are kept and searchable (docs/videos.md).
   // Tests never read or write the real ~/.config/watch/.env, nor see a GEMINI_API_KEY from the shell.
-  const videos = new Videos(log, process.env.VITEST ? { homeDir: join(dataDir ?? dirname(projectsDir), "home"), env: {} } : {});
+  const videos = new Videos(log, process.env.VITEST ? { homeDir: join(dataDir ?? dirname(projectsDir), "home"), env: {}, cloudFolders: () => [] } : {});
   const plugins = new PluginHost(log, join(dirname(projectsDir), "plugins"), {
     bay, door: coreDoor({ log, tickets, bay }), store: pluginStore, ai: pluginAi, videos,
     ...(github ? { tarball: (repo: string, ref: string) => github.tarball(repo, ref) } : {}),
