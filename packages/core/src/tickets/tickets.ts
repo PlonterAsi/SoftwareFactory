@@ -200,6 +200,8 @@ export interface AutoWork {
 }
 /** How many open tickets the Overseer reads at the same time on its own. */
 const TRIAGE_AT_ONCE = 2;
+/** The part of the daily auto-work limit the Overseer's reads may use. */
+const TRIAGE_SHARE = 0.25;
 
 export const AUTO_WORK_DEFAULT: AutoWork = { on: true, maxUsd: 0.6, askedMaxUsd: 3, dailyUsd: 3, wip: 2 };
 /** How often the crew starts or retries one ticket on its own before it leaves the rest to you. */
@@ -309,6 +311,13 @@ export class Tickets {
     const rows = this.log.db.prepare("SELECT json_extract(payload, '$.capUsd') AS cap FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND ts >= ?").all(day) as { cap: number | null }[];
     // Starts written before caps were recorded count at the bug-and-task cap.
     return rows.reduce((a, r) => a + (typeof r.cap === "number" ? r.cap : this.autoWork().maxUsd), 0);
+  }
+
+  /** What the Overseer's own reads of open tickets cost today. */
+  private triageUsdToday(): number {
+    const day = new Date().toISOString().slice(0, 10);
+    const r = this.log.db.prepare("SELECT sum(json_extract(payload, '$.capUsd')) AS usd FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.triage') = 1 AND ts >= ?").get(day) as { usd: number | null };
+    return Number(r?.usd ?? 0);
   }
 
   /** How often the crew started or retried this ticket on its own. */
@@ -1428,19 +1437,28 @@ export class Tickets {
     const rule = this.autoWork();
     if (!rule.on || !this.opts.runtime || this.opts.canWork?.()) return [];
     const cap = Math.min(this.opts.budgetUsd ?? 0.1, 0.1);
+    // Reading may use at most a quarter of the day, so it never eats the money the crew's starts need (19 Nov:
+    // twenty reads counted at their $0.10 cap took the whole $3 and left five ready tickets for tomorrow).
+    const share = rule.dailyUsd * TRIAGE_SHARE;
+    const readToday = this.triageUsdToday();
     const read = new Set((this.log.db.prepare("SELECT json_extract(payload, '$.id') AS id FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.triage') = 1").all() as { id: number }[]).map((r) => Number(r.id)));
     const rank = (p: Priority | null) => (p ? PRIORITIES.indexOf(p) : PRIORITIES.length);
     const open = this.list({ view: "all", status: "open", limit: 500 })
-      .filter((t) => AUTO_KINDS.includes(t.kind) && !read.has(t.id) && !this.asking.has(t.id) && t.assignee !== "you" && !t.blocked && !this.handBrake(t.id))
+      .filter((t) => t.project != null && AUTO_KINDS.includes(t.kind) && !read.has(t.id) && !this.asking.has(t.id) && t.assignee !== "you" && !t.blocked && !this.handBrake(t.id))
       .sort((a, b) => rank(a.priority) - rank(b.priority) || a.id - b.id);
     const sent: number[] = [];
     let spent = spentToday;
+    let reading = readToday + this.asking.size * cap;
     for (const t of open) {
-      if (this.asking.size >= TRIAGE_AT_ONCE || spent + cap > rule.dailyUsd + 1e-9) break;
-      this.log.append("ticket.noted", { id: t.id, by: "dispatcher", auto: 1, triage: 1, capUsd: cap, kind: "event", text: `The Overseer reads it on its own to size it and say whether it is ready for the crew (up to $${cap.toFixed(2)}, from today's auto-work limit). Write "hold" on the thread to keep the crew off it.` });
+      if (this.asking.size >= TRIAGE_AT_ONCE || spent + cap > rule.dailyUsd + 1e-9 || reading + cap > share + 1e-9) break;
+      // Noted at no cost; what the read really cost is counted when it ends (a read is cents, its cap is $0.10).
+      this.log.append("ticket.noted", { id: t.id, by: "dispatcher", auto: 1, triage: 1, capUsd: 0, kind: "event", text: `The Overseer reads it on its own to size it and say whether it is ready for the crew (up to $${cap.toFixed(2)}, from today's auto-work limit). Write "hold" on the thread to keep the crew off it.` });
       spent += cap;
+      reading += cap;
       sent.push(t.id);
-      this.ask(t.id).catch((e) => this.log.append("ticket.noted", { id: t.id, by: "dispatcher", kind: "event", text: `Reading it failed: ${(e as Error).message}` }));
+      this.ask(t.id)
+        .then((r) => this.log.append("ticket.noted", { id: t.id, by: "dispatcher", auto: 1, triage: 1, capUsd: Number((r.costUsd ?? 0).toFixed(4)), kind: "event", text: `Read by the Overseer for $${(r.costUsd ?? 0).toFixed(2)}.` }))
+        .catch((e) => this.log.append("ticket.noted", { id: t.id, by: "dispatcher", kind: "event", text: `Reading it failed: ${(e as Error).message}` }));
     }
     return sent;
   }
