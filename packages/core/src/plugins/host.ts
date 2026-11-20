@@ -13,6 +13,7 @@ import type { PluginDoor } from "./door.js";
 import { RUNNER_SOURCE } from "./runner.js";
 import type { PluginStore } from "./store.js";
 import type { PluginAi } from "./ai.js";
+import type { Videos } from "../video/videos.js";
 import "./tables.js";
 
 /** Where an add-on installed from GitHub came from: `github:owner/repo[/path]@ref#sha`. */
@@ -108,7 +109,7 @@ export class PluginHost {
   private listening = false;
   readonly runnerPath: string;
 
-  constructor(private log: EventLog, readonly root: string, private opts: { bay?: AgentBay; examplesDir?: string; node?: string; door?: PluginDoor; store?: PluginStore; ai?: PluginAi; tarball?: DownloadTarball; tar?: string } = {}) {
+  constructor(private log: EventLog, readonly root: string, private opts: { bay?: AgentBay; examplesDir?: string; node?: string; door?: PluginDoor; store?: PluginStore; ai?: PluginAi; videos?: Videos; tarball?: DownloadTarball; tar?: string } = {}) {
     this.runnerPath = join(root, ".runtime", "runner.mjs");
   }
 
@@ -582,6 +583,19 @@ export class PluginHost {
       if (op === "store.delete") return st.delete(id, a.coll, a.id);
       if (op === "store.count") return st.count(id, a.coll ?? undefined);
       if (op === "store.query") return st.query(id, a as never);
+    }
+    if (op.startsWith("video.")) {
+      if (!v.granted.includes("video")) throw new Error(`Plugin ${id} may not watch videos (it did not ask for the video permission)`);
+      const vid = this.opts.videos;
+      if (!vid) throw new Error("Videos are not available here");
+      if (op === "video.status") { const s = vid.status(); return { hasKey: s.hasKey, today: s.today, dailyMax: s.settings.dailyMax, notes: s.notes }; }
+      if (op === "video.search") return vid.search(a.text == null ? null : String(a.text), Number(a.limit) || 20);
+      if (op === "video.get") return vid.get(Number(a.id));
+      if (op === "video.watch") {
+        // Add-ons watch YouTube links only: a file path would let an add-on send any file on this computer to Google.
+        if (a.file != null) throw new Error("Add-ons watch YouTube links only; video files are watched from SoftwareFactory itself");
+        return vid.watch({ url: String(a.url ?? ""), question: a.question == null ? null : String(a.question), start: a.start as number, end: a.end as number, fps: a.fps as number, refresh: a.refresh === true }, `plugin:${id}`);
+      }
     }
     if (op === "act") return this.act(id, String(a.verb ?? ""), (a.args && typeof a.args === "object" ? a.args : {}) as Record<string, unknown>);
     if (op === "records") return this.records(id, String(a.kind ?? ""), { projectId: a.projectId == null ? null : Number(a.projectId), limit: Number(a.limit) || undefined });

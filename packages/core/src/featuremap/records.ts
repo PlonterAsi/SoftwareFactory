@@ -287,6 +287,21 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}watch/watchers.ts`, `${C}watch/routes.ts`], api: ["/api/watchers"],
   },
   {
+    id: "videos", name: "Videos (watch and learn)", group: "Agents",
+    purpose: "SoftwareFactory watches a video, a YouTube link or a clip you saved, and keeps timestamped notes of what it says and shows, searchable forever, so a video is learned once and never paid for twice.",
+    spec: [
+      "A YouTube link goes to Gemini as it is: Google fetches the video, nothing is downloaded on this computer. A video file you saved (TikTok, Instagram, X, a screen recording) is uploaded to Gemini, watched, then deleted there.",
+      "Only YouTube links are fetched: TikTok, Instagram and X forbid automated downloading, so their clips come in as files.",
+      "The Gemini key is pasted once in Systems and kept in ~/.config/watch/.env, the file Claude Code's /watch plugin reads too. It is never logged or sent back.",
+      "The same video with the same question is answered from the notes, free. A daily limit (40 by default) stops a loop from watching without end.",
+      "Add-ons with the video permission (Scout) watch YouTube links and search the notes; they cannot send files.",
+    ],
+    flow: ["Paste a free Gemini key once", "Give a YouTube link or a saved clip, and a question if you have one", "Gemini watches it and answers with timestamps", "The notes are kept and found by search later"],
+    design: "A Videos section in Systems: the key, the daily limit, a box to watch a link or a file, and the latest notes with search.",
+    screens: [], docs: ["docs/videos.md"], stations: [],
+    files: [`${C}video/gemini.ts`, `${C}video/videos.ts`, `${C}video/routes.ts`, `${B}Videos.tsx`], api: ["/api/videos"],
+  },
+  {
     id: "monthly-budgets", name: "Monthly budgets and burn rate", group: "Projects",
     purpose: "A monthly budget for each project and one for everything, read from the agent calls actually paid, with the burn rate and where the month ends at that rate. The crew's queue fits them.",
     spec: [

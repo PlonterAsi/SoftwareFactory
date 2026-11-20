@@ -16,6 +16,8 @@
  *   sf.log(…)  (console.log goes there too)   its log, shown on the Plugins page
  *   sf.ai.run({ prompt, system, model, tools, budgetUsd })   ask Claude (needs ai), from its monthly budget
  *   sf.ai.budget()                               { monthlyUsd, spentUsd, leftUsd, calls }
+ *   sf.video.watch({ url, question, start, end, fps, refresh })   Gemini watches a YouTube link (needs video) → notes
+ *   sf.video.search(text, limit) / sf.video.get(id) / sf.video.status()   the video notes SoftwareFactory keeps
  *   sf.store.put(coll, id, doc, text) / get / delete / count / query({ coll, text, where, sort, limit, offset })
  *                                                its searchable catalog (needs store)
  *   sf.act(verb, args) / sf.records(kind, opts)  the same as its pages (needs actions / records:read)
@@ -65,6 +67,12 @@ globalThis.sf = Object.freeze({
     delete: (coll, id) => ask("store.delete", { coll, id }),
     count: (coll) => ask("store.count", { coll }),
     query: (q) => ask("store.query", q),
+  }),
+  video: Object.freeze({
+    watch: (req) => ask("video.watch", req, 16 * 60000),
+    search: (text, limit) => ask("video.search", { text, limit }),
+    get: (id) => ask("video.get", { id }),
+    status: () => ask("video.status", {}),
   }),
   act: (verb, args) => ask("act", { verb, args: args ?? {} }),
   records: (kind, opts) => ask("records", { kind, ...(opts ?? {}) }),

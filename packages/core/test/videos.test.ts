@@ -1,0 +1,202 @@
+import { describe, it, expect } from "vitest";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { EventLog, Videos, Gemini, canonicalUrl, isYouTube, paidCost } from "../src/index.js";
+
+/** Videos (docs/videos.md): Gemini watches a YouTube link or a saved clip, and the notes are kept. */
+const tmp = () => mkdtempSync(join(tmpdir(), "sf-video-"));
+const KEY = "AIzaSyTESTKEY000000000000000000000000000";
+
+interface Seen { url: string; method: string; body: any; headers: Record<string, string> }
+function fakeGoogle(answer: (url: string, seen: Seen[]) => { status: number; body: unknown; headers?: Record<string, string> } | null = () => null) {
+  const seen: Seen[] = [];
+  const f = (async (url: string, init: RequestInit = {}) => {
+    const headers = Object.fromEntries(Object.entries(init.headers ?? {}).map(([k, v]) => [k.toLowerCase(), String(v)]));
+    let body: any = init.body;
+    if (typeof body === "string") { try { body = JSON.parse(body); } catch { /* raw */ } }
+    seen.push({ url, method: String(init.method ?? "GET"), body, headers });
+    const a = answer(url, seen) ?? {
+      status: 200,
+      body: { candidates: [{ content: { parts: [{ text: "TITLE: Building a CLI in Rust\n00:12 cargo new shows a fresh project." }] } }], usageMetadata: { promptTokenCount: 60000, candidatesTokenCount: 2000 } },
+    };
+    return new Response(typeof a.body === "string" ? a.body : JSON.stringify(a.body), { status: a.status, headers: a.headers });
+  }) as unknown as typeof fetch;
+  return { f, seen };
+}
+
+describe("YouTube links", () => {
+  it("knows YouTube links in every shape and gives one address per video", () => {
+    for (const u of ["https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=30", "https://youtu.be/dQw4w9WgXcQ", "https://m.youtube.com/shorts/dQw4w9WgXcQ", "https://youtube.com/live/dQw4w9WgXcQ"]) {
+      expect(isYouTube(u)).toBe(true);
+      expect(canonicalUrl(u)).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    }
+    expect(isYouTube("https://www.tiktok.com/@a/video/123")).toBe(false);
+    expect(isYouTube("https://www.youtube.com/")).toBe(false);
+  });
+  it("prices a call as it would cost on a paid key", () => {
+    expect(paidCost("gemini-3.8-flash", 60000, 2000)).toBe(0.0525);
+  });
+});
+
+describe("Gemini", () => {
+  it("sends the link as it is, with the clip, and reads the title and tokens", async () => {
+    const { f, seen } = fakeGoogle();
+    const a = await new Gemini({ key: KEY, fetch: f }).watch({ youtube: "https://youtu.be/dQw4w9WgXcQ" }, "How is the project made?", { start: 60, end: 120, fps: 0.5 });
+    expect(seen[0].url).toContain("/v1beta/models/gemini-3.8-flash:generateContent");
+    expect(seen[0].headers["x-goog-api-key"]).toBe(KEY);
+    const part = seen[0].body.contents[0].parts[0];
+    expect(part.file_data.file_uri).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(part.video_metadata).toEqual({ start_offset: "60s", end_offset: "120s", fps: 0.5 });
+    expect(seen[0].body.contents[0].parts[1].text).toContain("How is the project made?");
+    expect(a).toMatchObject({ title: "Building a CLI in Rust", model: "gemini-3.8-flash", tokensIn: 60000, tokensOut: 2000 });
+    expect(a.text).not.toContain("TITLE:");
+  });
+  it("moves to the next model when the free allowance runs out, and never shows the key in an error", async () => {
+    const { f, seen } = fakeGoogle((url) => url.includes("3.8") ? { status: 429, body: { error: { status: "RESOURCE_EXHAUSTED", message: `quota for ${KEY}` } } } : null);
+    const a = await new Gemini({ key: KEY, fetch: f }).watch({ youtube: "https://youtu.be/dQw4w9WgXcQ" });
+    expect(seen.map((s) => s.url.match(/models\/([^:]+)/)?.[1])).toEqual(["gemini-3.8-flash", "gemini-3.5-flash-lite"]);
+    expect(a.model).toBe("gemini-3.5-flash-lite");
+    const { f: f2 } = fakeGoogle(() => ({ status: 429, body: { error: { message: `quota for ${KEY}` } } }));
+    const err = await new Gemini({ key: KEY, fetch: f2 }).watch({ youtube: "https://youtu.be/dQw4w9WgXcQ" }).catch((e) => e);
+    expect(err.kind).toBe("quota");
+    expect(err.message).not.toContain(KEY);
+  });
+  it("stops at a refused key without trying other models", async () => {
+    const { f, seen } = fakeGoogle(() => ({ status: 400, body: { error: { message: "API key not valid. Please pass a valid API key." } } }));
+    const err = await new Gemini({ key: KEY, fetch: f }).watch({ youtube: "https://youtu.be/dQw4w9WgXcQ" }).catch((e) => e);
+    expect(err.kind).toBe("auth");
+    expect(seen).toHaveLength(1);
+  });
+});
+
+describe("Videos", () => {
+  const make = (answer?: Parameters<typeof fakeGoogle>[0]) => {
+    const home = tmp();
+    const g = fakeGoogle(answer);
+    const v = new Videos(new EventLog(":memory:"), { homeDir: home, env: {}, fetch: g.f, pollMs: 1 });
+    return { v, home, seen: g.seen };
+  };
+
+  it("keeps the key in the file /watch reads, beside the lines already there, and never logs it", () => {
+    const { v, home } = make();
+    expect(v.status().hasKey).toBe(false);
+    const file = join(home, ".config", "watch", ".env");
+    v.setKey(null);
+    writeFileSync(file, "WATCH_DETAIL=balanced\nGEMINI_API_KEY=old\n");
+    const s = v.setKey(KEY);
+    expect(s).toMatchObject({ hasKey: true, keySource: "file", keyHint: "…0000" });
+    expect(readFileSync(file, "utf8")).toBe(`WATCH_DETAIL=balanced\nGEMINI_API_KEY=${KEY}\n`);
+    expect(JSON.stringify((v as any).log.db.prepare("SELECT payload FROM events").all())).not.toContain(KEY);
+    expect(() => v.setKey("not a key")).toThrow(/does not look like a Gemini API key/);
+    writeFileSync(file, `WATCH_DETAIL=balanced\n${KEY}\n`);
+    expect(v.status()).toMatchObject({ hasKey: true, keyHint: "…0000" });
+    v.setKey(null);
+    expect(readFileSync(file, "utf8")).toBe("WATCH_DETAIL=balanced\n");
+  });
+
+  it("watches a YouTube link once, answers the same ask from the notes for free, and finds it by search", async () => {
+    const { v, seen } = make();
+    v.setKey(KEY);
+    const a = await v.watch({ url: "https://youtu.be/dQw4w9WgXcQ" });
+    expect(a).toMatchObject({ cached: false, kind: "youtube", source: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", title: "Building a CLI in Rust", paidUsd: 0.0525 });
+    const b = await v.watch({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" });
+    expect(b.cached).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(v.todayCount()).toBe(1);
+    await v.watch({ url: "https://youtu.be/dQw4w9WgXcQ", refresh: true });
+    expect(seen).toHaveLength(2);
+    expect(v.search("cargo")[0]).toMatchObject({ title: "Building a CLI in Rust" });
+    expect(v.search("cargo")[0].snippet).toContain("[cargo]");
+    expect(v.status().notes).toBe(1);
+  });
+
+  it("refuses links from sites that forbid downloading, and asks for the saved file instead", async () => {
+    const { v, seen } = make();
+    v.setKey(KEY);
+    await expect(v.watch({ url: "https://www.tiktok.com/@a/video/123" })).rejects.toThrow(/save the clip/);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("needs a key, and stops at the daily limit", async () => {
+    const { v } = make();
+    await expect(v.watch({ url: "https://youtu.be/dQw4w9WgXcQ" })).rejects.toThrow(/No Gemini key yet/);
+    v.setKey(KEY);
+    v.setSettings({ dailyMax: 1 });
+    await v.watch({ url: "https://youtu.be/dQw4w9WgXcQ" });
+    await expect(v.watch({ url: "https://youtu.be/aaaaaaaaaaa" })).rejects.toThrow(/daily limit/);
+  });
+
+  it("uploads a saved clip, watches it, and deletes it from Gemini", async () => {
+    const dir = tmp();
+    const clip = join(dir, "reel.mp4");
+    writeFileSync(clip, Buffer.alloc(1000));
+    const { v, seen } = make((url, s) => {
+      if (url.endsWith("/upload/v1beta/files")) return { status: 200, body: {}, headers: { "x-goog-upload-url": "https://upload.example/u1" } };
+      if (url === "https://upload.example/u1") return { status: 200, body: { file: { name: "files/abc", uri: "https://g/files/abc", mimeType: "video/mp4", state: "PROCESSING" } } };
+      if (url.endsWith("/v1beta/files/abc") && s[s.length - 1].method === "GET") return { status: 200, body: { name: "files/abc", uri: "https://g/files/abc", mimeType: "video/mp4", state: "ACTIVE" } };
+      if (url.endsWith("/v1beta/files/abc")) return { status: 200, body: {} };
+      return null;
+    });
+    v.setKey(KEY);
+    const n = await v.watch({ file: clip, question: "What is the hook?" });
+    expect(n).toMatchObject({ kind: "file", source: clip, question: "What is the hook?" });
+    const gen = seen.find((s) => s.url.includes(":generateContent"))!;
+    expect(gen.body.contents[0].parts[0].file_data).toEqual({ file_uri: "https://g/files/abc", mime_type: "video/mp4" });
+    expect(seen[seen.length - 1]).toMatchObject({ method: "DELETE", url: expect.stringContaining("/v1beta/files/abc") });
+    await expect(v.watch({ file: join(dir, "notes.txt") })).rejects.toThrow(/no file|not a video/);
+  });
+});
+
+describe("the Watch folder", () => {
+  it("watches a saved clip by itself, with the question from its .txt, and moves both to Watched", async () => {
+    const home = tmp();
+    const g = fakeGoogle((url, s) => {
+      if (url.endsWith("/upload/v1beta/files")) return { status: 200, body: {}, headers: { "x-goog-upload-url": "https://upload.example/u1" } };
+      if (url === "https://upload.example/u1") return { status: 200, body: { file: { name: "files/r1", uri: "https://g/files/r1", mimeType: "video/mp4", state: "ACTIVE" } } };
+      if (url.endsWith("/v1beta/files/r1")) return { status: 200, body: {} };
+      return null;
+    });
+    const v = new Videos(new EventLog(":memory:"), { homeDir: home, env: {}, fetch: g.f, pollMs: 1 });
+    const dir = v.settings().inbox;
+    expect(dir).toBe(join(home, "SoftwareFactory", "Watch"));
+    const { mkdirSync, existsSync } = await import("node:fs");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "reel.mp4"), Buffer.alloc(500));
+    writeFileSync(join(dir, "reel.txt"), "What is the hook in the first 3 seconds?");
+    writeFileSync(join(dir, "notes.md"), "not a video");
+    expect(await v.scanInbox(Date.now() + 60_000)).toEqual({ watched: 0, failed: 0 }); // no key yet
+    v.setKey(KEY);
+    expect(v.status().waiting).toBe(1);
+    expect(await v.scanInbox(Date.now())).toEqual({ watched: 0, failed: 0 }); // just saved: may still be syncing
+    expect(await v.scanInbox(Date.now() + 60_000)).toEqual({ watched: 1, failed: 0 });
+    expect(existsSync(join(dir, "Watched", "reel.mp4"))).toBe(true);
+    expect(existsSync(join(dir, "Watched", "reel.txt"))).toBe(true);
+    expect(existsSync(join(dir, "notes.md"))).toBe(true);
+    expect(v.search("cargo")[0]).toMatchObject({ kind: "file", question: "What is the hook in the first 3 seconds?", by: "watch folder" });
+  });
+
+  it("also watches an \"SF Watch\" folder made in Google Drive, found by itself", async () => {
+    const { mkdirSync } = await import("node:fs");
+    const { cloudWatchFolders } = await import("../src/index.js");
+    const home = tmp();
+    expect(cloudWatchFolders(home, "linux")).toEqual([]);
+    mkdirSync(join(home, "Google Drive", "My Drive", "SF Watch"), { recursive: true });
+    expect(cloudWatchFolders(home, "linux")).toEqual([join(home, "Google Drive", "My Drive", "SF Watch")]);
+    const v = new Videos(new EventLog(":memory:"), { homeDir: home, env: {} });
+    expect(v.status().folders).toEqual([join(home, "SoftwareFactory", "Watch"), join(home, "Google Drive", "My Drive", "SF Watch")]);
+  });
+
+  it("does not try a failed clip again until the file changes", async () => {
+    const home = tmp();
+    const g = fakeGoogle(() => ({ status: 500, body: { error: { message: "boom" } } }));
+    const v = new Videos(new EventLog(":memory:"), { homeDir: home, env: {}, fetch: g.f, pollMs: 1 });
+    v.setKey(KEY);
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(v.settings().inbox, { recursive: true });
+    writeFileSync(join(v.settings().inbox, "bad.mov"), Buffer.alloc(10));
+    expect(await v.scanInbox(Date.now() + 60_000)).toEqual({ watched: 0, failed: 1 });
+    expect(await v.scanInbox(Date.now() + 60_000)).toEqual({ watched: 0, failed: 0 });
+    expect(v.status().waiting).toBe(0);
+  });
+});

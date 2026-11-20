@@ -25,7 +25,7 @@ import { join, normalize, isAbsolute, sep } from "node:path";
  * Every plugin may keep its own small data (key → JSON value) and log lines; nothing else is
  * open to it unless its permissions say so.
  */
-export const PLUGIN_PERMISSIONS = ["events:read", "events:write", "agents", "records:read", "actions", "ai", "store"] as const;
+export const PLUGIN_PERMISSIONS = ["events:read", "events:write", "agents", "records:read", "actions", "ai", "store", "video"] as const;
 export type PluginPermission = (typeof PLUGIN_PERMISSIONS)[number];
 
 export const PERMISSION_TEXT: Record<PluginPermission, string> = {
@@ -36,6 +36,7 @@ export const PERMISSION_TEXT: Record<PluginPermission, string> = {
   actions: "Do the things its manifest lists for you (each one is named when you turn it on, and logged)",
   ai: "Ask Claude (it may search and read the web), paid from its own monthly budget, which you set",
   store: "Keep its own searchable catalog in SoftwareFactory's database",
+  video: "Watch YouTube videos with Gemini (your key, within your daily video limit) and read the video notes SoftwareFactory keeps",
 };
 
 /** The monthly budget an add-on with `ai` gets when its manifest names none, and the most a manifest may ask for (you can set more). */

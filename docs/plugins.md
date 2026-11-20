@@ -40,6 +40,7 @@ The full example is in `packages/core/plugin-examples/run-stats/` and ships with
 | `records:read` | read your real projects, tickets and agents: names, states, counts and spend, never file contents |
 | `actions` | do the things its manifest lists under `"actions"`, and nothing else |
 | `store` | keep its own searchable catalog in SoftwareFactory's database (full-text search, up to 200,000 documents of 256 KB) |
+| `video` | watch YouTube links with Gemini, within your key and daily video limit, and search the video notes SoftwareFactory keeps ([videos.md](videos.md)); never files |
 | `ai` | ask Claude (it may search and read the web, nothing else), paid from its own monthly budget, which you set |
 
 ### Actions: a plugin that does real work
@@ -109,6 +110,8 @@ await sf.store.get("finds", id); await sf.store.delete("finds", id); await sf.st
 await sf.ai.run({ prompt, system, model: "haiku", tools: ["WebSearch", "WebFetch"], budgetUsd: 0.4, practice: "[]" });  // ai
 // → { text, costUsd, practice }   refused when it would pass the month's budget
 await sf.ai.budget();   // { monthlyUsd, spentUsd, leftUsd }
+await sf.video.watch({ url, question, start, end, fps });   // video: → { id, title, notes, model, cached, … }
+await sf.video.search("rust cli", 20); await sf.video.get(id); await sf.video.status();   // { hasKey, today, dailyMax, notes }
 await sf.act("ticket.open", { … }); await sf.records("projects");   // the same as pages, from the backend
 ```
 

@@ -40,6 +40,8 @@ import { brainRoute } from "./brain/routes.js";
 import { featureMapRoute } from "./featuremap/routes.js";
 import { flowsRoute } from "./flows/routes.js";
 import { watchRoute } from "./watch/routes.js";
+import { videosRoute } from "./video/routes.js";
+import { Videos } from "./video/videos.js";
 import { monthLeft } from "./watch/spend.js";
 import { Watchers } from "./watch/watchers.js";
 import { FlowImprover } from "./flows/improver.js";
@@ -178,8 +180,11 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   // Add-ons may keep a searchable catalog (store) and ask Claude from their own monthly budget (ai): docs/plugins.md.
   const pluginStore = new PluginStore(log.db);
   const pluginAi = new PluginAi(log, () => runtime);
+  // Videos: Gemini watches a YouTube link or a file you saved, and the notes are kept and searchable (docs/videos.md).
+  // Tests never read or write the real ~/.config/watch/.env, nor see a GEMINI_API_KEY from the shell.
+  const videos = new Videos(log, process.env.VITEST ? { homeDir: join(dataDir ?? dirname(projectsDir), "home"), env: {}, cloudFolders: () => [] } : {});
   const plugins = new PluginHost(log, join(dirname(projectsDir), "plugins"), {
-    bay, door: coreDoor({ log, tickets, bay }), store: pluginStore, ai: pluginAi,
+    bay, door: coreDoor({ log, tickets, bay }), store: pluginStore, ai: pluginAi, videos,
     ...(github ? { tarball: (repo: string, ref: string) => github.tarball(repo, ref) } : {}),
   });
   const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"), plugins);
@@ -527,6 +532,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await flowsRoute({ flows: factory.flows, improver: flowImprover, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
+      if (url.pathname === "/api/videos" || url.pathname.startsWith("/api/videos/")) {
+        const r = await videosRoute({ videos, readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
       if (url.pathname === "/api/watchers" || url.pathname.startsWith("/api/watchers/") || url.pathname === "/api/budget/month") {
         const r = await watchRoute({ log, watchers, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
@@ -573,7 +582,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { github, git: gitman, flowImprover, watchers, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, git: gitman, flowImprover, watchers, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, videos, errors, fault, ensureSelf });
 }
 
 /**
@@ -976,6 +985,9 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
   timers.push(setInterval(improveTick, 15 * 60_000).unref());
   // Plugins you turned on start with the core and stop with it.
   for (const id of core.plugins.startAll()) console.log(`Plugin ${id} started`);
+  // The Watch folder: a video saved there (a reel from your phone, a screen recording) is watched within a minute (docs/videos.md).
+  const videoTick = () => { if (!process.env.VITEST) core.videos.scanInbox().catch((e) => console.error("watch folder failed:", e)); };
+  timers.push(setInterval(videoTick, 60_000).unref());
   // Add-ons installed from GitHub keep themselves up to date: a minute after start, then every 6 hours.
   const addonTick = () => { if (!process.env.VITEST) core.plugins.updateAllFromGithub().then((ids) => { for (const id of ids) console.log(`Add-on ${id} updated`); }).catch((e) => console.error("add-on updates failed:", e)); };
   timers.push(setTimeout(addonTick, 60_000).unref());
