@@ -10,6 +10,8 @@ import type { Videos } from "./videos.js";
  *   POST /api/videos/watch                 { url | file, question?, start?, end?, fps?, refresh? }  → the notes
  *   GET  /api/videos/notes?q=&limit=       notes found by words, or the newest
  *   GET  /api/videos/notes/:id             one note in full
+ *   GET  /api/videos/links                 link drop: Scrape Creators key set?, yt-dlp installed?, the last links fetched or not
+ *   POST /api/videos/links                 { scrapeCreatorsKey }  saves it (null removes it)
  *   GET  /api/videos/instagram             Instagram by DM: mailbox ready?, what to paste into Meta, last pull
  *   POST /api/videos/instagram             { cloudflareToken?, appSecret? }  deploys or updates the mailbox
  *   POST /api/videos/instagram/forget      forget the mailbox here
@@ -33,6 +35,8 @@ export async function videosRoute(ctx: { videos: Videos; readJson: (req: Incomin
         start: b.start as number, end: b.end as number, fps: b.fps as number, refresh: b.refresh === true,
       })];
     }
+    if (path === "/api/videos/links" && req.method === "GET") return [200, { ...(await videos.linkStatus()), log: videos.linkLog() }];
+    if (path === "/api/videos/links" && req.method === "POST") { const b = await ctx.readJson(req); return [200, videos.setScrapeKey(typeof b.scrapeCreatorsKey === "string" && b.scrapeCreatorsKey.trim() ? b.scrapeCreatorsKey : null)]; }
     if (path === "/api/videos/instagram" && req.method === "GET") return [200, videos.instagram.status()];
     if (path === "/api/videos/instagram" && req.method === "POST") return [200, await videos.instagram.setup(await ctx.readJson(req))];
     if (path === "/api/videos/instagram/forget" && req.method === "POST") return [200, videos.instagram.forget()];

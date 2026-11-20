@@ -5,6 +5,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import type { EventLog } from "../events.js";
 import { ftsQuery } from "../plugins/store.js";
 import { InstagramInbox } from "./instagram.js";
+import { LINK_HOSTS, LinkFetcher, linksIn } from "./links.js";
 import { canonicalUrl, Gemini, GeminiError, GEMINI_MODELS, isYouTube, videoMime, type WatchClip } from "./gemini.js";
 
 /**
@@ -18,8 +19,9 @@ import { canonicalUrl, Gemini, GeminiError, GEMINI_MODELS, isYouTube, videoMime,
  * The Gemini key lives in one place, ~/.config/watch/.env (GEMINI_API_KEY), the same file Claude Code's /watch
  * plugin reads, so pasting it once in Systems serves both. It is never logged and never sent back to a screen.
  *
- * Only YouTube links are fetched. TikTok, Instagram and X forbid automated downloading in their terms, so clips from
- * there come in as files you saved yourself. The fastest way in is the Watch folder (~/SoftwareFactory/Watch, or any
+ * YouTube links go to Gemini as they are. An Instagram, TikTok or X link is fetched by link drop (links.ts: Scrape
+ * Creators, else yt-dlp logged out; those sites' terms forbid it, and Assaf chose it knowingly), or comes in as a file
+ * you saved, or by DM to your second Instagram account (instagram.ts). The fastest way in is the Watch folder (~/SoftwareFactory/Watch, or any
  * folder you choose, like a phone-synced Google Drive or OneDrive folder): a video saved there is watched by itself
  * within a minute and moved to Watched/. A text file with the same name (reel.txt beside reel.mp4) is the question.
  */
@@ -89,7 +91,9 @@ export class Videos {
   private busy = 0;
   /** Instagram by DM: reels shared to your second account arrive through Meta's API and a mailbox you own. */
   readonly instagram: InstagramInbox;
-  constructor(private log: EventLog, private o: { homeDir?: string; env?: NodeJS.ProcessEnv; fetch?: typeof fetch; api?: string; pollMs?: number; cloudFolders?: () => string[] } = {}) {
+  /** Link drop: Instagram, TikTok and X links fetched logged out (Scrape Creators, else yt-dlp). */
+  readonly links: LinkFetcher;
+  constructor(private log: EventLog, private o: { homeDir?: string; env?: NodeJS.ProcessEnv; fetch?: typeof fetch; api?: string; pollMs?: number; cloudFolders?: () => string[]; run?: import("./links.js").Runner } = {}) {
     log.db.exec(`CREATE TABLE IF NOT EXISTS video_notes (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       ckey       TEXT NOT NULL UNIQUE,
@@ -109,6 +113,20 @@ export class Videos {
     CREATE INDEX IF NOT EXISTS video_notes_source ON video_notes(source);
     CREATE VIRTUAL TABLE IF NOT EXISTS video_notes_fts USING fts5(text, tokenize='porter unicode61');`);
     this.instagram = new InstagramInbox({ env: { get: () => this.envFile(), set: (kv) => this.setEnv(kv) }, inbox: () => this.settings().inbox, fetch: o.fetch });
+    this.links = new LinkFetcher({ key: () => (this.o.env ?? process.env).SCRAPECREATORS_API_KEY?.trim() || this.envFile().SCRAPECREATORS_API_KEY?.trim() || null, fetch: o.fetch, run: o.run });
+  }
+
+  /** The Scrape Creators key for link drop (or null to remove it), kept in the shared .env file only. */
+  setScrapeKey(key: string | null, by = "you"): { hasScrapeKey: boolean } {
+    const k = key == null ? "" : String(key).trim();
+    if (k && !/^[A-Za-z0-9_\-]{16,200}$/.test(k)) throw new Error("That does not look like a Scrape Creators API key (app.scrapecreators.com)");
+    this.setEnv({ SCRAPECREATORS_API_KEY: k || null });
+    this.log.append("video.linkkey", { set: !!k, by });
+    return { hasScrapeKey: !!k };
+  }
+
+  async linkStatus(): Promise<{ hasScrapeKey: boolean; ytdlp: boolean }> {
+    return { hasScrapeKey: !!this.envFile().SCRAPECREATORS_API_KEY?.trim() || !!(this.o.env ?? process.env).SCRAPECREATORS_API_KEY?.trim(), ytdlp: await this.links.hasYtDlp() };
   }
 
   /** Change some lines of the shared .env file (null removes one), keeping every other line. Never logged. */
@@ -238,7 +256,7 @@ export class Videos {
     if (url && file) throw new Error("Give a YouTube link or a video file, not both");
     if (url) {
       if (isYouTube(url)) return { kind: "youtube", source: canonicalUrl(url), stamp: "" };
-      if (/^https?:\/\//i.test(url)) throw new Error("Gemini watches YouTube links only. For a TikTok, Instagram or X video, save the clip from the app into your Watch folder (Systems, Videos), or give its file: those sites forbid automated downloading.");
+      if (/^https?:\/\//i.test(url)) throw new Error("Gemini watches YouTube links, and Instagram, TikTok, X, Facebook and Threads links are fetched first. For any other site, save the video into your Watch folder (Systems, Videos) or give its file.");
       throw new Error("That is not a YouTube link");
     }
     if (file) {
@@ -267,6 +285,20 @@ export class Videos {
 
   /** Watch a video, or answer from the notes when this exact ask was answered before. */
   async watch(req: WatchRequest, by = "you"): Promise<VideoNote & { cached: boolean }> {
+    const link = String(req.url ?? "").trim();
+    if (link && LINK_HOSTS.test(link)) {
+      // Link drop from the watch box or an add-on: fetch it into Watched/ (so the folder scan never watches it twice).
+      const prior = this.log.db.prepare("SELECT json_extract(payload, '$.video') AS v FROM events WHERE type = 'video.link' AND json_extract(payload, '$.url') = ? AND json_extract(payload, '$.ok') = 1 ORDER BY id DESC LIMIT 1").get(link) as { v: string } | undefined;
+      let file = prior?.v && existsSync(prior.v) ? prior.v : null;
+      if (!file) {
+        const done = join(this.settings().inbox, "Watched");
+        mkdirSync(done, { recursive: true });
+        const f = await this.links.fetchTo(link, done, linkBase(link));
+        this.log.append("video.link", { url: link, via: f.via, ok: 1, video: f.path, by });
+        file = f.path;
+      }
+      return this.watch({ ...req, url: undefined, file }, by);
+    }
     const src = this.source(req);
     const clip = this.clip(req);
     const question = String(req.question ?? "").trim().slice(0, VIDEO_LIMITS.questionChars) || null;
@@ -350,11 +382,65 @@ export class Videos {
    * Watch what is waiting in the Watch folder (at most three a look), each then moved to Watched/ with its question
    * file. Called every minute by the core; does nothing without a key or while the daily limit is reached.
    */
+  async scanLinks(now = Date.now()): Promise<number> {
+    let got = 0;
+    for (const dir of this.folders()) {
+      let names: string[];
+      try { names = readdirSync(dir); } catch { continue; }
+      for (const n of names) {
+        if (got >= 3) return got;
+        if (!/\.(txt|url)$/i.test(n)) continue;
+        const stem = basename(n, extname(n));
+        if (names.some((o) => o !== n && basename(o, extname(o)) === stem && videoMime(join(dir, o)))) continue; // a video's question file
+        const p = join(dir, n);
+        let st, text;
+        try { st = statSync(p); if (!st.isFile() || st.size > 64_000 || now - st.mtimeMs < 15_000) continue; text = readFileSync(p, "utf8"); } catch { continue; }
+        const stamp = `${st.size}:${Math.floor(st.mtimeMs)}`;
+        const { links, rest } = linksIn(text);
+        if (!links.length) continue;
+        let allDone = true;
+        for (const url of links) {
+          const ok = this.log.db.prepare("SELECT 1 FROM events WHERE type = 'video.link' AND json_extract(payload, '$.url') = ? AND json_extract(payload, '$.ok') = 1 LIMIT 1").get(url);
+          if (ok) continue;
+          const failed = this.log.db.prepare("SELECT 1 FROM events WHERE type = 'video.link' AND json_extract(payload, '$.url') = ? AND json_extract(payload, '$.stamp') = ? LIMIT 1").get(url, stamp);
+          if (failed) { allDone = false; continue; }
+          if (got >= 3) { allDone = false; break; }
+          try {
+            let base = linkBase(url);
+            for (let i = 2; names.includes(`${base}.mp4`) || existsSync(join(dir, `${base}.mp4`)); i++) base = `${linkBase(url)} (${i})`;
+            const f = await this.links.fetchTo(url, dir, base);
+            if (rest) writeFileSync(join(dir, `${basename(f.path, extname(f.path))}.txt`), rest.slice(0, VIDEO_LIMITS.questionChars));
+            this.log.append("video.link", { url, file: p, via: f.via, ok: 1, video: f.path, by: "link drop" });
+            got++;
+          } catch (e) {
+            allDone = false;
+            this.log.append("video.link", { url, file: p, stamp, ok: 0, error: String((e as Error).message).slice(0, 500), by: "link drop" });
+          }
+        }
+        if (allDone && links.length === 1 && !rest) {
+          const done = join(dir, "Watched");
+          mkdirSync(done, { recursive: true });
+          let t = join(done, n);
+          for (let i = 2; existsSync(t); i++) t = join(done, `${stem} (${i})${extname(n)}`);
+          try { renameSync(p, t); } catch { /* stays; its link is done and never fetched again */ }
+        }
+      }
+    }
+    return got;
+  }
+
+  /** Links fetched (or not) lately, newest first: what to look at when a dropped link was not watched. */
+  linkLog(limit = 20): { at: string; url: string; ok: boolean; via?: string; error?: string }[] {
+    return (this.log.db.prepare("SELECT ts, payload FROM events WHERE type = 'video.link' ORDER BY id DESC LIMIT ?").all(limit) as { ts: string; payload: string }[])
+      .map((r) => { const p = JSON.parse(r.payload); return { at: r.ts, url: p.url, ok: p.ok === 1, ...(p.via ? { via: p.via } : {}), ...(p.error ? { error: p.error } : {}) }; });
+  }
+
   async scanInbox(now = Date.now()): Promise<{ watched: number; failed: number }> {
     const s = this.settings();
     if (!this.key() || this.todayCount() >= s.dailyMax) return { watched: 0, failed: 0 };
-    // Reels shared by DM wait in your Instagram mailbox: bring them into the Watch folder first.
+    // Reels shared by DM wait in your Instagram mailbox, and dropped links wait to be fetched: bring both in first.
     await this.instagram.pull().catch(() => 0);
+    await this.scanLinks(now).catch(() => 0);
     let watched = 0, failed = 0;
     for (const f of this.folders(s).flatMap((d) => this.waiting(d, now)).filter((x) => x.ready).slice(0, 3)) {
       const side = join(dirname(f.path), `${basename(f.path, extname(f.path))}.txt`);
@@ -376,4 +462,14 @@ export class Videos {
     }
     return { watched, failed };
   }
+}
+
+/** A file name for a fetched link: the site and the post's id ("IG DF5s0duxDts", "TikTok 7463250363559218474"). */
+export function linkBase(url: string): string {
+  let u: URL;
+  try { u = new URL(url); } catch { return "Link"; }
+  const host = u.hostname.replace(/^www\./, "");
+  const site = /instagram/.test(host) ? "IG" : /tiktok/.test(host) ? "TikTok" : /x\.com|twitter/.test(host) ? "X" : /threads/.test(host) ? "Threads" : "FB";
+  const id = u.pathname.split("/").filter(Boolean).pop()?.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40) || "link";
+  return `${site} ${id}`;
 }

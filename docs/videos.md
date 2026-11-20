@@ -51,6 +51,20 @@ general notes. A video that fails is not tried again until the file changes. A f
 or OneDrive is found and watched too, with nothing to set up on the PC: make it from the phone's Drive app, share a
 saved reel into it, and it is watched once it syncs down.
 
+## Link drop
+
+An Instagram, TikTok, X, Facebook or Threads link is fetched, then watched like a saved clip. Put it in the watch box
+in Systems, Videos, or save it as a `.txt` (or Windows `.url`) file in the Watch folder, for example from the phone
+into Google Drive's `SF Watch`. Other words in the file become the video's question; a file holding only one link
+moves to `Watched/` once it is fetched. A link is fetched once; one that failed waits until its file changes.
+
+- **How** (`video/links.ts`): Scrape Creators first when `SCRAPECREATORS_API_KEY` is in `~/.config/watch/.env`
+  (1 credit a link: 100 free, then about $0.002), else `yt-dlp` if installed, run with `--ignore-config --no-cookies
+  --no-cookies-from-browser`. Never your login, cookies or accounts.
+- **Terms**: Instagram, TikTok and X forbid automated downloading. Assaf chose this on 2026-11-20 knowing that, for
+  links he saves himself; the fully official route is Instagram by DM below.
+- Systems, Videos, Link drop shows whether a key is set and yt-dlp is found, and the last links fetched or not, with why.
+
 ## Instagram by DM
 
 Share a reel by DM to a second Instagram account you own and it is watched, with nothing downloaded by hand and
