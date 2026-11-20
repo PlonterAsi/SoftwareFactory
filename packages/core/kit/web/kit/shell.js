@@ -47,6 +47,13 @@ const fieldLabel = (f) => f.label || f.name.replace(/([A-Z])/g, " $1").replace(/
  */
 export async function startApp({ schema, views, root, store }) {
   const mount = root || document.getElementById("app") || document.body;
+  // The page's own errors go to the app's log and, from the Run tab, become bugs in its project (SF-40).
+  const tell = (where, message, stack) => { try { fetch("api/_error", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ where: where + " " + location.hash, message: String(message || "Unknown error").slice(0, 2000), stack: stack ? String(stack).slice(0, 8000) : undefined }) }).catch(() => {}); } catch { /* opened as plain pages */ } };
+  if (typeof window !== "undefined" && !window.__kitErrors) {
+    window.__kitErrors = true;
+    window.addEventListener("error", (e) => tell("script", e.message, e.error && e.error.stack));
+    window.addEventListener("unhandledrejection", (e) => tell("promise", e.reason && e.reason.message || e.reason, e.reason && e.reason.stack));
+  }
   let st;
   try { st = store || (await openStore(schema)); } catch (e) {
     mount.replaceChildren(h("div", { class: "kit-fatal" }, h("h1", {}, "This app cannot start"), h("p", {}, e.message)));
@@ -266,7 +273,7 @@ export async function startApp({ schema, views, root, store }) {
   }
 
   function systemPage(tab) {
-    const tabs = [["overview", "Overview"], ["entities", "Entities"], ["flows", "Flows"], ["features", "Features"], ["activity", "Activity"], ["data", "Data"], ["code", "Code"]];
+    const tabs = [["overview", "Overview"], ["entities", "Entities"], ["flows", "Flows"], ["features", "Features"], ["activity", "Activity"], ["data", "Data"], ["log", "Log"], ["code", "Code"]];
     const body = h("div", {});
     const counts = schema.entities.map((e) => ({ label: plural(e), value: st.count(e.name) }));
     if (tab === "overview") body.append(
@@ -283,6 +290,7 @@ export async function startApp({ schema, views, root, store }) {
       own.map((v) => h("li", {}, h("strong", {}, v.label || v.id), v.description ? h("span", { class: "kit-muted" }, " · " + v.description) : null, h("a", { href: v.id === "dashboard" ? "#/home" : "#/v/" + v.id, class: "kit-link" }, " open"))))));
     else if (tab === "activity") body.append(h("div", { class: "kit-panel" }, activityList(200)));
     else if (tab === "data") body.append(dataPanel());
+    else if (tab === "log") body.append(logPanel());
     else if (tab === "code") body.append(codePanel());
     return h("section", {},
       h("header", { class: "kit-head" }, h("h1", {}, "System"), h("p", { class: "kit-sub" }, "Everything this app is made of: its data, flows, features, changes and code.")),
@@ -328,6 +336,16 @@ export async function startApp({ schema, views, root, store }) {
         h("button", { class: "kit-button", onclick: () => file.click() }, "Restore from a backup"), file,
         h("button", { class: "kit-button danger", onclick: async () => { if (confirm("Replace all data with the sample records?")) { await st.reset(); toast("Sample data restored"); draw(); } } }, "Start over with sample data")),
       h("p", { class: "kit-muted" }, "Backups are files this app makes and reads; you never write them by hand."));
+  }
+
+  function logPanel() {
+    const box = h("div", {}, h("p", { class: "kit-muted" }, "Loading the log…"));
+    fetch("api/_log").then((r) => r.ok ? r.json() : Promise.reject(new Error("no server"))).then((log) => {
+      box.replaceChildren(log.lines.length
+        ? h("pre", { class: "kit-source" }, log.lines.slice().reverse().join("\n"))
+        : h("p", { class: "kit-muted" }, "No errors so far."), h("p", { class: "kit-muted" }, "Kept in " + log.file + ", newest first. Each error is also filed as a bug in this project in SoftwareFactory when the app runs from its Run tab."));
+    }).catch(() => box.replaceChildren(h("p", { class: "kit-muted" }, "Start the app with its server (the Run tab's Start) to keep a log of its errors.")));
+    return h("div", { class: "kit-panel" }, h("h2", {}, "Log"), box);
   }
 
   function codePanel() {

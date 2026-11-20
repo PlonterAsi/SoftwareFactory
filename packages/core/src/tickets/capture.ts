@@ -26,7 +26,7 @@ export interface CapturedError {
   stack?: string;
   /** Where it happened: a route ("POST /api/tickets"), a screen ("bridge #/p/3/tickets"), a job. */
   where: string;
-  /** core, bridge or shell. */
+  /** core, bridge or shell; app for a project's own program (SF-40). */
   from?: string;
   /** What was around it: the screen, the last events, the request. Scrubbed and capped. */
   context?: Record<string, unknown>;
@@ -121,7 +121,7 @@ export class ErrorCapture {
     const dropped = this.hour.dropped;
     this.hour.dropped = 0;
     const body = [
-      `${from === "bridge" ? "The Bridge" : from === "shell" ? "The app window" : "The core"} hit an error${where ? ` in ${where}` : ""}:`,
+      `${from === "bridge" ? "The Bridge" : from === "shell" ? "The app window" : from === "app" ? "This project's program" : "The core"} hit an error${where ? ` in ${where}` : ""}:`,
       `\n${message}`,
       stack ? ["", "Stack:", stack].join("\n") : "",
       context ? ["", "Around it:", context].join("\n") : "",

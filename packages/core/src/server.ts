@@ -27,7 +27,7 @@ import { chatRoutes, projectHome } from "./chat/routes.js";
 import { RepoExplorer } from "./imports/explorer.js";
 import { importsRoute } from "./imports/routes.js";
 import { RepoReviewer } from "./imports/review.js";
-import { Launcher } from "./launch/launcher.js";
+import { Launcher, type LaunchFault } from "./launch/launcher.js";
 import { launchRoute } from "./launch/routes.js";
 import { Integrations } from "./integrations/service.js";
 import { integrationsRoute, serveExtension } from "./integrations/routes.js";
@@ -202,6 +202,9 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   reviewer.homeStack = settings.importHomeStack ?? "";
   // Finished projects run from their own folders; the Bridge shows their output and pages.
   const launcher = new Launcher(log);
+  // A project's program that dies, or an app that reports its own error, is a bug in that project (SF-40).
+  const appFault = (f: { message: string; stack?: string; where: string; project: number; context?: Record<string, unknown> }) => errors.capture({ ...f, from: "app" });
+  launcher.on("fault", (f: LaunchFault) => appFault({ message: f.message, stack: f.stack, where: `Run: ${f.label}`, project: f.projectId, context: { output: f.tail } }));
   // Every Signal, from the Overseer channel or a factory intake, is filed by the Order Engine.
   log.on("event", (e: SfEvent) => {
     if (e.type !== "signal.captured") return;
@@ -374,6 +377,15 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (origin && !/^https?:\/\/(tauri\.localhost|localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return json(res, 403, { error: "App agents answer apps on this computer only" });
         const r = await askForApp(log, runtime, bay, await readJson(req));
         return json(res, r.status, r.body);
+      }
+      if (req.method === "POST" && url.pathname === "/api/apps/error") {
+        // An app the factory built reports an error of its own (kit server.js): a bug in its project, never spent on.
+        if (origin && !/^https?:\/\/(tauri\.localhost|localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return json(res, 403, { error: "Apps on this computer only" });
+        const b = await readJson(req);
+        const project = Number(b.project);
+        if (!Number.isInteger(project) || !log.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(project)) return json(res, 400, { error: "Which project? (SF_PROJECT_ID)" });
+        const r = appFault({ message: String(b.message ?? "").slice(0, 2000), stack: b.stack ? String(b.stack).slice(0, 8000) : undefined, where: `${String(b.app ?? "the app").slice(0, 60)}: ${String(b.where ?? "server").slice(0, 100)}`, project });
+        return json(res, 200, { ticket: r?.ticket ?? null, again: r?.again ?? false });
       }
       if (req.method === "POST" && url.pathname === "/api/factory/runs") {
         const body = await readJson(req);
