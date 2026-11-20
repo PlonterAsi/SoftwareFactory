@@ -111,11 +111,14 @@ describe("Videos", () => {
     expect(v.status().notes).toBe(1);
   });
 
-  it("refuses links from sites that forbid downloading, and asks for the saved file instead", async () => {
-    const { v, seen } = make();
+  it("fetches only known social links, and says why when it cannot (no Scrape Creators key, no yt-dlp)", async () => {
+    const home = tmp();
+    const g = fakeGoogle();
+    const v = new Videos(new EventLog(":memory:"), { homeDir: home, env: {}, fetch: g.f, pollMs: 1, cloudFolders: () => [], run: async () => ({ code: -1, stdout: "", stderr: "not found" }) });
     v.setKey(KEY);
-    await expect(v.watch({ url: "https://www.tiktok.com/@a/video/123" })).rejects.toThrow(/save the clip/);
-    expect(seen).toHaveLength(0);
+    await expect(v.watch({ url: "https://vimeo.com/123" })).rejects.toThrow(/save the video into your Watch folder/);
+    await expect(v.watch({ url: "https://www.tiktok.com/@a/video/123" })).rejects.toThrow(/no Scrape Creators key; yt-dlp is not installed/);
+    expect(g.seen).toHaveLength(0);
   });
 
   it("needs a key, and stops at the daily limit", async () => {

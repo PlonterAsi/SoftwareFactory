@@ -51,6 +51,41 @@ general notes. A video that fails is not tried again until the file changes. A f
 or OneDrive is found and watched too, with nothing to set up on the PC: make it from the phone's Drive app, share a
 saved reel into it, and it is watched once it syncs down.
 
+## Link drop
+
+An Instagram, TikTok, X, Facebook or Threads link is fetched, then watched like a saved clip. Put it in the watch box
+in Systems, Videos, or save it as a `.txt` (or Windows `.url`) file in the Watch folder, for example from the phone
+into Google Drive's `SF Watch`. Other words in the file become the video's question; a file holding only one link
+moves to `Watched/` once it is fetched. A link is fetched once; one that failed waits until its file changes.
+
+- **How** (`video/links.ts`): Scrape Creators first when `SCRAPECREATORS_API_KEY` is in `~/.config/watch/.env`
+  (1 credit a link: 100 free, then about $0.002), else `yt-dlp` if installed, run with `--ignore-config --no-cookies
+  --no-cookies-from-browser`. Never your login, cookies or accounts.
+- **Terms**: Instagram, TikTok and X forbid automated downloading. Assaf chose this on 2026-11-20 knowing that, for
+  links he saves himself; the fully official route is Instagram by DM below.
+- Systems, Videos, Link drop shows whether a key is set and yt-dlp is found, and the last links fetched or not, with why.
+
+## Instagram by DM
+
+Share a reel by DM to a second Instagram account you own and it is watched, with nothing downloaded by hand and
+nothing scraped: the video comes from Meta's official Instagram Messaging API, for a reel you sent yourself.
+
+- **The second account** is a free professional (Creator) account, connected to a Meta developer app of yours with
+  the Instagram messaging use case. Meta only sends a webhook for a DM an account *receives*, so it cannot be the
+  same account you share from. In development mode only people with a role on the app (you) trigger it.
+- **The mailbox** is a small Cloudflare Worker on your free Cloudflare account (`video/ig-worker.ts`). Systems,
+  Videos, Instagram by DM: paste a Cloudflare API token ("Edit Cloudflare Workers" template) and SoftwareFactory
+  deploys it, with its KV storage and a `workers.dev` address. Then paste the Meta app's secret, and put the callback
+  URL and verify token it shows into the app's webhook (field `messages`). The Worker checks Meta's
+  `X-Hub-Signature-256`, fetches the reel's video from Instagram's media link at once (it expires), keeps it up to
+  14 days, and only follows links on Instagram's own media hosts.
+- **The pull**: every minute SoftwareFactory asks the mailbox for what waits (with a secret only it knows), saves each
+  reel into the Watch folder as `IG <caption> <id>.mp4` and deletes it there; it is then watched like any saved clip.
+  Nothing on this PC is opened to the internet, and reels shared while the PC is off arrive when it is back.
+- **Secrets** (`SF_IG_CF_TOKEN`, `SF_IG_APP_SECRET`, `SF_IG_PULL_SECRET`, `SF_IG_VERIFY_TOKEN`, `SF_IG_URL`) live in
+  `~/.config/watch/.env` only, never in the log or on screen (the verify token and address are shown, as Meta needs them).
+- **Last events** shows what the mailbox received, skipped (a photo post, an unshareable reel) or failed on.
+
 ## Storage
 
 Notes live in `video_notes` and `video_notes_fts` (FTS5), written directly like add-on catalogs. Events:
