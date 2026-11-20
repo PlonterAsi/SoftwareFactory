@@ -22,6 +22,10 @@ crew, and never spends money: every look is plain code.
 - **Filed once.** Each finding has a fingerprint (`watch:<project>:<watcher>:<finding>`). A finding that
   already has a ticket, open or closed, is not filed again. A finding that changes (more markers, another
   vulnerable package) is a new finding.
+- **Gone, closed.** When a look runs to the end and no longer finds what a watcher ticket names, that ticket
+  closes by itself with a note, as long as nobody has started on it (open or ready). The code was fixed, or the
+  finding changed and has a ticket of its own. A ticket in progress or built stays as it is, and a dependency
+  tool that could not run this time leaves its earlier tickets alone.
 - **No floods.** One look opens at most five tickets; the rest wait for the next look.
 - **Open, not ready.** A watcher's ticket is open, tagged `watcher`, so the crew does not pick it up until you
   make it ready.

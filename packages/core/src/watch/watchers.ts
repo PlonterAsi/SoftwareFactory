@@ -20,6 +20,9 @@ import type { Tickets } from "../tickets/tickets.js";
  *
  * The same finding opens one ticket, once: each finding has a fingerprint, and a finding that already has a ticket
  * (open or closed) is not filed again. A finding that changes (more markers, another vulnerable package) is new.
+ * A watcher's own ticket that nobody has started on (open or ready) closes by itself when a full look no longer
+ * finds it: the code was fixed, or the finding changed and has a ticket of its own. Without that, a scanner fix
+ * (SF-57) left its false alarms open on every project, some marked ready for the crew to spend money on.
  */
 export const WATCHER_KINDS = ["debt", "security", "dependencies", "flaky"] as const;
 export type WatcherKind = (typeof WATCHER_KINDS)[number];
@@ -106,8 +109,10 @@ export function securityFindings(dir: string, tools: Pick<WatchTools, "readCode"
 }
 
 /** Dependencies: one ticket for the packages a tool calls vulnerable (per tool), one for unpinned Python packages. */
-export async function dependencyFindings(dir: string, tools: Pick<WatchTools, "dependencyScan"> = realWatchTools): Promise<{ findings: Finding[]; notes: string[] }> {
+export async function dependencyFindings(dir: string, tools: Pick<WatchTools, "dependencyScan"> = realWatchTools): Promise<{ findings: Finding[]; notes: string[]; unjudged: string[] }> {
   const d = await tools.dependencyScan(dir);
+  // A tool that could not run this time says nothing about its earlier findings: they are not cleared.
+  const unjudged = d.reports.filter((x) => !x.ran).map((x) => `${x.tool}:`);
   const out: Finding[] = [];
   for (const r of d.reports.filter((x) => x.ran && x.vulnerable.length)) {
     const names = r.vulnerable.map((v) => v.name).sort();
@@ -120,7 +125,7 @@ export async function dependencyFindings(dir: string, tools: Pick<WatchTools, "d
     out.push({ key: `unpinned:${hash([...d.unpinned].sort().join(","))}`, kind: "task", priority: "someday", title: `Pin ${d.unpinned.length} Python package${d.unpinned.length > 1 ? "s" : ""} to exact versions`,
       body: `requirements.txt names these without an exact version (==), so two installs can get different code:\n${list(d.unpinned)}\n\nPin each to the version that works now.\n\nOpened by the Dependencies watcher.` });
   }
-  return { findings: out, notes: d.reports.filter((x) => !x.ran).map((x) => `${x.tool}: ${x.note}`) };
+  return { findings: out, notes: d.reports.filter((x) => !x.ran).map((x) => `${x.tool}: ${x.note}`), unjudged };
 }
 
 /** Flaky tests: from the project's builds, tests that passed and then failed again in a later round of the same build. */
@@ -208,13 +213,14 @@ export class Watchers {
       const dir = this.folder(projectId);
       let findings: Finding[] = [];
       let notes: string[] = [];
+      let unjudged: string[] = [];
       let error: string | undefined;
       try {
         if (kind === "flaky") findings = flakyFindings(this.log, projectId);
         else if (!dir) error = "This project has no folder on this computer to look at.";
         else if (kind === "debt") findings = debtFindings(dir, this.tools);
         else if (kind === "security") findings = securityFindings(dir, this.tools);
-        else ({ findings, notes } = await dependencyFindings(dir, this.tools));
+        else ({ findings, notes, unjudged } = await dependencyFindings(dir, this.tools));
       } catch (e) { error = (e as Error).message.slice(0, 300); }
       const opened: number[] = [];
       let known = 0;
@@ -226,13 +232,31 @@ export class Watchers {
         opened.push(t.id);
       }
       const left = findings.length - known - opened.length;
+      const cleared = error ? [] : this.clearGone(projectId, kind, findings, unjudged);
       const note = error ? `Could not look: ${error}`
-        : !findings.length ? `Nothing found.${notes.length ? ` ${notes.join(" ")}` : ""}`
-        : `${findings.length} found: ${opened.length} new ticket${opened.length === 1 ? "" : "s"}${known ? `, ${known} already filed` : ""}${left > 0 ? `, ${left} wait for the next look` : ""}.`;
-      const out = { found: findings.length, opened, note: note.slice(0, 500), ...(error ? { error } : {}) };
+        : (!findings.length ? `Nothing found.${notes.length ? ` ${notes.join(" ")}` : ""}`
+        : `${findings.length} found: ${opened.length} new ticket${opened.length === 1 ? "" : "s"}${known ? `, ${known} already filed` : ""}${left > 0 ? `, ${left} wait for the next look` : ""}.`)
+          + (cleared.length ? ` ${cleared.length} earlier ticket${cleared.length === 1 ? " is" : "s are"} no longer found and closed.` : "");
+      const out = { found: findings.length, opened, ...(cleared.length ? { cleared } : {}), note: note.slice(0, 500), ...(error ? { error } : {}) };
       this.log.append("watcher.ran", { projectId, kind, ...out });
       return out;
     } finally { this.running.delete(k); }
+  }
+
+  /** Close this watcher's untouched tickets on a project whose finding a full look no longer reports. */
+  private clearGone(projectId: number, kind: WatcherKind, findings: Finding[], unjudged: string[] = []): number[] {
+    const prefix = `watch:${projectId}:${kind}:`;
+    const now = new Set(findings.map((f) => `${prefix}${f.key}`.slice(0, 300)));
+    const mine = this.log.db.prepare("SELECT id, fingerprint FROM tickets WHERE fingerprint LIKE ? AND status IN ('open', 'ready')")
+      .all(`${prefix}%`) as { id: number; fingerprint: string }[]; // LIKE treats "_" as any letter; startsWith below is exact
+    const out: number[] = [];
+    for (const r of mine.filter((m) => m.fingerprint.startsWith(prefix) && !now.has(m.fingerprint) && !unjudged.some((u) => m.fingerprint.startsWith(prefix + u)))) {
+      try {
+        this.tickets.say(Number(r.id), "The watcher looked again and no longer finds this: the code changed, or the finding now has a ticket of its own. Closed by itself; reopen it if it is still a problem.", { status: "closed", by: `${WATCHER_LABEL[kind]} watcher` });
+        out.push(Number(r.id));
+      } catch { /* a move the rules refuse stays as it is */ }
+    }
+    return out;
   }
 
   /** The looks that are due now, across active projects. */
