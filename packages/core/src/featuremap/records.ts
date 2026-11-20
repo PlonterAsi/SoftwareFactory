@@ -153,12 +153,12 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
   {
     id: "checks", name: "Checks and harness steps", group: "Engine",
     purpose: "Free checks in plain code that hold every build to the truth: the tests load, every screen draws in a real browser, every link opens, no secret is written, locked tests are not weakened.",
-    spec: ["Tests are tried in a dry run before they are locked.", "Fast checks (syntax, types, lint, secrets) run after every build or fix.", "Every screen is opened in a real browser; without a browser the check is skipped, not passed.", "Every link the app ships is opened.", "A change that weakens a locked test is reported.", "Each station's output must have a visual (visualizeEverything)."],
+    spec: ["Tests are tried in a dry run before they are locked.", "Fast checks (syntax, types, lint, secrets) run after every build or fix.", "Every screen is opened in a real browser; without a browser the check is skipped, not passed.", "Every link the app ships is opened.", "A change that weakens a locked test is reported.", "Before anything costs money, a free preflight checks Git, Claude Code, its sign-in and disk space (safety/preflight.ts).", "Each station's output must have a visual (visualizeEverything)."],
     flow: ["A build or fix finishes", "Fast checks run", "The whole test suite runs", "Screens and links are opened", "Failures go to the Fixer with trimmed output"],
     design: "The Tests, Loop and Visuals tabs of the run deck show each check per round; fast checks appear in the Loop tab.",
     screens: ["/factory"], docs: ["docs/engine.md", "docs/screens.md"], stations: ["tests", "fix", "review"],
     files: [`${C}factory/testcheck.ts`, `${C}factory/screencheck.ts`, `${C}factory/uicheck.ts`, `${C}factory/linkcheck.ts`, `${C}factory/visualize.ts`, `${C}safety/`],
-    api: [],
+    api: ["/api/preflight"],
   },
   {
     id: "app-kit", name: "App kit and app check", group: "Engine",
