@@ -13,7 +13,7 @@ import { inProject, registerProjectPanel, registeredPanelIds, unregisterProjectP
  * A plugin page runs in a sandboxed frame. It cannot call the core itself; it asks this window
  * through sf.js (postMessage), and the core checks its permissions again.
  */
-export type PluginPermission = "events:read" | "events:write" | "agents" | "records:read" | "actions" | "ai" | "store";
+export type PluginPermission = "events:read" | "events:write" | "agents" | "records:read" | "actions" | "ai" | "store" | "video";
 export interface PluginPanel { id: string; title: string; entry: string; where: "project" | "page" | "nav"; order: number }
 export interface PluginBudget { monthlyUsd: number; spentUsd: number; leftUsd: number; calls: number; setBy: "manifest" | "you" }
 export interface PluginManifest {
@@ -208,7 +208,7 @@ export function PluginsPage({ events, list, err, refresh, id, panel }: {
         {plugins.map((p) => (
           <a key={p.id} className={`ft-item${current?.id === p.id ? " on" : ""}`} href={`#/plugins/${p.id}`} aria-current={current?.id === p.id ? "page" : undefined}>
             <span className={`ft-glyph pl-dot s-${p.status}${p.error && p.status !== "enabled" ? " bad" : ""}`} aria-hidden>⬢</span>
-            <span><b>{p.name}</b><span className="muted">{p.version} · {STATUS[p.status]}{p.running === false && p.status === "enabled" ? " · starting" : ""}</span></span>
+            <span><b>{p.name}</b><span className="muted">{p.version} · {waitsForApproval(p) ? "updated, waits for your OK" : STATUS[p.status]}{p.running === false && p.status === "enabled" ? " · starting" : ""}</span></span>
           </a>
         ))}
         {!plugins.length && <p className="empty">{err ?? (list ? "No plugins yet. Add the example below, or a folder of your own." : "Loading…")}</p>}
@@ -274,6 +274,14 @@ function PluginDetail({ p, list, events, busy, act, panelId }: {
           <button className="sm ghost" disabled={busy} onClick={() => { if (confirm(`Remove ${p.name}? Its copy and its stored data are deleted.`)) act(() => pluginsApi.remove(p.id).then(() => { location.hash = "#/plugins"; })); }}>Remove</button>
         </div>
       </header>
+
+      {waitsForApproval(p) && (
+        <div className="pl-approve" role="status">
+          <p><b>{p.name} {p.version} asks for {newAsks.length > 1 ? "new permissions" : "a new permission"}, so it is off until you approve.</b></p>
+          <ul>{newAsks.map((x) => <li key={x}>{x.startsWith("act:") ? (list.actions?.[x.slice(4)] ?? x.slice(4)) : (list.permissions[x as PluginPermission] ?? x)}</li>)}</ul>
+          <button className="sm gate" disabled={busy} onClick={() => act(() => pluginsApi.enable(p.id), `${p.name} is on.`)}>Approve and turn on</button>
+        </div>
+      )}
 
       {showPage && (
         <section className={`pl-page${full ? " full" : ""}`}>
@@ -368,9 +376,15 @@ export function AddonPage({ list, id, panel, events }: { list: PluginList | null
   );
 }
 
-/** The main menu items enabled add-ons ask for. */
-export function addonNav(list: PluginList | null | undefined): { id: string; panel: string; title: string }[] {
-  return (list?.plugins ?? []).filter((p) => p.status === "enabled")
-    .flatMap((p) => p.manifest.panels.filter((x) => x.where === "nav").map((x) => ({ id: p.id, panel: x.id, title: x.title, order: x.order })))
-    .sort((a, b) => a.order - b.order).map(({ id, panel, title }) => ({ id, panel, title }));
+/** An add-on that was on, then updated to a version that asks for more: it waits for you to turn it on again. */
+export const waitsForApproval = (p: PluginView) => p.status === "installed" && !!p.enabledAt;
+
+/**
+ * The main menu items enabled add-ons ask for. An add-on waiting for your approval after an update keeps its place,
+ * marked, and leads to its Add-ons page (where Turn on is the approval), so it does not vanish from the menu.
+ */
+export function addonNav(list: PluginList | null | undefined): { id: string; panel: string; title: string; waiting?: boolean }[] {
+  return (list?.plugins ?? []).filter((p) => p.status === "enabled" || waitsForApproval(p))
+    .flatMap((p) => p.manifest.panels.filter((x) => x.where === "nav").map((x) => ({ id: p.id, panel: x.id, title: x.title, order: x.order, waiting: p.status !== "enabled" })))
+    .sort((a, b) => a.order - b.order).map(({ id, panel, title, waiting }) => (waiting ? { id, panel, title, waiting } : { id, panel, title }));
 }
