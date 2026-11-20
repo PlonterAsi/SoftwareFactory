@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { EventLog } from "../events.js";
 import { SLOTS, type Slot } from "../bay/agentfile.js";
 import { registerProjection, type Projection } from "../store/projections.js";
@@ -102,6 +103,16 @@ export function principles(log?: EventLog | null): PrincipleView[] {
 
 function cleanStations(s: unknown): Slot[] {
   return Array.isArray(s) ? SLOTS.filter((x) => s.includes(x)) : [];
+}
+
+/**
+ * One short fingerprint of the Brain in force: every enabled principle, its stations and words (SF-19). A run
+ * records it when it starts, so two runs that show the same hash were told the same rules, and a run that
+ * behaved differently after a Brain edit shows a different one.
+ */
+export function brainHash(list: Principle[]): string {
+  const on = list.filter((p) => p.enabled).map((p) => `${p.id}|${[...p.stations].sort().join(",")}|${p.title}|${p.text}`).sort();
+  return createHash("sha256").update(on.join("\n")).digest("hex").slice(0, 12);
 }
 
 /** The principles an agent on this station must follow, as the block that opens its station instructions. */

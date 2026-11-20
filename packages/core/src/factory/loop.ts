@@ -12,6 +12,7 @@ import { checkLinks, type LinkCheck } from "./linkcheck.js";
 import { git, isLockedTest, readTree, testsHash } from "./workspace.js";
 import { type GateDecision, type GateId, MAX_AUTO_RESUMES, type Pending, type Plan, type RunMaker, type RunOptions, type ScreenRun, type StationId, defaultUi, normIdea, restoreState, unfinishedRuns, waitingEscalation } from "./runkit.js";
 import { Run } from "./run.js";
+import { brainHash, principles } from "../brain/brain.js";
 
 export { parseReview, StopRun, duplicateReply, normIdea, VERIFY_CONTRACT, modelFloorUsd, strongerModel, MAX_VIEWS, withDesignedScreens, journeyTestRule, kitName, reviewCapUsd, validatePlan, defaultUi, specMarkdown, NEXT_VERSION_ROUNDS, shippedDesign, MAX_AUTO_RESUMES, unfinishedRuns, reviewRepair, mergeRecheck, waitingEscalation, restoreState } from "./runkit.js";
 export type { StationId, GateId, Plan, RunOptions, ScreenRun, ReviewResult, GateDecision, RunSettings, RunMaker, RestoredState } from "./runkit.js";
@@ -239,7 +240,7 @@ export class Factory {
     // A run keeps the crew it started with, even if you switch Practice/Real meanwhile.
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
     const flow = this.flows.forRun(undefined, opts.flow);
-    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
+    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
     const done = new Run(this, this.log, runtime, ev.id, text, o).go().finally(() => this.active.delete(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
@@ -268,7 +269,7 @@ export class Factory {
     const idea = `Turn ${plan.name} into an app`;
     const o = { maxUsd: opts.maxUsd ?? 1, maxFixRounds: 4, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: "never" as const, review: true };
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
-    const ev = this.log.append("factory.run.started", { idea, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow: this.flows.forRun() });
+    const ev = this.log.append("factory.run.started", { idea, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow: this.flows.forRun() });
     const id = ev.id;
     // What is kept from the shipped run is on the floor too, so the run reads whole.
     const kept = `kept from run #${baseRun}`;
@@ -299,7 +300,7 @@ export class Factory {
     const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: true };
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
     const flow = this.flows.forRun();
-    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
+    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
     const done = new Run(this, this.log, runtime, ev.id, text, o, screen).go().finally(() => this.active.delete(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
@@ -316,7 +317,7 @@ export class Factory {
     if (!text) throw new Error("Say what to build.");
     const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: opts.review !== false };
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
-    const started = { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, kind, ...extra, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow: this.flows.forRun(kind, opts.flow) };
+    const started = { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), kind, ...extra, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow: this.flows.forRun(kind, opts.flow) };
     const ev = this.log.append("factory.run.started", started);
     const done = make({ factory: this, log: this.log, runtime, id: ev.id, idea: text, o, started }).go().finally(() => this.active.delete(ev.id));
     this.active.set(ev.id, done);

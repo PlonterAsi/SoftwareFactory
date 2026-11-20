@@ -46,7 +46,8 @@ describe("agent runtime", () => {
   it("runs station agents without the person's own CLAUDE.md and memory; a working copy keeps its own", () => {
     const rt = new ClaudeCodeRuntime({ profile: "lean" });
     expect(rt.envFor({ prompt: "hi" }, { PATH: "x" })).toEqual({ PATH: "x", CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
-    expect(rt.envFor({ prompt: "hi", cwd: "/repo", tools: ["Read", "Edit"] }, { PATH: "x" })).toEqual({ PATH: "x" });
+    // A working copy keeps its own CLAUDE.md; auto memory is off for every agent SF starts (SF-19).
+    expect(rt.envFor({ prompt: "hi", cwd: "/repo", tools: ["Read", "Edit"] }, { PATH: "x" })).toEqual({ PATH: "x", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
     // An agent that only reads a project folder is still a station agent.
     expect(rt.envFor({ prompt: "hi", cwd: "/repo", tools: ["Read"] }, { PATH: "x" })).toMatchObject({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1" });
   });
