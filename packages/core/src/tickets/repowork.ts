@@ -1,11 +1,10 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { runAgent } from "../agents.js";
 import type { AgentRuntime } from "../runtime.js";
 import type { AgentBay } from "../bay/bay.js";
-import { commitAll, git, parseFileBlocks, writeFiles } from "../factory/workspace.js";
+import { commitAll, git, parseFileBlocks, runAsync, writeFiles } from "../factory/workspace.js";
 import { importOf, moduleNotes } from "../imports/explorer.js";
 import { reviewBrief } from "../imports/review.js";
 import { describeSecrets, scanFiles } from "../safety/secrets.js";
@@ -217,13 +216,14 @@ const PASS: CheckResult = { ok: true, output: "" };
 const MAX_FIX_ROUNDS = 2;
 const trim = (s: string, n = 3000) => (s.length > n ? `…${s.slice(-n)}` : s);
 
-const sh = (cmd: string, args: string[], cwd: string, timeout = 300_000) => spawnSync(cmd, args, { cwd, encoding: "utf8", shell: true, windowsHide: true, timeout });
+// Never spawnSync here: a test run takes minutes, and a blocked core answers nothing meanwhile (20 Nov).
+const sh = (cmd: string, args: string[], cwd: string, timeout = 300_000) => runAsync(cmd, args, { cwd, shell: true, timeout });
 
 /** Install a fresh clone's dependencies once (npm ci --ignore-scripts). Returns why it could not, or null. */
-export function ensureDeps(dir: string): string | null {
+export async function ensureDeps(dir: string): Promise<string | null> {
   if (existsSync(join(dir, "node_modules"))) return null;
   if (!existsSync(join(dir, "package-lock.json"))) return "dependencies are not installed and there is no package-lock.json";
-  const i = sh("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], dir, 600_000);
+  const i = await sh("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], dir, 600_000);
   return i.status === 0 ? null : `npm ci failed: ${trim(`${i.stdout ?? ""}\n${i.stderr ?? ""}`, 800)}`;
 }
 
@@ -247,11 +247,11 @@ export function harnessChecks(o: { maxMinutes?: number; now?: () => number } = {
   const now = o.now ?? Date.now;
   const startedAt = now();
   return {
-    gates: (dir, files) => {
-      ensureDeps(dir);
+    gates: async (dir, files) => {
+      await ensureDeps(dir);
       const out: string[] = [];
       for (const [root, rel] of byPackage(files.filter((f) => existsSync(join(dir, f))))) {
-        const g = fastGates(join(dir, root), rel);
+        const g = await fastGates(join(dir, root), rel);
         if (!g.ok) out.push(root === "." ? g.messages : `In ${root}:\n${g.messages}`);
       }
       return { ok: !out.length, output: out.join("\n\n") };
@@ -271,13 +271,13 @@ export function harnessChecks(o: { maxMinutes?: number; now?: () => number } = {
  * package uses vitest, else its `test` script). A fresh clone has no dependencies: they are installed
  * once (`npm ci --ignore-scripts`); when that is not possible the check is skipped, never passed.
  */
-export function defaultRunTests(dir: string, files: string[]): CheckResult {
+export async function defaultRunTests(dir: string, files: string[]): Promise<CheckResult> {
   const roots = byPackage(files);
   const withTests = [...roots].filter(([r]) => {
     try { return !!JSON.parse(readFileSync(join(dir, r, "package.json"), "utf8")).scripts?.test; } catch { return false; }
   });
   if (!withTests.length) return { ok: true, output: "no package with a test script holds a changed file", skipped: true };
-  const deps = ensureDeps(dir);
+  const deps = await ensureDeps(dir);
   if (deps) return { ok: true, output: `${deps}, so the tests could not run`, skipped: true };
   let out = "";
   const ran: string[] = [];
@@ -286,8 +286,8 @@ export function defaultRunTests(dir: string, files: string[]): CheckResult {
     let usesVitest = false;
     try { const pj = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")); usesVitest = /vitest/.test(String(pj.scripts?.test)) || !!pj.devDependencies?.vitest; } catch { /* plain npm test */ }
     const p = usesVitest
-      ? sh("npx", ["vitest", "related", "--run", "--passWithNoTests", ...changed.map((f) => JSON.stringify(f))], cwd)
-      : sh("npm", ["test", "--silent"], cwd);
+      ? await sh("npx", ["vitest", "related", "--run", "--passWithNoTests", ...changed.map((f) => JSON.stringify(f))], cwd)
+      : await sh("npm", ["test", "--silent"], cwd);
     if (p.status !== 0) out += `${usesVitest ? "vitest related" : "npm test"} in ${r} failed:\n${trim(`${p.stdout ?? ""}\n${p.stderr ?? ""}`)}\n`;
     else ran.push(usesVitest ? `cd ${r} && npx vitest related --run ${changed.join(" ")}` : `cd ${r} && npm test`);
   }
@@ -426,7 +426,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     switch (s.action) {
       case "orient": {
         // The Builder runs the tests itself, so the clone's dependencies go in before it starts (once; skipped when present).
-        if (o.checks) { const why = ensureDeps(dir); if (why) step("install", "skipped", why); }
+        if (o.checks) { const why = await ensureDeps(dir); if (why) step("install", "skipped", why); }
         step("orient", "passed", "repo rules and code map added to the prompt");
         break;
       }

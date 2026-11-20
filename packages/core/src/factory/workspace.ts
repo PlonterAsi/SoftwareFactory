@@ -184,6 +184,31 @@ const DIAG_COUNT = /^(tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)
 /** What node --test says for a file that failed as a whole, with no detail of its own. */
 const GENERIC_FAIL = /^(test failed|failed)$/i;
 
+/** What a command left behind, shaped like spawnSync's answer so callers read it the same way. */
+export interface Ran { status: number | null; stdout: string; stderr: string; error?: Error; timedOut?: boolean }
+
+/**
+ * Run a command without blocking the core (20 Nov: a crew run's tests step held spawnSync for six minutes and the
+ * core answered nothing, health checks included). Output is kept up to `maxBytes` per stream, newest last; past
+ * `timeout` the whole process tree is killed.
+ */
+export function runAsync(cmd: string, args: string[], o: { cwd: string; timeout?: number; shell?: boolean; env?: NodeJS.ProcessEnv; input?: string; maxBytes?: number }): Promise<Ran> {
+  const max = o.maxBytes ?? 4_000_000;
+  return new Promise((resolve) => {
+    let child;
+    try { child = spawn(cmd, args, { cwd: o.cwd, shell: o.shell, env: o.env, windowsHide: true, stdio: [o.input != null ? "pipe" : "ignore", "pipe", "pipe"] }); }
+    catch (e) { resolve({ status: null, stdout: "", stderr: "", error: e as Error }); return; }
+    let stdout = "", stderr = "", timedOut = false, error: Error | undefined;
+    const keep = (a: string, d: unknown) => { const n = a + String(d); return n.length > max ? n.slice(-max) : n; };
+    child.stdout!.on("data", (d) => (stdout = keep(stdout, d)));
+    child.stderr!.on("data", (d) => (stderr = keep(stderr, d)));
+    if (o.input != null) { child.stdin!.on("error", () => { /* it ended before reading */ }); child.stdin!.end(o.input); }
+    const timer = o.timeout ? setTimeout(() => { timedOut = true; killTree(child, true); }, o.timeout) : null;
+    child.on("error", (e) => { error = e; });
+    child.on("close", (code) => { if (timer) clearTimeout(timer); resolve({ status: timedOut ? null : code, stdout, stderr, ...(error ? { error } : {}), ...(timedOut ? { timedOut, error: error ?? new Error(`timed out after ${o.timeout} ms`) } : {}) }); });
+  });
+}
+
 /** Run `node --test` in the project with a JSON-lines reporter, so each test is a cell in the grid. */
 export function runTests(root: string, timeoutMs = 60_000): Promise<TestRun> {
   return new Promise((resolve) => {
