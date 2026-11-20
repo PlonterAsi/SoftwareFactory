@@ -79,6 +79,8 @@ export * from "./plugins/door.js";
 export * from "./plugins/store.js";
 export * from "./video/gemini.js";
 export * from "./video/videos.js";
+export * from "./video/instagram.js";
+export * from "./video/ig-worker.js";
 export * from "./plugins/ai.js";
 export * from "./plugins/routes.js";
 export { RUNNER_SOURCE, FRAME_SDK_SOURCE } from "./plugins/runner.js";

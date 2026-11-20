@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { ftsQuery } from "../plugins/store.js";
+import { InstagramInbox } from "./instagram.js";
 import { canonicalUrl, Gemini, GeminiError, GEMINI_MODELS, isYouTube, videoMime, type WatchClip } from "./gemini.js";
 
 /**
@@ -86,6 +87,8 @@ const KEY_RE = /^[A-Za-z0-9_.\-]{30,200}$/;
 
 export class Videos {
   private busy = 0;
+  /** Instagram by DM: reels shared to your second account arrive through Meta's API and a mailbox you own. */
+  readonly instagram: InstagramInbox;
   constructor(private log: EventLog, private o: { homeDir?: string; env?: NodeJS.ProcessEnv; fetch?: typeof fetch; api?: string; pollMs?: number; cloudFolders?: () => string[] } = {}) {
     log.db.exec(`CREATE TABLE IF NOT EXISTS video_notes (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,6 +108,19 @@ export class Videos {
     );
     CREATE INDEX IF NOT EXISTS video_notes_source ON video_notes(source);
     CREATE VIRTUAL TABLE IF NOT EXISTS video_notes_fts USING fts5(text, tokenize='porter unicode61');`);
+    this.instagram = new InstagramInbox({ env: { get: () => this.envFile(), set: (kv) => this.setEnv(kv) }, inbox: () => this.settings().inbox, fetch: o.fetch });
+  }
+
+  /** Change some lines of the shared .env file (null removes one), keeping every other line. Never logged. */
+  private setEnv(kv: Record<string, string | null>): void {
+    const file = this.keyFile;
+    const names = Object.keys(kv);
+    const lines = existsSync(file) ? readFileSync(file, "utf8").split(/\r?\n/).filter((l) => !names.some((n) => new RegExp(`^\\s*(?:export\\s+)?${n}\\s*=`).test(l))) : [];
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    for (const [k, v] of Object.entries(kv)) if (v != null && v !== "") lines.push(`${k}=${v}`);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, lines.length ? lines.join("\n") + "\n" : "", { mode: 0o600 });
+    try { chmodSync(file, 0o600); } catch { /* Windows keeps it in the user's own folder */ }
   }
 
   // ---- the key ----------------------------------------------------------------------------
@@ -337,6 +353,8 @@ export class Videos {
   async scanInbox(now = Date.now()): Promise<{ watched: number; failed: number }> {
     const s = this.settings();
     if (!this.key() || this.todayCount() >= s.dailyMax) return { watched: 0, failed: 0 };
+    // Reels shared by DM wait in your Instagram mailbox: bring them into the Watch folder first.
+    await this.instagram.pull().catch(() => 0);
     let watched = 0, failed = 0;
     for (const f of this.folders(s).flatMap((d) => this.waiting(d, now)).filter((x) => x.ready).slice(0, 3)) {
       const side = join(dirname(f.path), `${basename(f.path, extname(f.path))}.txt`);

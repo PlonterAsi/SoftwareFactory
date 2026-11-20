@@ -10,6 +10,11 @@ import type { Videos } from "./videos.js";
  *   POST /api/videos/watch                 { url | file, question?, start?, end?, fps?, refresh? }  → the notes
  *   GET  /api/videos/notes?q=&limit=       notes found by words, or the newest
  *   GET  /api/videos/notes/:id             one note in full
+ *   GET  /api/videos/instagram             Instagram by DM: mailbox ready?, what to paste into Meta, last pull
+ *   POST /api/videos/instagram             { cloudflareToken?, appSecret? }  deploys or updates the mailbox
+ *   POST /api/videos/instagram/forget      forget the mailbox here
+ *   POST /api/videos/instagram/pull        pull what waits now
+ *   GET  /api/videos/instagram/events      the mailbox's last events
  */
 export async function videosRoute(ctx: { videos: Videos; readJson: (req: IncomingMessage) => Promise<Record<string, unknown>> }, req: IncomingMessage, url: URL): Promise<[number, unknown] | null> {
   const { videos } = ctx;
@@ -28,6 +33,11 @@ export async function videosRoute(ctx: { videos: Videos; readJson: (req: Incomin
         start: b.start as number, end: b.end as number, fps: b.fps as number, refresh: b.refresh === true,
       })];
     }
+    if (path === "/api/videos/instagram" && req.method === "GET") return [200, videos.instagram.status()];
+    if (path === "/api/videos/instagram" && req.method === "POST") return [200, await videos.instagram.setup(await ctx.readJson(req))];
+    if (path === "/api/videos/instagram/forget" && req.method === "POST") return [200, videos.instagram.forget()];
+    if (path === "/api/videos/instagram/pull" && req.method === "POST") { const got = await videos.instagram.pull(); return [200, { got, ...videos.instagram.status() }]; }
+    if (path === "/api/videos/instagram/events" && req.method === "GET") return [200, { events: await videos.instagram.events() }];
     if (req.method === "GET" && path === "/api/videos/notes") return [200, { notes: videos.search(url.searchParams.get("q"), Number(url.searchParams.get("limit")) || 20) }];
     const one = path.match(/^\/api\/videos\/notes\/(\d+)$/);
     if (req.method === "GET" && one) {

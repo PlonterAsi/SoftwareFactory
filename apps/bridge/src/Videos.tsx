@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { API } from "./api";
 
 interface Status { hasKey: boolean; keySource: "env" | "file" | null; keyHint: string | null; keyFile: string; settings: { dailyMax: number; models: string[]; inbox: string }; today: number; notes: number; waiting: number; folders: string[] }
+interface IgStatus { ready: boolean; webhookUrl: string | null; verifyToken: string | null; hasCloudflareToken: boolean; hasAppSecret: boolean; lastPull: { at: string; got: number; error: string | null } | null }
 interface Note { id: number; source: string; kind: "youtube" | "file"; title: string | null; question: string | null; notes: string; model: string; tokensIn: number; tokensOut: number; paidUsd: number; by: string; at: string; snippet?: string; cached?: boolean }
 
 async function call<T>(path: string, body?: unknown): Promise<T> {
@@ -26,12 +27,16 @@ export function Videos() {
   const [open, setOpen] = useState<Note | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [ig, setIg] = useState<IgStatus | null>(null);
+  const [cfToken, setCfToken] = useState("");
+  const [appSecret, setAppSecret] = useState("");
+  const [igEvents, setIgEvents] = useState<{ at: string; event: string; why?: string; title?: string }[] | null>(null);
 
   const run = async <T,>(what: string, fn: () => Promise<T>): Promise<T | null> => {
     setBusy(what); setErr(null);
     try { return await fn(); } catch (e) { setErr((e as Error).message); return null; } finally { setBusy(null); }
   };
-  const load = () => run("loading", async () => { setS(await call<Status>("/api/videos")); setNotes((await call<{ notes: Note[] }>(`/api/videos/notes?limit=8${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ""}`)).notes); });
+  const load = () => run("loading", async () => { setS(await call<Status>("/api/videos")); setIg(await call<IgStatus>("/api/videos/instagram").catch(() => null)); setNotes((await call<{ notes: Note[] }>(`/api/videos/notes?limit=8${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ""}`)).notes); });
   useEffect(() => { load(); }, []);
   if (!s) return err ? <p className="setup-blocker">{err}</p> : null;
 
@@ -112,6 +117,30 @@ export function Videos() {
             {open.notes}
           </div>
         )}
+        {ig && <>
+          <div className="place-top">
+            <span className="place-label">Instagram by DM</span>
+            <span className={`mono ${ig.ready ? "" : "muted"}`}>{ig.ready ? (ig.hasAppSecret ? `mailbox ready${ig.lastPull ? ` · last pull ${new Date(ig.lastPull.at).toLocaleTimeString()}${ig.lastPull.got ? `, ${ig.lastPull.got} reel${ig.lastPull.got > 1 ? "s" : ""}` : ""}${ig.lastPull.error ? ` · ${ig.lastPull.error}` : ""}` : ""}` : "mailbox up, waiting for the Meta app secret") : "not set up"}</span>
+            {ig.ready && <span className="place-actions">
+              <button className="ghost sm" disabled={!!busy} onClick={() => run("saving", async () => setIg(await call<IgStatus>("/api/videos/instagram/pull", {})))}>Pull now</button>
+              <button className="ghost sm" disabled={!!busy} onClick={() => run("loading", async () => setIgEvents((await call<{ events: { at: string; event: string; why?: string; title?: string }[] }>("/api/videos/instagram/events")).events))}>Last events</button>
+            </span>}
+          </div>
+          <div className="place-hint">
+            Share a reel by DM to a second Instagram account you own (a free professional account). Instagram's own Messaging API sends it to your mailbox, a small
+            Cloudflare Worker on your free Cloudflare account that SoftwareFactory sets up, and it lands in the Watch folder within a minute, even if this PC was off.
+            Nothing here is opened to the internet. Paste a Cloudflare API token ("Edit Cloudflare Workers" template), then the Meta app's secret; then put the
+            address and verify token below into the Meta app's webhook (field: messages).
+          </div>
+          <div className="place-edit">
+            <input type="password" value={cfToken} onChange={(e) => setCfToken(e.target.value)} placeholder={ig.hasCloudflareToken ? "Cloudflare token saved" : "Cloudflare API token"} aria-label="Cloudflare API token" />
+            <input type="password" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder={ig.hasAppSecret ? "Meta app secret saved" : "Meta app secret (App settings, Basic)"} aria-label="Meta app secret" />
+            <button className="sm" disabled={(!cfToken.trim() && !appSecret.trim() && ig.ready) || (!cfToken.trim() && !ig.hasCloudflareToken) || !!busy}
+              onClick={async () => { const r = await run("saving", () => call<IgStatus>("/api/videos/instagram", { cloudflareToken: cfToken || undefined, appSecret: appSecret || undefined })); if (r) { setIg(r); setCfToken(""); setAppSecret(""); } }}>{ig.ready ? "Update mailbox" : "Set up mailbox"}</button>
+          </div>
+          {ig.webhookUrl && <div className="place-hint mono">Callback URL: {ig.webhookUrl}{"\n"}Verify token: {ig.verifyToken}</div>}
+          {igEvents && <ul className="drops">{igEvents.length ? igEvents.slice().reverse().map((e, i) => <li key={i} className="filed"><span className="mono">{new Date(e.at).toLocaleString()}</span> {e.event}{e.title ? ` · ${e.title}` : ""}{e.why ? ` · ${e.why}` : ""}</li>) : <li className="muted">Nothing has reached the mailbox yet.</li>}</ul>}
+        </>}
         {err && <p className="setup-blocker">{err}</p>}
       </div>
     </section>
