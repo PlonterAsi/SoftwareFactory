@@ -17,7 +17,7 @@ import { roundsOf, type FlowStep } from "../flows/flow.js";
 import { critiquePrompt, docsFiles, mustRequirements, validateDocs, type Critique, type Finding, type ProductDocs } from "./discovery.js";
 import { MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation } from "./evaluate.js";
 import { FEATURE_FIT_USD, FEATURE_LOOP_MIN_USD, ONE_SESSION_FEATURE_USD, buildFit, buildPoolUsd, featureSessionCap, featuresFile, progressEntry, type Feature } from "./features.js";
-import { Run, StopRun, type Factory, type Plan, type RestoredState, type RunMaker, type RunOptions } from "./loop.js";
+import { Run, StopRun, type Factory, type Plan, type RunMaker, type RunOptions } from "./loop.js";
 import { SF_DIR, prepareEnv, readSite, runRepoTests, siteProfile, type RepoEnv } from "./repoenv.js";
 import { WORKBENCH_COMMANDS, changedFiles, workbenchContract, writtenOnDisk } from "./workbench.js";
 import { commitAll, git, parseFileBlocks, parseJsonBlock, writeFiles, type TestCase, type TestRun } from "./workspace.js";

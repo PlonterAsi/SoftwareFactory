@@ -619,7 +619,7 @@ export class Tickets extends TicketPrs {
     if (door.door === "reloop" && this.opts.runtime && this.opts.workRoot) {
       const name = (this.log.db.prepare("SELECT name FROM projects WHERE id = ?").get(project) as { name: string } | undefined)?.name ?? "";
       const t = this.open({ kind: "plan", title: `Another round${name ? ` on ${name}` : ""}: ${titleFrom(text)}`.slice(0, 200), body: text, project, by: o.by ?? "you", source: "project", asked });
-      this.workReloop(t, repo, { by: o.by });
+      this.workReloop(t, repo);
       return { ticket: this.get(t.id)!, run: null, route: { route: "light", why: door.why }, door: "reloop" };
     }
     const t = this.open({ kind: "request", body: text, project, by: o.by ?? "you", source: "project", asked });
@@ -632,7 +632,7 @@ export class Tickets extends TicketPrs {
    * ticket under this round's epic, ready for the crew. Work you asked for starts by itself within your limit;
    * the epic moves on by itself when its tickets are done.
    */
-  private workReloop(t: TicketView, repo: RepoRef, o: { by?: string } = {}) {
+  private workReloop(t: TicketView, repo: RepoRef) {
     const { runtime, bay, workRoot } = this.opts;
     if (!runtime || !workRoot) throw new Error("No crew or work folder in this core.");
     const by = bay?.crewFor("survey")[0]?.id ?? "surveyor";

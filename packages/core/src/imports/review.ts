@@ -41,7 +41,6 @@ import "./reviewTables.js";
 
 export type ReviewTrigger = "import" | "manual" | "update";
 export type ReviewStation = "copy" | "read" | "install" | "tests" | "site" | "deps" | "inspect" | "verdict" | "brief";
-export const REVIEW_STATIONS: ReviewStation[] = ["copy", "read", "install", "tests", "site", "deps", "inspect", "verdict", "brief"];
 
 export interface ReviewRow {
   id: number; projectId: number; ts: string; trigger: ReviewTrigger; mode: ExploreMode; status: "running" | "done" | "failed";
@@ -311,7 +310,6 @@ export class RepoReviewer {
     const mode = this.mode();
     const name = listImports(this.log).find((r) => r.projectId === projectId)?.name ?? imp.source;
     let spent = 0;
-    const fail = (msg: string) => Object.assign(new Error(msg), { spentUsd: spent });
 
     // 1. A copy of SoftwareFactory's own: the import and the person's folder stay as they are.
     this.station(projectId, review, "copy", "active");

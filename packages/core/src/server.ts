@@ -61,10 +61,6 @@ import { BaseHost, type BootedBase } from "./bases/host.js";
 import { BaseRegistry } from "./bases/registry.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
 
-/** The built-in Overseer's prompt with its station contract (the live one comes from the Agent Bay). */
-export const OVERSEER_ROLE =
-  "You are the Overseer, the manager AI of SoftwareFactory. Answer in at most 3 short sentences. Be concrete.";
-
 export interface CoreOptions {
   log: EventLog;
   runtime: AgentRuntime;
