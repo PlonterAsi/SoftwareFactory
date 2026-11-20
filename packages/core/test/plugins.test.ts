@@ -268,6 +268,13 @@ describe("the door to real records and actions", () => {
     const yours = tickets.open({ kind: "task", title: "Yours", by: "you" });
     expect(() => h.act("asker", "ticket.ask", { id: yours.id })).toThrow(/only for tickets it opened/);
     expect(() => h.act("asker", "ticket.ask", { id: 99999 })).toThrow(/No ticket/);
+    // A duplicate or a closed ticket stays put.
+    const dupe = h.act("asker", "ticket.open", { title: "The advisor skill again" }) as { id: number };
+    tickets.link(dupe.id, t.id, "duplicate_of");
+    expect(() => h.act("asker", "ticket.ask", { id: dupe.id })).toThrow(/closed|duplicate/);
+    tickets.say(t.id, "done", { status: "closed" });
+    expect(() => h.act("asker", "ticket.ask", { id: t.id })).toThrow(/is closed/);
+    expect(tickets.isAsked(tickets.get(dupe.id)!)).toBe(false);
   });
 
   it("takes only the actions it listed, marks who did it, and logs every try", () => {

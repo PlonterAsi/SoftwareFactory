@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventLog, MockRuntime, Tickets, GitHub, createProject, git, parseGitHubRepo, hideTokens } from "../src/index.js";
 import { ticketNumbersIn } from "../src/tickets/tickets.js";
+import { dupesIn } from "../src/tickets/shapes.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-gh-"));
 const TOKEN = "github_pat_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6";
@@ -247,6 +248,22 @@ describe("tickets: work merged outside the crew's own PR", () => {
     const b = t.open({ kind: "bug", title: "Already in", project: proj });
     expect(await t.linkPr(b.id, "#7")).toMatchObject({ status: "closed", pr: { number: 7, state: "merged" } });
     await expect(t.linkPr(b.id, "soon")).rejects.toThrow(/number/);
+  });
+
+  it("closes the #N tickets a merged title calls dupes as duplicates of the ticket it names", async () => {
+    const { state, proj, t } = setup();
+    expect(dupesIn("SF-71: close #89, #90 as dupes")).toEqual([89, 90]);
+    expect(dupesIn("Fix #89 and #90")).toEqual([]);
+    const main = t.open({ kind: "task", title: "Adopt the advisor", project: proj });
+    const loose = t.open({ kind: "task", title: "Advisor strategy, filed nowhere", project: null });
+    const other = t.open({ kind: "task", title: "Another project's", project: proj + 1 });
+    state.mergedList = [merged(70, `${main.key}: close #${loose.id}, #${other.id} as duplicates`)];
+    await t.followMerges();
+    expect(t.get(loose.id)!.status).toBe("closed");
+    expect(t.notes(loose.id).at(-1)!.text).toMatch(new RegExp(`duplicate of ${main.key}: PR #70`));
+    expect(t.links(loose.id).some((l) => l.relation === "duplicate_of")).toBe(true);
+    expect(t.get(other.id)!.status).toBe("open");
+    expect(t.get(main.id)!.status).toBe("closed");
   });
 
   it("leaves a ticket alone when it was opened after the PR merged", async () => {

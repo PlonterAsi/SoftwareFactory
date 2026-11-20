@@ -111,6 +111,18 @@ describe("Videos", () => {
     expect(v.status().notes).toBe(1);
   });
 
+  it("the same clip asked twice at once is watched once, and a refresh that overlaps a watch does not crash on the note", async () => {
+    const { v, seen } = make();
+    v.setKey(KEY);
+    const [a, b] = await Promise.all([v.watch({ url: "https://youtu.be/dQw4w9WgXcQ" }), v.watch({ url: "https://youtu.be/dQw4w9WgXcQ" })]);
+    expect([a.cached, b.cached]).toEqual([false, true]);
+    expect(seen).toHaveLength(1);
+    const [c, d] = await Promise.all([v.watch({ url: "https://youtu.be/dQw4w9WgXcQ", refresh: true }), v.watch({ url: "https://youtu.be/dQw4w9WgXcQ", refresh: true })]);
+    expect(c.title).toBe("Building a CLI in Rust");
+    expect(d.title).toBe("Building a CLI in Rust");
+    expect(v.status().notes).toBe(1);
+  });
+
   it("fetches only known social links, and says why when it cannot (no Scrape Creators key, no yt-dlp)", async () => {
     const home = tmp();
     const g = fakeGoogle();

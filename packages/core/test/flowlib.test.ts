@@ -185,6 +185,25 @@ describe("the check before money", () => {
     expect(big.questions.map((q) => q.id)).toEqual(["size"]);
   });
 
+  it("asks your call only for an ask to do the thing, not a mention of it (20 Nov false positives)", () => {
+    const ids = (title: string, body: string) => checkTicket({ kind: "task", title, body, answers: {}, size: "S" }).questions.filter((q) => q.kind === "decision").map((q) => q.id);
+    // An add-on's ticket: scores, token efficiency, a risk line, an MIT license, "no secrets".
+    const scout = ["Scout found this skill: https://github.com/acme/advisor", "", "Pairs a cheap worker with a strong advisor.", "",
+      "Verdict: Adopt. Score 4.2 of 5. Risk: low.", "Where it helps: long Builder sessions that burn tokens.", "",
+      "- Token efficiency: 5/5, uses fewer tokens per task", "- Security: 4/5, no secrets or API keys needed, MIT license", "- Upkeep: 4/5, active"].join("\n");
+    expect(ids("Adopt: The advisor strategy", scout)).toEqual([]);
+    expect(ids("A database query is put together from text", "The search builds SQL by joining the user's text, so a quote breaks it in production. It should use parameters.")).toEqual([]);
+    expect(ids("Pin 4 Python packages to exact versions", "requirements.txt uses ranges; pin them so a deploy installs what the tests ran with. The pricing page is unaffected.")).toEqual([]);
+    expect(ids("Deleting a ticket crashes the board", "Press Delete on a ticket and the board goes blank. It should remove the card.")).toEqual([]);
+    // Real asks still ask.
+    expect(ids("Connect GitHub", "The crew needs a GitHub token to open PRs; store it in Systems.")).toEqual(["secrets"]);
+    expect(ids("Sign in", "Add sign in with Google.")).toEqual(["secrets"]);
+    expect(ids("Pro plan", "Take payments for the pro plan with Stripe.")).toEqual(["money"]);
+    expect(ids("Clean up", "Delete all old rows from the log table, and run the database migration.")).toEqual(["data"]);
+    expect(ids("Launch", "Deploy it to production and announce it.")).toEqual(["public"]);
+    expect(ids("Open source it", "Choose a license and add a privacy policy.")).toEqual(["legal"]);
+  });
+
   it("holds a run until its questions are answered, lists them all in one batch, and starts what is clear", async () => {
     const log = new EventLog();
     const rt = new MockRuntime();

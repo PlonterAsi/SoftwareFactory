@@ -8,6 +8,7 @@ import { type GitHub } from "./github.js";
 import { type Routed } from "../factory/route.js";
 import { type RepoRuns } from "../factory/reporun.js";
 import type { Verification } from "./verify.js";
+import type { TicketCheck } from "./precheck.js";
 import { type LinkView, type NoteView, type Priority, type Size, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView } from "./model.js";
 
 export interface OpenTicket {
@@ -165,6 +166,8 @@ export interface QueueSpot {
   ticket: TicketView;
   /** 1 = next in line in its project. Null when the crew will not take it on its own. */
   position: number | null;
+  /** The check before money holds it: the questions that wait for your answer. */
+  held?: TicketCheck;
   /** Why it is not in line, in a sentence. */
   why: string | null;
 }
@@ -212,6 +215,17 @@ export function ticketNumbersIn(text: string, key: string): number[] {
     for (const n of m[2].matchAll(/\d+/g)) out.add(Number(n[0]));
   }
   return [...out];
+}
+
+/**
+ * Tickets a merged PR title closes as duplicates: when the title says "dupe" or "duplicate", each "#N" in it is
+ * the ticket numbered N (tickets in no project have no key, so "#89" is how they are named), a duplicate of the
+ * keyed ticket the same title names: "SF-71: close #89, #90 as dupes".
+ */
+export function dupesIn(text: string): number[] {
+  const s = String(text ?? "");
+  if (!/\bdup(?:e|es|licate|licates|licated)\b/i.test(s)) return [];
+  return [...new Set([...s.matchAll(/(?<![A-Za-z0-9&])#(\d+)\b/g)].map((m) => Number(m[1])))];
 }
 
 /** What the tickets service is given: the agent runtime, the engine, GitHub, and the rules it works under. */

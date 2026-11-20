@@ -19,14 +19,24 @@ export interface TicketCheck { verdict: "go" | "ask"; questions: CheckQuestion[]
 
 export const CHECK_WORD: Record<CheckKind, string> = { clarity: "Clarity", confidence: "Confidence", decision: "Your call" };
 
-/** Words that mark a decision only the person makes, each with the question it raises. */
+/**
+ * Words that mark a decision only the person makes, each with the question it raises. They match an ask to do the
+ * thing, not a mention of it (20 Nov: six tickets sat silently on "secrets" and "money" because an add-on's ticket
+ * scored "Token efficiency" and a bug said "in production"): taking payments, not a price; deleting data, not a
+ * button called Delete; needing a key, not a word "tokens".
+ */
 const YOUR_CALL: { id: string; re: RegExp; ask: string; why: string }[] = [
-  { id: "money", re: /\b(pay(ment)?s?|pric(e|es|ing)|subscriptions?|billing|charg(e|es|ing)|purchases?|checkout|invoices?|refunds?|stripe|paypal)\b/i, ask: "This touches money. What may it charge or spend, and who approves a payment?", why: "it mentions payments or prices" },
-  { id: "data", re: /\b(delet(e|es|ing)|drop(s|ping)? (the )?(table|database|column|data)|wip(e|es|ing)|purg(e|es|ing)|migrat(e|es|ion|ing)|remove all|truncat(e|es|ing))\b/i, ask: "This can remove or move data. Which data may it change, and is there a backup first?", why: "it can delete or migrate data" },
-  { id: "secrets", re: /\b(passwords?|api[ -]?keys?|tokens?|secrets?|credentials?|private keys?|oauth|sign[- ]?in with)\b/i, ask: "This involves secrets or accounts. Where do they come from, and which may the crew use?", why: "it mentions passwords, keys or sign-in" },
-  { id: "public", re: /\b(publish(es|ing)?|go(es)? live|production|deploy(s|ing|ment)?|release to|make (it )?public|app store|announce)\b/i, ask: "This goes out to people. Should it, and when?", why: "it would go public or to production" },
-  { id: "legal", re: /\b(licen[cs](e|es|ing)|terms of (service|use)|privacy polic(y|ies)|gdpr|copyright|trademark)\b/i, ask: "This has legal weight. What terms or license do you want?", why: "it mentions licenses, terms or privacy" },
+  { id: "money", re: /\b(tak(e|es|ing)|accept(s|ing)?|process(es|ing)?|collect(s|ing)?|charg(e|es|ing))\s+(a\s+|the\s+)?(payments?|money|cards?|users?|customers?|people)\b|\b(billing|checkout|invoic(e|es|ing)|refunds?|stripe|paypal|in-app purchases?|pay(s|ing)? for (the|a|it|its|their)|spend(s|ing)? (real )?money|buy(s|ing)? (a|the) (plan|licen[cs]e|subscription|domain|server))\b/i, ask: "This touches money. What may it charge or spend, and who approves a payment?", why: "it would take payments or spend money" },
+  { id: "data", re: /\b(delet(e|es|ing)|remov(e|es|ing)|wip(e|es|ing)|purg(e|es|ing)|truncat(e|es|ing)|drop(s|ping)?|eras(e|es|ing))\s+(all\s+|the\s+|old\s+|every\s+|existing\s+|their\s+|its\s+|user\s+|users'\s+)*(data|database|db|tables?|columns?|rows|records|history|accounts?|users)\b|\b(data(base)?|schema|records|rows|users?)\s+migrat(e|es|ion|ions|ing)\b|\bmigrat(e|es|ing)\s+(the\s+|all\s+|existing\s+)*(data|database|records|rows|users)\b/i, ask: "This can remove or move data. Which data may it change, and is there a backup first?", why: "it would delete or migrate data" },
+  { id: "secrets", re: /\b(needs?|requires?|asks? for|uses?|using|adds?|adding|sets?|setting|stores?|storing|pastes?|put|rotat(e|es|ing)|provid(e|es|ing)|enter|give|share)\s+(an?\s+|the\s+|your\s+|its\s+|their\s+|my\s+|our\s+)?([\w-]+\s+){0,2}?(api[ -]?keys?|access tokens?|tokens?|passwords?|secrets?|credentials?|private keys?)\b|\b(oauth|sign[- ]?in with|log[- ]?in with)\b/i, ask: "This involves secrets or accounts. Where do they come from, and which may the crew use?", why: "it needs passwords, keys or sign-in" },
+  { id: "public", re: /\b(publish(es|ing)?\s+(it|to|on|the)|go(es)? live|deploy(s|ing)?\s+(it\s+)?to\s+(production|prod|the store|users|customers)|release(s|d)?\s+(it\s+)?to\s+(users|the public|customers|production)|make (it )?public|app store|play store|announce)\b/i, ask: "This goes out to people. Should it, and when?", why: "it would go public or to production" },
+  { id: "legal", re: /\b(terms of (service|use)|privacy polic(y|ies)|gdpr|trademark|(choose|pick|change|add|set)\s+(a\s+|the\s+)?licen[cs]e|relicens(e|ing)|copyright (notice|claim|holder))\b/i, ask: "This has legal weight. What terms or license do you want?", why: "it touches terms, privacy or licensing" },
 ];
+
+/** Words about tokens as a measure ("Token efficiency", "uses fewer tokens"), not as a secret. */
+const TOKEN_MEASURE = /\b(fewer|more|less|many|few|saves?|saving|burns?|burning|spend(s|ing)?|input|output|context|cached)\s+tokens?\b|\btokens?\s+(efficiency|usage|use|count|counts|budget|cost|costs|limit|limits|window|per)\b/gi;
+/** Lines that describe or rate a find ("- Security: 4/5, no keys", "Score 4.2 of 5. Risk: low."), not an ask. */
+const RATING_LINE = /^\s*(?:[-*•]\s*)?[A-Z][\w ]{1,30}:\s*\d(?:\.\d)?\s*\/\s*5\b|\bScore [\d.?]+ of 5\b/;
 
 const OPEN_WORDS = /\b(maybe|perhaps|somehow|something|some kind of|etc|and so on|or so|whatever|tbd|not sure|either|probably)\b|\?\?/gi;
 
@@ -54,7 +64,8 @@ export function checkTicket(t: Pick<TicketView, "kind" | "title" | "body" | "ans
   if (o.runner === "session" && (t.size === "L" || asks >= 6)) add({ id: "size", kind: "confidence", ask: t.size === "L" ? "It is sized L but would go through one Builder session. Give it the Feature flow, or split it into tickets?" : `It lists ${asks} separate asks for one Builder session. Split it into tickets, or give it the Feature flow?`, why: "too much for one session" });
 
   // Your call: decisions only you make.
-  for (const c of YOUR_CALL) if (c.re.test(told)) add({ id: c.id, kind: "decision", ask: c.ask, why: c.why });
+  const asked = told.split("\n").filter((l) => !RATING_LINE.test(l)).join("\n").replace(TOKEN_MEASURE, " ");
+  for (const c of YOUR_CALL) if (c.re.test(asked)) add({ id: c.id, kind: "decision", ask: c.ask, why: c.why });
 
   const answered = qs.filter((q) => String(answers[`check.${q.id}`] ?? "").trim()).length;
   const left = qs.filter((q) => !String(answers[`check.${q.id}`] ?? "").trim());

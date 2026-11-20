@@ -3,6 +3,7 @@ import type { AgentBay } from "../bay/bay.js";
 import type { Tickets } from "../tickets/tickets.js";
 import { createProject, listProjects } from "../projects/service.js";
 import type { PluginAction, PluginRecordKind } from "./manifest.js";
+import { isClosed } from "../tickets/model.js";
 
 /**
  * The door plugins use to reach real records: what `records:read` shows and what each `actions`
@@ -61,6 +62,8 @@ export function coreDoor(deps: { log: EventLog; tickets: Tickets; bay?: AgentBay
         const t = Number.isFinite(id) ? tickets.get(id) : null;
         if (!t) throw new Error(`No ticket ${args.id}`);
         if (t.openedBy !== by) throw new Error("An add-on can ask only for tickets it opened itself");
+        // A ticket people closed or marked a duplicate stays put: an add-on cannot put it back in line (20 Nov: Scout re-asked #89).
+        if (args.on !== false && (isClosed(t.status) || tickets.links(id).some((l) => l.from === id && l.relation === "duplicate_of"))) throw new Error(`Ticket ${t.key} is ${isClosed(t.status) ? "closed" : "a duplicate"}; an add-on cannot ask for it again`);
         return ticketRow(tickets.setAsked(id, args.on !== false, by));
       }
       throw new Error(`Unknown action "${verb}"`);

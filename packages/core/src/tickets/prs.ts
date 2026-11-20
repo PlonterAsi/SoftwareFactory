@@ -6,7 +6,7 @@ import { hideTokens, parseGitHubRepo, type MergedPr } from "./github.js";
 import { TASTE_KINDS, isClosed, type TicketView } from "./model.js";
 import { TicketReads } from "./reads.js";
 import type { Row } from "./rows.js";
-import { ticketNumbersIn } from "./shapes.js";
+import { dupesIn, ticketNumbersIn } from "./shapes.js";
 
 /**
  * Tickets on GitHub: a worked branch goes out as a draft PR (or is sent by your press), and merged pull
@@ -136,7 +136,9 @@ export abstract class TicketPrs extends TicketReads {
       try { prs = await gh.mergedPrs(repo); } catch (e) { console.error("tickets: reading merged PRs of", p.ref, "failed:", hideTokens((e as Error).message)); continue; }
       // Oldest first, so a ticket named by several PRs ends on the newest.
       for (const pr of prs.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt))) {
-        for (const number of ticketNumbersIn(`${pr.title}\n${pr.branch}`, p.key)) {
+        const named = ticketNumbersIn(`${pr.title}\n${pr.branch}`, p.key);
+        moved += this.closeDupes(pr, named.length ? this.byKey(`${p.key}-${named[0]}`) : undefined);
+        for (const number of named) {
           const t = this.byKey(`${p.key}-${number}`);
           if (!t || seen.get(t.id, pr.number)) continue;
           // A ticket opened after the merge only mentions old work; it is not done by it.
@@ -150,6 +152,23 @@ export abstract class TicketPrs extends TicketReads {
       }
     }
     return moved;
+  }
+
+  /**
+   * "SF-71: close #89, #90 as dupes": a merged title that says dupe closes each "#N" it names as a duplicate of
+   * the keyed ticket it names, when that ticket is in the same project or in none, and was opened before the merge.
+   */
+  private closeDupes(pr: MergedPr, of: TicketView | undefined): number {
+    if (!of) return 0;
+    let n = 0;
+    for (const id of dupesIn(pr.title)) {
+      const d = this.get(id);
+      if (!d || d.id === of.id || isClosed(d.status) || d.createdAt > pr.mergedAt || (d.project != null && d.project !== of.project)) continue;
+      this.log.append("ticket.linked", { id: d.id, to: of.id, relation: "duplicate_of", by: "github", removed: false });
+      this.log.append("ticket.noted", { id: d.id, by: "github", status: "closed", text: `Closed as a duplicate of ${of.key}: PR #${pr.number} "${pr.title.slice(0, 120)}" says so and was merged.` });
+      n++;
+    }
+    return n;
   }
 
   /**
