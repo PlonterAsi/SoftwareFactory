@@ -46,6 +46,7 @@ export interface VideoNote {
 export interface WatchRequest { url?: string; file?: string; question?: string | null; start?: number | null; end?: number | null; fps?: number | null; refresh?: boolean }
 /** A passing watch failure in the Watch folder is retried after 5 minutes, then 10, 20 ... up to 6 hours, 6 tries in all. */
 export const VIDEO_RETRY = { firstMs: 5 * 60_000, maxMs: 6 * 3_600_000, tries: 6 };
+const PASSING_ERROR = /could not reach|fetch failed|did not answer within|high demand|overloaded|Google said 5\d\d|free allowance/i;
 
 export interface VideoSettings { dailyMax: number; models: string[]; inbox: string }
 /**
@@ -376,7 +377,10 @@ export class Videos {
       const stamp = `${st.size}:${Math.floor(st.mtimeMs)}`;
       // A lasting failure waits until the file changes; a passing one (Google busy, no network, out of free allowance)
       // is tried again later, further apart each time, and given up after VIDEO_RETRY.tries attempts.
-      const fails = this.log.db.prepare("SELECT json_extract(payload, '$.retryAt') AS retryAt FROM events WHERE type = 'video.failed' AND json_extract(payload, '$.source') = ? AND json_extract(payload, '$.stamp') = ? ORDER BY id").all(p, stamp) as { retryAt: string | null }[];
+      const fails = (this.log.db.prepare("SELECT ts, json_extract(payload, '$.retryAt') AS retryAt, json_extract(payload, '$.error') AS error FROM events WHERE type = 'video.failed' AND json_extract(payload, '$.source') = ? AND json_extract(payload, '$.stamp') = ? ORDER BY id").all(p, stamp) as { ts: string; retryAt: string | null; error: string | null }[])
+        // Failures logged before retries existed (0.2.385 and older): busy and passing ones are tried again too.
+        .filter((f) => f.retryAt || !/being watched already/.test(f.error ?? ""))
+        .map((f) => (f.retryAt || !PASSING_ERROR.test(f.error ?? "") ? f : { ...f, retryAt: new Date(Date.parse(f.ts) + VIDEO_RETRY.firstMs).toISOString() }));
       if (fails.some((f) => !f.retryAt) || fails.length >= VIDEO_RETRY.tries) continue;
       if (fails.length && Date.parse(fails[fails.length - 1].retryAt!) > now) continue;
       // Still being copied or synced: wait until it has not changed for 15 seconds.
