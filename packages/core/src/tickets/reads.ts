@@ -7,7 +7,7 @@ import { selfProject } from "./intake.js";
 import { type TicketCheck } from "./precheck.js";
 import { STATUSES, isClosed, keyFromName, keyText, nextMoves, type LinkView, type NoteView, type Relation, type TicketView } from "./model.js";
 import { SELECT, toView, type Row } from "./rows.js";
-import { TICKET_FILE_MAX, WAITING_ON_YOU, fileMime, stepOfSession, type BoardCard, type BoardLane, type TicketDetail, type TicketFile, type TicketFilter, type TicketsOptions, type TicketStep, type TimelineEntry, type WaitingItem } from "./shapes.js";
+import { TICKET_FILE_MAX, WAITING_ON_YOU, type AutoWork, fileMime, stepOfSession, type BoardCard, type BoardLane, type TicketDetail, type TicketFile, type TicketFilter, type TicketsOptions, type TicketStep, type TimelineEntry, type WaitingItem } from "./shapes.js";
 
 /**
  * Reading tickets: one ticket, lists, its notes, timeline, links, steps and files (attached here too), and the board.
@@ -24,6 +24,39 @@ export abstract class TicketReads {
   protected abstract isWorking(t: TicketView): boolean;
   abstract flowOf(t: TicketView, repo?: boolean): { id: string; name: string; runner: string; why: string; chosen: boolean } | null;
   abstract checks(project?: number | null): { ticket: TicketView; projectName: string | null; flow: { id: string; name: string } | null; check: TicketCheck }[];
+
+  /** Filled in by Tickets: the auto-work rule in force. */
+  abstract autoWork(): AutoWork;
+
+  // ---- what auto-work spent and tried (read from the log) -----------------
+
+  /** What today's auto starts (by the dispatcher) may spend together: their caps added up, for the daily limit. */
+  autoUsdToday(): number {
+    const day = new Date().toISOString().slice(0, 10);
+    const rows = this.log.db.prepare("SELECT json_extract(payload, '$.capUsd') AS cap FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND ts >= ?").all(day) as { cap: number | null }[];
+    // Starts written before caps were recorded count at the bug-and-task cap.
+    return rows.reduce((a, r) => a + (typeof r.cap === "number" ? r.cap : this.autoWork().maxUsd), 0);
+  }
+
+  /** What the Overseer's own reads of open tickets cost today. */
+  protected triageUsdToday(): number {
+    const day = new Date().toISOString().slice(0, 10);
+    const r = this.log.db.prepare("SELECT sum(json_extract(payload, '$.capUsd')) AS usd FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.triage') = 1 AND ts >= ?").get(day) as { usd: number | null };
+    return Number(r?.usd ?? 0);
+  }
+
+  /** How often the crew started or retried this ticket on its own. */
+  protected autoTries(id: number): number {
+    return Number((this.log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND json_extract(payload, '$.triage') IS NULL AND json_extract(payload, '$.id') = ?").get(id) as { n: number }).n);
+  }
+
+  /** Tickets you asked for (the last word on each, its own or its epic's), by id. */
+  protected askedIds(): Set<number> {
+    const rows = this.log.db.prepare("SELECT json_extract(payload, '$.id') AS id, json_extract(payload, '$.on') AS on_ FROM events WHERE type = 'ticket.asked' ORDER BY id").all() as { id: number; on_: number }[];
+    const out = new Set<number>();
+    for (const r of rows) { if (r.on_) out.add(Number(r.id)); else out.delete(Number(r.id)); }
+    return out;
+  }
 
   // ---- reading -------------------------------------------------------------
 

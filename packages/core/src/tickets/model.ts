@@ -111,7 +111,7 @@ export const AUTO_KINDS: TicketKind[] = ["bug", "task"];
  * The rule: a ready bug or task, sized S or M, not blocked, not taken by you,
  * and no hand-brake words on its thread.
  */
-export function autoWorkRefusal(t: Pick<TicketView, "kind" | "status" | "size" | "blocked" | "assignee"> & { project?: number | null }, handBrake = false): string | null {
+export function autoWorkRefusal(t: Pick<TicketView, "kind" | "status" | "size" | "blocked" | "assignee"> & { project?: number | null; children?: { total: number; done: number } }, handBrake = false): string | null {
   if (t.status !== "ready") return t.status === "open" ? "Not ready yet: the Overseer reads open bugs and tasks on its own and readies what is clear; then the crew can take it." : null;
   if (!AUTO_KINDS.includes(t.kind)) return `${cap(aKind(t.kind))} waits for your Work it press.`;
   // A ticket in no project would start a brand-new project of its own (an add-on's find filed nowhere, 19 Nov).
@@ -119,8 +119,9 @@ export function autoWorkRefusal(t: Pick<TicketView, "kind" | "status" | "size" |
   if (t.blocked) return "Blocked: it starts when what blocks it is closed or its pull request is merged.";
   if (t.assignee === "you") return "You took it, so the crew leaves it to you.";
   if (handBrake) return "The thread says to hold it.";
+  if (t.children?.total) return `Worked through its ${t.children.total} subtask${t.children.total === 1 ? "" : "s"} (${t.children.done} done); it rolls up when they are.`;
   if (t.size == null) return "Not sized yet: Ask an agent sizes it, or set S, M or L.";
-  if (t.size === "L") return "Size L: split it into smaller tickets, or press Work it yourself.";
+  if (t.size === "L") return "Size L: with auto-work on, the Overseer splits it into subtasks the crew takes one by one; or split it yourself, or press Work it.";
   return null;
 }
 

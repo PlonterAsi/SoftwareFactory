@@ -17,6 +17,7 @@ import { answerTicket } from "./research.js";
 import { checkTicket, type TicketCheck } from "./precheck.js";
 import { FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS, SIZES, autoWorkRefusal, ideaFromTicket, isClosed, nextMoves, refuseMove, refuseParent, titleFrom, workDocument, type Priority, type Size, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView, aKind, AUTO_KINDS } from "./model.js";
 import { TicketPrs } from "./prs.js";
+import { SPLIT_CAP_USD, splitRefusal, splitRollUp, splitTicket, splitTried } from "./split.js";
 import { pri, type Row } from "./rows.js";
 import { AUTO_TRIES, AUTO_WORK_DEFAULT, RELOOP_BRIEF, TICKET_CONTRACT, WAITING_ON_YOU, reloopFindings, epicOfTickets, type AutoWork, type OpenTicket, type QueueSpot, type TicketDetail, type TicketsOptions } from "./shapes.js";
 
@@ -30,6 +31,8 @@ const TRIAGE_SHARE = 0.25;
 export class Tickets extends TicketPrs {
   /** Ticket ids being asked of an agent right now (one call at a time per ticket). */
   private asking = new Set<number>();
+  /** Size-L tickets the Overseer is splitting right now (SF-66). */
+  private splitting = new Set<number>();
   /** Tickets the dispatcher could not start, with why, until something about them changes. */
   private stuck = new Map<number, string>();
   private dispatchSoon: ReturnType<typeof setTimeout> | null = null;
@@ -61,33 +64,6 @@ export class Tickets extends TicketPrs {
     return this.inRepo.has(t.id) || (t.run != null && !!this.opts.factory?.isActive(t.run));
   }
 
-  /** What today's auto starts (by the dispatcher) may spend together: their caps added up, for the daily limit. */
-  autoUsdToday(): number {
-    const day = new Date().toISOString().slice(0, 10);
-    const rows = this.log.db.prepare("SELECT json_extract(payload, '$.capUsd') AS cap FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND ts >= ?").all(day) as { cap: number | null }[];
-    // Starts written before caps were recorded count at the bug-and-task cap.
-    return rows.reduce((a, r) => a + (typeof r.cap === "number" ? r.cap : this.autoWork().maxUsd), 0);
-  }
-
-  /** What the Overseer's own reads of open tickets cost today. */
-  private triageUsdToday(): number {
-    const day = new Date().toISOString().slice(0, 10);
-    const r = this.log.db.prepare("SELECT sum(json_extract(payload, '$.capUsd')) AS usd FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.triage') = 1 AND ts >= ?").get(day) as { usd: number | null };
-    return Number(r?.usd ?? 0);
-  }
-
-  /** How often the crew started or retried this ticket on its own. */
-  private autoTries(id: number): number {
-    return Number((this.log.db.prepare("SELECT count(*) AS n FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND json_extract(payload, '$.triage') IS NULL AND json_extract(payload, '$.id') = ?").get(id) as { n: number }).n);
-  }
-
-  /** Tickets you asked for (the last word on each, its own or its epic's), by id. */
-  private askedIds(): Set<number> {
-    const rows = this.log.db.prepare("SELECT json_extract(payload, '$.id') AS id, json_extract(payload, '$.on') AS on_ FROM events WHERE type = 'ticket.asked' ORDER BY id").all() as { id: number; on_: number }[];
-    const out = new Set<number>();
-    for (const r of rows) { if (r.on_) out.add(Number(r.id)); else out.delete(Number(r.id)); }
-    return out;
-  }
 
   /** Did you ask for this work? Its own mark, or the mark on the epic it sits under. */
   isAsked(t: Pick<TicketView, "id" | "parentId">, ids = this.askedIds()): boolean {
@@ -137,13 +113,21 @@ export class Tickets extends TicketPrs {
     const dayLeft = rule.dailyUsd - this.autoUsdToday();
     const today = (t: TicketView): string | null => (dayLeft + 1e-9 < capOf(t) ? `Waits for tomorrow: today's auto-work limit of $${rule.dailyUsd.toFixed(2)} has $${Math.max(0, dayLeft).toFixed(2)} left, less than the $${capOf(t).toFixed(2)} this start may spend. Raise it in Tickets, or press Work it.` : null);
     return ready.map((t) => {
-      const why = this.stuck.get(t.id) ?? (this.isAsked(t, asked) ? this.askedRefusal(t) : autoWorkRefusal(t, this.handBrake(t.id))) ?? short(t) ?? today(t);
+      const why = this.stuck.get(t.id) ?? (this.isAsked(t, asked) ? this.askedRefusal(t) : autoWorkRefusal(t, this.handBrake(t.id))) ?? this.partBefore(t) ?? short(t) ?? today(t);
       if (why) return { ticket: t, position: null, why };
       const k = String(t.project);
       const n = (place.get(k) ?? 0) + 1;
       place.set(k, n);
       return { ticket: t, position: n, why: null };
     });
+  }
+
+  /** A part of a split bug or task (SF-66) waits for the parts before it, so it builds on their work (SF-29). */
+  private partBefore(t: TicketView): string | null {
+    const p = t.parentId != null ? this.get(t.parentId) : undefined;
+    if (!p || !AUTO_KINDS.includes(p.kind) || !splitTried(this.log, p.id)) return null;
+    const before = this.lines(p.id).filter((x) => (x.lineOrder ?? 0) < (t.lineOrder ?? 0) && x.status !== "built" && !isClosed(x.status));
+    return before.length ? `Waits for ${before[0].key}, the part before it, so it builds on that work.` : null;
   }
 
   /** Why the crew does not start this ticket you asked for, or null: only what makes a start wrong, not taste or size. */
@@ -211,6 +195,7 @@ export class Tickets extends TicketPrs {
       }
     }
     this.triage(spent);
+    this.splitBig();
     return started;
   }
 
@@ -770,6 +755,28 @@ export class Tickets extends TicketPrs {
   }
 
   /**
+   * SF-66: a ready bug or task sized L would wait for a person forever, so the Overseer splits one at a time into
+   * subtasks the queue then takes (tickets/split.ts). It spends from the same quarter of today's limit as the reads.
+   */
+  splitBig(): number[] {
+    const rule = this.autoWork();
+    const { runtime, bay } = this.opts;
+    if (!rule.on || !runtime || this.opts.canWork?.() || this.splitting.size) return [];
+    const reading = this.triageUsdToday() + this.asking.size * 0.1;
+    if (this.autoUsdToday() + SPLIT_CAP_USD > rule.dailyUsd + 1e-9 || reading + SPLIT_CAP_USD > rule.dailyUsd * TRIAGE_SHARE + 1e-9) return [];
+    const t = this.list({ view: "all", status: "ready", limit: 500 })
+      .filter((x) => !splitRefusal(x, { parentKind: x.parentId != null ? this.get(x.parentId)?.kind ?? null : null, handBrake: this.handBrake(x.id), triedBefore: splitTried(this.log, x.id) }))
+      .sort((a, b) => pri(a.priority) - pri(b.priority) || a.id - b.id)[0];
+    if (!t) return [];
+    this.splitting.add(t.id);
+    const host = { log: this.log, get: (id: number) => this.get(id), open: (o: OpenTicket) => this.open(o), edit: (id: number, f: string, v: unknown, by?: string) => this.edit(id, f, v, by), say: (id: number, text: string, o?: Parameters<Tickets["say"]>[2]) => this.say(id, text, o) };
+    splitTicket(host, runtime, bay, t, this.document(t.id))
+      .catch((e) => this.log.append("ticket.noted", { id: t.id, by: "dispatcher", kind: "event", text: `Splitting it failed: ${(e as Error).message}` }))
+      .finally(() => { this.splitting.delete(t.id); this.scheduleDispatch(); });
+    return [t.id];
+  }
+
+  /**
    * Ask an agent: the assignee (or the Overseer) reads the work document and
    * replies on the thread. One short call, capped; it may move an open ticket to ready.
    */
@@ -820,7 +827,13 @@ export class Tickets extends TicketPrs {
     const t = this.get(id);
     if (!t || t.parentId == null) return;
     const epic = this.get(t.parentId);
-    if (!epic || epic.kind !== "plan") return;
+    if (epic && epic.kind !== "plan") {
+      // A bug or task worked through its subtasks (SF-66) is done when they are.
+      const up = splitRollUp(epic, this.lines(epic.id).map((c) => c.status));
+      if (up) this.log.append("ticket.noted", { id: epic.id, by: "factory", status: up.status, text: up.text });
+      return;
+    }
+    if (!epic) return;
     const { total, done } = epic.children;
     if (total > 0 && done === total && ["open", "ready", "in_progress"].includes(epic.status)) {
       this.log.append("ticket.noted", { id: epic.id, by: "factory", status: "built", text: `All ${total} ticket${total === 1 ? "" : "s"} of this epic are done. Take a look.` });
