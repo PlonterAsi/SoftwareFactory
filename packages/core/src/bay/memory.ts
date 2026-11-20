@@ -45,8 +45,6 @@ export const DREAM_USD = 0.1;
 export const DREAM_MAX_USD = 0.6;
 const TEXT_MAX = 300;
 
-export const SOURCE_WORD: Record<LessonSource, string> = { person: "you taught it", self: "it noted it", review: "a review found it", dream: "a cleaned memory" };
-
 const P = (v: unknown) => v as Record<string, any>;
 
 export const memoryProjection: Projection = {

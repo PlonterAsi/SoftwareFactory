@@ -17,7 +17,6 @@ export type CheckKind = "clarity" | "confidence" | "decision";
 export interface CheckQuestion { id: string; kind: CheckKind; ask: string; why: string }
 export interface TicketCheck { verdict: "go" | "ask"; questions: CheckQuestion[]; answered: number }
 
-export const CHECK_WORD: Record<CheckKind, string> = { clarity: "Clarity", confidence: "Confidence", decision: "Your call" };
 
 /** Words that mark a decision only the person makes, each with the question it raises. */
 const YOUR_CALL: { id: string; re: RegExp; ask: string; why: string }[] = [

@@ -159,6 +159,22 @@ describe("watchers only open tickets", () => {
     expect(tk).toMatchObject({ status: "open", kind: "bug", project: p });
     expect(tk.tags).toEqual(expect.arrayContaining(["watcher", "security"]));
     expect((await w.run(p, "dependencies")).opened).toHaveLength(1);
+    // A finding that goes away (fixed, or a scanner that stops calling it a problem) closes its untouched ticket;
+    // one somebody has started on stays where it is.
+    const [secret, shell] = sec.opened;
+    t.say(shell, "", { status: "in_progress" });
+    files.delete("app.py"); files.delete("run.py");
+    const clean = await w.run(p, "security");
+    expect(clean).toMatchObject({ found: 0, cleared: [secret] });
+    expect(clean.note).toMatch(/1 earlier ticket is no longer found and closed/);
+    expect(t.get(secret)!.status).toBe("closed");
+    expect(t.get(shell)!.status).toBe("in_progress");
+    expect((await w.run(p, "security")).cleared).toBeUndefined();
+    // npm audit that could not run this time says nothing about its earlier finding: that ticket stays.
+    const dep = t.list({ project: p, view: "all", limit: 500 }).find((x) => x.tags.includes("dependencies"))!;
+    tools.dependencyScan = async () => ({ reports: [{ tool: "npm audit", ran: false, note: "npm is not installed", vulnerable: [] }], unpinned: [], total: 3 });
+    expect((await w.run(p, "dependencies")).cleared).toBeUndefined();
+    expect(t.get(dep.id)!.status).toBe("open");
     // Looked: none due until the schedule comes round; a watcher you turn off never is.
     expect(w.due().filter((d) => d.projectId === p).map((d) => d.kind)).toEqual(["flaky"]);
     w.set(p, "flaky", { on: false });
