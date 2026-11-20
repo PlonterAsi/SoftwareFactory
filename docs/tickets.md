@@ -66,7 +66,7 @@ Before a ticket costs anything, SF reads it (`tickets/precheck.ts`: plain code, 
 
 - **Clarity**: enough words to build from, the kind's first question answered, what right looks like for a bug.
 - **Confidence**: no open words left ("maybe", "something", "not sure"), and not more than one session's work on a session flow (size L, or six listed asks).
-- **Your call**: money, data that could be lost, secrets and accounts, going public, legal terms.
+- **Your call**: money, data that could be lost, secrets and accounts, going public, legal terms. Only an ask to do the thing counts, not a mention: "take payments", not a price; "delete all old rows", not a Delete button; "needs a GitHub token", not "token efficiency". Rating lines ("- Security: 4/5, ...") are description, not asks (20 Nov: six tickets sat on false flags).
 
 Work it runs the check first; the ticket page shows a **Before it costs money** box with each question, and you answer, or press Work it anyway (the caps still guard the money). The crew's own pickups skip a ticket the check holds, and the queue says so: it has no place in line, and its reason is "Waits for your answer before it costs money" with the questions. Answers go on the ticket's record (`answers["check.<id>"]`) and thread, and the check is on the ticket's timeline (`ticket.checked`). On Home, **Answer before money** lists every question across tickets in one sitting and starts the tickets that are then clear.
 
