@@ -58,7 +58,17 @@ export async function startApp({ schema, views, root, store }) {
   const toastBox = h("div", { class: "kit-toasts", role: "status" });
   const toast = (text, kind) => { const t = h("div", { class: "kit-toast " + (kind || "") }, text); toastBox.append(t); setTimeout(() => t.remove(), kind === "error" ? 6000 : 2500); };
   const go = (path) => { location.hash = "#/" + path; };
-  const ctx = { store: st, schema, h, bars, stat, go, toast };
+  // Data from the internet, read through the app's own server (the browser blocks most sites): { ok, status, type, text, json }.
+  const web = async (url) => {
+    const r = await fetch("api/_fetch?url=" + encodeURIComponent(url));
+    const type = r.headers.get("content-type") || "";
+    const text = await r.text();
+    let json;
+    if (/json/.test(type)) { try { json = JSON.parse(text); } catch { /* not json after all */ } }
+    if (!r.ok && json && json.error && !r.headers.get("x-fetched-status")) throw new Error(json.error);
+    return { ok: r.ok, status: r.status, type, text, json };
+  };
+  const ctx = { store: st, schema, h, bars, stat, go, toast, web };
 
   const nav = h("nav", { class: "kit-nav", "aria-label": "Main" });
   const main = h("main", { class: "kit-main" });
