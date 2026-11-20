@@ -5,6 +5,7 @@ import { delimiter, dirname, join } from "node:path";
 import type { EventLog } from "../events.js";
 import { quoteArg, splitArgs, type RunProfile } from "./detect.js";
 import "./tables.js";
+import { runFault, type RunFault } from "./faults.js";
 
 /** One line a running project printed. `n` counts from 1 per session. */
 export interface OutputLine { n: number; ts: string; stream: "out" | "err" | "in" | "sys"; text: string }
@@ -86,7 +87,7 @@ export function findLocalUrl(line: string): string | null {
 }
 
 /** The environment a project runs in: yours minus secrets, with its own tools and the bundled Node.js first on PATH. */
-export function projectEnv(dir: string, nodePath: string, port: number | null): NodeJS.ProcessEnv {
+export function projectEnv(dir: string, nodePath: string, port: number | null, projectId?: number): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !SECRET.test(k) && !k.startsWith("SF_")) env[k] = v;
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
@@ -94,6 +95,8 @@ export function projectEnv(dir: string, nodePath: string, port: number | null): 
   if (port) env.PORT = String(port);
   // Apps the factory built reach their agents through this core (kit route /api/_agent).
   env.SF_CORE_URL = `http://127.0.0.1:${process.env.SF_PORT ?? 4317}`;
+  // And file their errors as bugs in their own project (kit route /api/_error, SF-40).
+  if (projectId != null) env.SF_PROJECT_ID = String(projectId);
   env.BROWSER = "none"; // dev servers must not open a browser of their own; the Bridge shows the page
   env.FORCE_COLOR = "0";
   env.NO_COLOR = "1";
@@ -116,6 +119,9 @@ export function killTree(proc: ChildProcess, force = false) {
  * Bridge can show a live console and, for web projects, the page itself.
  * Each start is a launch.* event; output stays in memory (last lines kept on exit).
  */
+/** A launched program that died on its own: what it printed about it, and where. */
+export interface LaunchFault extends RunFault { projectId: number; label: string; session: number; tail: string[] }
+
 export class Launcher extends EventEmitter {
   private sessions = new Map<number, Live>();
   readonly nodePath: string;
@@ -196,7 +202,7 @@ export class Launcher extends EventEmitter {
     }
     if (!profile.exec) throw new Error(`"${profile.label}" has nothing to start.`);
 
-    const env = projectEnv(dir, this.nodePath, port);
+    const env = projectEnv(dir, this.nodePath, port, projectId);
     if (mode === "window") {
       const e = this.log.append("launch.started", { projectId, profileId: profile.id, kind: profile.kind, label: profile.label, command, args: argText, dir, mode, port });
       openConsoleWindow(dir, this.lineFor(profile, argList), `${profile.label}`, env);
@@ -324,8 +330,12 @@ export class Launcher extends EventEmitter {
     s.endedAt = new Date().toISOString();
     s.stdinOpen = false;
     // The database may already be closed when a program ends as the app quits; the next start marks it then.
-    try { this.log.append("launch.exited", { session: s.id, code, how, tail: s.out.slice(-60).map((l) => (l.stream === "in" ? "> " : "") + l.text) }); } catch { /* closed */ }
+    const tail = s.out.slice(-60).map((l) => (l.stream === "in" ? "> " : "") + l.text);
+    try { this.log.append("launch.exited", { session: s.id, code, how, tail }); } catch { /* closed */ }
     this.emit("state", strip(s));
+    // A program that died on its own is a bug in its project (SF-40); the core files it (server.ts).
+    const f = runFault(code, how, tail);
+    if (f) this.emit("fault", { ...f, projectId: s.projectId, label: s.label, session: s.id, tail: tail.slice(-20) } satisfies LaunchFault);
   }
 }
 

@@ -7,10 +7,12 @@
 //   - when it needs research or judgment plain code cannot do, it asks one of your agents:
 //     POST /api/_agent { task, input?, agent? } from a view, or ctx.ask(task, input) in api.js
 //     (SoftwareFactory must be open; it runs the agent and logs what it cost)
+//   - keeps a log of its errors in data/app.log (System → Log), keeps running after one, and files each as a bug
+//     in its project in SoftwareFactory (when started from the Run tab): server errors, crashes, and the page's own
 //   - when it needs data from the internet (a public API, a feed, a page), it reads it through this server:
 //     GET /api/_fetch?url=https://... from a view (ctx.web(url) does it for you), or plain fetch() in api.js
 import { createServer } from "node:http";
-import { readFile, writeFile, rename, mkdir, readdir, stat } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, readdir, stat, appendFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, normalize, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -40,6 +42,39 @@ function save() {
   });
   return saving;
 }
+
+// Errors: one line each in data/app.log (the last 1 MB, then app.log.1), and a bug in the app's project in
+// SoftwareFactory when the Run tab started it (SF_PROJECT_ID). Nothing leaves this computer.
+const logFile = join(dataDir, "app.log");
+let logging = Promise.resolve();
+function logLine(level, text) {
+  const line = new Date().toISOString() + " " + level.toUpperCase() + " " + String(text).replace(/\r?\n/g, "\n    ") + "\n";
+  logging = logging.then(async () => {
+    await mkdir(dataDir, { recursive: true });
+    const size = await stat(logFile).then((s) => s.size).catch(() => 0);
+    if (size > 1e6) await rename(logFile, logFile + ".1").catch(() => {});
+    await appendFile(logFile, line);
+  }).catch(() => {});
+  return logging;
+}
+const reported = new Map();
+async function report(where, err) {
+  const message = String((err && err.message) || err || "Unknown error").slice(0, 2000);
+  const stack = err && err.stack ? String(err.stack).slice(0, 8000) : undefined;
+  logLine("error", where + ": " + (stack || message));
+  if (!process.env.SF_PROJECT_ID) return;
+  // The same error from the same place is filed once a minute at most; SoftwareFactory counts the repeats.
+  const key = where + "|" + message;
+  if (Date.now() - (reported.get(key) || 0) < 60000) return;
+  reported.set(key, Date.now());
+  try {
+    await fetch(CORE + "/api/apps/error", { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(5000),
+      body: JSON.stringify({ project: Number(process.env.SF_PROJECT_ID), app: (schema.app && schema.app.name) || "the app", where, message, stack }) });
+  } catch { /* SoftwareFactory is closed: the log keeps it */ }
+}
+// A crash in a route or a timer is logged and filed, and the app keeps serving.
+process.on("uncaughtException", (e) => { report("server crash", e); });
+process.on("unhandledRejection", (e) => { report("server crash", e); });
 
 const ext = existsSync(join(root, "api.js")) ? await import(pathToFileURL(join(root, "api.js")).href) : null;
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8" };
@@ -136,6 +171,17 @@ async function api(req, res, url) {
     if (p.startsWith("..") || !abs.startsWith(root) || /(^|[\\/])(data|\.git|node_modules)([\\/]|$)/.test(p)) return send(res, 403, { error: "not allowed" });
     try { return send(res, 200, await readFile(abs, "utf8"), "text/plain; charset=utf-8"); } catch { return send(res, 404, { error: "no such file" }); }
   }
+  if (name === "_error" && req.method === "POST") {
+    // The page's own errors (shell.js): logged and filed like the server's.
+    const b = await body(req).catch(() => ({}));
+    await report("page " + String(b.where || "").slice(0, 80), { message: String(b.message || "Unknown error"), stack: b.stack ? String(b.stack) : undefined });
+    return send(res, 200, { ok: true });
+  }
+  if (name === "_log" && req.method === "GET") {
+    await logging;
+    const text = await readFile(logFile, "utf8").catch(() => "");
+    return send(res, 200, { file: relative(root, logFile), lines: text.split("\n").filter(Boolean).slice(-200) });
+  }
   if (name === "_agent" && req.method === "POST") {
     const b = await body(req);
     try { return send(res, 200, await ask(b.task, b.input, { agent: b.agent })); } catch (e) { return send(res, e.status || 502, { error: e.message }); }
@@ -182,6 +228,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { "content-type": TYPES[extname(p)] || "application/octet-stream", "cache-control": "no-store" });
     res.end(data);
   } catch (e) {
+    report(req.method + " " + req.url.split("?")[0], e);
     send(res, 500, { error: String(e && e.message || e) });
   }
 });
