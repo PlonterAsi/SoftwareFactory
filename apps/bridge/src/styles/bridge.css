@@ -248,3 +248,24 @@
 .rn-log { margin: 0 0 8px; height: min(52vh, 520px); overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: 13px/1.5 var(--mono); color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
 @media (max-width: 860px) { .rn-body { grid-template-columns: 1fr; } .rn-list { border-right: 0; border-bottom: 1px solid var(--line); } }
 @media (prefers-reduced-motion: reduce) { .rn-dot.work { animation: none; } }
+
+/* Verification: how a ticket's pass was tested, layer by layer (TicketVerify.tsx). */
+.tk-verify { border: 1px solid var(--line); border-left: 3px solid var(--good); border-radius: 8px; padding: 10px 12px; margin: 10px 0; background: var(--panel); }
+.tk-verify.v-part { border-left-color: var(--gate); }
+.tk-verify.v-gap { border-left-color: var(--bad); }
+.tk-verify > summary { cursor: pointer; list-style: none; }
+.tk-verify > summary::-webkit-details-marker { display: none; }
+.tk-verify-verdict { margin-left: 6px; }
+.tk-verify.v-gap .tk-verify-verdict { color: var(--bad); font-weight: 600; }
+.tk-verify-layers { width: 100%; border-collapse: collapse; margin: 10px 0 6px; font-size: 13px; }
+.tk-verify-layers th { text-align: left; font-weight: 600; color: var(--muted); padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); }
+.tk-verify-layers td { padding: 5px 8px 5px 0; vertical-align: top; border-bottom: 1px solid var(--line); }
+.tk-verify-mark { white-space: nowrap; }
+.tk-verify-layers .t-yes .tk-verify-mark { color: var(--good); }
+.tk-verify-layers .t-partly .tk-verify-mark { color: var(--gate); }
+.tk-verify-layers .t-no .tk-verify-mark { color: var(--bad); font-weight: 600; }
+.tk-verify-layers .t-na .tk-verify-mark { color: var(--muted); }
+.tk-verify-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.tk-verify-cols h4 { margin: 6px 0 4px; font-size: 13px; }
+.tk-verify-cols ol, .tk-verify-cols ul { margin: 0; padding-left: 18px; }
+.tk-verify-checks { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; color: var(--muted); }

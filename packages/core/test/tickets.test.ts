@@ -287,6 +287,12 @@ describe("tickets: working inside an imported repo", () => {
     // The workbench: a shell limited to the commands it needs to run the tests itself.
     expect(builder.commands).toContain("npm test");
     expect(t.notes(a.id).at(-1)!.text).toMatch(/Press Add to my folder/);
+    // How it was tested, from what ran (tickets/verify.ts): the Builder's docs file needs no test; the steps fall back to the expected result.
+    const v = t.detail(a.id)!.verification!;
+    expect(v.route).toBe("session");
+    expect(v.layers.find((l) => l.layer === "Docs")).toMatchObject({ tested: "n/a" });
+    expect(v.howToVerify).toEqual(["Check that: It logs in"]);
+    expect(builder.systemPrompt).toMatch(/How to verify:/);
     // Your press adds the branch to the original folder; its files and its current branch stay as they were.
     const sent = await t.send(a.id);
     expect(sent.pushedUrl).toBe("local");

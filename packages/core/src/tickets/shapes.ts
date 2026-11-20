@@ -7,6 +7,7 @@ import { type RepoRef } from "./repowork.js";
 import { type GitHub } from "./github.js";
 import { type Routed } from "../factory/route.js";
 import { type RepoRuns } from "../factory/reporun.js";
+import type { Verification } from "./verify.js";
 import { type LinkView, type NoteView, type Priority, type Size, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView } from "./model.js";
 
 export interface OpenTicket {
@@ -112,6 +113,8 @@ export interface TicketDetail {
   working: boolean;
   /** The harness steps of its latest pass in the repo (preflight, build, checks, review), each with its state. */
   steps: TicketStep[];
+  /** How its latest pass was tested, layer by layer, how to test it again and how to see it works (tickets/verify.ts). */
+  verification: (Verification & { at: string; by: string }) | null;
   /** Where it stands in the ready queue, or why the crew leaves it to you. */
   queue: { position: number | null; why: string | null } | null;
   /** You asked for it: the crew starts it within your standing auto-work limit. */

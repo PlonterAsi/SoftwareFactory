@@ -70,6 +70,17 @@ Before a ticket costs anything, SF reads it (`tickets/precheck.ts`: plain code, 
 
 Work it runs the check first; the ticket page shows a **Before it costs money** box with each question, and you answer, or press Work it anyway (the caps still guard the money). The crew's own pickups skip a ticket the check holds. Answers go on the ticket's record (`answers["check.<id>"]`) and thread, and the check is on the ticket's timeline (`ticket.checked`). On Home, **Answer before money** lists every question across tickets in one sitting and starts the tickets that are then clear.
 
+## Verification: how it was tested (2026-11-20)
+
+Every pass that changes code leaves a **Verification** on its ticket (`ticket.verification`, `tickets/verify.ts`), shown open on a ticket that waits for your look and on any ticket with an untested layer:
+
+- **Layers**: each changed file is sorted into Backend, UI, Database, Tests, Config or Docs by its path, and each layer says whether it was tested and how: **Tested** (tests ran and passed, including new or changed tests; for UI, every screen opened in a real browser on an engine run), **Partly tested** (the existing tests passed but no new test covers it, or a UI change no check opened), **Not tested** (no test ran: the reason is given), or **No test applies** (docs, config). A changed layer that was not tested is flagged in red: check it yourself before you close.
+- **From what ran, never from what the crew claims**: the harness steps of the pass (gates, test integrity, tests, review) and, for engine runs, the run's test report and browser check. The tests step records the commands it ran.
+- **How to test it again**: those commands.
+- **How to verify**: 1 to 3 steps a person follows to see it works, written by the Builder (its contract asks for them); without them, the ticket's expected result.
+
+`GET /api/tickets/:id` carries it as `verification`.
+
 ## Merging and versions (phase 3)
 
 A crew PR whose CI passed shows on Home's Needs you as a **Merge?** card, with SF's merge review.
