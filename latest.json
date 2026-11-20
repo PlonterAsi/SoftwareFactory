@@ -1,0 +1,15 @@
+{
+  "version": "0.2.397",
+  "notes": "Build of main at f19a9c7: The crew's tests and fast gates run without blocking the core (#147)",
+  "pub_date": "2026-11-20T10:01:55Z",
+  "platforms": {
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGNzR1ExbzVncHpMMFlsSStsSGFEMlp1R0F1WmtwQllnUTBPUFZ5TUxnWmpGOUZ3bG9DN0J2Y21EOE9wd1RvaDRHOXVzaGNaN2VJR29WOEErWEdWOWN6K3UzYk1VMEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTY4NTcyCWZpbGU6U29mdHdhcmVGYWN0b3J5XzAuMi4zOTdfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMi4zOTcKTHk4VzNMbThqNlAxVlRtQnAyVm9MSDN0UldLYkVhN1ZlMWgrcytLNmp3V1p3TElMWWt5dWZGcGVFVXlWZDJ4SU1PSVl2Yks0bWF4bXlydGQzZFNXQWc9PQo=",
+      "url": "https://api.github.com/repos/PlonterAsi/SoftwareFactory/releases/assets/771312435"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGNzR1ExbzVncHpMMFlsSStsSGFEMlp1R0F1WmtwQllnUTBPUFZ5TUxnWmpGOUZ3bG9DN0J2Y21EOE9wd1RvaDRHOXVzaGNaN2VJR29WOEErWEdWOWN6K3UzYk1VMEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTY4NTcyCWZpbGU6U29mdHdhcmVGYWN0b3J5XzAuMi4zOTdfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMi4zOTcKTHk4VzNMbThqNlAxVlRtQnAyVm9MSDN0UldLYkVhN1ZlMWgrcytLNmp3V1p3TElMWWt5dWZGcGVFVXlWZDJ4SU1PSVl2Yks0bWF4bXlydGQzZFNXQWc9PQo=",
+      "url": "https://api.github.com/repos/PlonterAsi/SoftwareFactory/releases/assets/771312435"
+    }
+  }
+}
