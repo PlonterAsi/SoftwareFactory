@@ -60,6 +60,18 @@ describe("tickets: the ready queue", () => {
     expect(t.detail(req)!.queue).toEqual({ position: null, why: expect.stringMatching(/Work it/) });
   });
 
+  it("a ticket the check before money holds is out of line and says which answers it waits for, said once on its timeline", () => {
+    const { t, ready, log } = setup();
+    const keys = ready({ kind: "task", title: "Rotate the API keys", body: "Move every API key to the new vault. The old file is gone after." });
+    const fine = ready({ kind: "task", title: "Fine one" });
+    expect(t.dispatch()).toEqual([fine]);
+    const spot = t.queue(7).find((q) => q.ticket.id === keys)!;
+    expect(spot.position).toBeNull();
+    expect(spot.why).toMatch(/Waits for your answer before it costs money: .*secrets or accounts/);
+    t.dispatch();
+    expect((log.db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'ticket.checked' AND json_extract(payload, '$.id') = ?").get(keys) as { n: number }).n).toBe(1);
+  });
+
   it("works at most `wip` tickets per project, in priority order, and takes the next when one ends", async () => {
     const { t, factory, ready } = setup({ wip: 1 });
     const later = ready({ kind: "task", title: "Later" });

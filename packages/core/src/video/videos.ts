@@ -89,6 +89,7 @@ const KEY_RE = /^[A-Za-z0-9_.\-]{30,200}$/;
 
 export class Videos {
   private busy = 0;
+  private watching = new Map<string, Promise<VideoNote & { cached: boolean }>>();
   /** Instagram by DM: reels shared to your second account arrive through Meta's API and a mailbox you own. */
   readonly instagram: InstagramInbox;
   /** Link drop: Instagram, TikTok and X links fetched logged out (Scrape Creators, else yt-dlp). */
@@ -309,6 +310,15 @@ export class Videos {
       this.log.append("video.watched", { id: n.id, source: n.source, title: n.title, model: n.model, tokensIn: 0, tokensOut: 0, paidUsd: 0, cached: 1, by });
       return { ...n, cached: true };
     }
+    // The same clip asked again while it is being watched waits for that watch, instead of paying twice.
+    const going = this.watching.get(ckey);
+    if (going) return { ...(await going), cached: true };
+    const p = this.watchNew(src, clip, question, ckey, by);
+    this.watching.set(ckey, p);
+    try { return await p; } finally { this.watching.delete(ckey); }
+  }
+
+  private async watchNew(src: { kind: "youtube" | "file"; source: string; stamp: string }, clip: WatchClip, question: string | null, ckey: string, by: string): Promise<VideoNote & { cached: boolean }> {
     const k = this.key();
     if (!k) throw new Error("No Gemini key yet. Get a free one at aistudio.google.com/apikey and paste it in Systems, Videos.");
     const s = this.settings();
@@ -335,10 +345,10 @@ export class Videos {
       const at = new Date().toISOString();
       const notes = a.text.slice(0, VIDEO_LIMITS.notesChars);
       const db = this.log.db;
-      if (prev) {
-        db.prepare("DELETE FROM video_notes_fts WHERE rowid = ?").run(prev.id);
-        db.prepare("DELETE FROM video_notes WHERE id = ?").run(prev.id);
-      }
+      // Whatever holds this key now goes, read again after the watch: another watch of the same clip may have
+      // finished meanwhile (20 Nov: a retry crashed on "UNIQUE constraint failed: video_notes.ckey").
+      db.prepare("DELETE FROM video_notes_fts WHERE rowid IN (SELECT id FROM video_notes WHERE ckey = ?)").run(ckey);
+      db.prepare("DELETE FROM video_notes WHERE ckey = ?").run(ckey);
       const r = db.prepare(`INSERT INTO video_notes (ckey, source, kind, title, question, clip, notes, model, tokens_in, tokens_out, paid_usd, by_who, at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(ckey, src.source, src.kind, a.title, question, JSON.stringify(clip), notes, a.model, a.tokensIn, a.tokensOut, a.paidUsd, by, at);
       const id = Number(r.lastInsertRowid);

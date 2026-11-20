@@ -116,6 +116,9 @@ export class Tickets extends TicketPrs {
     return ready.map((t) => {
       const why = this.stuck.get(t.id) ?? (this.isAsked(t, asked) ? this.askedRefusal(t) : autoWorkRefusal(t, this.handBrake(t.id))) ?? this.partBefore(t) ?? short(t) ?? today(t);
       if (why) return { ticket: t, position: null, why };
+      // The check before money holds a ticket with open questions: it waits for your answers, and says which (20 Nov: six sat at "1" with no reason).
+      const held = this.check(t.id);
+      if (held.verdict === "ask") return { ticket: t, position: null, why: `Waits for your answer before it costs money: ${held.questions.map((q) => q.ask).join(" ")}`, held };
       const k = String(t.project);
       const n = (place.get(k) ?? 0) + 1;
       place.set(k, n);
@@ -162,6 +165,8 @@ export class Tickets extends TicketPrs {
     let spent = this.autoUsdToday();
     const asked = this.askedIds();
     for (const spot of this.queue()) {
+      // Its open questions wait in Needs you, said once on its timeline.
+      if (spot.held) this.recordCheck(spot.ticket.id, spot.held, "dispatcher");
       if (spot.position == null) continue;
       const k = String(spot.ticket.project);
       if ((busy.get(k) ?? 0) >= rule.wip) continue;
@@ -169,9 +174,6 @@ export class Tickets extends TicketPrs {
       const mine = this.isAsked(t, asked);
       const cap = mine ? rule.askedMaxUsd : rule.maxUsd;
       if (spent + cap > rule.dailyUsd + 1e-9) continue;
-      // The check before money holds a ticket with open questions: they wait in Needs you, said once on its timeline.
-      const held = this.check(t.id);
-      if (held.verdict === "ask") { this.recordCheck(t.id, held, "dispatcher"); continue; }
       try {
         // SF-65: work you asked for whose run stopped or failed picks up from that step, with fresh money for what is left.
         const again = mine && t.run != null && this.opts.factory?.retryable(t.run).ok;
