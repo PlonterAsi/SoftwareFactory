@@ -295,11 +295,12 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
       "The Gemini key is pasted once in Systems and kept in ~/.config/watch/.env, the file Claude Code's /watch plugin reads too. It is never logged or sent back.",
       "The same video with the same question is answered from the notes, free. A daily limit (40 by default) stops a loop from watching without end.",
       "Add-ons with the video permission (Scout) watch YouTube links and search the notes; they cannot send files.",
+      "Instagram by DM: a reel shared to your second (professional) Instagram account arrives through Meta's official Messaging API at a small Cloudflare Worker on your own account, which SoftwareFactory deploys; it is pulled into the Watch folder every minute. Nothing on this computer is opened to the internet.",
     ],
     flow: ["Paste a free Gemini key once", "Give a YouTube link or a saved clip, and a question if you have one", "Gemini watches it and answers with timestamps", "The notes are kept and found by search later"],
     design: "A Videos section in Systems: the key, the daily limit, a box to watch a link or a file, and the latest notes with search.",
     screens: [], docs: ["docs/videos.md"], stations: [],
-    files: [`${C}video/gemini.ts`, `${C}video/videos.ts`, `${C}video/routes.ts`, `${B}Videos.tsx`], api: ["/api/videos"],
+    files: [`${C}video/gemini.ts`, `${C}video/videos.ts`, `${C}video/routes.ts`, `${C}video/instagram.ts`, `${C}video/ig-worker.ts`, `${B}Videos.tsx`], api: ["/api/videos"],
   },
   {
     id: "monthly-budgets", name: "Monthly budgets and burn rate", group: "Projects",
