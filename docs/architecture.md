@@ -110,7 +110,7 @@ Beside `src/`: `kit/` is the app kit copied into every built app; `agent-skills/
 - `api.ts` holds every call to the core and the hooks that fold the live event stream into view state (`useFactory`, `useOrder`, `useBay`, `useProjects`).
 - `projects/router.ts` keeps the place in the address hash.
 - `projects/panels.tsx` is the registry of project tabs. A module registers a tab at load time and is imported once from `App.tsx`.
-- `shell/` is the frame (sidebar, Helm, Needs you, shortcuts); `ui/` holds shared components; `styles.css` holds the Foundry Glass tokens.
+- `shell/` is the frame (sidebar, Helm, Needs you, shortcuts); `ui/` holds shared components; `styles.css` loads the style parts in `styles/` in order; `styles/base.css` holds the Foundry Glass tokens.
 
 Screen by screen: [app.md](app.md).
 

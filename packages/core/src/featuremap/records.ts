@@ -532,7 +532,7 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     flow: ["The app opens", "The shell draws the sidebar and the page for the address", "Pages read the live event stream", "The person moves by click or keyboard"],
     design: "Foundry Glass: the tokens in styles.css, the shared components in ui/, the kit page at #/_kit.",
     screens: ["/_kit"], docs: ["docs/design.md", "docs/app.md", "docs/ui-tour.md"], stations: [],
-    files: [`${B}App.tsx`, `${B}main.tsx`, `${B}shell/`, `${B}ui/`, `${B}styles.css`, `${B}Kit.tsx`, `${B}projects/router.ts`], api: [],
+    files: [`${B}App.tsx`, `${B}main.tsx`, `${B}shell/`, `${B}ui/`, `${B}styles.css`, `${B}styles/`, `${B}Kit.tsx`, `${B}projects/router.ts`], api: [],
   },
   {
     id: "bases", name: "Bases", group: "App",

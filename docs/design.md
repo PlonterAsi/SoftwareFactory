@@ -2,7 +2,7 @@
 
 Approved by Assaf on 2026-11-11 after a UI and UX council. Proposal, mockups and live prototype: https://claude.ai/artifact/BUevHm6B2yRRUC7f837Dze
 
-Tokens live at the top of `apps/bridge/src/styles.css`. Use them; do not add raw colours.
+Tokens live at the top of `apps/bridge/src/styles/base.css` (`styles.css` loads the parts in order). Use them; do not add raw colours.
 
 ## Colour
 - Surfaces, nearer is lighter: `--bg` #0b0d10, `--shell` #0f1216, `--panel` #14181d, `--panel-2` #1a1f26, `--hover` #20262e.
