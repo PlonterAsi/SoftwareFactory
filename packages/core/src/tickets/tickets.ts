@@ -5,7 +5,7 @@ import { kitArgs, kitOf } from "../factory/crew.js";
 import { runAgent } from "../agents.js";
 import { registerProjectFacet } from "../projects/service.js";
 import { EDITABLE } from "./tables.js";
-import { branchFor, harnessChecks, repoOfProject, workInRepo, type RepoRef } from "./repowork.js";
+import { branchFor, harnessChecks, repoOfProject, siblingStack, workInRepo, type RepoRef } from "./repowork.js";
 import { hideTokens } from "./github.js";
 import { intakeDoor, routeWork, type Routed, type WorkRoute } from "../factory/route.js";
 import { REPO_ENGINE_MIN_USD } from "../factory/reporun.js";
@@ -706,7 +706,7 @@ export class Tickets extends TicketPrs {
     // A GitHub repo with no copy on this computer is cloned from where this core's GitHub access points
     // (github.com; a local stand-in in tests). One imported from GitHub is cloned from its copy here.
     if (repo.github && gh && !existsSync(join(repo.dir, ".git"))) repo = { ...repo, dir: gh.remote(repo.github) };
-    const job = workInRepo(this.log, runtime, bay, { id: t.id, key: t.key, title: t.title, document: doc, repo, workRoot, maxUsd: Math.min(maxUsd ?? 0.6, 1.5), git: gh ? (d, ...a) => gh.git(d, ...a) : undefined, projectId: t.project, checks: harnessChecks({ maxMinutes: this.opts.factory?.maxRunMinutes }), flow })
+    const job = workInRepo(this.log, runtime, bay, { id: t.id, key: t.key, title: t.title, document: doc, repo, workRoot, maxUsd: Math.min(maxUsd ?? 0.6, 1.5), git: gh ? (d, ...a) => gh.git(d, ...a) : undefined, projectId: t.project, checks: harnessChecks({ maxMinutes: this.opts.factory?.maxRunMinutes }), flow, stack: t.parentId != null ? siblingStack(this.lines(t.parentId), t.id) : [] })
       .then(async (r) => {
         if (!r.ok) {
           this.log.append("ticket.noted", { id: t.id, by, status: "open", text: `The Builder could not work it: ${r.error}` });
