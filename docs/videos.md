@@ -47,7 +47,7 @@ route is a folder: save the clip yourself (Instagram's Share, Download where off
 Watch folder, `~/SoftwareFactory/Watch` by default, changeable in Systems, Videos. Every minute SoftwareFactory watches
 up to three new videos there (each once it has not changed for 15 seconds, so a sync can finish), then moves each to
 `Watched/`. A text file with the same name (`reel.txt` beside `reel.mp4`) is the question; without one, Gemini takes
-general notes. A video that fails is not tried again until the file changes. A folder named `SF Watch` in Google Drive (My Drive)
+general notes. A video that fails is not tried again until the file changes. A folder named `SF Watch` in Google Drive (My Drive, or one folder down such as `My Drive/Dev/SF Watch`)
 or OneDrive is found and watched too, with nothing to set up on the PC: make it from the phone's Drive app, share a
 saved reel into it, and it is watched once it syncs down.
 

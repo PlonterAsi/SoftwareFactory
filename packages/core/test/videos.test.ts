@@ -187,6 +187,15 @@ describe("the Watch folder", () => {
     expect(v.status().folders).toEqual([join(home, "SoftwareFactory", "Watch"), join(home, "Google Drive", "My Drive", "SF Watch")]);
   });
 
+  it("finds an \"SF Watch\" folder one level down in Google Drive, like My Drive/Dev/SF Watch", async () => {
+    const { mkdirSync } = await import("node:fs");
+    const { cloudWatchFolders } = await import("../src/index.js");
+    const home = tmp();
+    mkdirSync(join(home, "Google Drive", "My Drive", "Dev", "SF Watch"), { recursive: true });
+    mkdirSync(join(home, "Google Drive", "My Drive", "Other", "Deeper", "SF Watch"), { recursive: true });
+    expect(cloudWatchFolders(home, "linux")).toEqual([join(home, "Google Drive", "My Drive", "Dev", "SF Watch")]);
+  });
+
   it("does not try a failed clip again until the file changes", async () => {
     const home = tmp();
     const g = fakeGoogle(() => ({ status: 500, body: { error: { message: "boom" } } }));
