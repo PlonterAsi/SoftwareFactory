@@ -7,11 +7,15 @@
 //   - when it needs research or judgment plain code cannot do, it asks one of your agents:
 //     POST /api/_agent { task, input?, agent? } from a view, or ctx.ask(task, input) in api.js
 //     (SoftwareFactory must be open; it runs the agent and logs what it cost)
+//   - when it needs data from the internet (a public API, a feed, a page), it reads it through this server:
+//     GET /api/_fetch?url=https://... from a view (ctx.web(url) does it for you), or plain fetch() in api.js
 import { createServer } from "node:http";
 import { readFile, writeFile, rename, mkdir, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, normalize, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import * as schema from "./src/schema.js";
 import { createRecord, updateRecord, deleteRecord, seedDb, importDb, query, entityOf, checkSchema } from "./web/kit/db.js";
 
@@ -66,6 +70,48 @@ async function ask(task, input, opts = {}) {
   return out;
 }
 
+// Reading the internet for the app's own pages: the browser will not let a page read most sites (CORS), so the
+// server reads them. Only http and https, only public addresses (never this computer or the home network, so a
+// page cannot reach SoftwareFactory or the router through it), a GET only, at most 5 MB and 20 seconds, at most
+// 3 redirects (each checked again). The answer comes back as it came, marked so it never runs as a page here.
+const WEB_MAX = 5e6;
+const privateIp = (ip) => {
+  if (ip.startsWith("::ffff:")) ip = ip.slice(7);
+  if (isIP(ip) === 4) {
+    const [a, b] = ip.split(".").map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+  }
+  const x = ip.toLowerCase();
+  return x === "::" || x === "::1" || x.startsWith("fc") || x.startsWith("fd") || x.startsWith("fe80") || x.startsWith("ff");
+};
+async function publicUrl(raw) {
+  let u;
+  try { u = new URL(String(raw || "")); } catch { throw Object.assign(new Error("Give a whole address, like https://example.com/data.json"), { status: 400 }); }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw Object.assign(new Error("Only http and https addresses can be read"), { status: 400 });
+  if (process.env.APP_WEB_ALLOW_LOCAL === "1") return u;
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  const ips = isIP(host) ? [host] : (await lookup(host, { all: true }).catch(() => { throw Object.assign(new Error("No such site: " + host), { status: 502 }); })).map((a) => a.address);
+  if (!ips.length || ips.some(privateIp)) throw Object.assign(new Error("Only public internet addresses can be read, not this computer or the local network"), { status: 403 });
+  return u;
+}
+async function web(raw) {
+  let u = await publicUrl(raw);
+  for (let hop = 0; ; hop++) {
+    const r = await fetch(u, { redirect: "manual", signal: AbortSignal.timeout(20000), headers: { "user-agent": "SoftwareFactory-app" } })
+      .catch((e) => { throw Object.assign(new Error("Could not reach " + u.host + ": " + (e.name === "TimeoutError" ? "no answer in 20 seconds" : e.message)), { status: 502 }); });
+    if (r.status >= 300 && r.status < 400 && r.headers.get("location")) {
+      if (hop >= 3) throw Object.assign(new Error("Too many redirects"), { status: 502 });
+      u = await publicUrl(new URL(r.headers.get("location"), u).href);
+      continue;
+    }
+    if (Number(r.headers.get("content-length") || 0) > WEB_MAX) throw Object.assign(new Error("The answer is larger than 5 MB"), { status: 413 });
+    const chunks = [];
+    let size = 0;
+    for await (const c of r.body || []) { size += c.length; if (size > WEB_MAX) throw Object.assign(new Error("The answer is larger than 5 MB"), { status: 413 }); chunks.push(c); }
+    return { status: r.status, type: r.headers.get("content-type") || "application/octet-stream", data: Buffer.concat(chunks) };
+  }
+}
+
 async function files(dir, out) {
   for (const name of await readdir(dir)) {
     if (name.startsWith(".") || name === "node_modules" || name === "data") continue;
@@ -93,6 +139,15 @@ async function api(req, res, url) {
   if (name === "_agent" && req.method === "POST") {
     const b = await body(req);
     try { return send(res, 200, await ask(b.task, b.input, { agent: b.agent })); } catch (e) { return send(res, e.status || 502, { error: e.message }); }
+  }
+  if (name === "_fetch" && req.method === "GET") {
+    // A page from another site must not use this app as its way out.
+    if (req.headers["sec-fetch-site"] === "cross-site") return send(res, 403, { error: "not allowed" });
+    try {
+      const r = await web(url.searchParams.get("url"));
+      res.writeHead(r.status, { "content-type": r.type, "x-fetched-status": String(r.status), "x-content-type-options": "nosniff", "content-security-policy": "sandbox", "cache-control": "no-store" });
+      return res.end(r.data);
+    } catch (e) { return send(res, e.status || 502, { error: e.message }); }
   }
   if (ext && typeof ext.handle === "function") {
     const handled = await ext.handle(req, res, url, { db, schema, save, send, body: () => body(req), root, ask });
