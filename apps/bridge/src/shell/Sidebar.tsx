@@ -11,7 +11,7 @@ import { shortName } from "../projects/shortName";
  */
 export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0, proposals = 0, tickets = 0, addons = [], children }: {
   route: Route; needs: number; projects: ProjectSummary[] | null; crewBusy: boolean; base?: string;
-  conflicts?: number; proposals?: number; tickets?: number; addons?: { id: string; panel: string; title: string }[]; children?: ReactNode;
+  conflicts?: number; proposals?: number; tickets?: number; addons?: { id: string; panel: string; title: string; waiting?: boolean }[]; children?: ReactNode;
 }) {
   const at = (r: Route["page"], view?: string) => route.page === r && (view == null || (route.page === "factory" && route.view === view));
   const recent = (projects ?? []).filter((p) => p.status !== "archived")
@@ -41,7 +41,10 @@ export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0,
       {addons.length > 0 && (
         <div className="sb-group">
           <div className="sb-label">Add-ons</div>
-          {addons.map((a) => (
+          {addons.map((a) => a.waiting ? (
+            <Item key={`${a.id}:${a.panel}`} to={{ page: "plugins", id: a.id }} on={false} alert badge={1}
+              icon={<Ico d="M8 2.5 13.5 5.5v5L8 13.5 2.5 10.5v-5zM8 8v5.5M8 8l5.5-2.5M8 8 2.5 5.5" />}>{a.title}: approve update</Item>
+          ) : (
             <Item key={`${a.id}:${a.panel}`} to={{ page: "addon", id: a.id, panel: a.panel }} on={route.page === "addon" && route.id === a.id && (route.panel ?? addons.find((x) => x.id === a.id)!.panel) === a.panel}
               icon={<Ico d="M8 2.5 13.5 5.5v5L8 13.5 2.5 10.5v-5zM8 8v5.5M8 8l5.5-2.5M8 8 2.5 5.5" />}>{a.title}</Item>
           ))}
