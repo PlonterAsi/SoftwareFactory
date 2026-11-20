@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, mkdtempSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
 /**
  * Link drop (docs/videos.md): a reel or clip link you save into the Watch folder (a .txt or .url file, from the phone
@@ -50,7 +51,7 @@ const pick = (o: unknown, paths: string[][]): string | null => {
 
 export class LinkFetcher {
   private ytdlp: boolean | null = null;
-  constructor(private o: { key: () => string | null; fetch?: typeof fetch; run?: Runner; api?: string }) {}
+  constructor(private o: { key: () => string | null; fetch?: typeof fetch; run?: Runner; api?: string; tmp?: string }) {}
   private get f() { return this.o.fetch ?? fetch; }
   private get r() { return this.o.run ?? run; }
 
@@ -60,9 +61,25 @@ export class LinkFetcher {
     return this.ytdlp;
   }
 
-  /** Fetch one link into dir as `${base}.mp4`. Throws with the reason when neither way can. */
+  /**
+   * Fetch one link into dir as `${base}.mp4`. Throws with the reason when neither way can. The download happens in a
+   * private local temp folder and only the finished video is moved into dir: a synced folder (Google Drive) locks
+   * half-written files, which broke yt-dlp's .part rename there.
+   */
   async fetchTo(url: string, dir: string, base: string): Promise<Fetched> {
     if (!LINK_HOSTS.test(url)) throw new Error("Only Instagram, TikTok, X, Facebook and Threads links are fetched");
+    const work = mkdtempSync(join(this.o.tmp ?? tmpdir(), "sf-link-"));
+    try {
+      const f = await this.fetchHere(url, work, base);
+      const dest = join(dir, basename(f.path));
+      try { renameSync(f.path, dest); } catch { copyFileSync(f.path, dest); try { unlinkSync(f.path); } catch { /* the temp folder goes below */ } }
+      return { ...f, path: dest };
+    } finally {
+      rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  }
+
+  private async fetchHere(url: string, dir: string, base: string): Promise<Fetched> {
     const why: string[] = [];
     const key = this.o.key();
     if (key && /instagram\.com|tiktok\.com/i.test(url)) {

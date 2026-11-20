@@ -72,6 +72,8 @@ describe("link drop", () => {
     const dl = runs.find((r) => r.includes("--no-cookies"))!;
     expect(dl).toEqual(expect.arrayContaining(["--ignore-config", "--no-cookies", "--no-cookies-from-browser", "--", "https://www.tiktok.com/@a/video/7463250363559218474"]));
     expect(dl.some((a) => /cookies-from-browser$/.test(a) && a !== "--no-cookies-from-browser")).toBe(false);
+    // Downloaded in a private temp folder, not in the (possibly Drive-synced) Watch folder, whose sync locks .part files.
+    expect(dl[dl.indexOf("-o") + 1].startsWith(inbox)).toBe(false);
     expect(readFileSync(join(inbox, "TikTok 7463250363559218474.txt"), "utf8")).toBe("Which editor do they use?");
     expect(existsSync(join(inbox, "tt.txt"))).toBe(true); // it holds a question too, so it stays
   });

@@ -1,4 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { basename, extname } from "node:path";
 
 /**
@@ -87,7 +89,7 @@ export interface GeminiOptions { key: string; fetch?: typeof fetch; api?: string
 export class Gemini {
   constructor(private o: GeminiOptions) {}
   private get api() { return this.o.api ?? GEMINI_API; }
-  private get http() { return this.o.fetch ?? fetch; }
+  private get http() { return this.o.fetch ?? longFetch; }
   private scrub(s: string) { return this.o.key ? s.split(this.o.key).join("[key]") : s; }
 
   private async call(method: string, url: string, init: { body?: BodyInit; headers?: Record<string, string>; timeoutMs?: number } = {}): Promise<{ status: number; headers: Headers; json: any }> {
@@ -98,7 +100,9 @@ export class Gemini {
         signal: AbortSignal.timeout(init.timeoutMs ?? this.o.timeoutMs ?? 10 * 60_000),
       });
     } catch (e) {
-      throw new GeminiError("network", this.scrub(`${HINT.network} (${(e as Error).message})`));
+      const err = e as Error;
+      if (err.name === "TimeoutError" || err.name === "AbortError") throw new GeminiError("network", `Gemini did not answer within ${Math.round((init.timeoutMs ?? this.o.timeoutMs ?? 10 * 60_000) / 60_000)} minutes; it will be tried again later`);
+      throw new GeminiError("network", this.scrub(`${HINT.network} (${err.message})`));
     }
     const text = await r.text().catch(() => "");
     let json: any = null;
@@ -147,8 +151,8 @@ export class Gemini {
       } catch (e) {
         if (!(e instanceof GeminiError)) throw e;
         last = e;
-        // Out of free allowance on this model, or the model is not offered to this key: the next model may still answer.
-        if (!(e.kind === "quota" || (e.kind === "rejected" && e.status === 404))) throw e;
+        // Out of free allowance on this model, overloaded ("high demand", 5xx), or not offered to this key: the next model may still answer.
+        if (!(e.kind === "quota" || e.kind === "service" || (e.kind === "rejected" && e.status === 404))) throw e;
       }
     }
     throw last ?? new GeminiError("response", HINT.response);
@@ -192,3 +196,36 @@ export class Gemini {
     try { await this.call("DELETE", `${this.api}/v1beta/${name}`, { timeoutMs: 30_000 }); } catch { /* it expires on its own */ }
   }
 }
+
+/**
+ * fetch over node:https without Node's built-in 5-minute wait for an answer's first byte (undici's headersTimeout):
+ * Gemini can think about a video for longer than that before it answers, which showed up as a bare "fetch failed".
+ * The caller's AbortSignal (10 minutes by default) is the only limit.
+ */
+export const longFetch = ((input: string | URL, init: RequestInit = {}) => new Promise<Response>((resolve, reject) => {
+  const u = new URL(String(input));
+  const headers: Record<string, string> = {};
+  new Headers(init.headers as HeadersInit | undefined).forEach((v, k) => { headers[k] = v; });
+  const body = init.body == null ? null : typeof init.body === "string" ? Buffer.from(init.body) : Buffer.isBuffer(init.body) ? init.body : init.body instanceof Uint8Array ? Buffer.from(init.body) : null;
+  if (init.body != null && !body) return reject(new Error("longFetch sends text or bytes only"));
+  if (body && !Object.keys(headers).some((k) => k.toLowerCase() === "content-length")) headers["content-length"] = String(body.length);
+  const req = (u.protocol === "http:" ? httpRequest : httpsRequest)(u, { method: init.method ?? "GET", headers }, (res) => {
+    const chunks: Buffer[] = [];
+    res.on("data", (c: Buffer) => chunks.push(c));
+    res.on("end", () => {
+      const h = new Headers();
+      for (const [k, v] of Object.entries(res.headers)) if (v != null) h.set(k, Array.isArray(v) ? v.join(", ") : String(v));
+      const status = res.statusCode ?? 0;
+      resolve(new Response(status === 204 || status === 304 ? null : Buffer.concat(chunks), { status, headers: h }));
+    });
+    res.on("error", reject);
+  });
+  req.on("error", reject);
+  const signal = init.signal;
+  if (signal) {
+    if (signal.aborted) { req.destroy(); return reject(signal.reason ?? Object.assign(new Error("aborted"), { name: "AbortError" })); }
+    signal.addEventListener("abort", () => { req.destroy(); reject(signal.reason ?? Object.assign(new Error("aborted"), { name: "AbortError" })); }, { once: true });
+  }
+  if (body) req.write(body);
+  req.end();
+})) as unknown as typeof fetch;
