@@ -50,9 +50,18 @@ export function cloudWatchFolders(home: string, platform = process.platform): st
   const roots = [join(home, "Google Drive", "My Drive"), join(home, "My Drive"), join(home, "OneDrive")];
   if (platform === "win32") for (const l of "DEFGHIJKLMNOPQRSTUVWXYZ") roots.push(`${l}:\\My Drive`);
   const out: string[] = [];
+  const isDir = (d: string) => { try { return statSync(d).isDirectory(); } catch { return false; } };
   for (const r of roots) {
-    const d = join(r, "SF Watch");
-    try { if (statSync(d).isDirectory()) out.push(d); } catch { /* not there */ }
+    if (!isDir(r)) continue;
+    // Right under the drive, or one folder down (for example My Drive/Dev/SF Watch).
+    if (isDir(join(r, "SF Watch"))) out.push(join(r, "SF Watch"));
+    let kids: string[] = [];
+    try { kids = readdirSync(r); } catch { /* unreadable */ }
+    for (const k of kids) {
+      if (k.startsWith(".") || k === "SF Watch") continue;
+      const d = join(r, k, "SF Watch");
+      if (isDir(d)) out.push(d);
+    }
   }
   return out;
 }
