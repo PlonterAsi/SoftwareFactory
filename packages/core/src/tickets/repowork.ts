@@ -17,6 +17,7 @@ import { parseGitHubRepo, type GitHubRepo } from "./github.js";
 import { SMALL_CHANGE_FLOW, crewPick, roundsOf, stepsToRun, type FlowDef } from "../flows/flow.js";
 import { noteLesson } from "../bay/memory.js";
 import { isClosed, type TicketView } from "./model.js";
+import { VERIFY_ASK } from "./verify.js";
 
 /**
  * Working a ticket inside an existing codebase (a project imported from a git
@@ -41,6 +42,7 @@ export const REPO_CONTRACT = [
   "Station contract: repo. You are working inside an existing code repository: the current folder is a clone on its own branch.",
   "Make the smallest change that does what the ticket asks, in the style of the code around it. Read before you edit.",
   "Do not touch files outside this folder. If you cannot edit files, answer with <<<FILE path ... FILE>>> blocks holding whole files.",
+  VERIFY_ASK,
 ].join("\n");
 
 /** The ticket Builder's workbench: file tools and the shell (factory/workbench.ts), so it runs the tests it touches. */
@@ -174,7 +176,7 @@ export function prepareClone(repo: RepoRef, workRoot: string, id: number, branch
   return { dir, base, stacked };
 }
 
-export interface RepoWorkResult { ok: boolean; dir: string; branch: string; base: string; sha: string | null; files: string[]; costUsd: number; summary: string; error?: string; /** The checks that passed (gates, test integrity, tests, review). */ checks?: string[]; /** The flow ends with a draft PR step (false: the branch stays here by the flow's choice). */ handover?: boolean }
+export interface RepoWorkResult { /** The Builder's whole first answer (its "How to verify" steps). */ builderText?: string; ok: boolean; dir: string; branch: string; base: string; sha: string | null; files: string[]; costUsd: number; summary: string; error?: string; /** The checks that passed (gates, test integrity, tests, review). */ checks?: string[]; /** The flow ends with a draft PR step (false: the branch stays here by the flow's choice). */ handover?: boolean }
 
 /**
  * The codebase overview the Cartographer and Surveyor already wrote (SF-20): each module's purpose,
@@ -278,6 +280,7 @@ export function defaultRunTests(dir: string, files: string[]): CheckResult {
   const deps = ensureDeps(dir);
   if (deps) return { ok: true, output: `${deps}, so the tests could not run`, skipped: true };
   let out = "";
+  const ran: string[] = [];
   for (const [r, changed] of withTests) {
     const cwd = join(dir, r);
     let usesVitest = false;
@@ -286,8 +289,9 @@ export function defaultRunTests(dir: string, files: string[]): CheckResult {
       ? sh("npx", ["vitest", "related", "--run", "--passWithNoTests", ...changed.map((f) => JSON.stringify(f))], cwd)
       : sh("npm", ["test", "--silent"], cwd);
     if (p.status !== 0) out += `${usesVitest ? "vitest related" : "npm test"} in ${r} failed:\n${trim(`${p.stdout ?? ""}\n${p.stderr ?? ""}`)}\n`;
+    else ran.push(usesVitest ? `cd ${r} && npx vitest related --run ${changed.join(" ")}` : `cd ${r} && npm test`);
   }
-  return { ok: !out, output: out };
+  return { ok: !out, output: out || ran.join("\n") };
 }
 
 // The git helper trims its output, so the first status line can lose its leading space: parse by pattern, not by column.
@@ -391,7 +395,8 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
       const r = await fn();
       if (!r.ok) { step(name, "failed", r.output); return { name, output: r.output }; }
       if (r.skipped) { step(name, "skipped", r.output); continue; }
-      step(name, "passed");
+      // What ran goes on the step, so the ticket's verification can say how it was tested.
+      step(name, "passed", r.output);
       if (!passed.includes(name)) passed.push(name);
     }
     return null;
@@ -414,6 +419,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
 
   // The flow's steps, in its order (flows/flow.ts, runner "session").
   let summary = "";
+  let builderText = "";
   let sha: string | null = null;
   let handover = false;
   for (const s of stepsToRun(flow)) {
@@ -427,6 +433,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
       case "build": {
         const first = await build(`${o.document}\n\nYou are on branch ${branch} of a clone of ${o.repo.source}.${repoGuidance(dir)}${reviewBrief(log, o.projectId)}${overviewBlock(log, o.projectId)}${stackNote}`, o.maxUsd * 0.5, "build");
         if (first.error) return fail(first.error);
+        builderText = first.text.replace(/<<<\s*FILE[\s\S]*?(?:FILE\s*>>>|$)/g, "").slice(-4000);
         summary = first.text.replace(/<<<\s*FILE[\s\S]*?(?:FILE\s*>>>|$)/g, "").trim().split("\n").filter(Boolean).slice(-6).join("\n");
         break;
       }
@@ -477,5 +484,5 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
     }
   }
   const files = sha ? git(dir, "diff", "--name-only", `${base}..HEAD`).split("\n").filter(Boolean) : [];
-  return { ok: true, dir, branch, base, sha, files, costUsd: spent, summary, checks: passed, handover };
+  return { ok: true, dir, branch, base, sha, files, costUsd: spent, summary, checks: passed, handover, builderText };
 }

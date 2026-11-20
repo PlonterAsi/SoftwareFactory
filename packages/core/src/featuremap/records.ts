@@ -419,7 +419,7 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     flow: ["A ticket is opened", "It is made ready", "The crew or the person works it", "It waits on the person when built or when it has a question", "It is closed"],
     design: "The Tickets page (list or board, and a ticket page with its thread and actions) and the Tickets tab of every project.",
     screens: ["/factory/tickets", "/p/ID/tickets"], docs: ["docs/tickets.md", "docs/flows.md"], stations: [],
-    files: [`${C}tickets/`, `${B}Tickets.tsx`, `${B}TicketsPanel.tsx`], api: ["/api/tickets"],
+    files: [`${C}tickets/`, `${B}Tickets.tsx`, `${B}TicketVerify.tsx`, `${B}TicketsPanel.tsx`], api: ["/api/tickets"],
   },
   {
     id: "intake", name: "Intake (not every idea is a project)", group: "Work",

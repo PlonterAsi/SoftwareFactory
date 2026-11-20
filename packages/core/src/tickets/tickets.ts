@@ -17,6 +17,7 @@ import { answerTicket } from "./research.js";
 import { checkTicket, type TicketCheck } from "./precheck.js";
 import { FORMS, HAND_BRAKE, KINDS, PRIORITIES, RELATIONS, TICKET_SEVERITIES, STATUSES, TASTE_KINDS, SIZES, autoWorkRefusal, ideaFromTicket, isClosed, nextMoves, refuseMove, refuseParent, titleFrom, workDocument, type Priority, type Size, type Relation, type TicketSeverity, type TicketKind, type TicketStatus, type TicketView, aKind, AUTO_KINDS } from "./model.js";
 import { TicketPrs } from "./prs.js";
+import { buildVerification, engineChecks, verificationOf } from "./verify.js";
 import { SPLIT_CAP_USD, splitRefusal, splitRollUp, splitTicket, splitTried } from "./split.js";
 import { pri, type Row } from "./rows.js";
 import { AUTO_TRIES, AUTO_WORK_DEFAULT, RELOOP_BRIEF, TICKET_CONTRACT, WAITING_ON_YOU, reloopFindings, epicOfTickets, type AutoWork, type OpenTicket, type QueueSpot, type TicketDetail, type TicketsOptions } from "./shapes.js";
@@ -223,7 +224,7 @@ export class Tickets extends TicketPrs {
       moves: nextMoves(t.status, t.kind), run,
       // The files go in the work document by where they lie, so an agent that works the ticket can open them.
       document: files.length ? `${workDocument(t, notes, links, lines)}\n\n## Files on this ticket\n\n${files.map((f) => `- ${f.name} (${f.mime}, ${f.size} bytes): ${f.path}`).join("\n")}` : workDocument(t, notes, links, lines),
-      repo, route: repo && this.opts.repoRuns && !epicOfTickets(t) ? this.routeOf(t, {}) : null, working: this.inRepo.has(id), steps: this.steps(id),
+      repo, route: repo && this.opts.repoRuns && !epicOfTickets(t) ? this.routeOf(t, {}) : null, working: this.inRepo.has(id), steps: this.steps(id), verification: verificationOf(this.log, id),
       flow: this.flowOf(t, !!repo),
       queue: t.status === "ready" || (t.status === "open" && this.isAsked(t)) ? this.spot(t) : null,
       asked: this.isAsked(t),
@@ -698,6 +699,7 @@ export class Tickets extends TicketPrs {
           return;
         }
         this.log.append("ticket.branch", { id: t.id, by, source: repo.source, dir: r.dir, branch: r.branch, base: r.base, sha: r.sha, files: r.files.slice(0, 200), costUsd: r.costUsd });
+        if (r.sha) this.log.append("ticket.verification", { id: t.id, by, ...buildVerification({ route: "session", files: r.files, checks: this.steps(t.id).map((x) => ({ name: x.step, state: x.state, note: x.note ?? "" })), builderText: r.builderText, expected: t.answers.expected }) });
         const now = this.get(t.id)!;
         if (isClosed(now.status)) return;
         if (r.sha && repo.github && r.handover !== false) {
@@ -911,6 +913,7 @@ export class Tickets extends TicketPrs {
       return;
     }
     const tests = this.log.db.prepare("SELECT payload FROM events WHERE type = 'factory.tests' AND json_extract(payload, '$.run') = ? ORDER BY id DESC LIMIT 1").get(run) as { payload: string } | undefined;
+    this.log.append("ticket.verification", { id: t.id, by: "factory", ...buildVerification({ route: "engine", run, files: p.repo?.files ?? p.files ?? [], ...engineChecks(this.log, run), expected: t.answers.expected }) });
     const tp = tests ? JSON.parse(tests.payload) as { passed: number; failed: number } : null;
     if (p.repo?.branch) {
       // An engine run in the ticket's repo: its branch (and its draft PR) go onto the ticket, which waits for your look.

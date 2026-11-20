@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { API, flowsApi, type FlowSummaryView, type SfEvent } from "./api";
 import { peekPendingTicket, takePendingTicket } from "./BugReport";
+import { TicketVerify, type VerificationView } from "./TicketVerify";
 
 /**
  * Tickets: every unit of work on a project, in one place. A list or a board,
@@ -31,6 +32,8 @@ interface Detail {
   /** In a project that lives in a repo: the route Work it takes when you do not choose, and why. */
   route?: { route: "light" | "engine"; why: string } | null;
   steps?: { step: string; state: "running" | "passed" | "failed" | "skipped"; note: string; at: string }[];
+  /** How its latest pass was tested, layer by layer, and how to see it works. */
+  verification?: VerificationView | null;
   /** The flow it follows if worked now, and why (you picked it, or its kind's). */
   flow?: { id: string; name: string; runner: string; why: string; chosen: boolean } | null;
   queue: { position: number | null; why: string | null } | null;
@@ -591,6 +594,7 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
           <button className="sm ghost" onClick={() => work("auto", true)}>Work it again anyway</button>
         </div>
       )}
+      {d.verification && <TicketVerify v={d.verification} lookNow={t.status === "built"} />}
       {d.run && (
         <div className="tk-runstrip" aria-label={`Factory run ${d.run.id}`}>
           <button className="link mono" onClick={() => onShowRun?.(d.run!.id)}>run #{d.run.id}</button>
