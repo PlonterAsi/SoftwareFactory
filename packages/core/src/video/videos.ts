@@ -44,6 +44,9 @@ export interface VideoNote {
   snippet?: string;
 }
 export interface WatchRequest { url?: string; file?: string; question?: string | null; start?: number | null; end?: number | null; fps?: number | null; refresh?: boolean }
+/** A passing watch failure in the Watch folder is retried after 5 minutes, then 10, 20 ... up to 6 hours, 6 tries in all. */
+export const VIDEO_RETRY = { firstMs: 5 * 60_000, maxMs: 6 * 3_600_000, tries: 6 };
+
 export interface VideoSettings { dailyMax: number; models: string[]; inbox: string }
 /**
  * "SF Watch" folders in Google Drive or OneDrive on this computer, when they exist. Make the folder from the phone
@@ -314,7 +317,7 @@ export class Videos {
     const s = this.settings();
     const done = this.todayCount();
     if (done >= s.dailyMax) throw new Error(`SoftwareFactory already watched ${done} videos today, its daily limit. Raise it in Systems, Videos, or try tomorrow.`);
-    if (this.busy >= VIDEO_LIMITS.concurrent) throw new Error(`${this.busy} videos are being watched already; wait for one to finish`);
+    if (this.busy >= VIDEO_LIMITS.concurrent) throw Object.assign(new Error(`${this.busy} videos are being watched already; wait for one to finish`), { kind: "busy" });
     this.busy++;
     const g = new Gemini({ key: k.key, fetch: this.o.fetch, api: this.o.api, models: s.models, pollMs: this.o.pollMs });
     let uploaded: string | null = null;
@@ -329,8 +332,9 @@ export class Videos {
         }
       } catch (e) {
         const msg = e instanceof GeminiError ? e.message : (e as Error).message;
-        this.log.append("video.failed", { source: src.source, kind: e instanceof GeminiError ? e.kind : "error", error: msg.slice(0, 500), by });
-        throw new Error(msg);
+        const kind = e instanceof GeminiError ? e.kind : "error";
+        this.log.append("video.failed", { source: src.source, kind, error: msg.slice(0, 500), by });
+        throw Object.assign(new Error(msg), { kind });
       }
       const at = new Date().toISOString();
       const notes = a.text.slice(0, VIDEO_LIMITS.notesChars);
@@ -370,8 +374,11 @@ export class Videos {
       try { st = statSync(p); } catch { continue; }
       if (!st.isFile()) continue;
       const stamp = `${st.size}:${Math.floor(st.mtimeMs)}`;
-      const failed = this.log.db.prepare("SELECT 1 FROM events WHERE type = 'video.failed' AND json_extract(payload, '$.source') = ? AND json_extract(payload, '$.stamp') = ? LIMIT 1").get(p, stamp);
-      if (failed) continue;
+      // A lasting failure waits until the file changes; a passing one (Google busy, no network, out of free allowance)
+      // is tried again later, further apart each time, and given up after VIDEO_RETRY.tries attempts.
+      const fails = this.log.db.prepare("SELECT json_extract(payload, '$.retryAt') AS retryAt FROM events WHERE type = 'video.failed' AND json_extract(payload, '$.source') = ? AND json_extract(payload, '$.stamp') = ? ORDER BY id").all(p, stamp) as { retryAt: string | null }[];
+      if (fails.some((f) => !f.retryAt) || fails.length >= VIDEO_RETRY.tries) continue;
+      if (fails.length && Date.parse(fails[fails.length - 1].retryAt!) > now) continue;
       // Still being copied or synced: wait until it has not changed for 15 seconds.
       out.push({ path: p, stamp, ready: st.size > 0 && now - st.mtimeMs > 15_000 });
     }
@@ -455,9 +462,15 @@ export class Videos {
         if (question) try { renameSync(side, free(basename(side))); } catch { /* stays */ }
         watched++;
       } catch (e) {
+        const kind = (e as { kind?: string }).kind;
+        // Busy with other videos is not a failure: the next look takes it.
+        if (kind === "busy") break;
         failed++;
-        this.log.append("video.failed", { source: f.path, stamp: f.stamp, kind: "watch-folder", error: String((e as Error).message).slice(0, 500), by: "watch folder" });
-        if (/daily limit|No Gemini key/.test((e as Error).message)) break;
+        const passing = kind === "service" || kind === "network" || kind === "quota";
+        const tries = (this.log.db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'video.failed' AND json_extract(payload, '$.source') = ? AND json_extract(payload, '$.stamp') = ?").get(f.path, f.stamp) as { n: number }).n;
+        const retryAt = passing ? new Date(now + Math.min(VIDEO_RETRY.maxMs, VIDEO_RETRY.firstMs * 2 ** tries)).toISOString() : undefined;
+        this.log.append("video.failed", { source: f.path, stamp: f.stamp, kind: `watch-folder${kind ? `:${kind}` : ""}`, error: String((e as Error).message).slice(0, 500), ...(retryAt ? { retryAt } : {}), by: "watch folder" });
+        if (/daily limit|No Gemini key/.test((e as Error).message) || kind === "quota" || kind === "network") break;
       }
     }
     return { watched, failed };

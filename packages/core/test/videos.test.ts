@@ -211,4 +211,28 @@ describe("the Watch folder", () => {
     expect(await v.scanInbox(Date.now() + 60_000)).toEqual({ watched: 0, failed: 0 });
     expect(v.status().waiting).toBe(0);
   });
+
+  it("tries a clip again later when Google was only busy, and falls back to the next model on high demand", async () => {
+    const home = tmp();
+    let busy = true;
+    const models: string[] = [];
+    const g = fakeGoogle((u: string) => {
+      if (u.endsWith("/upload/v1beta/files")) return { status: 200, body: {}, headers: { "x-goog-upload-url": "https://upload.example/u9" } };
+      if (u === "https://upload.example/u9") return { status: 200, body: { file: { name: "files/r9", uri: "https://g/files/r9", mimeType: "video/mp4", state: "ACTIVE" } } };
+      const m = /models\/([^:]+):generateContent/.exec(u);
+      if (m) models.push(decodeURIComponent(m[1]));
+      return busy && m ? { status: 503, body: { error: { message: "This model is currently experiencing high demand" } } } : null;
+    });
+    const v = new Videos(new EventLog(":memory:"), { homeDir: home, env: {}, fetch: g.f, pollMs: 1 });
+    v.setKey(KEY);
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(v.settings().inbox, { recursive: true });
+    writeFileSync(join(v.settings().inbox, "reel.mp4"), Buffer.alloc(10));
+    const t0 = Date.now() + 60_000;
+    expect(await v.scanInbox(t0)).toEqual({ watched: 0, failed: 1 });
+    expect(new Set(models).size).toBeGreaterThan(1); // every model was asked before giving up for now
+    expect(await v.scanInbox(t0 + 60_000)).toEqual({ watched: 0, failed: 0 }); // not yet: retried after 5 minutes
+    busy = false;
+    expect(await v.scanInbox(t0 + 6 * 60_000)).toEqual({ watched: 1, failed: 0 });
+  });
 });

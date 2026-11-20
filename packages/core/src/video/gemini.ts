@@ -147,8 +147,8 @@ export class Gemini {
       } catch (e) {
         if (!(e instanceof GeminiError)) throw e;
         last = e;
-        // Out of free allowance on this model, or the model is not offered to this key: the next model may still answer.
-        if (!(e.kind === "quota" || (e.kind === "rejected" && e.status === 404))) throw e;
+        // Out of free allowance on this model, overloaded ("high demand", 5xx), or not offered to this key: the next model may still answer.
+        if (!(e.kind === "quota" || e.kind === "service" || (e.kind === "rejected" && e.status === 404))) throw e;
       }
     }
     throw last ?? new GeminiError("response", HINT.response);

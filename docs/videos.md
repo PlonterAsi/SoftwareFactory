@@ -47,7 +47,7 @@ route is a folder: save the clip yourself (Instagram's Share, Download where off
 Watch folder, `~/SoftwareFactory/Watch` by default, changeable in Systems, Videos. Every minute SoftwareFactory watches
 up to three new videos there (each once it has not changed for 15 seconds, so a sync can finish), then moves each to
 `Watched/`. A text file with the same name (`reel.txt` beside `reel.mp4`) is the question; without one, Gemini takes
-general notes. A video that fails is not tried again until the file changes. A folder named `SF Watch` in Google Drive (My Drive, or one folder down such as `My Drive/Dev/SF Watch`)
+general notes. A video that fails for good (Gemini refuses it) waits until the file changes; one that failed only for now (Google busy or overloaded, no network, out of free allowance) is tried again after 5 minutes, then 10, 20 and on up to 6 hours, 6 tries in all. "High demand" moves on to the next model first. A folder named `SF Watch` in Google Drive (My Drive, or one folder down such as `My Drive/Dev/SF Watch`)
 or OneDrive is found and watched too, with nothing to set up on the PC: make it from the phone's Drive app, share a
 saved reel into it, and it is watched once it syncs down.
 
@@ -56,7 +56,7 @@ saved reel into it, and it is watched once it syncs down.
 An Instagram, TikTok, X, Facebook or Threads link is fetched, then watched like a saved clip. Put it in the watch box
 in Systems, Videos, or save it as a `.txt` (or Windows `.url`) file in the Watch folder, for example from the phone
 into Google Drive's `SF Watch`. Other words in the file become the video's question; a file holding only one link
-moves to `Watched/` once it is fetched. A link is fetched once; one that failed waits until its file changes.
+moves to `Watched/` once it is fetched. A link is fetched once, into a private temp folder, and only the finished video is moved into the Watch folder (Drive locks half-written files). One that failed waits until its file changes.
 
 - **How** (`video/links.ts`): Scrape Creators first when `SCRAPECREATORS_API_KEY` is in `~/.config/watch/.env`
   (1 credit a link: 100 free, then about $0.002), else `yt-dlp` if installed, run with `--ignore-config --no-cookies
