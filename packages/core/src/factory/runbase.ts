@@ -150,7 +150,7 @@ export abstract class RunBase {
     // Fast gates (SF-26): free checks on what the last commit changed, before the slower suite. A failure goes straight to the fixer.
     let changed: string[] = [];
     try { changed = git(this.dir, "diff", "--name-only", "HEAD~1", "HEAD").split("\n").filter(Boolean); } catch { changed = Object.keys(readTree(this.dir)); }
-    const gates = fastGates(this.dir, changed.filter((f) => !isKitFile(f)));
+    const gates = await fastGates(this.dir, changed.filter((f) => !isKitFile(f)));
     for (const g of gates.results) this.log.append("factory.fastgate", { run: this.id, round, gate: g.gate, state: g.state, note: g.note, messages: g.messages.slice(0, 20) });
     if (!gates.ok) {
       const bad = gates.results.find((g) => g.state === "fail")!;

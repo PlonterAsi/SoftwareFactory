@@ -1,8 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { failureLines } from "../factory/trim.js";
-import { syntaxErrors } from "../factory/workspace.js";
+import { runAsync, syntaxErrors } from "../factory/workspace.js";
 import { describeSecrets, scanFiles } from "./secrets.js";
 
 /**
@@ -14,8 +13,8 @@ export type GateName = "syntax" | "tsc" | "lint" | "secrets";
 export interface GateResult { gate: GateName; state: "pass" | "fail" | "skipped"; note?: string; messages: string[] }
 export interface FastGates { ok: boolean; results: GateResult[]; /** What the agent reads: file:line and what to fix. Empty when ok. */ messages: string }
 
-const run = (cmd: string, args: string[], cwd: string) =>
-  spawnSync(cmd, args, { cwd, encoding: "utf8", windowsHide: true, timeout: 120_000, shell: process.platform === "win32" });
+// Async, so a slow tsc or lint never stops the core answering (20 Nov).
+const run = (cmd: string, args: string[], cwd: string) => runAsync(cmd, args, { cwd, timeout: 120_000, shell: process.platform === "win32" });
 
 /** The local binary of a tool (node_modules/.bin), or null. */
 const localBin = (dir: string, name: string) => {
@@ -35,7 +34,7 @@ function toolMessages(output: string): string[] {
   return t ? t.split("\n").filter(Boolean) : [];
 }
 
-export function fastGates(dir: string, files: string[]): FastGates {
+export async function fastGates(dir: string, files: string[]): Promise<FastGates> {
   const results: GateResult[] = [];
   const done = (r: GateResult) => { results.push(r); return r.state === "fail"; };
   const finish = (): FastGates => {
@@ -53,9 +52,9 @@ export function fastGates(dir: string, files: string[]): FastGates {
     // A codebase that generates files before it typechecks (SoftwareFactory's own wiring.generated.js) says so in a
     // pretypecheck script: run it first, or tsc fails on a file that is simply not generated yet (SF-55's run).
     const pre = readJson(join(dir, "package.json"))?.scripts?.pretypecheck;
-    if (typeof pre === "string" && existsSync(join(dir, "node_modules"))) run("npm", ["run", "--silent", "pretypecheck"], dir);
+    if (typeof pre === "string" && existsSync(join(dir, "node_modules"))) await run("npm", ["run", "--silent", "pretypecheck"], dir);
     const bin = localBin(dir, "tsc");
-    const r = bin ? run(bin, ["--noEmit", "--pretty", "false"], dir) : run("tsc", ["--noEmit", "--pretty", "false"], dir);
+    const r = bin ? await run(bin, ["--noEmit", "--pretty", "false"], dir) : await run("tsc", ["--noEmit", "--pretty", "false"], dir);
     if (r.error || (!bin && r.status !== 0 && /not (found|recognized)|ENOENT/i.test(`${r.stderr}${r.stdout}`))) done({ gate: "tsc", state: "skipped", note: "tsc is not installed", messages: [] });
     else if (done({ gate: "tsc", state: r.status === 0 ? "pass" : "fail", messages: r.status === 0 ? [] : toolMessages(`${r.stdout}\n${r.stderr}`) })) return finish();
   }
@@ -68,7 +67,7 @@ export function fastGates(dir: string, files: string[]): FastGates {
   else if (!script && !localBin(dir, "eslint")) done({ gate: "lint", state: "skipped", note: "eslint is not installed", messages: [] });
   else if (script && !existsSync(join(dir, "node_modules"))) done({ gate: "lint", state: "skipped", note: "dependencies are not installed", messages: [] });
   else {
-    const r = script ? run("npm", ["run", "--silent", "lint"], dir) : run(localBin(dir, "eslint")!, ["--format", "unix", ...files.filter((f) => /\.[cm]?[jt]sx?$/.test(f))], dir);
+    const r = script ? await run("npm", ["run", "--silent", "lint"], dir) : await run(localBin(dir, "eslint")!, ["--format", "unix", ...files.filter((f) => /\.[cm]?[jt]sx?$/.test(f))], dir);
     if (r.error) done({ gate: "lint", state: "skipped", note: "the lint tool could not start", messages: [] });
     else if (done({ gate: "lint", state: r.status === 0 ? "pass" : "fail", messages: r.status === 0 ? [] : toolMessages(`${r.stdout}\n${r.stderr}`) })) return finish();
   }
