@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,6 +60,7 @@ import { ImproveCouncil, type Target } from "./improve/council.js";
 import { BaseHost, type BootedBase } from "./bases/host.js";
 import { BaseRegistry } from "./bases/registry.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
+import { freeBytesAt, lastAgentCall, preflight, type PreflightReport } from "./safety/preflight.js";
 
 /** The built-in Overseer's prompt with its station contract (the live one comes from the Agent Bay). */
 export const OVERSEER_ROLE =
@@ -104,6 +105,18 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     if (Date.now() - gitOk.at > 60_000) gitOk = { ok: checkGit().found, at: Date.now() };
     return gitOk.ok;
   };
+  // Preflight (safety/preflight.ts): free checks that this PC can do paid work, remembered for a minute.
+  let pre: { auto: PreflightReport; manual: PreflightReport; at: number } | null = null;
+  const preflightNow = (fresh = false) => {
+    if (fresh || !pre || Date.now() - pre.at > 60_000) {
+      const s = setupReport(runtime, fresh);
+      const input = { mode: crewMode(), git: s.git, claude: s.claude, freeBytes: freeBytesAt(existsSync(projectsDir) ? projectsDir : homedir()), lastCall: lastAgentCall(log) };
+      pre = { auto: preflight(input), manual: preflight({ ...input, manual: true }), at: Date.now() };
+    }
+    return pre;
+  };
+  /** What stops paid work started by a press, past Git (which each route words for itself), or null. */
+  const pressProblem = () => { const r = preflightNow().manual; return r.items.find((x) => !x.ok && x.id !== "git")?.text ?? null; };
   const factory = new Factory(log, runtime, projectsDir, bay);
   factory.maxRunMinutes = settings.maxRunMinutes;
   // A build's "add more" never goes past its project's budget.
@@ -127,7 +140,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const repoRuns = enableRepoRuns(factory, log, { github, ship: githubShipper(github, canShip) });
   const tickets = new Tickets(log, {
     runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1), workRoot: join(dirname(projectsDir), "ticket-work"),
-    autoWork, canWork: () => (gitReady() ? null : "Git is not installed"),
+    autoWork, canWork: () => (gitReady() ? preflightNow().auto.problem : "Git is not installed"),
     github, canShip, repoRuns,
     // Monthly budgets hold paid starts on the real crew only: the practice crew costs nothing (watch/spend.ts).
     monthLeft: (p) => (crewMode() === "real" ? monthLeft(log, p) : { leftUsd: null, why: null }),
@@ -237,6 +250,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         appVersion: appVersion ?? null, activeRuns: factory.activeCount(), agentCalls: agentCalls.size,
         clients: { origins: Object.fromEntries(clients.origins), streams: Object.fromEntries(clients.streams) },
       });
+      if (req.method === "GET" && url.pathname === "/api/preflight") { const r = preflightNow(url.searchParams.get("fresh") === "1"); return json(res, 200, { ...r.auto, press: r.manual }); }
       if (req.method === "GET" && url.pathname === "/api/factory/cycles") return json(res, 200, { cycles: log.view("engine-cycles", engineCycles) });
       if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeCount(), agentCalls.size, runnerJobs()));
       if (req.method === "POST" && url.pathname === "/api/updates") {
@@ -359,6 +373,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (req.method === "POST" && url.pathname === "/api/factory/runs") {
         const body = await readJson(req);
         if (!gitReady()) return json(res, 409, { error: "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again." });
+        { const why = pressProblem(); if (why) return json(res, 409, { error: why }); }
         // Said inside a project that lives in a repo: it is work in that repo (a ticket, on the route that fits), not a new app.
         if (typeof body.projectId === "number" && !body.newApp && String(body.idea ?? "").trim()) {
           try {
@@ -480,7 +495,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
           }
           return json(res, 200, tickets.autoWork());
         }
-        const r = await ticketRoute(tickets, req, url, gitReady);
+        const r = await ticketRoute(tickets, req, url, gitReady, pressProblem);
         if (r && r[0] === -2) return sendFile(res, r[1] as TicketFile);
         if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
       }
@@ -680,7 +695,7 @@ async function bayRoute(bay: AgentBay, req: IncomingMessage, url: URL): Promise<
 }
 
 /** The tickets' API. Every write is an event, so the Bridge sees it on the stream. Status -1 = the work document as Markdown. */
-async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, gitReady: () => boolean): Promise<[number, unknown] | null> {
+async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, gitReady: () => boolean, pressProblem: () => string | null = () => null): Promise<[number, unknown] | null> {
   const path = url.pathname;
   const q = url.searchParams;
   const proj = q.get("project");
@@ -780,6 +795,7 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
     case "spawn": return [201, tickets.spawn(id, { ...(body as object), by: "you" } as any)];
     case "work":
       if (!gitReady()) return [409, { error: "Git is not installed, so the crew has nowhere to keep what it builds. Install Git for Windows (git-scm.com/download/win), then press Work it again." }];
+      { const why = pressProblem(); if (why) return [409, { error: why }]; }
       try {
         return [202, tickets.work(id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true, again: body.again === true, where: body.where === "repo" || body.where === "new" ? body.where : "auto", route: body.route === "light" || body.route === "engine" ? body.route : undefined, check: body.anyway !== true })];
       } catch (e) {

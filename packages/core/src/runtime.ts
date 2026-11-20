@@ -225,7 +225,9 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     // An agent that only reads a project's files is still a station agent: its contract, not the person's memory.
     // A factory build agent edits a folder SF made, which has no memory of its own: the person's CLAUDE.md is
     // written for them, not for a station agent (run 2623's Builder ended with "Assaf, press Start").
-    const env: NodeJS.ProcessEnv = edits(req) && !req.noMemory ? { ...base } : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
+    // Auto memory is off for every agent SF starts (SF-19): what an agent should know comes from the Brain and its own
+    // memory in SF, never from notes Claude Code keeps on the side, which no one sees and which drift between runs.
+    const env: NodeJS.ProcessEnv = edits(req) && !req.noMemory ? { ...base, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } : { ...base, CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
     return req.pathFirst?.length ? withPathFirst(env, req.pathFirst) : env;
   }
 

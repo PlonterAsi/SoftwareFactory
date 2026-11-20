@@ -53,7 +53,7 @@ These hold for every feature. Each has a place in the code that enforces it.
 | Same prompt compared across engine versions | Built | Engine cycles page |
 | A failure in a run becomes an engine change inside SF | Planned | Done by people and threads today; the review is the work list |
 | A complete, good product from one prompt | Partial | The benchmark ("Game Mastery", same prompt each time) reached 35 of 40 requirements seen working in cycle 5 for $10.65. Open engine items: designs that assume data research cannot return, invented links, the last part of screen detail. |
-| A preflight step before a run spends money | Planned | From the harness plan |
+| A preflight step before a run spends money | Built | Free checks of Git, Claude Code, its sign-in and disk space (`safety/preflight.ts`, `GET /api/preflight`). A failed check holds auto-work, and refuses a Build or Work it with what to fix. A sign-in failure holds only auto-work, for 30 minutes |
 | Harness evaluations (the harness tested as a product) | Planned | From the harness plan |
 
 ### 3.2 Agents

@@ -45,6 +45,14 @@ Lessons come from four places, all free:
 A repeat, or a lesson that shares four fifths of its words with one the agent already has, is not
 noted again.
 
+### No memory on the side
+
+Claude Code's own auto memory is off for every agent SF starts (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in
+`runtime.ts`), so no MEMORY.md grows behind SF's back between runs. What an agent knows comes from its
+lessons above and from the Brain, which goes into every station agent's instructions. Each run records
+the Brain it was told as a 12-character hash (`brain` on `factory.run.started`, from `brainHash()` in
+`brain/brain.ts`): two runs with the same hash were given the same rules.
+
 ## Cleaning a memory
 
 Cleaning works the way Claude Code's Auto Dream cleans its own memory: it merges, dedupes and prunes.

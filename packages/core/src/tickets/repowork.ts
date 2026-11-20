@@ -16,6 +16,7 @@ import { WORKBENCH_COMMANDS, WORKBENCH_TOOLS, statusPath, workbenchContract } fr
 import { parseGitHubRepo, type GitHubRepo } from "./github.js";
 import { SMALL_CHANGE_FLOW, crewPick, roundsOf, stepsToRun, type FlowDef } from "../flows/flow.js";
 import { noteLesson } from "../bay/memory.js";
+import { isClosed, type TicketView } from "./model.js";
 
 /**
  * Working a ticket inside an existing codebase (a project imported from a git
@@ -89,8 +90,34 @@ export function repoOfProject(log: EventLog, project: number | null): RepoRef | 
 export const branchFor = (key: string, title: string) =>
   `sf/${key.startsWith("#") ? `ticket-${key.slice(1)}` : key}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "work"}`;
 
-/** Make (or reuse) the clone for one ticket and put it on the ticket's branch. Returns the clone folder and the base commit. */
-export function prepareClone(repo: RepoRef, workRoot: string, id: number, branch: string, run: (dir: string, ...args: string[]) => string = git, folder = `ticket-${id}`): { dir: string; base: string } {
+/** A sibling ticket's branch, not on main yet, that this ticket's clone builds on (SF-29). */
+export interface StackBranch { key: string; branch: string; dir: string }
+
+/**
+ * SF-29: the work of a ticket's siblings that is not on main yet, so a line of a plan builds on the lines before it
+ * instead of beside them (19 Nov: the Scout slices SF-60 to SF-63 each needed the one before, and each clone started
+ * from main without it). Siblings are the tickets under the same parent, in the plan's order; only the ones before
+ * this ticket count, so two tickets never build on each other. A sibling counts while its branch is still the
+ * crew's: built for your look or with an open pull request, never closed, never merged (merged work is on main).
+ */
+export function siblingStack(lines: Pick<TicketView, "id" | "key" | "status" | "branch" | "branchDir" | "pr">[], id: number): StackBranch[] {
+  const i = lines.findIndex((x) => x.id === id);
+  if (i <= 0) return [];
+  return lines.slice(0, i)
+    .filter((s) => s.branch && s.branchDir && !isClosed(s.status) && (s.status === "built" || s.pr?.state === "open") && s.pr?.state !== "merged" && s.pr?.state !== "closed" && existsSync(join(s.branchDir, ".git")))
+    .map((s) => ({ key: s.key, branch: s.branch!, dir: s.branchDir! }));
+}
+
+/** What a clone took from its siblings: the branches merged in, and the ones left out with why. */
+export interface Stacked { merged: string[]; skipped: { key: string; why: string }[] }
+
+/**
+ * Make (or reuse) the clone for one ticket and put it on the ticket's branch. Returns the clone folder and the base
+ * commit. `stack`: sibling branches to merge in first (SF-29), each from its own clone; one that does not merge
+ * cleanly is left out (the merge is undone) and named in `stacked.skipped`. With a stack the base is the commit after
+ * those merges, so the ticket's changed files and the test integrity guard cover only its own work.
+ */
+export function prepareClone(repo: RepoRef, workRoot: string, id: number, branch: string, run: (dir: string, ...args: string[]) => string = git, folder = `ticket-${id}`, stack: StackBranch[] = []): { dir: string; base: string; stacked: Stacked } {
   const dir = resolve(workRoot, folder);
   mkdirSync(workRoot, { recursive: true });
   if (!existsSync(join(dir, ".git"))) {
@@ -107,9 +134,44 @@ export function prepareClone(repo: RepoRef, workRoot: string, id: number, branch
     if (repo.github) { try { from = git(dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); } catch { /* keep HEAD */ } }
     git(dir, "checkout", "-q", "-b", branch, from);
   }
-  let base: string;
-  try { base = git(dir, "merge-base", "HEAD", "origin/HEAD").slice(0, 12); } catch { base = git(dir, "rev-parse", "--short=12", "HEAD"); }
-  return { dir, base };
+  const stacked: Stacked = { merged: [], skipped: [] };
+  let fresh = 0;
+  for (const s of stack) {
+    if (resolve(s.dir) === dir) continue;
+    try {
+      git(dir, "fetch", "-q", s.dir, `${s.branch}`);
+      // Already in (an earlier pass took it, or main has it): nothing to do.
+      try { git(dir, "merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD"); stacked.merged.push(s.key); continue; } catch { /* not in yet */ }
+      // Always a merge commit, never a fast-forward: the first-parent line then holds only this ticket's own commits.
+      git(dir, "merge", "-q", "--no-ff", "--no-edit", "-m", `Build on ${s.key} (${s.branch}), not merged yet`, "FETCH_HEAD");
+      stacked.merged.push(s.key);
+      fresh++;
+    } catch (e) {
+      try { git(dir, "merge", "--abort"); } catch { /* no merge was started */ }
+      const msg = (e as Error).message;
+      stacked.skipped.push({ key: s.key, why: /conflict/i.test(msg) ? "it conflicts with this ticket's branch" : msg.split("\n")[0].slice(0, 200) });
+    }
+  }
+  // The base this ticket's own work is measured from, kept in the clone's git config so a later pass finds it again.
+  // A pass that merged a sibling in, before the ticket has work of its own, moves the base to just after it; once
+  // the ticket has its own commits the base stays put, so they are never dropped (a sibling taken later then shows
+  // in this ticket's changed files too, which only widens what the gates look at).
+  const key = `branch.${branch}.sfbase`;
+  let kept = "";
+  try { kept = git(dir, "config", "--get", key); } catch { /* no stacked pass yet */ }
+  // Down the first-parent line only: the commits a sibling brought in are not this ticket's own.
+  const ownWork = (from: string) => git(dir, "rev-list", "--count", "--no-merges", "--first-parent", `${from}..HEAD`) !== "0";
+  let base = kept;
+  if (fresh && (!kept || !ownWork(kept))) {
+    let main = "";
+    try { main = git(dir, "merge-base", "HEAD", "origin/HEAD"); } catch { /* no origin */ }
+    // Commits of the ticket's own from before any stacking (an earlier unstacked pass) keep the main base.
+    const before = !kept && main ? git(dir, "rev-list", "--count", "--no-merges", "--first-parent", `${main}..HEAD`) !== "0" : false;
+    base = before ? main.slice(0, 12) : git(dir, "rev-parse", "--short=12", "HEAD");
+    git(dir, "config", key, base);
+  }
+  if (!base) { try { base = git(dir, "merge-base", "HEAD", "origin/HEAD").slice(0, 12); } catch { base = git(dir, "rev-parse", "--short=12", "HEAD"); } }
+  return { dir, base, stacked };
 }
 
 export interface RepoWorkResult { ok: boolean; dir: string; branch: string; base: string; sha: string | null; files: string[]; costUsd: number; summary: string; error?: string; /** The checks that passed (gates, test integrity, tests, review). */ checks?: string[]; /** The flow ends with a draft PR step (false: the branch stays here by the flow's choice). */ handover?: boolean }
@@ -263,10 +325,19 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
   id: number; key: string; title: string; document: string; repo: RepoRef; workRoot: string; maxUsd: number; git?: (dir: string, ...args: string[]) => string; projectId?: number | null; checks?: LoopChecks;
   /** The session flow to follow (flows/flow.ts): its steps in order, its fix round limits, its brief. Default: Small change. */
   flow?: FlowDef;
+  /** Sibling tickets' branches, not merged yet, to build on (SF-29; siblingStack()). */
+  stack?: StackBranch[];
 }): Promise<RepoWorkResult> {
   const flow = o.flow ?? SMALL_CHANGE_FLOW;
   const branch = branchFor(o.key, o.title);
-  const { dir, base } = prepareClone(o.repo, o.workRoot, o.id, branch, o.git);
+  const { dir, base, stacked } = prepareClone(o.repo, o.workRoot, o.id, branch, o.git, undefined, o.stack ?? []);
+  if (stacked.merged.length || stacked.skipped.length) {
+    log.append("ticket.noted", { id: o.id, by: "factory", kind: "event", stacked: stacked.merged, text: [
+      stacked.merged.length ? `Built on ${stacked.merged.join(", ")}: their work is not on main yet, so it was merged into ${branch} first. This ticket's pull request shows their changes too until they merge.` : "",
+      ...stacked.skipped.map((x) => `Not built on ${x.key}: ${x.why}.`),
+    ].filter(Boolean).join(" ") });
+  }
+  const stackNote = stacked.merged.length ? `\n\nThis branch already holds the work of ${stacked.merged.join(", ")} (earlier tickets of the same plan, not merged yet). Build on it; do not redo or undo it.` : "";
   const c = o.checks ?? {};
   // The agents the flow names for Build and Review, else whoever works those stations in the Bay.
   const b = bay?.crewFor("build", crewPick(flow, "build"))[0];
@@ -354,7 +425,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
         break;
       }
       case "build": {
-        const first = await build(`${o.document}\n\nYou are on branch ${branch} of a clone of ${o.repo.source}.${repoGuidance(dir)}${reviewBrief(log, o.projectId)}${overviewBlock(log, o.projectId)}`, o.maxUsd * 0.5, "build");
+        const first = await build(`${o.document}\n\nYou are on branch ${branch} of a clone of ${o.repo.source}.${repoGuidance(dir)}${reviewBrief(log, o.projectId)}${overviewBlock(log, o.projectId)}${stackNote}`, o.maxUsd * 0.5, "build");
         if (first.error) return fail(first.error);
         summary = first.text.replace(/<<<\s*FILE[\s\S]*?(?:FILE\s*>>>|$)/g, "").trim().split("\n").filter(Boolean).slice(-6).join("\n");
         break;
