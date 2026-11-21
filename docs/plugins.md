@@ -112,6 +112,7 @@ await sf.ai.run({ prompt, system, model: "haiku", tools: ["WebSearch", "WebFetch
 await sf.ai.budget();   // { monthlyUsd, spentUsd, leftUsd }
 await sf.video.watch({ url, question, start, end, fps });   // video: → { id, title, notes, model, cached, … }
 await sf.video.search("rust cli", 20); await sf.video.get(id); await sf.video.status();   // { hasKey, today, dailyMax, notes }
+// A note on a clip fetched from a dropped link (Instagram, TikTok, X…) carries `link`: the post it came from; `source` is then the saved file.
 await sf.act("ticket.open", { … }); await sf.records("projects");   // the same as pages, from the backend
 ```
 

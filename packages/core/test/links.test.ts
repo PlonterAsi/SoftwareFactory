@@ -97,4 +97,15 @@ describe("link drop", () => {
     expect(v.linkLog()[0]).toMatchObject({ ok: true, via: "scrapecreators" });
     expect(readdirSync(inbox).filter((n) => n.endsWith(".mp4"))).toEqual([]);
   });
+
+  it("a note on a clip fetched from a link carries that link (without tracking bits), so add-ons can show and group by the post", () => {
+    const log = new EventLog(":memory:");
+    const v = new Videos(log, { homeDir: tmp(), env: {}, cloudFolders: () => [] });
+    const file = join(tmp(), "IG DF5s0duxDts.mp4");
+    log.append("video.link", { url: "https://www.instagram.com/reel/DF5s0duxDts/?igsh=abc", ok: 1, video: file, by: "link drop" });
+    const add = (source: string, kind: string) => Number(log.db.prepare("INSERT INTO video_notes (ckey, source, kind, title, question, clip, notes, model, tokens_in, tokens_out, paid_usd, by_who, at) VALUES (?, ?, ?, 'T', NULL, '{}', 'n', 'm', 0, 0, 0, 'x', '2026-11-21')").run(`k${source}`, source, kind).lastInsertRowid);
+    expect(v.get(add(file, "file"))?.link).toBe("https://www.instagram.com/reel/DF5s0duxDts/");
+    expect(v.get(add(join(tmp(), "saved by hand.mp4"), "file"))?.link).toBeUndefined();
+    expect(v.get(add("https://www.youtube.com/watch?v=abc", "youtube"))?.link).toBeUndefined();
+  });
 });
