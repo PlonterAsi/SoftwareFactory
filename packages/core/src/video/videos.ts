@@ -42,6 +42,8 @@ export interface VideoNote {
   by: string;
   at: string;
   snippet?: string;
+  /** For a clip fetched from a dropped link (link drop, the watch box): the post it came from, without tracking bits. */
+  link?: string;
 }
 export interface WatchRequest { url?: string; file?: string; question?: string | null; start?: number | null; end?: number | null; fps?: number | null; refresh?: boolean }
 /** A passing watch failure in the Watch folder is retried after 5 minutes, then 10, 20 ... up to 6 hours, 6 tries in all. */
@@ -237,7 +239,14 @@ export class Videos {
     return {
       id: r.id, source: r.source, kind: r.kind, title: r.title, question: r.question, clip: JSON.parse(r.clip || "{}"), notes: r.notes, model: r.model,
       tokensIn: r.tokens_in, tokensOut: r.tokens_out, paidUsd: r.paid_usd, by: r.by_who, at: r.at, ...(r.snippet ? { snippet: r.snippet } : {}),
+      ...(r.kind === "file" ? this.linkOf(r.source) : {}),
     };
+  }
+  /** The link a saved clip was fetched from, when it came from a link drop (so add-ons can show and group by the post). */
+  private linkOf(file: string): { link?: string } {
+    const r = this.log.db.prepare("SELECT json_extract(payload, '$.url') AS url FROM events WHERE type = 'video.link' AND json_extract(payload, '$.video') = ? AND json_extract(payload, '$.ok') = 1 ORDER BY id DESC LIMIT 1").get(file) as { url: string | null } | undefined;
+    if (!r?.url) return {};
+    try { const u = new URL(r.url); return { link: `${u.origin}${u.pathname}` }; } catch { return { link: r.url }; }
   }
   get(id: number): VideoNote | null {
     const r = this.log.db.prepare("SELECT * FROM video_notes WHERE id = ?").get(id) as Row | undefined;
