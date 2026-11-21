@@ -1009,6 +1009,9 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
     if (!checkGit().found) console.log("Not resuming interrupted runs: Git is not installed.");
     else for (const id of core.factory.resumeInterrupted()) console.log(`Resumed run #${id} where it left off`);
   }
+  // SF-94: a Builder session in a ticket's clone does not survive the core; its ticket goes back in line instead of sitting In progress.
+  for (const id of core.tickets.recoverInterrupted()) console.log(`Ticket #${id} was cut off by the restart; it is back in line`);
+
   let disposed = false;
   const dispose = () => {
     if (disposed) return;
