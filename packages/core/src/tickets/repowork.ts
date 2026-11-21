@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { runAgent } from "../agents.js";
@@ -113,6 +113,15 @@ export function siblingStack(lines: Pick<TicketView, "id" | "key" | "status" | "
 export interface Stacked { merged: string[]; skipped: { key: string; why: string }[] }
 
 /**
+ * A clone with a commit to stand on: false for one a cut-off `git clone` left behind, which may have fetched
+ * origin's branches but never checked anything out (no HEAD commit, no local branch, no origin/HEAD).
+ */
+function hasCommit(dir: string): boolean {
+  try { git(dir, "rev-parse", "--verify", "-q", "HEAD^{commit}"); return true; } catch { /* unborn HEAD */ }
+  try { return git(dir, "for-each-ref", "--count=1", "refs/heads") !== ""; } catch { return false; }
+}
+
+/**
  * Make (or reuse) the clone for one ticket and put it on the ticket's branch. Returns the clone folder and the base
  * commit. `stack`: sibling branches to merge in first (SF-29), each from its own clone; one that does not merge
  * cleanly is left out (the merge is undone) and named in `stacked.skipped`. With a stack the base is the commit after
@@ -121,6 +130,9 @@ export interface Stacked { merged: string[]; skipped: { key: string; why: string
 export function prepareClone(repo: RepoRef, workRoot: string, id: number, branch: string, run: (dir: string, ...args: string[]) => string = git, folder = `ticket-${id}`, stack: StackBranch[] = []): { dir: string; base: string; stacked: Stacked } {
   const dir = resolve(workRoot, folder);
   mkdirSync(workRoot, { recursive: true });
+  // SF-94: a clone the app was cut off in the middle of (a restart, the PC asleep) has a .git but no commit, and every
+  // later pass failed on "HEAD is not a commit". It holds no work, so it is moved aside (never deleted) and cloned again.
+  if (existsSync(join(dir, ".git")) && !hasCommit(dir)) renameSync(dir, `${dir}.broken-${Date.now()}`);
   if (!existsSync(join(dir, ".git"))) {
     // A plain clone: the original repo gets no worktree entry, branch or file from us.
     run(workRoot, "clone", "-q", "--no-hardlinks", repo.dir, dir);
