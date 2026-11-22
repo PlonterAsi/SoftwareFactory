@@ -569,7 +569,7 @@ export class Run extends RunJudge {
     while (run.failed > 0 || feedback) {
       const failing = run.cases.filter((c) => !c.pass).map((c) => c.name).sort().join("\n");
       history.push({ failing: run.failed, names: failing, files, before });
-      const stop = stopReason({ rounds: history, startedAt: this.startedAt + this.waitedMs, now: Date.now(), maxMinutes: runMinutes(this.o.maxUsd, this.f.maxRunMinutes) });
+      const stop = stopReason({ rounds: history, startedAt: this.startedAt + this.waitedMs + this.suiteMs, now: Date.now(), maxMinutes: runMinutes(this.o.maxUsd, this.f.maxRunMinutes) });
       const timeUp = !!stop && /longer than/.test(stop);
       // A stall climbs the ladder before anyone is asked (H6): a deeper fix on a stronger model, then the locked
       // test itself is questioned. Each step once per stall; the wall clock is never waived.

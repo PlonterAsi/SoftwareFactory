@@ -256,6 +256,12 @@ export class RepoRun extends Run {
     this.finish("shipped", pr ? `The change is on branch ${this.info.branch}, as draft pull request #${pr.number}: ${pr.url}` : `The change is on branch ${this.info.branch} in ${this.dir}. ${this.handed.kept ?? ""} ${take}`.replace(/\s+/g, " "), sha);
   }
 
+  /** The repo's own suite, timed so the run's clock leaves it out (suiteMs). */
+  private async suite(): Promise<TestRun> {
+    const began = Date.now();
+    try { return await this.tools.runTests(this.dir, this.env); } finally { this.suiteMs += Date.now() - began; }
+  }
+
   private lastOf(type: string): Record<string, any> | undefined {
     return this.log.list({ type, sinceId: this.id - 1, limit: 1e6 }).map((e) => e.payload as Record<string, any>).filter((p) => p.run === this.id).at(-1);
   }
@@ -490,7 +496,7 @@ export class RepoRun extends Run {
       this.mark("tests", "skipped", undefined, `This repo has no tests SoftwareFactory can run here${this.env.notes.length ? ` (${this.env.notes[0]})` : ""}. Each feature brings tests for what it adds.`);
       return;
     }
-    const t = await this.tools.runTests(this.dir, this.env);
+    const t = await this.suite();
     this.failingBefore = new Set(t.cases.filter((c) => !c.pass).map(key));
     this.log.append("factory.tests.locked", { run: this.id, hash: "", files: [...new Set(t.cases.map((c) => c.file).filter(Boolean))].slice(0, 200), sha: this.base, kept: "repo", baseline: { passed: t.passed, failed: t.failed, command: this.env.testHint }, failingBefore: [...this.failingBefore].slice(0, 500), ...(this.gatesOff ? { gatesOff: this.gatesOff } : {}) });
     this.mark("tests", "pass", undefined, `The repo's own tests before the change: ${t.passed} pass${t.failed ? `, ${t.failed} already fail (not held against this run)` : ""}.`);
@@ -546,7 +552,7 @@ export class RepoRun extends Run {
     if (!existsSync(progress)) writeFileSync(progress, "# Progress\n\nOne entry per feature, written by SoftwareFactory after each build session.\n\n");
     const buildStart = this.spent;
     const pool = buildPoolUsd(this.o.maxUsd, buildStart);
-    const suite = async () => (this.env.tests.length ? this.tools.runTests(this.dir, this.env) : null);
+    const suite = async () => (this.env.tests.length ? this.suite() : null);
     let passing = new Set(((await suite())?.cases ?? []).filter((c) => c.pass).map(key));
     let wroteAny = features.some((f) => f.state === "built");
     let emptyAnswer = "";
@@ -652,7 +658,7 @@ export class RepoRun extends Run {
       }
     }
     const began = Date.now();
-    const r: TestRun = this.env.tests.length ? await this.tools.runTests(this.dir, this.env) : { cases: [], passed: 0, failed: 0, exitCode: 0, timedOut: false, output: "" };
+    const r: TestRun = this.env.tests.length ? await this.suite() : { cases: [], passed: 0, failed: 0, exitCode: 0, timedOut: false, output: "" };
     const tookS = Math.round((Date.now() - began) / 1000);
     const old = r.cases.filter((c) => !c.pass && failedBefore(c, this.failingBefore));
     r.cases = r.cases.filter((c) => !old.includes(c));
