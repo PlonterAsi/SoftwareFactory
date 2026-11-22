@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { AgentBay, EventLog, Factory, MockRuntime, Tickets, createProject, git, type AgentRequest, type AgentRuntime, type TestRun } from "../src/index.js";
-import { REPO_ENGINE_MIN_USD, enableRepoRuns, repoBranch, validateRepoPlan, type BranchToShip, type RepoTools } from "../src/factory/reporun.js";
+import { REPO_ENGINE_MIN_USD, enableRepoRuns, failedBefore, repoBranch, validateRepoPlan, type BranchToShip, type RepoTools } from "../src/factory/reporun.js";
 import { parseCases, prepareEnv, readPages, runRepoTests, siteProfile, withSite, type RepoEnv } from "../src/factory/repoenv.js";
 import { intakeDoor, routeWork } from "../src/factory/route.js";
 import { withPathFirst } from "../src/runtime.js";
@@ -606,4 +606,16 @@ describe("a codebase on this computer, for real", () => {
     writeFileSync(join(dir, "app.py"), "from http.server import HTTPServer\nraise SystemExit('no database')\n");
     expect(await withSite(dir, { pathFirst: env.pathFirst }, async () => 1)).toMatchObject({ skipped: expect.stringMatching(/could not be started here.*no database/s) });
   }, 120_000);
+});
+
+describe("a test that already failed before the change", () => {
+  it("is known however vitest named it this time (run 7899)", () => {
+    const before = new Set(["::opens each screen of a built app and names the one that breaks", "tests/test_app.py::test_old"]);
+    expect(failedBefore({ file: "", name: "every screen in a real browser > opens each screen of a built app and names the one that breaks" }, before)).toBe(true);
+    expect(failedBefore({ file: "test/engine.test.ts", name: "every screen in a real browser > opens each screen of a built app and names the one that breaks" }, before)).toBe(true);
+    expect(failedBefore({ file: "tests/test_app.py", name: "test_old" }, before)).toBe(true);
+    // A new failure, or a test of the same name in another file, is still this run's.
+    expect(failedBefore({ file: "", name: "every screen > opens one screen" }, before)).toBe(false);
+    expect(failedBefore({ file: "tests/test_other.py", name: "test_old" }, before)).toBe(false);
+  });
 });
