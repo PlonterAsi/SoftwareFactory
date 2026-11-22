@@ -61,9 +61,11 @@ describe("agent runtime", () => {
     expect(inDir[inDir.indexOf("--tools") + 1]).toBe("Read,Grep,WebSearch");
     expect(inDir[inDir.indexOf("--allowedTools") + 1]).toBe("Read,Grep,WebSearch");
     expect(inDir).not.toContain("--permission-mode");
-    // A station agent sees only its own kit, not the person's installed plugins and skills; repo work keeps them.
+    // A station agent sees only its own kit, not the person's installed plugins and skills; since the configuration
+    // brief repo work does too (SF_CREW_PERSONAL_SETTINGS=1 brings the person's settings back, test/configs.test.ts).
     expect(inDir[inDir.indexOf("--setting-sources") + 1]).toBe("project,local");
-    expect(rt.buildArgs({ prompt: "hi", tools: ["Read", "Edit"], cwd: "/proj" })).not.toContain("--setting-sources");
+    const repo = rt.buildArgs({ prompt: "hi", tools: ["Read", "Edit"], cwd: "/proj" });
+    expect(repo[repo.indexOf("--setting-sources") + 1]).toBe("project,local");
     // The factory's own project folder is not the person's repo: its Builder and Fixer get their kit only (run 3185).
     const own = rt.buildArgs({ prompt: "hi", tools: ["Read", "Edit"], cwd: "/proj", ownKitOnly: true });
     expect(own[own.indexOf("--setting-sources") + 1]).toBe("project,local");

@@ -1,5 +1,7 @@
 import { crewAdvisor, readAdvisorRule } from "./advisor.js";
 import { noteLesson, rememberLines } from "./bay/memory.js";
+import { callContext, resolveProfiles, trialSettings } from "./configs/profiles.js";
+import { stampConfig } from "./configs/stamp.js";
 import type { EventLog } from "./events.js";
 import type { AgentRequest, AgentResult, AgentRuntime } from "./runtime.js";
 import { explainAgentError, isSignInError } from "./setup.js";
@@ -16,9 +18,15 @@ export interface AgentRun {
 /** Run one agent call and record start, result and cost in the event log. */
 export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: string, reqIn: AgentRequest, meta: { factoryRun?: number; projectId?: number; ticket?: number; station?: string; agentVersion?: number; seat?: number; round?: number; bayTest?: boolean; workbench?: boolean } = {}): Promise<AgentRun> {
   // The advisor tool (advisor.ts): a stronger model the agent may consult, by the rule you set in Systems.
-  const advisor = crewAdvisor(reqIn, readAdvisorRule(log));
+  // Configuration profiles (configs/profiles.ts): the global, project, ticket and run profiles this call falls under.
+  const prof = profilesFor(log, agent, reqIn, meta);
+  reqIn = prof.req;
+  const rule = readAdvisorRule(log);
+  const advisor = crewAdvisor(reqIn, prof.advisor !== undefined ? { ...rule, model: prof.advisor } : rule);
   let req: AgentRequest = { ...reqIn, advisor };
-  const start = log.append("agent.run.started", { agent, runtime: runtime.name, model: req.model ?? null, ...(advisor ? { advisor } : {}), prompt: req.prompt.slice(0, 4000), budgetUsd: req.budgetUsd ?? null, ...(req.tools?.length ? { tools: req.tools } : {}), ...(req.commands?.length ? { commands: req.commands } : {}), ...(req.cwd ? { cwd: req.cwd } : {}), ...meta });
+  // "Ran with" (configs/stamp.ts): the fingerprint of the setup this call runs with.
+  const config = stampConfig(log);
+  const start = log.append("agent.run.started", { agent, runtime: runtime.name, model: req.model ?? null, ...(advisor ? { advisor } : {}), ...(config ? { config } : {}), ...(prof.chain.length ? { profiles: prof.chain } : {}), ...(prof.trial ? { trial: prof.trial } : {}), prompt: req.prompt.slice(0, 4000), budgetUsd: req.budgetUsd ?? null, ...(req.tools?.length ? { tools: req.tools } : {}), ...(req.commands?.length ? { commands: req.commands } : {}), ...(req.cwd ? { cwd: req.cwd } : {}), ...meta });
   try {
     let result: AgentResult;
     try { result = await runtime.run(req); }
@@ -51,6 +59,30 @@ export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: stri
     const costUsd = Number((e as { costUsd?: number }).costUsd ?? 0);
     log.append("agent.run.failed", { runId: start.id, agent, ...meta, error, costUsd, raw: raw.slice(0, 2000) });
     return { runId: start.id, agent, error, costUsd };
+  }
+}
+
+/** A profile's settings applied to one call: the agent's model and cap, the advisor, the person's own settings. Never throws. */
+function profilesFor(log: EventLog, agent: string, req: AgentRequest, meta: { projectId?: number; ticket?: number; factoryRun?: number }): { req: AgentRequest; advisor?: string | null; chain: string[]; trial?: { entry: string; unit: string; arm: "with" | "without" } } {
+  try {
+    const ctx = callContext(log, meta);
+    const r = resolveProfiles(log, ctx);
+    // An entry on trial (configs/trials.ts) applies to every second piece of work; a profile's own setting wins over it.
+    const t = trialSettings(log, ctx);
+    const s: Record<string, { value: unknown }> = { ...t.settings, ...r.settings };
+    if (!r.chain.length && !Object.keys(s).length && !t.trials.length) return { req, chain: [] };
+    const out: AgentRequest = { ...req };
+    const model = s[`agent.${agent}.model`]?.value;
+    if (typeof model === "string") out.model = model;
+    // A profile can lower a cap, never lift it past what the run has left.
+    const cap = s[`agent.${agent}.budgetUsd`]?.value;
+    if (typeof cap === "number") out.budgetUsd = req.budgetUsd !== undefined ? Math.min(req.budgetUsd, cap) : cap;
+    const personal = s["crew.personalSettings"]?.value;
+    if (typeof personal === "boolean") out.personalSettings = personal;
+    const adv = s["advisor.model"];
+    return { req: out, ...(adv ? { advisor: (adv.value as string | null) ?? null } : {}), chain: r.chain.map((c) => `${c.scope}:${c.profile.id}`), ...(t.trials[0] ? { trial: t.trials[0] } : {}) };
+  } catch {
+    return { req, chain: [] };
   }
 }
 

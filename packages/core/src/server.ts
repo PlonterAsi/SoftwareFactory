@@ -11,6 +11,13 @@ import { EventLog, type SfEvent } from "./events.js";
 import { captureSignal, listSignals } from "./signals.js";
 import { costSummary, runAgent } from "./agents.js";
 import { readAdvisorRule, setAdvisorRule } from "./advisor.js";
+import { configRoute } from "./configs/routes.js";
+import { liveConfig } from "./configs/source.js";
+import { setConfigSource } from "./configs/stamp.js";
+import { setProfileFlows } from "./configs/profiles.js";
+import { adoptScoutTickets, setEntryState } from "./configs/catalog.js";
+import { decideTrials } from "./configs/trials.js";
+import { applySwitches, noteStarted } from "./configs/switches.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { duplicateReply, Factory, type GateId } from "./factory/loop.js";
 import { stopRunsOnClose } from "./tickets/stopruns.js";
@@ -191,6 +198,18 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     ...(github ? { tarball: (repo: string, ref: string) => github.tarball(repo, ref) } : {}),
   });
   const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"), plugins);
+  // What SoftwareFactory runs with, and the "Ran with" stamp on every paid call (docs/configuration.md).
+  setProfileFlows(factory.flows, log);
+  // Once: the open tickets Scout filed become catalog entries, held until you choose Build it (configs/catalog.ts).
+  // Trials decide themselves as their pieces of work finish (configs/trials.ts), at most once a minute.
+  let trialsAt = 0;
+  log.on("event", (e: SfEvent) => {
+    if (!/^(ticket\.pr|ticket\.noted|factory\.run\.finished)$/.test(e.type) || Date.now() - trialsAt < 60_000) return;
+    trialsAt = Date.now();
+    try { decideTrials(log, (id, state, note) => setEntryState(log, tickets, id, state, "trial", note)); } catch { /* the next event tries again */ }
+  });
+  try { adoptScoutTickets(log, tickets); } catch (e) { console.warn(`catalog: could not adopt Scout's tickets: ${(e as Error).message}`); }
+  setConfigSource(log, liveConfig({ log, bay, flows: factory.flows, plugins, crewMode, autoWork, maxRunMinutes: () => factory.maxRunMinutes }));
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
   const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
     maxUsd: settings.improveMaxUsd ?? improveOpts?.maxUsd, everyHours: settings.improveEveryHours ?? improveOpts?.everyHours,
@@ -551,6 +570,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (url.pathname.startsWith("/plugins/") && servePluginFile(plugins, req, res, url)) return;
       if (url.pathname === "/api/brain" || url.pathname.startsWith("/api/brain/")) {
         const r = await brainRoute({ log, bay, order: () => order.state(), readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
+      if (url.pathname === "/api/config" || url.pathname.startsWith("/api/config/")) {
+        const r = await configRoute({ log, readJson, tickets, known: () => ({ flows: new Set(factory.flows.list().map((f) => f.id)), agents: new Set(bay.agents().map((a) => a.def.id)) }) }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/flows" || url.pathname.startsWith("/api/flows/")) {
@@ -967,6 +990,9 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isDefault?: boolean; runnerJobs?: () => number } = {}): BootedBase & { core: ReturnType<typeof createCore>; log: EventLog } {
   if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
   const log = new EventLog(dbPath);
+  // Switches you set on the Configuration page (configs/switches.ts) win over this PC's environment. One process, one
+  // environment: only the default base's choices apply.
+  if (isDefault) { try { applySwitches(log); } catch (e) { console.warn("Switches from the Configuration page not applied:", (e as Error).message); } noteStarted(); }
   // Crew mode: what you last picked in the Bridge, else what the shell found (real when Claude Code is installed).
   const picked = readSettings(log).crewMode;
   const envMode: CrewMode = modeOf(runtimeFromEnv());

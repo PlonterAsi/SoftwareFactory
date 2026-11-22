@@ -18,6 +18,7 @@ import { OrderDeck } from "./OrderDeck";
 import { DataDeck, useStore } from "./DataDeck";
 import { UpdateBanner, VersionChip, useUpdates } from "./Updates";
 import { RunnersPage } from "./Runners";
+import { ConfigurationPage } from "./Configuration";
 import { Home } from "./projects/Home";
 import { Workspace } from "./projects/Workspace";
 import { href, useRoute, type FactoryView } from "./projects/router";
@@ -163,6 +164,8 @@ export function App() {
     ? <BasesPage bases={bases.data} refresh={bases.refresh} />
     : route.page === "runners"
     ? <RunnersPage />
+    : route.page === "config"
+    ? <ConfigurationPage />
     : route.page === "kit"
     ? <KitPage />
     : route.page === "brain"

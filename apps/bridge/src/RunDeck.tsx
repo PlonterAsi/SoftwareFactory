@@ -1,3 +1,4 @@
+import { RanWith } from "./Configuration";
 import { useEffect, useState } from "react";
 import { Blueprint } from "./projects/mission/Blueprint";
 import { ticketsApi } from "./Tickets";
@@ -37,6 +38,7 @@ export function RunDeck({ run }: { run?: FactoryRunView }) {
         {run?.dir && <span className="muted mono deck-dir" title={run.dir}>{run.dir.split(/[\\/]/).slice(-1)[0]}</span>}
       </header>
       <div className="deck-body">
+        {run && <RanWith run={run.run} />}
         {run?.repo && <RepoStrip run={run} />}
         {!run && <div className="empty">Start a run to see its plan as a task graph, its tests as a grid and its files as a heat map.</div>}
         {run && tab === "plan" && (run.plan ? <Blueprint run={run} /> : <TaskGraph run={run} />)}

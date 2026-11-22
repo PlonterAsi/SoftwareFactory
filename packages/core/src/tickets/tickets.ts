@@ -149,7 +149,7 @@ export class Tickets extends TicketPrs {
 
   /** You wrote "hold", "don't close", "needs a look" on the thread: the crew keeps its hands off. */
   private handBrake(id: number): boolean {
-    return this.notes(id).some((n) => n.kind === "note" && n.by === "you" && HAND_BRAKE.test(n.text));
+    return (this.get(id)?.tags ?? []).includes("catalog") || this.notes(id).some((n) => n.kind === "note" && n.by === "you" && HAND_BRAKE.test(n.text));
   }
 
   /** SF-94: light-route work a restart cut off goes back in line (tickets/recover.ts). */

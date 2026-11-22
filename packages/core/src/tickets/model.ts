@@ -111,7 +111,9 @@ export const AUTO_KINDS: TicketKind[] = ["bug", "task"];
  * The rule: a ready bug or task, sized S or M, not blocked, not taken by you,
  * and no hand-brake words on its thread.
  */
-export function autoWorkRefusal(t: Pick<TicketView, "kind" | "status" | "size" | "blocked" | "assignee"> & { project?: number | null; children?: { total: number; done: number } }, handBrake = false): string | null {
+export function autoWorkRefusal(t: Pick<TicketView, "kind" | "status" | "size" | "blocked" | "assignee"> & { project?: number | null; tags?: string[]; children?: { total: number; done: number } }, handBrake = false): string | null {
+  // A pick waiting in the Configuration catalog (configs/catalog.ts): built only when you choose Build it, or press Work it.
+  if (t.tags?.includes("catalog")) return "Waits in the catalog: choose Build it on the Configuration page, or press Work it.";
   if (t.status !== "ready") return t.status === "open" ? "Not ready yet: the Overseer reads open bugs and tasks on its own and readies what is clear; then the crew can take it." : null;
   if (!AUTO_KINDS.includes(t.kind)) return `${cap(aKind(t.kind))} waits for your Work it press.`;
   // A ticket in no project would start a brand-new project of its own (an add-on's find filed nowhere, 19 Nov).

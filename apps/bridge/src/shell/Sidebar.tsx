@@ -57,6 +57,7 @@ export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0,
         <Item to={{ page: "factory", view: "tickets" }} on={at("factory", "tickets")} icon={<Ico d="M3 4.5h10v2.2a1.3 1.3 0 0 0 0 2.6v2.2H3V9.3a1.3 1.3 0 0 0 0-2.6zM9.5 4.5v7" />} badge={tickets || undefined}>Tickets</Item>
         {base && <Item to={{ page: "bases" }} on={at("bases")} icon={<Ico d="M2 13h12M3 13V6l5-3 5 3v7M6.5 13V9.5h3V13" />}>Base: {base}</Item>}
         <Item to={{ page: "factory", view: "factory" }} on={at("factory", "factory")} icon={<Ico d="M2 13V7l4 2V7l4 2V3h4v10z" />}>All builds</Item>
+        <Item to={{ page: "config" }} on={at("config")} icon={<Ico d="M3 4h10M3 8h10M3 12h10M6 2.5v3M10 6.5v3M5 10.5v3" />}>Configuration</Item>
         <Item to={{ page: "factory", view: "flows" }} on={at("factory", "flows")} icon={<Ico d="M3.5 3.5h3v3h-3zM9.5 9.5h3v3h-3zM6.5 5h3.5v4.5M3.5 9.5v3h3" />}>Flows</Item>
         <Item to={{ page: "factory", view: "order" }} on={at("factory", "order")} icon={<Ico d="M8 2.5 13.5 8 8 13.5 2.5 8zM8 5.5v5M5.5 8h5" />} badge={conflicts || undefined} alert={conflicts > 0}>Rules and ideas</Item>
         <Item to={{ page: "factory", view: "improve" }} on={at("factory", "improve")} icon={<Ico d="M8 13V3M4 7l4-4 4 4" />} badge={proposals || undefined}>Improve</Item>
