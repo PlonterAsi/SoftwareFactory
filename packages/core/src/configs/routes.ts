@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import type { EventLog } from "../events.js";
 import { CONFIG_LAYERS, configHash, diffConfig } from "./inventory.js";
+import { SETTING_KINDS, assign, assignments, listProfiles, removeProfile, resolveProfiles, saveProfile, type Scope } from "./profiles.js";
 import { currentConfig, ranWith, snapshotOf } from "./stamp.js";
 
 /**
@@ -9,10 +10,33 @@ import { currentConfig, ranWith, snapshotOf } from "./stamp.js";
  *   GET /api/config                    the setup SoftwareFactory runs with now, by layer, and its hash
  *   GET /api/config/snapshots/:hash    a setup a past call ran with, and what changed since
  *   GET /api/config/ran?run=N          the setups factory run N ran with (or ?ticket=N for a ticket)
+ *   GET    /api/config/profiles        every profile, which scope uses which, and what a profile can set
+ *   PUT    /api/config/profiles/:id    { profile }  save (refused, with every problem, when two settings touch the same thing)
+ *   DELETE /api/config/profiles/:id    remove; whatever used it falls back to the broader profile
+ *   POST   /api/config/assign          { scope: global|project|ticket|run, ref, profile|null }
+ *   GET    /api/config/resolve?project=&ticket=&run=   the profiles and settings a call there runs with
  */
-export async function configRoute(ctx: { log: EventLog }, req: IncomingMessage, url: URL): Promise<[number, unknown] | null> {
-  if (req.method !== "GET") return null;
+export async function configRoute(ctx: { log: EventLog; readJson?: (req: IncomingMessage) => Promise<any>; known?: () => { flows: Set<string>; agents: Set<string> } }, req: IncomingMessage, url: URL): Promise<[number, unknown] | null> {
   const parts = url.pathname.replace(/^\/api\/config\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  const num = (k: string) => { const v = url.searchParams.get(k); return v && /^\d+$/.test(v) ? Number(v) : null; };
+  try {
+    if (parts[0] === "profiles" && parts.length === 1 && req.method === "GET") return [200, { profiles: listProfiles(ctx.log), assignments: assignments(ctx.log), kinds: SETTING_KINDS }];
+    if (parts[0] === "profiles" && parts.length === 2 && req.method === "PUT") {
+      const body = (await ctx.readJson?.(req)) ?? {};
+      return [200, saveProfile(ctx.log, { ...(body.profile ?? {}), id: parts[1] }, "you", ctx.known?.())];
+    }
+    if (parts[0] === "profiles" && parts.length === 2 && req.method === "DELETE") { removeProfile(ctx.log, parts[1]); return [200, { ok: true }]; }
+    if (parts[0] === "assign" && parts.length === 1 && req.method === "POST") {
+      const body = (await ctx.readJson?.(req)) ?? {};
+      assign(ctx.log, body.scope as Scope, body.ref ?? null, body.profile ? String(body.profile) : null);
+      return [200, { assignments: assignments(ctx.log) }];
+    }
+    if (parts[0] === "resolve" && req.method === "GET") return [200, resolveProfiles(ctx.log, { projectId: num("project"), ticket: num("ticket"), factoryRun: num("run") })];
+  } catch (e) {
+    const err = e as Error & { problems?: string[] };
+    return [400, { error: err.message, ...(err.problems ? { problems: err.problems } : {}) }];
+  }
+  if (req.method !== "GET") return null;
   const entries = currentConfig(ctx.log) ?? [];
   if (!parts.length) return [200, { hash: configHash(entries), layers: CONFIG_LAYERS, entries }];
   if (parts[0] === "snapshots" && parts[1]) {

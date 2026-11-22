@@ -3,6 +3,7 @@ import { API, flowsApi, type FlowSummaryView, type SfEvent } from "./api";
 import { peekPendingTicket, takePendingTicket } from "./BugReport";
 import { TicketVerify, type VerificationView } from "./TicketVerify";
 import { RanWith } from "./Configuration";
+import { TicketProfile } from "./Profiles";
 
 /**
  * Tickets: every unit of work on a project, in one place. A list or a board,
@@ -597,6 +598,7 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
       )}
       {d.verification && <TicketVerify v={d.verification} lookNow={t.status === "built"} />}
       <RanWith ticket={t.id} />
+      <TicketProfile ticket={t.id} />
       {d.run && (
         <div className="tk-runstrip" aria-label={`Factory run ${d.run.id}`}>
           <button className="link mono" onClick={() => onShowRun?.(d.run!.id)}>run #{d.run.id}</button>

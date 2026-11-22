@@ -38,6 +38,8 @@ export interface AgentRequest {
    * Work in the person's own repository leaves it off and keeps their setup.
    */
   ownKitOnly?: boolean;
+  /** Set by a configuration profile (crew.personalSettings): load the person's own Claude Code settings when editing a repo. Absent: SF_CREW_PERSONAL_SETTINGS decides. */
+  personalSettings?: boolean;
   /** A longer (or shorter) limit for this one call than the runtime's default, in ms. */
   timeoutMs?: number;
   /** Run without any CLAUDE.md or memory, even when editing (a factory build folder has none of its own). */
@@ -197,7 +199,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     // (130+ on Assaf's PC), not just its own kit. Since the configuration brief (22 Nov 2026) that holds for
     // agents editing a repo too: the crew runs only on what SoftwareFactory gives it. SF_CREW_PERSONAL_SETTINGS=1
     // brings back the old way, where the Builder and Fixer in a person's repo also load the person's settings.
-    if (this.opts.profile === "lean" && (!edits(req) || req.ownKitOnly || !crewUsesPersonalSettings())) args.push("--setting-sources", "project,local");
+    if (this.opts.profile === "lean" && (!edits(req) || req.ownKitOnly || !(req.personalSettings ?? crewUsesPersonalSettings()))) args.push("--setting-sources", "project,local");
     else if (builtin.length) args.push("--tools", builtin.join(","));
     if (req.mcpConfig) args.push("--mcp-config", req.mcpConfig);
     // Headless edits in a working copy: accept file edits there, nothing else is allowed to prompt.

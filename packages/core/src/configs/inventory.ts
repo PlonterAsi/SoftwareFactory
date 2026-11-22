@@ -55,6 +55,8 @@ export interface ConfigInputs {
   /** True when the Builder and Fixer still load the person's own Claude Code settings (SF_CREW_PERSONAL_SETTINGS=1). */
   personalSettings: boolean;
   env: Record<string, string | undefined>;
+  /** Configuration profiles: the global default (if any), and how many projects, tickets and runs have their own. */
+  profiles?: { global: { id: string; name: string; settings: number } | null; project: number; ticket: number; run: number };
   /** When a setting was last changed, by key (settings.changed events). */
   settingSince?: Record<string, string>;
 }
@@ -103,6 +105,15 @@ export function buildInventory(i: ConfigInputs): ConfigEntry[] {
   const live = i.agents.filter((a) => !a.retired);
 
   // ── how
+  if (i.profiles) {
+    const g = i.profiles.global;
+    const own = [i.profiles.project && `${i.profiles.project} project${i.profiles.project === 1 ? "" : "s"}`, i.profiles.ticket && `${i.profiles.ticket} ticket${i.profiles.ticket === 1 ? "" : "s"}`, i.profiles.run && `${i.profiles.run} run${i.profiles.run === 1 ? "" : "s"}`].filter(Boolean).join(", ");
+    out.push({
+      id: "profile:global", layer: "how", group: "Profiles", name: "Global default profile", on: !!g,
+      detail: `${g ? `${g.name} (${g.settings} setting${g.settings === 1 ? "" : "s"})` : "None: everything as listed below"}${own ? `; own profile on ${own}` : ""}`,
+      source: { kind: "you", label: "Picked on this page" },
+    });
+  }
   for (const f of i.flows) {
     out.push({
       id: `flow:${f.id}`, layer: "how", group: "Flows", name: f.name, on: true,

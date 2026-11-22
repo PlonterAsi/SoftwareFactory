@@ -14,6 +14,7 @@ import { readAdvisorRule, setAdvisorRule } from "./advisor.js";
 import { configRoute } from "./configs/routes.js";
 import { liveConfig } from "./configs/source.js";
 import { setConfigSource } from "./configs/stamp.js";
+import { setProfileFlows } from "./configs/profiles.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { duplicateReply, Factory, type GateId } from "./factory/loop.js";
 import { stopRunsOnClose } from "./tickets/stopruns.js";
@@ -195,6 +196,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   });
   const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"), plugins);
   // What SoftwareFactory runs with, and the "Ran with" stamp on every paid call (docs/configuration.md).
+  setProfileFlows(factory.flows, log);
   setConfigSource(log, liveConfig({ log, bay, flows: factory.flows, plugins, crewMode, autoWork, maxRunMinutes: () => factory.maxRunMinutes }));
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
   const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
@@ -559,7 +561,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/config" || url.pathname.startsWith("/api/config/")) {
-        const r = await configRoute({ log }, req, url);
+        const r = await configRoute({ log, readJson, known: () => ({ flows: new Set(factory.flows.list().map((f) => f.id)), agents: new Set(bay.agents().map((a) => a.def.id)) }) }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/flows" || url.pathname.startsWith("/api/flows/")) {

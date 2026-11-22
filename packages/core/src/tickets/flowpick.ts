@@ -1,6 +1,7 @@
 import { BUG_FIX_FLOW, NEW_PROJECT_FLOW, REPO_CHANGE_FLOW, RESEARCH_FLOW, SMALL_CHANGE_FLOW, runnerOf, type FlowDef, type FlowRunner } from "../flows/flow.js";
 import type { FlowLibrary } from "../flows/library.js";
 import type { WorkRoute } from "../factory/route.js";
+import { profileFlow } from "../configs/profiles.js";
 
 /**
  * Which flow a ticket follows (phase 2 of the SF behavior brief: one flow per kind of work).
@@ -15,12 +16,16 @@ import type { WorkRoute } from "../factory/route.js";
  */
 export interface FlowPick { flow: FlowDef; why: string; chosen: boolean }
 
-export function pickFlow(lib: FlowLibrary, t: { kind: string; flow?: string | null }, o: { repo: boolean; route?: WorkRoute | null; routeChosen?: boolean }): FlowPick {
+export function pickFlow(lib: FlowLibrary, t: { kind: string; flow?: string | null; id?: number; project?: number | null }, o: { repo: boolean; route?: WorkRoute | null; routeChosen?: boolean }): FlowPick {
   if (t.flow) {
     const f = lib.get(t.flow);
     if (!f) throw new Error(`This ticket names the flow "${t.flow}", which no longer exists. Pick another on the ticket.`);
     return { flow: f, why: `you picked the ${f.name} flow`, chosen: true };
   }
+  // A configuration profile can pick the flow for a kind of ticket (configs/profiles.ts, "flow.<kind>").
+  const viaProfile = profileFlow(lib, t);
+  const pf = viaProfile ? lib.get(viaProfile) : null;
+  if (pf) return { flow: pf, why: `the configuration profile picks the ${pf.name} flow for a ${t.kind}`, chosen: true };
   const serving = (runner: FlowRunner, fallback: FlowDef): FlowDef => {
     const own = lib.list().filter((s) => s.runner === runner && s.kinds.includes(t.kind)).map((s) => lib.get(s.id)!).filter(Boolean);
     return own.find((f) => !f.builtIn) ?? own[0] ?? lib.get(fallback.id) ?? fallback;

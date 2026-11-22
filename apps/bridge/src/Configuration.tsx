@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API } from "./api";
 import { ago } from "./projects/builtin";
+import { ProfilesSection } from "./Profiles";
 
 export type ConfigLayer = "how" | "who" | "where";
 export interface ConfigSource { kind: "built-in" | "scout" | "pr" | "you" | "add-on" | "switch"; label: string; link?: string }
@@ -21,12 +22,13 @@ export function ConfigurationPage() {
   const [err, setErr] = useState<string | null>(null);
   const [onlyOn, setOnlyOn] = useState(false);
   const [q, setQ] = useState("");
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     const load = () => fetch(`${API}/api/config`).then(async (r) => { if (!r.ok) throw new Error(`The core said ${r.status}`); setRep(await r.json()); setErr(null); }).catch((e) => setErr((e as Error).message));
     load();
     const t = setInterval(load, 10_000);
     return () => clearInterval(t);
-  }, []);
+  }, [tick]);
   const shown = useMemo(() => (rep?.entries ?? []).filter((e) => (!onlyOn || e.on) && (!q || `${e.name} ${e.detail} ${e.group} ${e.source.label}`.toLowerCase().includes(q.toLowerCase()))), [rep, onlyOn, q]);
   const counts = useMemo(() => {
     const all = rep?.entries ?? [];
@@ -50,6 +52,7 @@ export function ConfigurationPage() {
             <input type="search" placeholder="Find a piece" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a piece" />
             <label className="muted"><input type="checkbox" checked={onlyOn} onChange={(e) => setOnlyOn(e.target.checked)} /> Only what is on</label>
           </div>
+          <ProfilesSection onChanged={() => setTick((n) => n + 1)} />
           {rep.layers.map((l) => {
             const rows = shown.filter((e) => e.layer === l.id);
             if (!rows.length) return null;
