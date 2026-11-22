@@ -234,6 +234,15 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}advisor.ts`, `${B}CrewAdvisor.tsx`], api: ["/api/crew"],
   },
   {
+    id: "configuration", name: "Configuration (what SF runs with)", group: "Agents",
+    purpose: "One place that shows everything SoftwareFactory runs with right now, in three layers, and where each piece came from, so it is always clear what is in use and why. Every run records the setup it ran with.",
+    spec: ["Every flow, agent, skill, MCP server, add-on, gate, limit and SF_* switch in use is listed in one of three layers: how we work, who works, where and with what.", "Each entry says whether it is on, what it is set to, where it came from and since when.", "Every paid call records the fingerprint of the setup it ran with; each setup is kept once.", "A run and a ticket show the setup they ran with, and what changed since.", "The crew never loads the person's own Claude Code settings unless SF_CREW_PERSONAL_SETTINGS=1."],
+    flow: ["The core reads the live setup from the Bay, flows, add-ons, settings and environment", "A paid call asks for the setup's fingerprint and records it", "A new fingerprint keeps its whole list once", "The Configuration page lists the setup; a run or ticket shows Ran with and the differences"],
+    design: "Main menu, Factory, Configuration: a table per layer with state, setting, source and since; a Ran with line on each run deck and ticket.",
+    screens: ["/config"], docs: ["docs/configuration.md"], stations: [],
+    files: [`${C}configs/`, `${B}Configuration.tsx`], api: ["/api/config"],
+  },
+  {
     id: "agent-bay", name: "Agent Bay", group: "Agents",
     purpose: "Where the workers are made and managed: create, edit, version, test and assign agents to station seats, each with only the skills and tools it lists.",
     spec: ["An agent is a file with a name, a model, a cap per call, plugins, skills, tools, MCP servers and a prompt.", "Every save is a version, with diff and rollback.", "An agent can be tested on a sample task before it is assigned.", "Stations have seats; an agent is assigned to seats.", "Each agent loads only the skills and MCP servers it lists."],

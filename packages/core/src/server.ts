@@ -11,6 +11,9 @@ import { EventLog, type SfEvent } from "./events.js";
 import { captureSignal, listSignals } from "./signals.js";
 import { costSummary, runAgent } from "./agents.js";
 import { readAdvisorRule, setAdvisorRule } from "./advisor.js";
+import { configRoute } from "./configs/routes.js";
+import { liveConfig } from "./configs/source.js";
+import { setConfigSource } from "./configs/stamp.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { duplicateReply, Factory, type GateId } from "./factory/loop.js";
 import { stopRunsOnClose } from "./tickets/stopruns.js";
@@ -191,6 +194,8 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     ...(github ? { tarball: (repo: string, ref: string) => github.tarball(repo, ref) } : {}),
   });
   const integrations = new Integrations(log, join(dirname(projectsDir), "extensions"), plugins);
+  // What SoftwareFactory runs with, and the "Ran with" stamp on every paid call (docs/configuration.md).
+  setConfigSource(log, liveConfig({ log, bay, flows: factory.flows, plugins, crewMode, autoWork, maxRunMinutes: () => factory.maxRunMinutes }));
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
   const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
     maxUsd: settings.improveMaxUsd ?? improveOpts?.maxUsd, everyHours: settings.improveEveryHours ?? improveOpts?.everyHours,
@@ -551,6 +556,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (url.pathname.startsWith("/plugins/") && servePluginFile(plugins, req, res, url)) return;
       if (url.pathname === "/api/brain" || url.pathname.startsWith("/api/brain/")) {
         const r = await brainRoute({ log, bay, order: () => order.state(), readJson }, req, url);
+        if (r) return json(res, r[0], r[1]);
+      }
+      if (url.pathname === "/api/config" || url.pathname.startsWith("/api/config/")) {
+        const r = await configRoute({ log }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/flows" || url.pathname.startsWith("/api/flows/")) {

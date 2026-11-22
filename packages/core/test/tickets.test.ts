@@ -336,7 +336,8 @@ describe("tickets: the real runtime in a working copy", () => {
   it("accepts file edits only when it runs in a folder with edit tools", () => {
     const rt = new ClaudeCodeRuntime({ command: "claude" });
     const a = rt.buildArgs({ prompt: "x", tools: ["Read", "Edit"], cwd: "/tmp/clone" });
-    expect(a.join(" ")).toMatch(/--tools Read,Edit --permission-mode acceptEdits/);
+    expect(a.join(" ")).toMatch(/--tools Read,Edit /);
+    expect(a.join(" ")).toMatch(/--permission-mode acceptEdits/);
     expect(rt.buildArgs({ prompt: "x", tools: ["Read", "Edit"] })).not.toContain("--permission-mode");
     expect(rt.buildArgs({ prompt: "x", cwd: "/tmp/clone" })).not.toContain("--permission-mode");
   });

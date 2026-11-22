@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
  *   #/a/id[/panel]         an add-on's own page from the main menu (its "nav" panel), the whole window
  *   #/brain                the Brain: the principles every loop follows
  *   #/map[/id]             the Feature map: every feature's record, wiring and proof of life (one feature)
+ *   #/config               configuration: what SoftwareFactory runs with now, and where each piece came from
  *   #/runners              build runners: GitHub's checks and builds, run on this PC
  *   #/bases                the factories this app hosts (open, create, rename, archive)
  *   #/factory[/view]       the whole factory (floor, bay, order, tickets, improve, cycles, flows, data), as before projects
@@ -34,6 +35,7 @@ export type Route =
   | { page: "map"; id?: string }
   | { page: "bases" }
   | { page: "runners" }
+  | { page: "config" }
   | { page: "kit" }
   | { page: "needs" }
   | { page: "bridge"; mode: BridgeMode };
@@ -55,6 +57,7 @@ export function parse(hash: string): Route {
   if (parts[0] === "bases") return { page: "bases" };
   if (parts[0] === "projects") return { page: "projects" };
   if (parts[0] === "runners") return { page: "runners" };
+  if (parts[0] === "config") return { page: "config" };
   if (parts[0] === "_kit") return { page: "kit" };
   if (parts[0] === "needs") return { page: "needs" };
   if (parts[0] === "bridge") return { page: "bridge", mode: MODES.includes(parts[1] as BridgeMode) ? (parts[1] as BridgeMode) : "loom" };
@@ -72,6 +75,7 @@ export function href(r: Route): string {
   if (r.page === "bases") return "#/bases";
   if (r.page === "projects") return "#/projects";
   if (r.page === "runners") return "#/runners";
+  if (r.page === "config") return "#/config";
   if (r.page === "kit") return "#/_kit";
   if (r.page === "needs") return "#/needs";
   if (r.page === "bridge") return r.mode === "loom" ? "#/bridge" : `#/bridge/${r.mode}`;

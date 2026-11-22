@@ -1,5 +1,6 @@
 import { crewAdvisor, readAdvisorRule } from "./advisor.js";
 import { noteLesson, rememberLines } from "./bay/memory.js";
+import { stampConfig } from "./configs/stamp.js";
 import type { EventLog } from "./events.js";
 import type { AgentRequest, AgentResult, AgentRuntime } from "./runtime.js";
 import { explainAgentError, isSignInError } from "./setup.js";
@@ -18,7 +19,9 @@ export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: stri
   // The advisor tool (advisor.ts): a stronger model the agent may consult, by the rule you set in Systems.
   const advisor = crewAdvisor(reqIn, readAdvisorRule(log));
   let req: AgentRequest = { ...reqIn, advisor };
-  const start = log.append("agent.run.started", { agent, runtime: runtime.name, model: req.model ?? null, ...(advisor ? { advisor } : {}), prompt: req.prompt.slice(0, 4000), budgetUsd: req.budgetUsd ?? null, ...(req.tools?.length ? { tools: req.tools } : {}), ...(req.commands?.length ? { commands: req.commands } : {}), ...(req.cwd ? { cwd: req.cwd } : {}), ...meta });
+  // "Ran with" (configs/stamp.ts): the fingerprint of the setup this call runs with.
+  const config = stampConfig(log);
+  const start = log.append("agent.run.started", { agent, runtime: runtime.name, model: req.model ?? null, ...(advisor ? { advisor } : {}), ...(config ? { config } : {}), prompt: req.prompt.slice(0, 4000), budgetUsd: req.budgetUsd ?? null, ...(req.tools?.length ? { tools: req.tools } : {}), ...(req.commands?.length ? { commands: req.commands } : {}), ...(req.cwd ? { cwd: req.cwd } : {}), ...meta });
   try {
     let result: AgentResult;
     try { result = await runtime.run(req); }

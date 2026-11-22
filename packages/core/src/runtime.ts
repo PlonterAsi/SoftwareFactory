@@ -193,9 +193,11 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     const shell = !!req.cwd && !!req.commands?.length;
     const builtin = [...new Set([...(req.tools ?? []), ...(shell ? ["Bash"] : [])])].filter((t) => !t.startsWith("mcp__") && (req.cwd || !FILE_TOOLS.includes(t)) && (t !== "Bash" || shell));
     if (this.opts.profile === "lean") args.push("--strict-mcp-config", "--tools", builtin.join(","));
-    // Without this a station agent with the Skill tool sees every skill and plugin the person installed
-    // (130+ on Assaf's PC), not just its own kit. An agent that edits a working copy keeps the person's settings.
-    if (this.opts.profile === "lean" && (!edits(req) || req.ownKitOnly)) args.push("--setting-sources", "project,local");
+    // Without this an agent sees every skill, plugin, hook and CLAUDE.md the person installed for themselves
+    // (130+ on Assaf's PC), not just its own kit. Since the configuration brief (22 Nov 2026) that holds for
+    // agents editing a repo too: the crew runs only on what SoftwareFactory gives it. SF_CREW_PERSONAL_SETTINGS=1
+    // brings back the old way, where the Builder and Fixer in a person's repo also load the person's settings.
+    if (this.opts.profile === "lean" && (!edits(req) || req.ownKitOnly || !crewUsesPersonalSettings())) args.push("--setting-sources", "project,local");
     else if (builtin.length) args.push("--tools", builtin.join(","));
     if (req.mcpConfig) args.push("--mcp-config", req.mcpConfig);
     // Headless edits in a working copy: accept file edits there, nothing else is allowed to prompt.
@@ -546,6 +548,11 @@ A writing desk: keep your pieces, give each a word goal and watch its bar fill.
 Open it from the project's Run tab in SoftwareFactory and press Start. No arguments, no files to write; data lives in data/db.json.
 FILE>>>`,
 };
+
+/** True only when SF_CREW_PERSONAL_SETTINGS=1: the Builder and Fixer in a person's repo load the person's own Claude Code settings. */
+export function crewUsesPersonalSettings(env = process.env): boolean {
+  return env.SF_CREW_PERSONAL_SETTINGS === "1";
+}
 
 export function runtimeFromEnv(env = process.env): AgentRuntime {
   const kind = env.SF_RUNTIME ?? "mock";
