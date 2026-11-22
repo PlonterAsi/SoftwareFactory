@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentBay, ClaudeCodeRuntime, EventLog, parseClaudeJson } from "../src/index.js";
-import { findSecrets, scanFiles, secretHookFile } from "../src/safety/secrets.js";
+import { findSecrets, scanFiles, secretHookFile, secretHookScript } from "../src/safety/secrets.js";
 import { failureLines } from "../src/factory/trim.js";
 import { PERSON_KINDS, recall, recallBlock, recallQuery } from "../src/brain/recall.js";
 import { overviewBlock } from "../src/tickets/repowork.js";
@@ -36,6 +36,25 @@ describe("SF-17: the secret gate", () => {
     const r = run(bad);
     expect(r.code).toBe(2);
     expect(r.err).toMatch(/secret gate.*\n.*bad\.js:1: looks like a GitHub token/s);
+  });
+
+  it("the hook script is the same on every platform: plain Node, no shell, no platform branch, same result for CRLF files and either path field", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sf-gate-"));
+    const hook = secretHookFile(dir);
+    const script = secretHookScript();
+    expect(hook.endsWith(".mjs")).toBe(true);
+    expect(script).not.toMatch(/process\.platform|win32|child_process|\/bin\/sh|bash/);
+    const run = (input: string) => {
+      try { execFileSync(process.execPath, [hook], { input, stdio: ["pipe", "pipe", "pipe"] }); return { code: 0, err: "" }; }
+      catch (e: any) { return { code: e.status as number, err: String(e.stderr) }; }
+    };
+    const crlf = join(dir, "crlf.js");
+    writeFileSync(crlf, `a\r\nexport const k = "${FAKE_GH}";\r\n`);
+    const r = run(JSON.stringify({ tool_input: { path: crlf } }));
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/crlf\.js:2: looks like a GitHub token/);
+    expect(run("").code).toBe(0);
+    expect(run(JSON.stringify({ tool_input: { file_path: join(dir, "missing.js") } })).code).toBe(0);
   });
 
   it("repo work runs with the hook; station agents do not need it", () => {
