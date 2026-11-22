@@ -303,6 +303,12 @@ export abstract class RunBase {
   protected lastSession: string | undefined;
   /** Time this run spent waiting at gates for the person. */
   protected waitedMs = 0;
+  /**
+   * Time spent running the repo's own test suite. It is the repo's speed, not the crew's work: run 8917
+   * (2026-11-22) spent 3 minutes in agent calls and about 40 minutes in five 8-minute suites, and was stopped
+   * at its 30-minute limit right after the last suite passed. The run's clock leaves it out, like gate waits.
+   */
+  protected suiteMs = 0;
   protected async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number; /** The cap may go above the agent's own per-call budget (it stays inside the run's). */ raiseCap?: boolean } = {}): Promise<string> {
     this.stopCheck();
     if (this.o.maxUsd - this.spent < 0.01) {
