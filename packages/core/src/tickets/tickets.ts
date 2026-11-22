@@ -658,7 +658,7 @@ export class Tickets extends TicketPrs {
    * build feature by feature, a review, a judge on the running site), on a branch of its own. Returns null,
    * after saying why on the thread, when the engine cannot take it and nobody chose it: the light route does.
    */
-  private workEngine(t: TicketView, o: { maxUsd?: number; autoApprove?: boolean; by?: string }, routed: Routed, flow?: string): { ticket: TicketView; run: number; branch: string; route: Routed } | null {
+  private workEngine(t: TicketView, o: { maxUsd?: number; autoApprove?: boolean; by?: string; again?: boolean }, routed: Routed, flow?: string): { ticket: TicketView; run: number; branch: string; route: Routed } | null {
     const { factory, repoRuns } = this.opts;
     const no = (why: string): null => {
       if (routed.chosen) throw new Error(why);
@@ -668,6 +668,19 @@ export class Tickets extends TicketPrs {
     if (!factory || !repoRuns || t.project == null) return no("this core has no engine for repos");
     if (t.run != null && factory.isActive(t.run)) throw new Error(`Run #${t.run} is already working this ticket.`);
     if (this.inRepo.has(t.id)) throw new Error("The Builder is already working this ticket in the repo.");
+    // The factory's one-build-a-day check, for this ticket's own engine run. On 2026-11-22 SF-99's run #7899 shipped
+    // as a draft PR, and one more press of Work it a minute later started run #8917 on the same branch: a second
+    // build of the same ask, at full price. A build that shipped today, or one stopped that can resume, is the answer;
+    // "work it again anyway" (again) still starts a new one.
+    if (!o.again && t.run != null) {
+      const r = this.log.db.prepare("SELECT outcome, started_at, finished_at FROM factory_runs WHERE id = ?").get(t.run) as { outcome: string | null; started_at: string; finished_at: string | null } | undefined;
+      const shipped = r?.outcome === "shipped" && (r.finished_at ?? r.started_at) > new Date(Date.now() - 24 * 3600_000).toISOString();
+      const stopped = r?.outcome === "stopped" && factory.resumable(t.run).ok;
+      if (shipped || stopped) {
+        const what = shipped ? "already built it today" : "already started it and can resume";
+        throw Object.assign(new Error(`Run #${t.run} ${what}. Open that run, or work it again anyway.`), { duplicate: { duplicateOf: t.run, state: shipped ? "shipped" : "stopped", projectId: t.project } });
+      }
+    }
     const allow = buildAllowance(this.log, t.project, "next", o.maxUsd);
     if ("error" in allow) return no(allow.error);
     const maxUsd = allow.maxUsd ?? DEFAULT_NEXT_USD;
