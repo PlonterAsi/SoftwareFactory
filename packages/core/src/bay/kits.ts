@@ -3,6 +3,8 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, r
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { secretHookSettings } from "../safety/secrets.js";
+import { checkMcpEntry, checkSkill, checkSubAgent, checkHookSettings, type PluginPin } from "./definitions-check.js";
 
 /**
  * Per-agent kits: each agent loads only the skills and MCP servers it lists, nothing else.
@@ -105,12 +107,41 @@ export function listMcp(): McpInfo[] {
 
 /** What an agent's settings can choose from, for the Agent Bay's pickers. */
 export function library() {
+  const pin = loadPin();
+  const failingFirst = <T extends { checks: string[] }>(xs: T[]) => [...xs].sort((a, b) => Number(b.checks.length > 0) - Number(a.checks.length > 0));
+  const skillChecks = (s: SkillInfo): string[] => {
+    if (!pin) return [];
+    try { return checkSkill(s.name, readFileSync(join(s.dir, "SKILL.md"), "utf8"), pin); }
+    catch (e) { return [`Skill ${s.name}: SKILL.md can't be read (${(e as Error).message}).`]; }
+  };
+  const agentsDir = bundledPath("plugin-examples");
+  const subAgents = !pin || !existsSync(agentsDir) ? [] : readdirSync(agentsDir).flatMap((p) => {
+    const dir = join(agentsDir, p, "agents");
+    return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".md")).map((f) => {
+      const name = `${p}/${f.replace(/\.md$/, "")}`;
+      try { return { name, kind: "sub-agent", checks: checkSubAgent(name, readFileSync(join(dir, f), "utf8"), pin) }; }
+      catch (e) { return { name, kind: "sub-agent", checks: [`Sub-agent ${name}: the file can't be read (${(e as Error).message}).`] }; }
+    }) : [];
+  });
+  const checks = failingFirst([
+    ...listSkills().map((s) => ({ kind: "skill", name: s.name, checks: skillChecks(s) })),
+    ...listMcp().map((m) => ({ kind: "mcp", name: m.name, checks: pin ? checkMcpEntry(m.name, m.config, pin) : [] })),
+    ...(pin ? [{ kind: "hook", name: "secret-scan", checks: checkHookSettings(secretHookSettings("secret-scan-hook.js"), pin) }] : []),
+    ...subAgents,
+  ]);
   return {
     skills: listSkills().map(({ name, description, source }) => ({ name, description, source })),
     tools: TOOL_CHOICES,
     mcp: listMcp().map(({ name, command, note, source }) => ({ name, command, note, source })),
+    checks,
+    reference: pin ? { repo: pin.repo, commit: pin.commit, date: pin.pinnedOn } : null,
     mcpFile: cfg.dataDir ? join(cfg.dataDir, "mcp-servers.json") : null,
   };
+}
+
+/** The pinned plugin reference shipped next to the code; null when it is not there (checks are then left out). */
+function loadPin(): PluginPin | null {
+  try { return JSON.parse(readFileSync(bundledPath("reference/plugin-reference.json"), "utf8")) as PluginPin; } catch { return null; }
 }
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 12);

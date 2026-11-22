@@ -1,0 +1,47 @@
+{
+  "repo": "anthropics/claude-plugins-official",
+  "commit": "73c8cf3ea7e296057b467990f2f5d61b4c922260",
+  "pinnedOn": "2026-11-22",
+  "license": "LICENSE",
+  "licenseName": "Apache License 2.0",
+  "note": "Structure only: file names, headings, field names and allowed values. No text is copied from the reference.",
+  "hooks": {
+    "path": "plugins/claude-code-setup/skills/claude-automation-recommender/references/hooks-patterns.md",
+    "headings": ["Hooks Recommendations", "Auto-Formatting Hooks", "Type Checking Hooks", "Protection Hooks", "Test Runner Hooks", "Notification Hooks", "Hook Placement"],
+    "events": ["PreToolUse", "PostToolUse", "Notification"],
+    "matcherEvents": ["PreToolUse", "PostToolUse"],
+    "entryFields": { "hooks": "from the reference", "matcher": "from the reference" },
+    "commandFields": { "type": "from the reference", "command": "from the reference" },
+    "commandType": "command"
+  },
+  "skills": {
+    "path": "plugins/claude-code-setup/skills/claude-automation-recommender/references/skills-reference.md",
+    "headings": ["Skills Recommendations", "Available from Official Plugins", "Custom Project Skills", "Custom Skill Examples", "Argument Patterns", "Dynamic Context Injection"],
+    "layout": [".claude/skills/<skill-name>/SKILL.md"],
+    "requiredFields": { "name": "from the reference", "description": "from the reference" },
+    "optionalFields": ["disable-model-invocation", "user-invocable", "allowed-tools", "context", "agent"],
+    "allowedValues": { "context": ["fork"] },
+    "skeletonFolders": ["scripts", "examples", "templates"]
+  },
+  "mcp": {
+    "path": "plugins/claude-code-setup/skills/claude-automation-recommender/references/mcp-servers.md",
+    "headings": ["MCP Server Recommendations", "Setup & Team Sharing", "Quick Reference: Detection Patterns"],
+    "entryFields": ["command", "args", "url", "type", "env"],
+    "requiredOneOf": ["command", "url"]
+  },
+  "pluginStructure": {
+    "path": "plugins/claude-code-setup/skills/claude-automation-recommender/references/plugins-reference.md",
+    "headings": ["Plugin Recommendations", "Official Plugins", "Plugin Management", "When to Recommend Plugins"],
+    "requiredFields": {},
+    "matches": [],
+    "checker": "none: the reference pins headings only, and SoftwareFactory's plugin.json is its own manifest, not this structure"
+  },
+  "subAgent": {
+    "path": "plugins/claude-code-setup/skills/claude-automation-recommender/references/subagent-templates.md",
+    "headings": ["Subagent Recommendations", "Code Review Agents", "Specialized Agents", "Utility Agents", "Subagent Placement", "Model Selection Guide", "Tool Access Guide"],
+    "layout": [".claude/agents/<name>.md"],
+    "requiredFields": {},
+    "allowedValues": { "model": ["haiku", "sonnet", "opus"], "tools": ["Read", "Grep", "Glob", "Write", "Bash"] },
+    "matches": [{ "path": "packages/core/plugin-examples/*/agents/*.md", "kind": "sub-agent" }]
+  }
+}
