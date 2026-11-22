@@ -46,3 +46,8 @@
 .cfg-acts button + button { margin-left: 4px; }
 .cs-building, .cs-trial { color: var(--gate); }
 .cs-ready, .cs-promoted { color: var(--good); }
+
+.cfg-trial { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--line); font-size: 12px; }
+.cfg-trial.ct-promote { border-left-color: var(--good); }
+.cfg-trial.ct-drop { border-left-color: var(--bad); }
+.cfg-trial.ct-unclear { border-left-color: var(--gate); }

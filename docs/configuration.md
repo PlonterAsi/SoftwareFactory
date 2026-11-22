@@ -2,7 +2,7 @@
 
 What SoftwareFactory runs with right now, where each piece came from, and which setup every run used.
 
-Built from Assaf's brief of 22 Nov 2026. Done: the inventory, Ran with, isolation, profiles, the catalog. Next: trials, editable switches.
+Built from Assaf's brief of 22 Nov 2026. Done: the inventory, Ran with, isolation, profiles, the catalog, trials. Next: editable switches.
 
 ## The three layers
 
@@ -53,13 +53,31 @@ Every technique, tool or workflow picked from Scout (or added by hand) is one ca
 | proposed | Picked; nothing runs. Its ticket is tagged `catalog` and the crew never starts it on its own |
 | building | You chose Build it: the tag comes off and the ticket is back in line |
 | ready | Built; it can join a profile, and its settings (if it has any) apply through that profile |
-| trial, promoted, dropped | Set by trials (next part) or by you |
+| trial | On trial (below) |
+| promoted | Clearly better: its settings apply everywhere, under any profile |
+| dropped | Worse, or dropped by you. Bring back or Put on trial again |
 
 Work it on a held ticket still starts it: your press is your ask.
 
 Add-ons add picks with the `catalog.add` action (Scout's Add to catalog). On its first start with this version, SF moved every open ticket Scout had filed into the catalog. Tickets about the same named thing (a brand in both titles, like SkillSpector) became one entry, and the extra tickets were closed as duplicates of the first.
 
 A profile can list catalog entries (`entries`). Two entries in one profile that touch the same thing, or an entry and one of the profile's own settings, are refused.
+
+## Trials
+
+Only a ready entry with settings can go on trial. An entry built as code has none, so Mark built gives it its own switch, `feature.<id>`; code checks it with `featureOn(log, id, meta)` in `configs/profiles.ts`. The Build it note on the ticket says so.
+
+While an entry is on trial, every second piece of work gets it: a ticket, or a factory run with no ticket, by its id (even ids get it, odd ids do not). A profile's own setting wins over a trial. Each agent call records its side in `agent.run.started` (`trial: { entry, unit, arm }`). Two trials at once may not touch the same thing.
+
+A piece is finished when its ticket's pull request merged (pass), or it was rejected, its PR closed unmerged, or it was closed for another reason than a duplicate (fail). A factory run passes when it shipped and fails when it failed. When both sides have 5 finished pieces, SF decides:
+
+| Result | When | What happens |
+|---|---|---|
+| Promote | Pass rate at least 20 points higher, and cost per piece no more than 20% higher | State promoted, applies everywhere |
+| Drop | Lower pass rate, or the same pass rate for more than 20% extra | State dropped |
+| Your call | Anything else | Stays on trial with a note; Promote or Drop on the Configuration page |
+
+SF checks after a pull request changes, a ticket note, or a finished run (at most once a minute), and when the Configuration page loads. The catalog shows both sides of each trial.
 
 ## API
 

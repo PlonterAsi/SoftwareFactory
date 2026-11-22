@@ -72,6 +72,7 @@ export function saveEntry(log: EventLog, raw: Partial<CatalogEntry>, by = "you")
     ticket: raw.ticket ?? existing?.ticket ?? null,
     merged: raw.merged ?? existing?.merged ?? [],
     state: CATALOG_STATES.find((s) => s === raw.state) ?? existing?.state ?? "proposed",
+    ...(existing?.note ? { note: existing.note } : {}),
   };
   log.append("catalog.entry.saved", { entry, by });
   return getEntry(log, id)!;
@@ -83,12 +84,14 @@ export function setEntryState(log: EventLog, tickets: Tickets | null, id: string
   if (!e) throw new Error("No catalog entry with that id.");
   if (!CATALOG_STATES.includes(state)) throw new Error(`State is one of ${CATALOG_STATES.join(", ")}.`);
   log.append("catalog.entry.state", { id, state, by, ...(note ? { note } : {}) });
+  // Built with no settings of its own: it is the switch feature.<id>, so it can join a profile or go on trial.
+  if (state === "ready" && !e.settings?.length) saveEntry(log, { ...e, state: "ready", settings: [{ path: `feature.${e.id}`, value: true }] }, by);
   if (tickets && e.ticket != null && tickets.get(e.ticket)) {
     const t = tickets.get(e.ticket)!;
     const tags = (t.tags ?? []).filter((x) => x !== CATALOG_TAG);
     if (state === "building") {
       tickets.edit(t.id, "tags", tags, by);
-      tickets.say(t.id, `Catalog: you chose to build "${e.title}". Back in line for the crew.`, { by: "configuration", kind: "event" });
+      tickets.say(t.id, `Catalog: you chose to build "${e.title}". Back in line for the crew. Build it behind the switch feature.${e.id} (featureOn in configs/profiles.ts), so it can go on trial and be turned on or off per profile.`, { by: "configuration", kind: "event" });
     } else if (!(t.tags ?? []).includes(CATALOG_TAG)) {
       tickets.edit(t.id, "tags", [...tags, CATALOG_TAG], by);
     }

@@ -1,6 +1,6 @@
 import { crewAdvisor, readAdvisorRule } from "./advisor.js";
 import { noteLesson, rememberLines } from "./bay/memory.js";
-import { callContext, resolveProfiles } from "./configs/profiles.js";
+import { callContext, resolveProfiles, trialSettings } from "./configs/profiles.js";
 import { stampConfig } from "./configs/stamp.js";
 import type { EventLog } from "./events.js";
 import type { AgentRequest, AgentResult, AgentRuntime } from "./runtime.js";
@@ -26,7 +26,7 @@ export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: stri
   let req: AgentRequest = { ...reqIn, advisor };
   // "Ran with" (configs/stamp.ts): the fingerprint of the setup this call runs with.
   const config = stampConfig(log);
-  const start = log.append("agent.run.started", { agent, runtime: runtime.name, model: req.model ?? null, ...(advisor ? { advisor } : {}), ...(config ? { config } : {}), ...(prof.chain.length ? { profiles: prof.chain } : {}), prompt: req.prompt.slice(0, 4000), budgetUsd: req.budgetUsd ?? null, ...(req.tools?.length ? { tools: req.tools } : {}), ...(req.commands?.length ? { commands: req.commands } : {}), ...(req.cwd ? { cwd: req.cwd } : {}), ...meta });
+  const start = log.append("agent.run.started", { agent, runtime: runtime.name, model: req.model ?? null, ...(advisor ? { advisor } : {}), ...(config ? { config } : {}), ...(prof.chain.length ? { profiles: prof.chain } : {}), ...(prof.trial ? { trial: prof.trial } : {}), prompt: req.prompt.slice(0, 4000), budgetUsd: req.budgetUsd ?? null, ...(req.tools?.length ? { tools: req.tools } : {}), ...(req.commands?.length ? { commands: req.commands } : {}), ...(req.cwd ? { cwd: req.cwd } : {}), ...meta });
   try {
     let result: AgentResult;
     try { result = await runtime.run(req); }
@@ -63,11 +63,14 @@ export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: stri
 }
 
 /** A profile's settings applied to one call: the agent's model and cap, the advisor, the person's own settings. Never throws. */
-function profilesFor(log: EventLog, agent: string, req: AgentRequest, meta: { projectId?: number; ticket?: number; factoryRun?: number }): { req: AgentRequest; advisor?: string | null; chain: string[] } {
+function profilesFor(log: EventLog, agent: string, req: AgentRequest, meta: { projectId?: number; ticket?: number; factoryRun?: number }): { req: AgentRequest; advisor?: string | null; chain: string[]; trial?: { entry: string; unit: string; arm: "with" | "without" } } {
   try {
-    const r = resolveProfiles(log, callContext(log, meta));
-    if (!r.chain.length) return { req, chain: [] };
-    const s = r.settings;
+    const ctx = callContext(log, meta);
+    const r = resolveProfiles(log, ctx);
+    // An entry on trial (configs/trials.ts) applies to every second piece of work; a profile's own setting wins over it.
+    const t = trialSettings(log, ctx);
+    const s: Record<string, { value: unknown }> = { ...t.settings, ...r.settings };
+    if (!r.chain.length && !Object.keys(s).length && !t.trials.length) return { req, chain: [] };
     const out: AgentRequest = { ...req };
     const model = s[`agent.${agent}.model`]?.value;
     if (typeof model === "string") out.model = model;
@@ -77,7 +80,7 @@ function profilesFor(log: EventLog, agent: string, req: AgentRequest, meta: { pr
     const personal = s["crew.personalSettings"]?.value;
     if (typeof personal === "boolean") out.personalSettings = personal;
     const adv = s["advisor.model"];
-    return { req: out, ...(adv ? { advisor: (adv.value as string | null) ?? null } : {}), chain: r.chain.map((c) => `${c.scope}:${c.profile.id}`) };
+    return { req: out, ...(adv ? { advisor: (adv.value as string | null) ?? null } : {}), chain: r.chain.map((c) => `${c.scope}:${c.profile.id}`), ...(t.trials[0] ? { trial: t.trials[0] } : {}) };
   } catch {
     return { req, chain: [] };
   }

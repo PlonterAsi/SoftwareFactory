@@ -22,6 +22,7 @@ export const SETTING_KINDS: { pattern: string; layer: ConfigLayer; label: string
   { pattern: "agent.<id>.model", layer: "who", label: "An agent's model", value: "model" },
   { pattern: "agent.<id>.budgetUsd", layer: "who", label: "An agent's cap per call, USD", value: "usd" },
   { pattern: "advisor.model", layer: "who", label: "Advisor for the crew (off, sonnet, opus)", value: "advisor" },
+  { pattern: "feature.<id>", layer: "how", label: "A built catalog piece switched on or off (the crew builds picks behind feature.<id>)", value: "bool" },
   { pattern: "crew.personalSettings", layer: "where", label: "Builder and Fixer load your own Claude Code settings", value: "bool" },
 ];
 
@@ -51,7 +52,7 @@ const MODELS = ["haiku", "sonnet", "opus", "fable"];
 
 /** The layer a path belongs to, or null when profiles cannot set it. */
 export function layerOf(path: string): ConfigLayer | null {
-  if (/^flow\.[a-z]+$/.test(path)) return "how";
+  if (/^flow\.[a-z]+$/.test(path) || /^feature\.[a-z0-9-]+$/.test(path)) return "how";
   if (/^agent\.[a-z0-9-]+\.(model|budgetUsd)$/.test(path) || path === "advisor.model") return "who";
   if (path === "crew.personalSettings") return "where";
   return null;
@@ -85,7 +86,7 @@ export function profileProblems(p: Profile, known: { flows?: Set<string>; agents
     if (s.path.endsWith(".model") && s.path.startsWith("agent.") && !MODELS.includes(String(s.value))) out.push(`${s.path}: pick haiku, sonnet, opus or fable.`);
     if (s.path.endsWith(".budgetUsd") && !(typeof s.value === "number" && s.value > 0 && s.value <= 10)) out.push(`${s.path}: a cap between $0.01 and $10.`);
     if (s.path === "advisor.model" && !(s.value === null || s.value === "off" || s.value === "sonnet" || s.value === "opus")) out.push("advisor.model: off, sonnet or opus.");
-    if (s.path === "crew.personalSettings" && typeof s.value !== "boolean") out.push("crew.personalSettings: on or off.");
+    if ((s.path === "crew.personalSettings" || s.path.startsWith("feature.")) && typeof s.value !== "boolean") out.push(`${s.path}: on or off.`);
     if (s.path.startsWith("flow.") && (typeof s.value !== "string" || (known.flows && !known.flows.has(s.value)))) out.push(`${s.path}: no flow called ${String(s.value)}.`);
   }
   return out;
@@ -171,6 +172,8 @@ export function resolveProfiles(log: EventLog, ctx: { projectId?: number | null;
   }
   const settings: Resolved["settings"] = {};
   const entries = new Map(listCatalog(log).map((e) => [e.id, e]));
+  // Promoted catalog entries (configs/trials.ts) apply everywhere, under every profile; a profile can still override them.
+  for (const e of entries.values()) if (e.state === "promoted") for (const s of e.settings ?? []) settings[s.path] = { value: s.value, from: `catalog:${e.id}`, scope: "global", why: `promoted: ${e.title}` };
   for (const { scope, profile } of chain) {
     for (const id of profile.entries ?? []) {
       const e = entries.get(id);
@@ -228,4 +231,31 @@ export function setProfileFlows(lib: object, log: EventLog): void {
 
 export function profileFlow(lib: object, t: { id?: number; project?: number | null; kind: string }): string | null {
   try { return flowSources.get(lib)?.(t) ?? null; } catch { return null; }
+}
+
+/** Whether a built catalog piece is switched on for this piece of work (a profile's feature.<id>, a promotion or a trial). Off unless something says on. */
+export function featureOn(log: EventLog, id: string, meta: { projectId?: number; ticket?: number; factoryRun?: number } = {}): boolean {
+  try {
+    const ctx = callContext(log, meta);
+    const v = resolveProfiles(log, ctx).settings[`feature.${id}`]?.value;
+    if (typeof v === "boolean") return v;
+    const trial = trialSettings(log, ctx);
+    return trial.settings[`feature.${id}`]?.value === true;
+  } catch { return false; }
+}
+
+/** The settings of entries on trial that this piece of work gets (even ids), and which trials it is part of. */
+export function trialSettings(log: EventLog, ctx: { ticket: number | null; factoryRun: number | null }): { settings: Record<string, { value: unknown; entry: string }>; trials: { entry: string; unit: string; arm: "with" | "without" }[] } {
+  const settings: Record<string, { value: unknown; entry: string }> = {};
+  const trials: { entry: string; unit: string; arm: "with" | "without" }[] = [];
+  const id = ctx.ticket ?? ctx.factoryRun;
+  if (id == null) return { settings, trials };
+  const unit = ctx.ticket != null ? `ticket:${ctx.ticket}` : `run:${ctx.factoryRun}`;
+  const arm = id % 2 === 0 ? "with" : "without";
+  for (const e of listCatalog(log)) {
+    if (e.state !== "trial" || !e.settings?.length) continue;
+    trials.push({ entry: e.id, unit, arm });
+    if (arm === "with") for (const s of e.settings) settings[s.path] = { value: s.value, entry: e.id };
+  }
+  return { settings, trials };
 }

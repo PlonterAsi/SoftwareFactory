@@ -1,7 +1,8 @@
 import type { IncomingMessage } from "node:http";
 import type { EventLog } from "../events.js";
 import { CONFIG_LAYERS, configHash, diffConfig } from "./inventory.js";
-import { CATALOG_STATES, listCatalog, saveEntry, setEntryState, type CatalogState } from "./catalog.js";
+import { canTrial, decideTrials, onTrial, trialReport } from "./trials.js";
+import { CATALOG_STATES, getEntry, listCatalog, saveEntry, setEntryState, type CatalogState } from "./catalog.js";
 import type { Tickets } from "../tickets/tickets.js";
 import { SETTING_KINDS, assign, assignments, listProfiles, removeProfile, resolveProfiles, saveProfile, type Scope } from "./profiles.js";
 import { currentConfig, ranWith, snapshotOf } from "./stamp.js";
@@ -34,10 +35,23 @@ export async function configRoute(ctx: { log: EventLog; readJson?: (req: Incomin
       assign(ctx.log, body.scope as Scope, body.ref ?? null, body.profile ? String(body.profile) : null);
       return [200, { assignments: assignments(ctx.log) }];
     }
-    if (parts[0] === "catalog" && parts.length === 1 && req.method === "GET") return [200, { entries: listCatalog(ctx.log), states: CATALOG_STATES }];
+    if (parts[0] === "catalog" && parts.length === 1 && req.method === "GET") {
+      decideTrials(ctx.log, (id, state, note) => setEntryState(ctx.log, ctx.tickets ?? null, id, state, "trial", note));
+      const entries = listCatalog(ctx.log);
+      return [200, { entries, states: CATALOG_STATES, trials: Object.fromEntries(entries.filter((e) => e.state === "trial").map((e) => [e.id, trialReport(ctx.log, e.id)])) }];
+    }
     if (parts[0] === "catalog" && parts.length === 1 && req.method === "POST") { const body = (await ctx.readJson?.(req)) ?? {}; return [200, saveEntry(ctx.log, body.entry ?? {})]; }
     if (parts[0] === "catalog" && parts.length === 3 && parts[2] === "state" && req.method === "POST") {
       const body = (await ctx.readJson?.(req)) ?? {};
+      if (body.state === "trial") {
+        const e = getEntry(ctx.log, parts[1]);
+        const no = canTrial(e);
+        if (no) return [400, { error: no }];
+        // Two trials at once may not touch the same thing, or neither result would mean anything.
+        const mine = new Set([...(e!.touches ?? []), ...(e!.settings ?? []).map((x) => x.path)]);
+        const clash = onTrial(ctx.log).find((o) => o.id !== e!.id && [...o.touches, ...(o.settings ?? []).map((x) => x.path)].some((t) => mine.has(t)));
+        if (clash) return [400, { error: `"${clash.title}" is on trial and touches the same thing. Wait for it, or drop it.` }];
+      }
       return [200, setEntryState(ctx.log, ctx.tickets ?? null, parts[1], String(body.state) as CatalogState, "you", body.note ? String(body.note) : undefined)];
     }
     if (parts[0] === "resolve" && req.method === "GET") return [200, resolveProfiles(ctx.log, { projectId: num("project"), ticket: num("ticket"), factoryRun: num("run") })];
