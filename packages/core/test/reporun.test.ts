@@ -320,6 +320,8 @@ describe("a sliced run still hands over a branch that works (reliability after r
     expect(next.blocked).toBe(true);
     // The reviewer was told what was left, so it does not hold it against this run.
     expect(w.seen.filter((x) => x.station === "review").at(-1)!.req.prompt).toMatch(/left to a run of their own[\s\S]*F2/);
+    // What only another system could show is left to CI, not failed here (run 7899).
+    expect(w.seen.filter((x) => x.station === "review").at(-1)!.req.prompt).toMatch(/not checkable on this computer/);
   }, 60_000);
 });
 

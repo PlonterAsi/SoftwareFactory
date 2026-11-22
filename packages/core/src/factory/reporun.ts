@@ -333,6 +333,15 @@ export class RepoRun extends Run {
     }
     return out;
   }
+  /**
+   * The review runs on this one computer. Run 7899 (2026-11-22) was sent back twice for "on win32 and on Linux":
+   * the hook passed on Windows, and the Linux half cannot be run here, so a pass was turned into "not met" and a
+   * Fixer round that could never succeed. What only another system can show is left to the repo's CI.
+   */
+  private hereNote(): string {
+    const os = process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : "Linux";
+    return `\n\nThis work is checked on one ${os} computer. The part of a criterion that only another operating system, or a service this computer cannot reach, could show is not this run's to fail: when everything checkable here passes, the criterion passes, with the evidence "checked on ${os}; the rest is not checkable on this computer". The repo's CI checks the other systems.`;
+  }
   /** A sliced plan (SF-64): what this run leaves to the next slice, so nobody holds it against this one. */
   private laterNote(): string {
     const later = [...(this.plan.slice?.later ?? []), ...this.leftOver()];
@@ -358,7 +367,7 @@ export class RepoRun extends Run {
 
   protected fixBrief(): { spec: string; where: string } {
     return {
-      spec: `The change being built, as approved:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, acceptance: this.plan.acceptance }, null, 2)}${this.laterNote()}`,
+      spec: `The change being built, as approved:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, acceptance: this.plan.acceptance }, null, 2)}${this.laterNote()}${this.hereNote()}`,
       where: `You are in a clone of ${this.info.source} on branch ${this.info.branch}. The plan and the design of the change are under .sf/ (read only, not part of the repo).${this.env.testHint ? ` Its tests run with: ${this.env.testHint}.` : ""} See what changed so far with: git diff ${this.base}`,
     };
   }
@@ -369,7 +378,7 @@ export class RepoRun extends Run {
     try { diff = git(this.dir, "diff", "--no-color", this.base, "--", ".").slice(0, 40000); } catch { /* the Reviewer reads the folder */ }
     const site = siteProfile(this.dir);
     return {
-      prompt: `The approved plan:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, features: (this.plan.features ?? []).map((f) => `${f.id} ${f.title}`), acceptance: this.plan.acceptance }, null, 2)}${this.laterNote()}\n\nThe diff against ${this.base}, where the work started (${this.info.source}, branch ${this.info.branch}):\n${diff || "(empty)"}`,
+      prompt: `The approved plan:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, features: (this.plan.features ?? []).map((f) => `${f.id} ${f.title}`), acceptance: this.plan.acceptance }, null, 2)}${this.laterNote()}${this.hereNote()}\n\nThe diff against ${this.base}, where the work started (${this.info.source}, branch ${this.info.branch}):\n${diff || "(empty)"}`,
       verify: [
         "You also verify the change, not only read it. You have a shell in the clone (read and run only: do not change files).",
         `For EACH acceptance criterion below, check it by running something: ${this.env.testHint ? `the repo's tests (${this.env.testHint}), ` : ""}the code itself${site ? `, or the running site (start it in the background with \`${site.command}\`, read the address it prints, fetch its pages, then stop it)` : ""}.`,
