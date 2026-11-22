@@ -292,12 +292,19 @@ export abstract class RunBase {
     }
   }
 
+  /** SF-115: a run someone stopped ends here, before its next step, agent call or gate. */
+  protected stopCheck() {
+    const why = this.f.stopReason(this.id);
+    if (why) throw new StopRun(why);
+  }
+
   /** One agent call, inside both its own cap and what is left of the run's cap. */
   /** The CLI session of the last successful call, so a follow-up can continue it. */
   protected lastSession: string | undefined;
   /** Time this run spent waiting at gates for the person. */
   protected waitedMs = 0;
   protected async ask(m: CrewMember, prompt: string, meta: { seat?: number; round?: number } = {}, x: { model?: string; resume?: string; noTools?: boolean; capUsd?: number; /** The cap may go above the agent's own per-call budget (it stays inside the run's). */ raiseCap?: boolean } = {}): Promise<string> {
+    this.stopCheck();
     if (this.o.maxUsd - this.spent < 0.01) {
       // Council seats ask at the same time: one question, and the others see the answer.
       await this.gateTurn(async () => {
@@ -337,10 +344,12 @@ export abstract class RunBase {
       ...(verifier ? { cwd: this.dir, tools: [...new Set([...READ_TOOLS, "Bash", ...(kit.tools ?? []).filter((t) => t !== "Edit" && t !== "Write")])], commands: this.benchCommands(), timeoutMs: 15 * 60_000, noMemory: true, ...this.benchEnv() } : {}),
       ...(x.resume ? { resume: x.resume } : {}),
       ...(x.noTools ? { tools: [] } : {}),
+      signal: this.f.signalOf(this.id),
     }, { factoryRun: this.id, station: m.station, agentVersion: m.version, ...meta, ...(bench ? { workbench: true } : {}) });
     this.lastSession = r.result?.sessionId;
     // A call that failed was still paid for (run 2366: two opus calls died at the cap and were never counted).
     this.spent += r.result?.costUsd ?? r.costUsd ?? 0;
+    this.stopCheck();
     if (r.error || !r.result) throw new Error(`${m.name} failed: ${r.error}`);
     return r.result.text;
   }
@@ -350,6 +359,7 @@ export abstract class RunBase {
     let attempt = 1;
     let lastError = "";
     for (;;) {
+      this.stopCheck();
       this.mark(id, "active", round, attempt > 1 ? `retry ${attempt - 1}` : undefined);
       try {
         const out = await work();

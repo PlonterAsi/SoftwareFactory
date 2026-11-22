@@ -309,6 +309,16 @@ Retry used to repeat the failed step with what was left of the old limit, so a b
 - **Inside a run**, a step that ran out of money inside one call is retried with a bigger cap for that call (double its last cap, at least a whole feature session), never the same one, and the question says what it adds to the run to afford it ("Retry it with $0.90 for that call, adding $0.40 to the run?"). An unattended run never repeats a failure nothing changed, and never adds money by itself.
 - **After a run stopped or failed**, `Factory.retry` picks it up at the step it stopped at (`factory.run.retried`): same folder, same branch, what was built stays built, with fresh money sized to what is left (`retryAddUsd`), bounded by the project's budget. The run page and the ticket page both have the button.
 
+## Stop ends a run, whatever it is doing (SF-115)
+
+On 2026-11-22 a second build of the same ticket (run 8917) sat at its plan gate, and the only way to end it was to reject the plan by hand. **Stop run** (on the run's floor and its mission card; two presses) and `POST /api/factory/runs/:id/stop` (`{ by?, reason? }`) end a run in any state:
+
+- **Parked at a gate:** the wait ends at once with a stop; no gate name is needed.
+- **At work:** the agent call in flight is cut (the run's `AbortSignal` kills the CLI), and the run checks before each step, agent call and gate, so nothing new starts.
+- **Stopped and resumable** (the app closed under it, also one that waited at a gate): it is closed for good, so the next start does not resume it.
+
+Each stop writes `factory.run.stop` (who, why, the gate it waited at, whether it was at work), and the run ends `stopped` and not resumable; Retry can still pick it up on purpose. A run that already ended answers 409. Closing a ticket (closed, rejected, or closed as a duplicate) stops every run started on it the same way, and the ticket's thread says which (`tickets/stopruns.ts`).
+
 ## A sliced run still hands over a branch that works (2026-11-18)
 
 Run 5669 also showed two ways a run with several features ended with nothing usable: F1 broke 9 to 15 of the repo's passing tests, was committed anyway, and every later feature built on a broken branch; and a run that ran dry mid-build stopped at the budget question, so the features it had built were never handed over.

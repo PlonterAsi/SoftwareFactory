@@ -10,7 +10,7 @@ import { probeStart } from "./appkit.js";
 import { checkScreens, readScreens, type ScreenCheck } from "./screencheck.js";
 import { checkLinks, type LinkCheck } from "./linkcheck.js";
 import { git, isLockedTest, readTree, testsHash } from "./workspace.js";
-import { type GateDecision, type GateId, MAX_AUTO_RESUMES, type Pending, type Plan, type RunMaker, type RunOptions, type ScreenRun, type StationId, defaultUi, normIdea, restoreState, unfinishedRuns, waitingEscalation } from "./runkit.js";
+import { type GateDecision, type GateId, MAX_AUTO_RESUMES, type Pending, type Plan, type RunMaker, type RunOptions, type ScreenRun, type StationId, StopRun, defaultUi, normIdea, restoreState, unfinishedRuns, waitingEscalation } from "./runkit.js";
 import { Run } from "./run.js";
 import { brainHash, principles } from "../brain/brain.js";
 
@@ -23,6 +23,9 @@ export { RunJudge } from "./runjudge.js";
 export class Factory {
   private pending = new Map<number, Pending>();
   private active = new Map<number, Promise<void>>();
+  /** SF-115: runs asked to stop, with why; each one's agent call in flight is cut through its signal. */
+  private stopping = new Map<number, string>();
+  private aborters = new Map<number, AbortController>();
 
   /** Runs this core found in flight when it started (closed as stopped, resumable). */
   readonly interrupted: number[] = [];
@@ -96,8 +99,11 @@ export class Factory {
   resumeInterrupted(): number[] {
     const out: number[] = [];
     for (const id of this.interrupted.splice(0)) {
-      const auto = this.log.list({ type: "factory.run.resumed", limit: 1e6 }).filter((e) => (e.payload as { run: number; auto?: boolean }).run === id && (e.payload as { auto?: boolean }).auto).length;
-      if (auto >= MAX_AUTO_RESUMES) continue;
+      // A run that waited at the plan or build gate comes back to that gate with no agent call: an update while it
+      // waits is not a run that keeps dying, so those resumes do not count toward the limit.
+      const atGate = (from?: string) => from === "gateA" || from === "gateB";
+      const auto = this.log.list({ type: "factory.run.resumed", limit: 1e6 }).filter((e) => { const p = e.payload as { run: number; auto?: boolean; from?: string }; return p.run === id && p.auto && !atGate(p.from); }).length;
+      if (auto >= MAX_AUTO_RESUMES && !atGate(restoreState(this.log, id).from)) continue;
       try { this.resume(id, { auto: true }); out.push(id); } catch { /* not resumable (say, its folder is gone): it stays stopped */ }
     }
     return out;
@@ -227,7 +233,7 @@ export class Factory {
     }
     this.log.append("factory.run.resumed", { run, from: st.from, auto: !!opts.auto, spentUsd: Number(st.spent.toFixed(6)), runtime: runtime.name });
     const r = make ? make({ factory: this, log: this.log, runtime, id: run, idea: started.idea, o, started }) : new Run(this, this.log, runtime, run, started.idea, o, started.screen ?? null);
-    const done = r.go(st).finally(() => this.active.delete(run));
+    const done = r.go(st).finally(() => this.ended(run));
     this.active.set(run, done);
     return run;
   }
@@ -241,7 +247,7 @@ export class Factory {
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
     const flow = this.flows.forRun(undefined, opts.flow);
     const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
-    const done = new Run(this, this.log, runtime, ev.id, text, o).go().finally(() => this.active.delete(ev.id));
+    const done = new Run(this, this.log, runtime, ev.id, text, o).go().finally(() => this.ended(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
   }
@@ -280,7 +286,7 @@ export class Factory {
     const files = Object.keys(readTree(dir)).filter(isLockedTest);
     this.log.append("factory.tests.locked", { run: id, hash: testsHash(dir), files, sha: screen.baseSha.slice(0, 7), kept: baseRun });
     this.log.append("factory.station", { run: id, station: "tests", state: "skipped", note: `${files.length} locked test file${files.length === 1 ? "" : "s"} ${kept}`, spentUsd: 0, maxUsd: o.maxUsd });
-    const done = new Run(this, this.log, runtime, id, idea, o, screen).go(restoreState(this.log, id)).finally(() => this.active.delete(id));
+    const done = new Run(this, this.log, runtime, id, idea, o, screen).go(restoreState(this.log, id)).finally(() => this.ended(id));
     this.active.set(id, done);
     return id;
   }
@@ -301,7 +307,7 @@ export class Factory {
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
     const flow = this.flows.forRun();
     const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
-    const done = new Run(this, this.log, runtime, ev.id, text, o, screen).go().finally(() => this.active.delete(ev.id));
+    const done = new Run(this, this.log, runtime, ev.id, text, o, screen).go().finally(() => this.ended(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
   }
@@ -319,7 +325,7 @@ export class Factory {
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
     const started = { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), kind, ...extra, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow: this.flows.forRun(kind, opts.flow) };
     const ev = this.log.append("factory.run.started", started);
-    const done = make({ factory: this, log: this.log, runtime, id: ev.id, idea: text, o, started }).go().finally(() => this.active.delete(ev.id));
+    const done = make({ factory: this, log: this.log, runtime, id: ev.id, idea: text, o, started }).go().finally(() => this.ended(ev.id));
     this.active.set(ev.id, done);
     return ev.id;
   }
@@ -361,6 +367,54 @@ export class Factory {
 
   /** @internal used by Run */
   awaitGate(run: number, gate: GateId): Promise<GateDecision> {
-    return new Promise((res) => this.pending.set(run, { gate, resolve: res }));
+    const why = this.stopping.get(run);
+    if (why) return Promise.reject(new StopRun(why));
+    return new Promise((res, rej) => this.pending.set(run, { gate, resolve: res, stop: rej }));
+  }
+
+  /**
+   * SF-115: stop a run on purpose, whatever it is doing. One parked at a gate ends at once; one at work ends as soon
+   * as its agent call in flight is cut (the CLI is killed through the run's signal) or its next step begins; one the
+   * app's restart left stopped and resumable (also one that waited at a gate) is closed for good, so nothing resumes
+   * it. On 2026-11-22 a duplicate build (run 8917) sat at its plan gate, and the only way to end it was to reject the
+   * plan by hand. A stopped run is not resumable; Retry can still pick it up on purpose.
+   */
+  stop(run: number, opts: { by?: string; reason?: string } = {}): { ok: boolean; run: number; state: "stopping" | "stopped" | "ended"; why?: string } {
+    const by = opts.by ?? "you";
+    const reason = (opts.reason ?? (by === "you" ? "You stopped this run." : `Stopped by ${by}.`)).slice(0, 500);
+    if (this.active.has(run)) {
+      if (this.stopping.has(run)) return { ok: true, run, state: "stopping" };
+      const gate = this.waitingGate(run);
+      this.stopping.set(run, reason);
+      this.log.append("factory.run.stop", { run, by, reason, gate, working: !gate });
+      const p = this.pending.get(run);
+      if (p) { this.pending.delete(run); p.stop?.(new StopRun(reason)); }
+      this.aborters.get(run)?.abort();
+      return { ok: true, run, state: "stopping" };
+    }
+    if (this.log.get(run)?.type !== "factory.run.started") return { ok: false, run, state: "ended", why: "No such run." };
+    const r = this.resumable(run);
+    if (!r.ok) return { ok: false, run, state: "ended", why: r.why };
+    const i = this.interrupted.indexOf(run);
+    if (i >= 0) this.interrupted.splice(i, 1);
+    this.log.append("factory.run.stop", { run, by, reason, gate: null, working: false });
+    this.log.append("factory.run.finished", { run, outcome: "stopped", reason, resumable: false, totalUsd: null, by });
+    return { ok: true, run, state: "stopped" };
+  }
+
+  /** Why this run was asked to stop, or null. The run checks it before each step, agent call and gate. */
+  stopReason(run: number): string | null { return this.stopping.get(run) ?? null; }
+
+  /** The signal that cuts this run's agent call in flight when it is stopped. */
+  signalOf(run: number): AbortSignal {
+    let a = this.aborters.get(run);
+    if (!a) { a = new AbortController(); this.aborters.set(run, a); }
+    return a.signal;
+  }
+
+  private ended(run: number) {
+    this.active.delete(run);
+    this.stopping.delete(run);
+    this.aborters.delete(run);
   }
 }

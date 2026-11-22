@@ -52,6 +52,8 @@ export interface AgentRequest {
    * runtime's rule (see `advisorFor`).
    */
   advisor?: string | null;
+  /** SF-115: aborting it ends the call at once (the CLI is killed); a stopped run cuts its call in flight. */
+  signal?: AbortSignal;
 }
 
 export interface AgentResult {
@@ -247,11 +249,14 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       let err = "";
       const limit = req.timeoutMs ?? this.opts.timeoutMs;
       const timer = setTimeout(() => { killTree(child, true); reject(new Error(`Agent timed out after ${limit} ms`)); }, limit);
+      const onAbort = () => { clearTimeout(timer); killTree(child, true); reject(new Error("The run was stopped, so this call was cut.")); };
+      if (req.signal?.aborted) onAbort(); else req.signal?.addEventListener("abort", onAbort, { once: true });
       child.stdout.on("data", (d) => (out += d));
       child.stderr.on("data", (d) => (err += d));
       child.on("error", (e) => { clearTimeout(timer); reject(e); });
       child.on("close", (code) => {
         clearTimeout(timer);
+        req.signal?.removeEventListener("abort", onAbort);
         try {
           const r = parseClaudeJson(out, this.name, Date.now() - started);
           resolve(advisor ? { ...r, advisor } : r);

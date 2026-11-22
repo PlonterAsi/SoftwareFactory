@@ -79,6 +79,14 @@ export async function retryRun(run: number) {
   return j as { run: number; from: string; addUsd: number; maxUsd: number };
 }
 
+/** SF-115: stop a run whatever it is doing (at work, parked at a gate, or stopped and waiting to resume). It does not resume. */
+export async function stopRun(run: number) {
+  const r = await fetch(`${API}/api/factory/runs/${run}/stop`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? "could not stop the run");
+  return j as { run: number; state: "stopping" | "stopped" };
+}
+
 export async function decideGate(run: number, gate: string, approve: boolean, note?: string) {
   const r = await fetch(`${API}/api/factory/runs/${run}/gate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ gate, approve, note }) });
   if (!r.ok) throw new Error((await r.json()).error ?? "gate failed");

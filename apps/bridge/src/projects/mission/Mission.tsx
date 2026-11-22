@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { duplicateOf, projectsApi, resumeRun, type DuplicateRun, type FactoryRunView } from "../../api";
 import { DuplicateNotice } from "../../DuplicateNotice";
 import { AskBanner } from "../../Intake";
-import { GateActions } from "../../GateActions";
+import { GateActions, StopRunButton } from "../../GateActions";
 import { showTicket } from "../../BugReport";
 import { RepoStrip } from "../../RunDeck";
 import { ago, describe } from "../builtin";
@@ -113,6 +113,7 @@ function ForYou({ run, onOpen }: { run?: FactoryRunView; onOpen: (s: StopId) => 
       <div className="ms-card ms-you on">
         <h4><i />{run.waiting.gate === "gateA" ? "Your OK: plan" : run.waiting.gate === "gateB" ? "Your OK: build" : "Your call"}</h4>
         <GateActions run={run} compact />
+        <StopRunButton key={run.run} run={run.run} />
         <button className="ghost sm" onClick={() => onOpen(at === "ok1" ? "plan" : at === "ok2" ? "judge" : at)}>{at === "ok1" ? "Read the plan" : at === "ok2" ? "See what the Judge saw" : "Show the loop"}</button>
       </div>
     );
@@ -123,6 +124,7 @@ function ForYou({ run, onOpen }: { run?: FactoryRunView; onOpen: (s: StopId) => 
         <h4><i />Stopped part way</h4>
         <p>{run.finished.reason}</p>
         <button onClick={() => resumeRun(run.run).catch(() => undefined)}>Resume from where it stopped</button>
+        <StopRunButton key={run.run} run={run.run} label="Stop for good" />
       </div>
     );
   }
@@ -132,6 +134,7 @@ function ForYou({ run, onOpen }: { run?: FactoryRunView; onOpen: (s: StopId) => 
     <div className="ms-card ms-you">
       <h4><i />Coming up for you</h4>
       <p>Nothing needs you right now. You approve {next} when it is ready; it shows here and under Needs you.</p>
+      <StopRunButton key={run.run} run={run.run} />
     </div>
   );
 }

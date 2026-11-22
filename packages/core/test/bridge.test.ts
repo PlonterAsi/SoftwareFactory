@@ -195,19 +195,29 @@ describe("in-app updates", () => {
       const idle = await fetch(`${base}/api/updates/install`, { method: "POST", body: JSON.stringify({ by: "auto", version: "0.3.0" }) });
       expect(idle.status).toBe(200);
       expect(log.list({ type: "app.update.started" }).at(-1)!.payload).toMatchObject({ by: "auto", version: "0.3.0", from: "0.2.5", activeRuns: 0, agentCalls: 0 });
-      // A build waiting at its plan gate: an install that starts by itself is refused; the person's own goes on.
+      // A build waiting at its plan gate costs nothing and waits at the same gate after the restart, so it does not hold an
+      // update (run 8917 sat at its plan gate and held every update on the PC).
       const run = core.factory.start("count words", { autoRetries: 0 });
       for (let i = 0; i < 400 && core.factory.waitingGate(run) !== "gateA"; i++) await new Promise((r) => setTimeout(r, 25));
       expect(core.factory.waitingGate(run)).toBe("gateA");
+      expect(await (await fetch(`${base}/api/updates`)).json()).toMatchObject({ activeRuns: 0, parkedRuns: 1 });
+      const parked = await fetch(`${base}/api/updates/install`, { method: "POST", body: JSON.stringify({ by: "auto", version: "0.3.0" }) });
+      expect(parked.status).toBe(200);
+      expect(log.list({ type: "app.update.started" }).at(-1)!.payload).toMatchObject({ by: "auto", activeRuns: 0, parkedRuns: 1, runs: [{ run, gate: "gateA" }] });
+      // Work in flight still holds an install that starts by itself; the person's own goes on.
+      const busy = log.append("agent.run.started", { agent: "builder", runtime: "mock", prompt: "x" });
       const held = await fetch(`${base}/api/updates/install`, { method: "POST", body: JSON.stringify({ by: "auto", version: "0.3.0" }) });
       expect(held.status).toBe(409);
-      expect(log.list({ type: "app.update.held" }).at(-1)!.payload).toMatchObject({ by: "auto", activeRuns: 1, runs: [{ run, gate: "gateA" }] });
-      expect(log.list({ type: "app.update.started" })).toHaveLength(1);
+      expect(log.list({ type: "app.update.held" }).at(-1)!.payload).toMatchObject({ by: "auto", agentCalls: 1 });
       const mine = await fetch(`${base}/api/updates/install`, { method: "POST", body: JSON.stringify({ by: "person", version: "0.3.0" }) });
       expect(mine.status).toBe(200);
-      expect(log.list({ type: "app.update.started" }).at(-1)!.payload).toMatchObject({ by: "person", activeRuns: 1, runs: [{ run, gate: "gateA" }] });
-      core.factory.decide(run, "gateA", { approve: false });
+      log.append("agent.run.failed", { runId: busy.id, agent: "builder", error: "stopped" });
+      // SF-115: Stop ends the parked run with one call, no gate name needed.
+      const stop = await fetch(`${base}/api/factory/runs/${run}/stop`, { method: "POST", body: "{}" });
+      expect(stop.status).toBe(200);
       await core.factory.wait(run);
+      expect(log.list({ type: "factory.run.finished" }).at(-1)!.payload).toMatchObject({ run, outcome: "stopped", reason: "You stopped this run." });
+      expect((await fetch(`${base}/api/factory/runs/${run}/stop`, { method: "POST", body: "{}" })).status).toBe(409);
     } finally { server.close(); }
   });
 
