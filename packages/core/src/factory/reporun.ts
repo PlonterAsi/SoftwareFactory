@@ -193,6 +193,28 @@ export function repoBranch(run: string | number, ask: string, ticket?: { key: st
 
 const key = (c: Pick<TestCase, "file" | "name">) => `${c.file}::${c.name}`;
 
+/**
+ * A test that already failed in the baseline, however the runner named it this time. Vitest prints the same failure
+ * as "× suite > name" in the file's list and as "FAIL file > suite > name" in the summary, and which of the two
+ * lines a run shows varies; run 7899 had "::opens each screen…" in its baseline and "every screen in a real
+ * browser > opens each screen…" in its rounds, so the old failure was held against it (2026-11-22). The test's own
+ * name, the last "> " part, is what stays the same.
+ */
+export function failedBefore(c: Pick<TestCase, "file" | "name">, before: Set<string>): boolean {
+  if (before.has(key(c))) return true;
+  const leaf = (n: string) => n.split(" > ").at(-1)!.trim();
+  const mine = leaf(c.name);
+  if (!mine) return false;
+  for (const k of before) {
+    const at = k.indexOf("::");
+    const file = k.slice(0, at);
+    // Two files may hold tests of the same name (pytest's test_home): only a line without its file falls back.
+    if (file && c.file && file !== c.file) continue;
+    if (leaf(k.slice(at + 2)) === mine) return true;
+  }
+  return false;
+}
+
 export class RepoRun extends Run {
   private env: RepoEnv = { stack: [], tests: [], pathFirst: [], commands: [], notes: [], testHint: "" };
   private ref!: RepoRef;
@@ -219,7 +241,12 @@ export class RepoRun extends Run {
   protected async testsStep() { await this.baselineTests(); }
   protected keptOnResume(step: FlowStep): Promise<void> | void {
     if (step.action === "intake") return this.prepare();
-    if (step.action === "tests") this.failingBefore = new Set(((this.lastOf("factory.tests.locked")?.failingBefore ?? []) as string[]).map(String));
+    if (step.action === "tests") {
+      const locked = this.lastOf("factory.tests.locked");
+      this.failingBefore = new Set(((locked?.failingBefore ?? []) as string[]).map(String));
+      // The fast checks that already failed before the change stay off after a resume too.
+      if (typeof locked?.gatesOff === "string") this.gatesOff = locked.gatesOff;
+    }
   }
 
   protected shipped(sha: string) {
@@ -618,7 +645,7 @@ export class RepoRun extends Run {
     const began = Date.now();
     const r: TestRun = this.env.tests.length ? await this.tools.runTests(this.dir, this.env) : { cases: [], passed: 0, failed: 0, exitCode: 0, timedOut: false, output: "" };
     const tookS = Math.round((Date.now() - began) / 1000);
-    const old = r.cases.filter((c) => !c.pass && this.failingBefore.has(key(c)));
+    const old = r.cases.filter((c) => !c.pass && failedBefore(c, this.failingBefore));
     r.cases = r.cases.filter((c) => !old.includes(c));
     if (old.length) r.cases.push({ name: `${old.length} test${old.length === 1 ? "" : "s"} that already failed before this change (not held against it)`, file: "", pass: true, durationMs: 0 });
     if (!this.env.tests.length) r.cases.push({ name: "the repo has no tests SoftwareFactory can run here", file: "", pass: true, durationMs: 0 });
@@ -632,7 +659,8 @@ export class RepoRun extends Run {
     if (gamed.length) r.output = `Test integrity:\n${describeIntegrity(gamed)}\nFix the code, not the tests.\n\n${r.output}`.slice(0, 6000);
     r.passed = r.cases.filter((c) => c.pass).length;
     r.failed = r.cases.length - r.passed;
-    this.log.append("factory.tests", { run: this.id, round, cases: r.cases.slice(0, 400), passed: r.passed, failed: r.failed, timedOut: r.timedOut });
+    // Failing cases first, so a long suite cut at 400 never drops the ones that matter.
+    this.log.append("factory.tests", { run: this.id, round, cases: [...r.cases.filter((c) => !c.pass), ...r.cases.filter((c) => c.pass)].slice(0, 400), passed: r.passed, failed: r.failed, timedOut: r.timedOut });
     if (this.env.tests.length) this.lastSuite = { passed: r.passed, failed: r.failed, failing: r.cases.filter((c) => !c.pass).map((c) => c.name).slice(0, 10), seconds: tookS };
     return r;
   }
