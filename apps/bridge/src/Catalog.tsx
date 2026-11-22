@@ -16,7 +16,7 @@ const usd = (x: number | null) => (x == null ? "n/a" : `$${x.toFixed(2)}`);
 
 /** One trial: both sides, so you can see why it was (or will be) promoted, dropped or left to you. */
 function TrialLine({ t }: { t: Trial }) {
-  const side = (label: string, s: Side) => <span>{label}: {s.passed} of {s.finished} passed ({pct(s.passRate)}), {usd(s.avgUsd)} each{s.running ? `, ${s.running} still going` : ""}</span>;
+  const side = (label: string, s: Side) => <span>{label}: {s.finished ? `${s.passed} of ${s.finished} passed (${pct(s.passRate)}), ${usd(s.avgUsd)} each` : "nothing finished yet"}{s.running ? `, ${s.running} still going` : ""}</span>;
   return (
     <div className={`cfg-trial ct-${t.verdict}`}>
       {side("With it", t.sides.with)} · {side("Without", t.sides.without)}

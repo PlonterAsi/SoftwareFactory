@@ -2,7 +2,7 @@
 
 What SoftwareFactory runs with right now, where each piece came from, and which setup every run used.
 
-Built from Assaf's brief of 22 Nov 2026. Done: the inventory, Ran with, isolation, profiles, the catalog, trials. Next: editable switches.
+Built from Assaf's brief of 22 Nov 2026. Done: the inventory, Ran with, isolation, profiles, the catalog, trials, switches.
 
 ## The three layers
 
@@ -79,6 +79,14 @@ A piece is finished when its ticket's pull request merged (pass), or it was reje
 
 SF checks after a pull request changes, a ticket note, or a finished run (at most once a minute), and when the Configuration page loads. The catalog shows both sides of each trial.
 
+## Switches
+
+SoftwareFactory reads SF_* environment variables. The ones that change how the crew works (personal settings, the default advisor, the agent timeout, the screen and link checks, auto-resume, the import, review, Archivist and improvement caps, the sign-in retry wait, the browser) are listed in the Switches section of the Configuration page, set or not, with what each one does.
+
+Change one there and it is kept as a `config.switch.set` event: it wins over this PC's environment and stays after a restart. Reset gives the PC's own value (or the default) back. Some switches are read on every use and apply at once; the rest apply when SoftwareFactory starts, and the page says when a change waits for a restart. With several bases, only the default base's choices apply, since they share one process.
+
+Not editable there: secrets (shown by name only), how the process was started (port, database), and what picks the Claude Code binary or the crew mode (Systems owns those).
+
 ## API
 
 - `GET /api/config`: the current setup by layer, with its fingerprint
@@ -86,3 +94,4 @@ SF checks after a pull request changes, a ticket note, or a finished run (at mos
 - `GET /api/config/ran?run=N` or `?ticket=N`: the setups a run's or ticket's calls ran with
 - `GET /api/config/profiles`, `PUT|DELETE /api/config/profiles/:id`, `POST /api/config/assign`, `GET /api/config/resolve?project=&ticket=&run=`
 - `GET|POST /api/config/catalog`, `POST /api/config/catalog/:id/state`
+- `GET /api/config/switches`, `PUT|DELETE /api/config/switches/:name`

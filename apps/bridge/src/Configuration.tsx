@@ -3,6 +3,7 @@ import { API } from "./api";
 import { ago } from "./projects/builtin";
 import { ProfilesSection } from "./Profiles";
 import { CatalogSection } from "./Catalog";
+import { SwitchesSection } from "./Switches";
 
 export type ConfigLayer = "how" | "who" | "where";
 export interface ConfigSource { kind: "built-in" | "scout" | "pr" | "you" | "add-on" | "switch"; label: string; link?: string }
@@ -24,13 +25,14 @@ export function ConfigurationPage() {
   const [onlyOn, setOnlyOn] = useState(false);
   const [q, setQ] = useState("");
   const [tick, setTick] = useState(0);
+  const [editable, setEditable] = useState<string[]>([]);
   useEffect(() => {
     const load = () => fetch(`${API}/api/config`).then(async (r) => { if (!r.ok) throw new Error(`The core said ${r.status}`); setRep(await r.json()); setErr(null); }).catch((e) => setErr((e as Error).message));
     load();
     const t = setInterval(load, 10_000);
     return () => clearInterval(t);
   }, [tick]);
-  const shown = useMemo(() => (rep?.entries ?? []).filter((e) => (!onlyOn || e.on) && (!q || `${e.name} ${e.detail} ${e.group} ${e.source.label}`.toLowerCase().includes(q.toLowerCase()))), [rep, onlyOn, q]);
+  const shown = useMemo(() => (rep?.entries ?? []).filter((e) => !editable.includes(e.name) && (!onlyOn || e.on) && (!q || `${e.name} ${e.detail} ${e.group} ${e.source.label}`.toLowerCase().includes(q.toLowerCase()))), [rep, onlyOn, q, editable]);
   const counts = useMemo(() => {
     const all = rep?.entries ?? [];
     return { on: all.filter((e) => e.on).length, off: all.filter((e) => !e.on).length, scout: all.filter((e) => e.source.kind === "scout").length };
@@ -78,6 +80,7 @@ export function ConfigurationPage() {
               </section>
             );
           })}
+          <SwitchesSection onChanged={() => setTick((n) => n + 1)} onNames={setEditable} />
         </div>
       )}
     </section>

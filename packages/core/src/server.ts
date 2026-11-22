@@ -17,6 +17,7 @@ import { setConfigSource } from "./configs/stamp.js";
 import { setProfileFlows } from "./configs/profiles.js";
 import { adoptScoutTickets, setEntryState } from "./configs/catalog.js";
 import { decideTrials } from "./configs/trials.js";
+import { applySwitches, noteStarted } from "./configs/switches.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { duplicateReply, Factory, type GateId } from "./factory/loop.js";
 import { stopRunsOnClose } from "./tickets/stopruns.js";
@@ -989,6 +990,9 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isDefault?: boolean; runnerJobs?: () => number } = {}): BootedBase & { core: ReturnType<typeof createCore>; log: EventLog } {
   if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
   const log = new EventLog(dbPath);
+  // Switches you set on the Configuration page (configs/switches.ts) win over this PC's environment. One process, one
+  // environment: only the default base's choices apply.
+  if (isDefault) { try { applySwitches(log); } catch (e) { console.warn("Switches from the Configuration page not applied:", (e as Error).message); } noteStarted(); }
   // Crew mode: what you last picked in the Bridge, else what the shell found (real when Claude Code is installed).
   const picked = readSettings(log).crewMode;
   const envMode: CrewMode = modeOf(runtimeFromEnv());

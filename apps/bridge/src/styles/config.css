@@ -51,3 +51,8 @@
 .cfg-trial.ct-promote { border-left-color: var(--good); }
 .cfg-trial.ct-drop { border-left-color: var(--bad); }
 .cfg-trial.ct-unclear { border-left-color: var(--gate); }
+
+.cfg-switch { display: inline-flex; align-items: center; gap: 6px; }
+.cfg-switch-form { display: inline-flex; gap: 4px; }
+.cfg-switch-form input { width: 12em; max-width: 100%; }
+.cfg-restart { color: var(--gate); }

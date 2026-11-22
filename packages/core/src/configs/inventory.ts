@@ -61,6 +61,8 @@ export interface ConfigInputs {
   catalog?: Record<string, number>;
   /** When a setting was last changed, by key (settings.changed events). */
   settingSince?: Record<string, string>;
+  /** The switches you can change on the page (configs/switches.ts), set or not. */
+  switches?: { name: string; what: string; value: string | null; from: "page" | "pc" | "default"; unset: string; at?: string }[];
 }
 
 const REPO = "https://github.com/PlonterAsi/SoftwareFactory";
@@ -207,8 +209,17 @@ export function buildInventory(i: ConfigInputs): ConfigEntry[] {
       source: pluginSource(p),
     });
   }
+  const known = new Set((i.switches ?? []).map((s) => s.name));
+  for (const s of i.switches ?? []) {
+    out.push({
+      id: `switch:${s.name}`, layer: "where", group: "Switches", name: s.name, on: s.value !== null,
+      detail: s.value !== null ? `${s.what}: ${s.value}` : `${s.what}. Unset: ${s.unset}`,
+      source: s.from === "page" ? { kind: "you", label: "Set by you on this page" } : s.from === "pc" ? { kind: "switch", label: "Set in this PC's environment" } : SHIPPED,
+      since: s.at ?? null,
+    });
+  }
   for (const [k, v] of Object.entries(i.env).sort(([a], [b]) => a.localeCompare(b))) {
-    if (!k.startsWith("SF_") || v === undefined || PLUMBING.has(k)) continue;
+    if (!k.startsWith("SF_") || v === undefined || PLUMBING.has(k) || known.has(k)) continue;
     out.push({ id: `switch:${k}`, layer: "where", group: "Switches", name: k, on: true, detail: SECRET.test(k) ? "Set (value hidden)" : `= ${v}`, source: { kind: "switch", label: "Set in this PC's environment" } });
   }
   return out;

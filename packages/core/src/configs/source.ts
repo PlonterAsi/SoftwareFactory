@@ -1,3 +1,4 @@
+import { listSwitches } from "./switches.js";
 import { readAdvisorRule } from "../advisor.js";
 import type { AgentBay } from "../bay/bay.js";
 import { listMcp, listSkills } from "../bay/kits.js";
@@ -30,6 +31,7 @@ export function liveConfig(d: {
       skills: listSkills().map((s) => ({ name: s.name, source: s.source })), mcp: listMcp().map((m) => ({ name: m.name, source: m.source })),
       advisor: readAdvisorRule(d.log), crewMode: d.crewMode(), autoWork: d.autoWork(), maxRunMinutes: d.maxRunMinutes(),
       personalSettings: crewUsesPersonalSettings(env), env, settingSince: settingSince(d.log), profiles: profileCounts(d.log), catalog: catalogCounts(d.log),
+      switches: listSwitches(d.log, env),
     });
     cached = { at: Date.now(), entries };
     return entries;

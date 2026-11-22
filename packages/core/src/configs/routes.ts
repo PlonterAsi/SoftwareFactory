@@ -6,6 +6,7 @@ import { CATALOG_STATES, getEntry, listCatalog, saveEntry, setEntryState, type C
 import type { Tickets } from "../tickets/tickets.js";
 import { SETTING_KINDS, assign, assignments, listProfiles, removeProfile, resolveProfiles, saveProfile, type Scope } from "./profiles.js";
 import { currentConfig, ranWith, snapshotOf } from "./stamp.js";
+import { listSwitches, resetSwitch, setSwitch } from "./switches.js";
 
 /**
  * The Configuration API (docs/configuration.md).
@@ -18,11 +19,19 @@ import { currentConfig, ranWith, snapshotOf } from "./stamp.js";
  *   DELETE /api/config/profiles/:id    remove; whatever used it falls back to the broader profile
  *   POST   /api/config/assign          { scope: global|project|ticket|run, ref, profile|null }
  *   GET    /api/config/resolve?project=&ticket=&run=   the profiles and settings a call there runs with
+ *   GET    /api/config/switches        every SF_* switch you can change, its value and where it came from
+ *   PUT    /api/config/switches/:name  { value }  set it (null = unset); DELETE gives the PC's own value back
  */
 export async function configRoute(ctx: { log: EventLog; readJson?: (req: IncomingMessage) => Promise<any>; known?: () => { flows: Set<string>; agents: Set<string> }; tickets?: Tickets | null }, req: IncomingMessage, url: URL): Promise<[number, unknown] | null> {
   const parts = url.pathname.replace(/^\/api\/config\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
   const num = (k: string) => { const v = url.searchParams.get(k); return v && /^\d+$/.test(v) ? Number(v) : null; };
   try {
+    if (parts[0] === "switches" && parts.length === 1 && req.method === "GET") return [200, { switches: listSwitches(ctx.log) }];
+    if (parts[0] === "switches" && parts.length === 2 && req.method === "PUT") {
+      const body = (await ctx.readJson?.(req)) ?? {};
+      return [200, { switch: setSwitch(ctx.log, parts[1], body.value ?? null) }];
+    }
+    if (parts[0] === "switches" && parts.length === 2 && req.method === "DELETE") return [200, { switch: resetSwitch(ctx.log, parts[1]) }];
     if (parts[0] === "profiles" && parts.length === 1 && req.method === "GET") return [200, { profiles: listProfiles(ctx.log), assignments: assignments(ctx.log), kinds: SETTING_KINDS }];
     if (parts[0] === "profiles" && parts.length === 2 && req.method === "PUT") {
       const body = (await ctx.readJson?.(req)) ?? {};
