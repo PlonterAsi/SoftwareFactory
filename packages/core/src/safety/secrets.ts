@@ -61,7 +61,7 @@ process.stdin.on("end", () => {
   text.split(/\\r?\\n/).forEach((l, i) => { const p = PATTERNS.find(([, re]) => re.test(l)); if (p) hits.push(file + ":" + (i + 1) + ": looks like a " + p[0]); });
   if (!hits.length) process.exit(0);
   process.stderr.write("SoftwareFactory secret gate: this file now holds what looks like a real secret. Take it out (read it from an environment variable or a config file that is not committed) before going on.\\n" + hits.slice(0, 10).join("\\n") + "\\n");
-  process.exit(2);
+  process.exitCode = 2; // not process.exit(): on a pipe the message must be flushed before the process ends
 });
 `;
 }
