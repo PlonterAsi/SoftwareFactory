@@ -446,6 +446,9 @@ describe("tickets in a repo project take the route that fits", () => {
     await w.factory.wait(r.run!);
     const built = w.tickets.get(t.id)!;
     expect(built).toMatchObject({ status: "built", branch: r.branch, pr: null, pushedUrl: null });
+    // Work it again on the built ticket points at the run that built it today, not a second build (run 8917).
+    expect(() => w.tickets.work(t.id, { autoApprove: true })).toThrow(/Run #\d+ already built it today/);
+    expect(events(w.log, "factory.run.started")).toHaveLength(1);
     const note = w.tickets.notes(t.id).at(-1)!.text;
     expect(note).toMatch(/Press Add to my folder on this ticket/);
     expect(note).not.toMatch(/git fetch/);
