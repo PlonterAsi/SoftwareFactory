@@ -4,6 +4,7 @@ import type { Tickets } from "../tickets/tickets.js";
 import { createProject, listProjects } from "../projects/service.js";
 import type { PluginAction, PluginRecordKind } from "./manifest.js";
 import { isClosed } from "../tickets/model.js";
+import { CATALOG_TAG, saveEntry } from "../configs/catalog.js";
 
 /**
  * The door plugins use to reach real records: what `records:read` shows and what each `actions`
@@ -48,6 +49,20 @@ export function coreDoor(deps: { log: EventLog; tickets: Tickets; bay?: AgentBay
         const kind = TICKET_KINDS.find((k) => k === args.kind) ?? "task";
         const t = tickets.open({ kind, title, body: text(args.body, 8000), project: args.project == null ? null : Number(args.project), by });
         return ticketRow(t);
+      }
+      if (verb === "catalog.add") {
+        // A pick goes to the catalog (configs/catalog.ts): one entry, and a build ticket the crew leaves alone until you choose Build it.
+        const title = text(args.title, 200);
+        if (!title) throw new Error("catalog.add needs a title");
+        const t = tickets.open({ kind: "task", title, body: text(args.body, 8000), project: args.project == null ? null : Number(args.project), by });
+        tickets.edit(t.id, "tags", [...(t.tags ?? []), CATALOG_TAG], by);
+        const src = (args.source ?? {}) as Record<string, unknown>;
+        const e = saveEntry(log, {
+          title, what: text(args.what ?? args.body, 1200), kind: text(args.kind, 16) as never,
+          source: { kind: "scout", label: text(src.label, 300) || `From ${by.replace(/^plugin:/, "")}`, ...(src.link ? { link: text(src.link, 500) } : {}), ...(src.video ? { video: text(src.video, 300) } : {}), ...(src.at ? { at: text(src.at, 16) } : {}) },
+          touches: Array.isArray(args.touches) ? args.touches.map((x) => text(x, 60)) : [], ticket: t.id, state: "proposed",
+        }, by);
+        return { entry: e.id, ticket: ticketRow(tickets.get(t.id)!) };
       }
       if (verb === "ticket.note") {
         const id = Number(args.id);

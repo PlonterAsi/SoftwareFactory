@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { API } from "./api";
 import { ago } from "./projects/builtin";
 import { ProfilesSection } from "./Profiles";
+import { CatalogSection } from "./Catalog";
 
 export type ConfigLayer = "how" | "who" | "where";
 export interface ConfigSource { kind: "built-in" | "scout" | "pr" | "you" | "add-on" | "switch"; label: string; link?: string }
@@ -53,6 +54,7 @@ export function ConfigurationPage() {
             <label className="muted"><input type="checkbox" checked={onlyOn} onChange={(e) => setOnlyOn(e.target.checked)} /> Only what is on</label>
           </div>
           <ProfilesSection onChanged={() => setTick((n) => n + 1)} />
+          <CatalogSection onChanged={() => setTick((n) => n + 1)} />
           {rep.layers.map((l) => {
             const rows = shown.filter((e) => e.layer === l.id);
             if (!rows.length) return null;

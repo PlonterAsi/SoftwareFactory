@@ -5,6 +5,7 @@ import type { EventLog } from "../events.js";
 import type { FlowLibrary } from "../flows/library.js";
 import type { PluginHost } from "../plugins/host.js";
 import { crewUsesPersonalSettings } from "../runtime.js";
+import { listCatalog } from "./catalog.js";
 import { assignments, listProfiles } from "./profiles.js";
 import { buildInventory, type ConfigEntry, type ConfigInputs } from "./inventory.js";
 
@@ -28,7 +29,7 @@ export function liveConfig(d: {
       agents: d.bay.agents(), slots: d.bay.slots(), flows: d.flows.list(), plugins: d.plugins.list(),
       skills: listSkills().map((s) => ({ name: s.name, source: s.source })), mcp: listMcp().map((m) => ({ name: m.name, source: m.source })),
       advisor: readAdvisorRule(d.log), crewMode: d.crewMode(), autoWork: d.autoWork(), maxRunMinutes: d.maxRunMinutes(),
-      personalSettings: crewUsesPersonalSettings(env), env, settingSince: settingSince(d.log), profiles: profileCounts(d.log),
+      personalSettings: crewUsesPersonalSettings(env), env, settingSince: settingSince(d.log), profiles: profileCounts(d.log), catalog: catalogCounts(d.log),
     });
     cached = { at: Date.now(), entries };
     return entries;
@@ -41,4 +42,10 @@ function profileCounts(log: EventLog): NonNullable<ConfigInputs["profiles"]> {
   const p = g ? listProfiles(log).find((x) => x.id === g.profile) : undefined;
   const n = (scope: string) => as.filter((a) => a.scope === scope).length;
   return { global: p ? { id: p.id, name: p.name, settings: p.settings.length } : null, project: n("project"), ticket: n("ticket"), run: n("run") };
+}
+
+function catalogCounts(log: EventLog): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const e of listCatalog(log)) out[e.state] = (out[e.state] ?? 0) + 1;
+  return out;
 }

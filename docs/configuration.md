@@ -2,7 +2,7 @@
 
 What SoftwareFactory runs with right now, where each piece came from, and which setup every run used.
 
-Built from Assaf's brief of 22 Nov 2026. Done: the inventory, Ran with, isolation, profiles. Next: Scout picks as catalog entries, trials, editable switches.
+Built from Assaf's brief of 22 Nov 2026. Done: the inventory, Ran with, isolation, profiles, the catalog. Next: trials, editable switches.
 
 ## The three layers
 
@@ -44,9 +44,27 @@ Each setting's path is what it touches. Two settings in one profile that touch t
 
 Pick profiles on the Configuration page (everywhere and per project) and on a ticket. Events: `config.profile.saved`, `config.profile.removed`, `config.assigned`.
 
+## Catalog
+
+Every technique, tool or workflow picked from Scout (or added by hand) is one catalog entry: title, what it is, its kind, where it came from (the video and the moment, or the find's link), what it touches, its build ticket and any tickets merged into it, and where it stands.
+
+| State | Meaning |
+|---|---|
+| proposed | Picked; nothing runs. Its ticket is tagged `catalog` and the crew never starts it on its own |
+| building | You chose Build it: the tag comes off and the ticket is back in line |
+| ready | Built; it can join a profile, and its settings (if it has any) apply through that profile |
+| trial, promoted, dropped | Set by trials (next part) or by you |
+
+Work it on a held ticket still starts it: your press is your ask.
+
+Add-ons add picks with the `catalog.add` action (Scout's Add to catalog). On its first start with this version, SF moved every open ticket Scout had filed into the catalog. Tickets about the same named thing (a brand in both titles, like SkillSpector) became one entry, and the extra tickets were closed as duplicates of the first.
+
+A profile can list catalog entries (`entries`). Two entries in one profile that touch the same thing, or an entry and one of the profile's own settings, are refused.
+
 ## API
 
 - `GET /api/config`: the current setup by layer, with its fingerprint
 - `GET /api/config/snapshots/:hash`: a recorded setup and what changed since
 - `GET /api/config/ran?run=N` or `?ticket=N`: the setups a run's or ticket's calls ran with
 - `GET /api/config/profiles`, `PUT|DELETE /api/config/profiles/:id`, `POST /api/config/assign`, `GET /api/config/resolve?project=&ticket=&run=`
+- `GET|POST /api/config/catalog`, `POST /api/config/catalog/:id/state`

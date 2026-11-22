@@ -41,3 +41,8 @@
 .cfg-editor input { width: 100%; }
 .cfg-editor-acts { display: flex; gap: 8px; align-items: center; }
 .cfg-clash td { background: var(--gate-dim); }
+.cfg-what { max-width: 520px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cfg-acts { white-space: nowrap; }
+.cfg-acts button + button { margin-left: 4px; }
+.cs-building, .cs-trial { color: var(--gate); }
+.cs-ready, .cs-promoted { color: var(--good); }

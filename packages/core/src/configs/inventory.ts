@@ -57,6 +57,8 @@ export interface ConfigInputs {
   env: Record<string, string | undefined>;
   /** Configuration profiles: the global default (if any), and how many projects, tickets and runs have their own. */
   profiles?: { global: { id: string; name: string; settings: number } | null; project: number; ticket: number; run: number };
+  /** The catalog: how many picks are in each state. */
+  catalog?: Record<string, number>;
   /** When a setting was last changed, by key (settings.changed events). */
   settingSince?: Record<string, string>;
 }
@@ -112,6 +114,14 @@ export function buildInventory(i: ConfigInputs): ConfigEntry[] {
       id: "profile:global", layer: "how", group: "Profiles", name: "Global default profile", on: !!g,
       detail: `${g ? `${g.name} (${g.settings} setting${g.settings === 1 ? "" : "s"})` : "None: everything as listed below"}${own ? `; own profile on ${own}` : ""}`,
       source: { kind: "you", label: "Picked on this page" },
+    });
+  }
+  if (i.catalog) {
+    const total = Object.values(i.catalog).reduce((a, b) => a + b, 0);
+    out.push({
+      id: "catalog", layer: "how", group: "Catalog", name: "Picks in the catalog", on: total > 0,
+      detail: total ? Object.entries(i.catalog).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(", ") : "None yet",
+      source: { kind: "scout", label: "Picks from Scout and your own" },
     });
   }
   for (const f of i.flows) {

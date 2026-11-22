@@ -1,4 +1,5 @@
 import type { EventLog } from "../events.js";
+import { listCatalog } from "./catalog.js";
 import type { ConfigLayer } from "./inventory.js";
 
 /**
@@ -37,6 +38,8 @@ export interface Profile {
   name: string;
   note?: string;
   settings: ProfileSetting[];
+  /** Catalog entries in this profile (configs/catalog.ts); their settings apply, and what they touch may not overlap. */
+  entries?: string[];
   savedAt?: string;
   savedBy?: string;
 }
@@ -55,8 +58,21 @@ export function layerOf(path: string): ConfigLayer | null {
 }
 
 /** Every problem that stops a profile being saved. Empty: it can be saved. */
-export function profileProblems(p: Profile, known: { flows?: Set<string>; agents?: Set<string> } = {}): string[] {
+export function profileProblems(p: Profile, known: { flows?: Set<string>; agents?: Set<string>; entries?: Map<string, { title: string; touches: string[]; settings?: ProfileSetting[] }> } = {}): string[] {
   const out: string[] = [];
+  // Catalog entries: each must exist, and no two may touch the same thing (with each other or with the profile's own settings).
+  const touched = new Map<string, string>();
+  for (const s of p.settings ?? []) touched.set(s.path, "this profile's own settings");
+  for (const id of p.entries ?? []) {
+    const e = known.entries?.get(id);
+    if (known.entries && !e) { out.push(`No catalog entry called ${id}.`); continue; }
+    if (!e) continue;
+    for (const t of [...e.touches, ...(e.settings ?? []).map((s) => s.path)]) {
+      const prev = touched.get(t);
+      if (prev && prev !== e.title) out.push(`"${e.title}" and ${prev.startsWith("this") ? prev : `"${prev}"`} both touch ${t}. Pick one.`);
+      else touched.set(t, e.title);
+    }
+  }
   if (!ID.test(p.id)) out.push("The profile's id must be lowercase letters, digits and dashes.");
   if (!p.name?.trim()) out.push("Give the profile a name.");
   const seen = new Map<string, number>();
@@ -93,8 +109,8 @@ export function getProfile(log: EventLog, id: string): Profile | null {
   return listProfiles(log).find((p) => p.id === id) ?? null;
 }
 
-export function saveProfile(log: EventLog, p: Profile, by = "you", known?: { flows?: Set<string>; agents?: Set<string> }): Profile {
-  const clean: Profile = { id: String(p.id ?? "").trim(), name: String(p.name ?? "").trim(), ...(p.note ? { note: String(p.note) } : {}), settings: (p.settings ?? []).map((s) => ({ path: String(s.path), value: s.value === "off" ? null : s.value, ...(s.why ? { why: String(s.why) } : {}) })) };
+export function saveProfile(log: EventLog, p: Profile, by = "you", known?: Parameters<typeof profileProblems>[1]): Profile {
+  const clean: Profile = { id: String(p.id ?? "").trim(), name: String(p.name ?? "").trim(), ...(p.note ? { note: String(p.note) } : {}), ...(p.entries?.length ? { entries: [...new Set(p.entries.map(String))] } : {}), settings: (p.settings ?? []).map((s) => ({ path: String(s.path), value: s.value === "off" ? null : s.value, ...(s.why ? { why: String(s.why) } : {}) })) };
   const problems = profileProblems(clean, known);
   if (problems.length) throw Object.assign(new Error(problems.join(" ")), { problems });
   log.append("config.profile.saved", { profile: clean, by });
@@ -154,7 +170,15 @@ export function resolveProfiles(log: EventLog, ctx: { projectId?: number | null;
     if (p) chain.push({ scope, profile: p });
   }
   const settings: Resolved["settings"] = {};
-  for (const { scope, profile } of chain) for (const s of profile.settings) settings[s.path] = { value: s.value, from: profile.id, scope, ...(s.why ? { why: s.why } : {}) };
+  const entries = new Map(listCatalog(log).map((e) => [e.id, e]));
+  for (const { scope, profile } of chain) {
+    for (const id of profile.entries ?? []) {
+      const e = entries.get(id);
+      if (!e || !["ready", "trial", "promoted"].includes(e.state)) continue;
+      for (const s of e.settings ?? []) settings[s.path] = { value: s.value, from: profile.id, scope, why: `catalog: ${e.title}` };
+    }
+    for (const s of profile.settings) settings[s.path] = { value: s.value, from: profile.id, scope, ...(s.why ? { why: s.why } : {}) };
+  }
   return { chain, settings };
 }
 

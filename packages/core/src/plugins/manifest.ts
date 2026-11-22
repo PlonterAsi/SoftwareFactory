@@ -52,6 +52,7 @@ export const PLUGIN_ACTIONS = {
   "project.create": "Create a project",
   "ticket.open": "Open a ticket",
   "ticket.note": "Add a note to a ticket",
+  "catalog.add": "Add a pick to the Configuration catalog, with its build ticket held until you choose Build it",
   "ticket.ask": "Ask the crew to start a ticket it opened, within your auto-work limit (this can spend up to that limit)",
 } as const;
 export type PluginAction = keyof typeof PLUGIN_ACTIONS;
