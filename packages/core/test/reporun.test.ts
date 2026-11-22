@@ -336,6 +336,10 @@ describe("a Builder call that changes no file (run 7899)", () => {
     // No suite after a call that changed nothing; no escalation for the empty first try.
     expect(events(w.log, "factory.feature").find((e) => e.state === "empty")).toMatchObject({ attempt: 1, passed: 0, failed: 0 });
     expect(events(w.log, "factory.gate").filter((g) => g.gate === "escalation")).toHaveLength(0);
+    // The Reviewer is told the suite the core ran, and not to run all of it again (run 7899 timed out doing so).
+    const review = w.seen.filter((x) => x.station === "review").at(-1)!.req;
+    expect(`${review.systemPrompt}
+${review.prompt}`).toMatch(/already ran the repo's whole test suite on this branch[\s\S]*Do not run the whole suite again/);
   }, 60_000);
 
   it("fails in the Builder's own words when it still changes nothing, and a Retry is told about the empty try", async () => {

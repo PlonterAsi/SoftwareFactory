@@ -335,6 +335,8 @@ export class RepoRun extends Run {
       where: `You are in a clone of ${this.info.source} on branch ${this.info.branch}. The plan and the design of the change are under .sf/ (read only, not part of the repo).${this.env.testHint ? ` Its tests run with: ${this.env.testHint}.` : ""} See what changed so far with: git diff ${this.base}`,
     };
   }
+  /** The last whole run of the repo's tests on the branch: the Reviewer is told it instead of running it again. */
+  protected lastSuite: { passed: number; failed: number; failing: string[]; seconds: number } | null = null;
   protected reviewBrief(): { prompt: string; verify: string } {
     let diff = "";
     try { diff = git(this.dir, "diff", "--no-color", this.base, "--", ".").slice(0, 40000); } catch { /* the Reviewer reads the folder */ }
@@ -344,9 +346,11 @@ export class RepoRun extends Run {
       verify: [
         "You also verify the change, not only read it. You have a shell in the clone (read and run only: do not change files).",
         `For EACH acceptance criterion below, check it by running something: ${this.env.testHint ? `the repo's tests (${this.env.testHint}), ` : ""}the code itself${site ? `, or the running site (start it in the background with \`${site.command}\`, read the address it prints, fetch its pages, then stop it)` : ""}.`,
+        // Run 7899: the Reviewer ran SoftwareFactory's whole suite (about 10 minutes) and was stopped at its 15-minute limit with nothing said.
+        this.lastSuite ? reviewSuiteNote(this.lastSuite) : "",
         "Stop every process you start before you answer, and make the JSON your very last message: only the last message is read.",
         "Add to your JSON a \"criteria\" list, one entry per criterion in order: {\"text\": \"the criterion\", \"pass\": true|false, \"evidence\": \"what you ran and what you saw, short\"}. pass is true only when you saw it work.",
-      ].join("\n"),
+      ].filter(Boolean).join("\n"),
     };
   }
   protected acceptWord(): string { return `Accept the change (it is then handed over on branch ${this.info.branch}${this.ref?.github ? ", as a draft pull request when GitHub access allows" : ""}; never on the main line)`; }
@@ -611,7 +615,9 @@ export class RepoRun extends Run {
         return failed;
       }
     }
+    const began = Date.now();
     const r: TestRun = this.env.tests.length ? await this.tools.runTests(this.dir, this.env) : { cases: [], passed: 0, failed: 0, exitCode: 0, timedOut: false, output: "" };
+    const tookS = Math.round((Date.now() - began) / 1000);
     const old = r.cases.filter((c) => !c.pass && this.failingBefore.has(key(c)));
     r.cases = r.cases.filter((c) => !old.includes(c));
     if (old.length) r.cases.push({ name: `${old.length} test${old.length === 1 ? "" : "s"} that already failed before this change (not held against it)`, file: "", pass: true, durationMs: 0 });
@@ -627,6 +633,7 @@ export class RepoRun extends Run {
     r.passed = r.cases.filter((c) => c.pass).length;
     r.failed = r.cases.length - r.passed;
     this.log.append("factory.tests", { run: this.id, round, cases: r.cases.slice(0, 400), passed: r.passed, failed: r.failed, timedOut: r.timedOut });
+    if (this.env.tests.length) this.lastSuite = { passed: r.passed, failed: r.failed, failing: r.cases.filter((c) => !c.pass).map((c) => c.name).slice(0, 10), seconds: tookS };
     return r;
   }
 
@@ -693,6 +700,14 @@ export class RepoRun extends Run {
 
 const briefLine = (b: { agreed: string[]; proposals: string[]; concerns: string[] }) =>
   ["The Council looked at the ask first.", b.agreed.length ? `Agreed: ${b.agreed.join("; ")}.` : "", b.proposals.length ? `Proposed: ${b.proposals.join("; ")}.` : "", b.concerns.length ? `Concerns: ${b.concerns.join("; ")}.` : ""].filter(Boolean).join(" ");
+
+/** What the Reviewer is told about the suite the core already ran: use it, and run only the tests of what changed. */
+export function reviewSuiteNote(s: { passed: number; failed: number; failing: string[]; seconds: number }): string {
+  return [
+    `SoftwareFactory already ran the repo's whole test suite on this branch just now (${s.seconds} s): ${s.passed} pass, ${s.failed} fail${s.failing.length ? ` (${s.failing.join("; ")})` : ""}. Take that as given.`,
+    "Do not run the whole suite again: you have a time limit. Run only the test files that cover what changed, one command each, and keep output short.",
+  ].join(" ");
+}
 
 /** What the next call is told after a call that changed no file: its own answer, and to search the whole tree before it stops again. */
 export function emptyRetry(answer: string): string {
