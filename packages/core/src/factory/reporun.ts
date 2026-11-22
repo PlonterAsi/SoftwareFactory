@@ -694,7 +694,6 @@ export class RepoRun extends Run {
 const briefLine = (b: { agreed: string[]; proposals: string[]; concerns: string[] }) =>
   ["The Council looked at the ask first.", b.agreed.length ? `Agreed: ${b.agreed.join("; ")}.` : "", b.proposals.length ? `Proposed: ${b.proposals.join("; ")}.` : "", b.concerns.length ? `Concerns: ${b.concerns.join("; ")}.` : ""].filter(Boolean).join(" ");
 
-/** The design of the change as the Planner reads it. */
 /** What the next call is told after a call that changed no file: its own answer, and to search the whole tree before it stops again. */
 export function emptyRetry(answer: string): string {
   return [
@@ -710,6 +709,7 @@ export function emptyFailure(answer: string): string {
   return said ? `The Builder changed no file. It said: ${said.slice(0, 240)}` : "The Builder changed no file";
 }
 
+/** The design of the change as the Planner reads it. */
 export function repoDocsForPlanner(d: ProductDocs): string {
   return [
     "The design of the change (written and reviewed before you; the plan implements it):",
