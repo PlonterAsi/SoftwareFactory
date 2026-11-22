@@ -475,6 +475,7 @@ export class RepoRun extends Run {
         "- Build only this, completely, in the style of the code around it. The smallest change that does it.",
         `- Keep everything that works working: no test that passed before your call may fail after it. Add or extend tests for the behaviour you add${this.env.testHint ? ` (the repo's tests run with ${this.env.testHint})` : ""}; never delete, skip or weaken a test that is there.`,
         "- Do not write under .sf/: the core keeps those files.",
+        "- If something the plan needs is not where it says (a file, a folder, a repo's layout), search the whole tree for it before you stop: a recursive listing, not only the top level. Use it where it really is. Only if it is truly nowhere, change no file and start your answer with BLOCKED: followed by every place you searched.",
         "- Work in few steps, because every step re-sends everything you have read so far: read the files you need in one command, write each file in one go, and run the tests once at the end (once more after a fix). Keep command output short (tail it).",
         "- End your answer with two or three lines for the next call: what you built, and anything it must know.",
       ].join("\n"),
@@ -491,9 +492,15 @@ export class RepoRun extends Run {
     const builder = this.builder = this.one("build");
     const features = this.featureList();
     const path = join(this.dir, SF_DIR, "features.json");
+    // A feature an earlier try left with no file changed (a Retry, a resume): the next call is told so, never sent in blind again.
+    const emptyBefore = new Set<string>();
     try {
       const kept = (JSON.parse(readFileSync(path, "utf8")).features ?? []) as { id: string; state: string }[];
-      for (const f of features) if (kept.find((k) => k.id === f.id)?.state === "built") f.state = "built";
+      for (const f of features) {
+        const k = kept.find((x) => x.id === f.id)?.state;
+        if (k === "built") f.state = "built";
+        else if (k === "empty") emptyBefore.add(f.id);
+      }
     } catch { /* first time */ }
     const progress = join(this.dir, SF_DIR, "PROGRESS.md");
     if (!existsSync(progress)) writeFileSync(progress, "# Progress\n\nOne entry per feature, written by SoftwareFactory after each build session.\n\n");
@@ -502,6 +509,7 @@ export class RepoRun extends Run {
     const suite = async () => (this.env.tests.length ? this.tools.runTests(this.dir, this.env) : null);
     let passing = new Set(((await suite())?.cases ?? []).filter((c) => c.pass).map(key));
     let wroteAny = features.some((f) => f.state === "built");
+    let emptyAnswer = "";
     const leftOver: { f: Feature; why: string }[] = [];
     // Room kept for the review and the judge, so a run that built something always reaches them (run 5669 ran dry mid-build).
     const reserve = Math.min(0.5, this.o.maxUsd * 0.12);
@@ -517,7 +525,7 @@ export class RepoRun extends Run {
           break;
         }
       }
-      let retry = "";
+      let retry = emptyBefore.has(f.id) ? emptyRetry("") : "";
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
         const left = features.filter((x) => x.state !== "built").length;
@@ -526,13 +534,18 @@ export class RepoRun extends Run {
         const text = await this.askBench(builder, this.featurePrompt(features, f, retry), { round: i + 1 }, { capUsd: cap, raiseCap: cap > builder.budgetUsd });
         const res = this.takeWork(text);
         const files = res.written.map((w) => w.path);
-        const t = await suite();
-        const now = new Set((t?.cases ?? []).filter((c) => c.pass).map(key));
-        const broke = [...passing].filter((k) => !now.has(k));
+        // Nothing changed, nothing to test: the suite takes minutes in a big repo, and a flaky test would read as broken (run 7899).
+        const t = files.length ? await suite() : null;
+        const now = t ? new Set(t.cases.filter((c) => c.pass).map(key)) : passing;
+        const broke = t ? [...passing].filter((k) => !now.has(k)) : [];
         if (t) { f.passed = t.passed; f.total = t.passed + t.failed; }
         f.state = !files.length ? "empty" : broke.length ? "regressed" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, ...(this.bench ? { workbench: true } : {}) }); }
         this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t?.passed ?? 0, failed: t?.failed ?? 0, ...(broke.length ? { broke: broke.slice(0, 10) } : {}) });
+        // Run 7899: the Builder looked at a repo's top level only, said BLOCKED and changed nothing; the files were one search away.
+        // An empty call gets one more, with its own answer back and the ask to search the whole tree before it stops.
+        if (f.state === "empty") emptyAnswer = text;
+        if (f.state === "empty" && attempt === 1) { retry = emptyRetry(text); continue; }
         if (f.state === "regressed" && attempt === 1) {
           retry = `These tests of the repo passed before your call and fail after it:\n${broke.slice(0, 10).map((k) => `- ${k.replace(/^::/, "").replace("::", ": ")}`).join("\n")}\n\n${(t?.output ?? "").slice(-1500)}`;
           continue;
@@ -554,7 +567,7 @@ export class RepoRun extends Run {
         break;
       }
     }
-    if (!features.some((f) => f.state === "built") && !(wroteAny && features.length === 1)) throw new Error(wroteAny ? "No feature was built without breaking tests that passed before" : "The Builder changed no file");
+    if (!features.some((f) => f.state === "built") && !(wroteAny && features.length === 1)) throw new Error(wroteAny ? "No feature was built without breaking tests that passed before" : emptyFailure(emptyAnswer));
     // What is not built goes to the next slice, a ticket of its own, so the run still hands over a branch that works.
     const planned = new Map((this.plan.features ?? []).map((p) => [p.id, p]));
     this.left = leftOver.map(({ f, why }) => { const p = planned.get(f.id); return { id: f.id, title: f.title, what: p?.what ?? f.what, done: f.done, files: p?.files ?? [], why }; });
@@ -680,6 +693,21 @@ export class RepoRun extends Run {
 
 const briefLine = (b: { agreed: string[]; proposals: string[]; concerns: string[] }) =>
   ["The Council looked at the ask first.", b.agreed.length ? `Agreed: ${b.agreed.join("; ")}.` : "", b.proposals.length ? `Proposed: ${b.proposals.join("; ")}.` : "", b.concerns.length ? `Concerns: ${b.concerns.join("; ")}.` : ""].filter(Boolean).join(" ");
+
+/** What the next call is told after a call that changed no file: its own answer, and to search the whole tree before it stops again. */
+export function emptyRetry(answer: string): string {
+  return [
+    answer.trim() ? `Your call changed no file. Your answer was:\n${answer.trim().slice(-1500)}` : "An earlier call changed no file for this. Its answer is the last entry in .sf/PROGRESS.md.",
+    "If it stopped because something the plan needs seemed missing, look again before you stop: search the whole tree (a recursive listing of the repo; for a GitHub repo, its git/trees API with recursive=1), not only the top level. Files are often deeper than the plan says: use them where they really are.",
+    "Stop again only if it is truly nowhere: then start your answer with BLOCKED: and list every place you searched. Otherwise build it.",
+  ].join("\n\n");
+}
+
+/** Why a build that changed no file failed, in the Builder's own words first, so the Retry question says it (it is cut at 300 characters). */
+export function emptyFailure(answer: string): string {
+  const said = answer.replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
+  return said ? `The Builder changed no file. It said: ${said.slice(0, 240)}` : "The Builder changed no file";
+}
 
 /** The design of the change as the Planner reads it. */
 export function repoDocsForPlanner(d: ProductDocs): string {
