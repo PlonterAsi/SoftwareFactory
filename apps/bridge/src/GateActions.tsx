@@ -1,4 +1,5 @@
-import { decideGate, type FactoryRunView } from "./api";
+import { useEffect, useState } from "react";
+import { decideGate, stopRun, type FactoryRunView } from "./api";
 import { GateBar } from "./ui/GateBar";
 
 /** Plain names for each station, used in "Retrying …" and "… failed". */
@@ -18,5 +19,29 @@ export function GateActions({ run, compact, label = STEP }: { run: FactoryRunVie
       yes={w.action ?? (esc ? "Retry" : "Approve")} kind={esc ? "escalation" : "approve"} compact={compact} fresh={(w.attempt ?? 1) > 1}
       onDecide={(approve, note) => decideGate(run.run, w.gate, approve, note)}
       explain={(m) => /not waiting/.test(m) ? "The run is no longer waiting here (the app may have restarted it). Look at the run for a Resume button." : m} />
+  );
+}
+
+/**
+ * SF-115: Stop a run for good, whatever it is doing: at work, parked at a gate, or stopped and waiting to resume. Two
+ * presses (the first arms it for six seconds), so a stray click next to Approve never ends a build. A stopped run
+ * does not resume by itself; Retry can still pick it up on purpose.
+ */
+export function StopRunButton({ run, label = "Stop run" }: { run: number; label?: string }) {
+  const [armed, setArmed] = useState(false);
+  const [state, setState] = useState<"idle" | "stopping" | "done">("idle");
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 6000); return () => clearTimeout(t); }, [armed]);
+  if (state === "done") return <span className="muted">Stopped</span>;
+  return (
+    <>
+      <button className="ghost sm" disabled={state === "stopping"} title="Ends this run now. It does not resume; Retry can still pick it up later."
+        onClick={() => {
+          if (!armed) { setArmed(true); return; }
+          setArmed(false); setState("stopping"); setErr(null);
+          stopRun(run).then(() => setState("done")).catch((e) => { setState("idle"); setErr((e as Error).message); });
+        }}>{state === "stopping" ? "Stopping…" : armed ? "Press again to stop" : label}</button>
+      {err && <span className="err">{err}</span>}
+    </>
   );
 }
