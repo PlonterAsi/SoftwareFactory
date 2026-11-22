@@ -21,6 +21,7 @@ import { buildVerification, engineChecks, verificationOf } from "./verify.js";
 import { SPLIT_CAP_USD, splitRefusal, splitRollUp, splitTicket, splitTried } from "./split.js";
 import { pri, type Row } from "./rows.js";
 import { recoverInterrupted as putBackCutOff } from "./recover.js";
+import { engineRefusal } from "./rebuild.js";
 import { AUTO_TRIES, AUTO_WORK_DEFAULT, RELOOP_BRIEF, TICKET_CONTRACT, WAITING_ON_YOU, reloopFindings, epicOfTickets, type AutoWork, type OpenTicket, type QueueSpot, type TicketDetail, type TicketsOptions } from "./shapes.js";
 
 export * from "./shapes.js";
@@ -65,7 +66,6 @@ export class Tickets extends TicketPrs {
   protected isWorking(t: TicketView): boolean {
     return this.inRepo.has(t.id) || (t.run != null && !!this.opts.factory?.isActive(t.run));
   }
-
 
   /** Did you ask for this work? Its own mark, or the mark on the epic it sits under. */
   isAsked(t: Pick<TicketView, "id" | "parentId">, ids = this.askedIds()): boolean {
@@ -658,7 +658,7 @@ export class Tickets extends TicketPrs {
    * build feature by feature, a review, a judge on the running site), on a branch of its own. Returns null,
    * after saying why on the thread, when the engine cannot take it and nobody chose it: the light route does.
    */
-  private workEngine(t: TicketView, o: { maxUsd?: number; autoApprove?: boolean; by?: string }, routed: Routed, flow?: string): { ticket: TicketView; run: number; branch: string; route: Routed } | null {
+  private workEngine(t: TicketView, o: { maxUsd?: number; autoApprove?: boolean; by?: string; again?: boolean }, routed: Routed, flow?: string): { ticket: TicketView; run: number; branch: string; route: Routed } | null {
     const { factory, repoRuns } = this.opts;
     const no = (why: string): null => {
       if (routed.chosen) throw new Error(why);
@@ -666,8 +666,7 @@ export class Tickets extends TicketPrs {
       return null;
     };
     if (!factory || !repoRuns || t.project == null) return no("this core has no engine for repos");
-    if (t.run != null && factory.isActive(t.run)) throw new Error(`Run #${t.run} is already working this ticket.`);
-    if (this.inRepo.has(t.id)) throw new Error("The Builder is already working this ticket in the repo.");
+    const busy = engineRefusal(this.log.db, factory, t.run, this.inRepo.has(t.id), !!o.again, t.project); if (busy) throw busy;
     const allow = buildAllowance(this.log, t.project, "next", o.maxUsd);
     if ("error" in allow) return no(allow.error);
     const maxUsd = allow.maxUsd ?? DEFAULT_NEXT_USD;

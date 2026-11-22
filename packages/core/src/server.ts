@@ -13,6 +13,7 @@ import { costSummary, runAgent } from "./agents.js";
 import { readAdvisorRule, setAdvisorRule } from "./advisor.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { duplicateReply, Factory, type GateId } from "./factory/loop.js";
+import { stopRunsOnClose } from "./tickets/stopruns.js";
 import { enableRepoRuns, githubShipper } from "./factory/reporun.js";
 import { OrderEngine, type OrderOptions } from "./order/engine.js";
 import { canonFor, type NodeKind } from "./order/model.js";
@@ -140,6 +141,8 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const canShip = () => (crewMode() === "real" ? null : "the practice crew never opens a PR; switch to the real crew in Systems for that");
   // The engine also runs in codebases it did not write: imported repos get the same stations, on a branch of a clone.
   const repoRuns = enableRepoRuns(factory, log, { github, ship: githubShipper(github, canShip) });
+  // SF-115: closing a ticket stops its runs (tickets/stopruns.ts).
+  stopRunsOnClose(log, factory);
   const tickets = new Tickets(log, {
     runtime, factory, bay, budgetUsd: Math.min(budgetUsd, 0.1), workRoot: join(dirname(projectsDir), "ticket-work"),
     autoWork, canWork: () => (gitReady() ? preflightNow().auto.problem : "Git is not installed"),
@@ -260,12 +263,12 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       });
       if (req.method === "GET" && url.pathname === "/api/preflight") { const r = preflightNow(url.searchParams.get("fresh") === "1"); return json(res, 200, { ...r.auto, press: r.manual }); }
       if (req.method === "GET" && url.pathname === "/api/factory/cycles") return json(res, 200, { cycles: log.view("engine-cycles", engineCycles) });
-      if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeCount(), agentCalls.size, runnerJobs()));
+      if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeRuns(), agentCalls.size, runnerJobs()));
       if (req.method === "POST" && url.pathname === "/api/updates") {
         const body = await readJson(req);
         if (typeof body.auto !== "boolean") return json(res, 400, { error: "Send { auto: true } or { auto: false }." });
         log.append("settings.changed", { key: "autoUpdate", value: body.auto });
-        return json(res, 200, updatesReport(log, appVersion, factory.activeCount(), agentCalls.size, runnerJobs()));
+        return json(res, 200, updatesReport(log, appVersion, factory.activeRuns(), agentCalls.size, runnerJobs()));
       }
       if (req.method === "POST" && url.pathname === "/api/updates/install") {
         // The Bridge says so before it installs. An install that starts by itself is refused while anything is
@@ -274,13 +277,16 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const body = await readJson(req);
         const by = body.by === "person" ? "person" : "auto";
         const runs = factory.activeRuns();
-        const payload = { by, version: typeof body.version === "string" ? body.version.slice(0, 40) : null, from: appVersion ?? null, activeRuns: runs.length, agentCalls: agentCalls.size, runnerJobs: runnerJobs(), runs: runs.slice(0, 10) };
-        if (by === "auto" && (runs.length || agentCalls.size || payload.runnerJobs)) {
+        // A run parked at the plan or build gate costs nothing while it waits, and after the restart it waits at the
+        // same gate again (restoreState resumes it from gateA/gateB with no agent call), so it does not hold an update.
+        const working = runs.filter((r) => !parkedAtGate(r.gate)).length;
+        const payload = { by, version: typeof body.version === "string" ? body.version.slice(0, 40) : null, from: appVersion ?? null, activeRuns: working, parkedRuns: runs.length - working, agentCalls: agentCalls.size, runnerJobs: runnerJobs(), runs: runs.slice(0, 10) };
+        if (by === "auto" && (working || agentCalls.size || payload.runnerJobs)) {
           log.append("app.update.held", payload);
-          return json(res, 409, { ok: false, activeRuns: runs.length, agentCalls: agentCalls.size, runnerJobs: payload.runnerJobs, error: "Work is in flight, so the update waits." });
+          return json(res, 409, { ok: false, activeRuns: working, agentCalls: agentCalls.size, runnerJobs: payload.runnerJobs, error: "Work is in flight, so the update waits." });
         }
         log.append("app.update.started", payload);
-        return json(res, 200, { ok: true, activeRuns: runs.length, agentCalls: agentCalls.size });
+        return json(res, 200, { ok: true, activeRuns: working, agentCalls: agentCalls.size });
       }
       if (req.method === "GET" && url.pathname === "/api/setup") {
         const fresh = url.searchParams.get("fresh") === "1";
@@ -432,6 +438,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (!gitReady()) return json(res, 409, { error: "Git is not installed, so the run cannot pick up its repo. Install Git for Windows (git-scm.com/download/win), then press Resume again." });
         factory.resume(id);
         return json(res, 202, { run: id, from: ok.from });
+      }
+      const stopMatch = url.pathname.match(/^\/api\/factory\/runs\/(\d+)\/stop$/);
+      if (req.method === "POST" && stopMatch) {
+        // SF-115: stop a run whatever it is doing: at work, parked at a gate, or stopped and waiting to resume.
+        const b = await readJson(req);
+        const r = factory.stop(Number(stopMatch[1]), { by: typeof b.by === "string" && b.by.trim() ? b.by.trim().slice(0, 40) : "you", ...(typeof b.reason === "string" && b.reason.trim() ? { reason: b.reason.trim() } : {}) });
+        return json(res, r.ok ? 200 : 409, r.ok ? r : { ...r, error: `Run #${r.run} is not running or waiting: ${r.why}` });
       }
       const gateMatch = url.pathname.match(/^\/api\/factory\/runs\/(\d+)\/gate$/);
       if (req.method === "POST" && gateMatch) {
@@ -613,8 +626,10 @@ export interface UpdatesReport {
   /** Install updates on its own when the factory is idle (default on). */
   auto: boolean;
   appVersion: string | null;
-  /** Factory runs in flight, a run waiting at a gate included. */
+  /** Factory runs at work, or waiting for an answer to a question (escalation). These hold an update. */
   activeRuns: number;
+  /** Runs parked at the plan or build gate: they wait at the same gate after the restart, so they do not hold an update. */
+  parkedRuns?: number;
   /** Agent calls in flight anywhere in the core: a ticket's crew, a Council session, an import, the Overseer. */
   agentCalls: number;
   /** Jobs running on this PC's build runners. Installing would cut them off, so an update that installs by itself waits. */
@@ -623,10 +638,16 @@ export interface UpdatesReport {
   history: { ts: string; from: string | null; to: string }[];
 }
 
-export function updatesReport(log: EventLog, appVersion: string | undefined, activeRuns: number, agentCalls = 0, runnerJobs = 0): UpdatesReport {
+/** A run waiting at the plan or build gate: it resumes at that same gate after a restart, so an update may go ahead. */
+export const parkedAtGate = (gate: GateId | null) => gate === "gateA" || gate === "gateB";
+
+/** activeRuns counts the runs at work; parkedRuns those waiting for you at the plan or build gate, which do not hold an update. */
+export function updatesReport(log: EventLog, appVersion: string | undefined, runs: number | { gate: GateId | null }[], agentCalls = 0, runnerJobs = 0): UpdatesReport {
   const history = (log.db.prepare("SELECT ts, from_version, to_version FROM app_versions ORDER BY id DESC LIMIT 10").all() as { ts: string; from_version: string | null; to_version: string }[])
     .map((r) => ({ ts: r.ts, from: r.from_version, to: r.to_version }));
-  return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns, agentCalls, runnerJobs, history };
+  const list = typeof runs === "number" ? Array.from({ length: runs }, () => ({ gate: null })) : runs;
+  const parkedRuns = list.filter((r) => parkedAtGate(r.gate)).length;
+  return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns: list.length - parkedRuns, parkedRuns, agentCalls, runnerJobs, history };
 }
 
 /** Link SoftwareFactory's own project to its GitHub repo once, so its tickets are worked there. */

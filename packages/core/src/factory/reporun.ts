@@ -193,6 +193,28 @@ export function repoBranch(run: string | number, ask: string, ticket?: { key: st
 
 const key = (c: Pick<TestCase, "file" | "name">) => `${c.file}::${c.name}`;
 
+/**
+ * A test that already failed in the baseline, however the runner named it this time. Vitest prints the same failure
+ * as "× suite > name" in the file's list and as "FAIL file > suite > name" in the summary, and which of the two
+ * lines a run shows varies; run 7899 had "::opens each screen…" in its baseline and "every screen in a real
+ * browser > opens each screen…" in its rounds, so the old failure was held against it (2026-11-22). The test's own
+ * name, the last "> " part, is what stays the same.
+ */
+export function failedBefore(c: Pick<TestCase, "file" | "name">, before: Set<string>): boolean {
+  if (before.has(key(c))) return true;
+  const leaf = (n: string) => n.split(" > ").at(-1)!.trim();
+  const mine = leaf(c.name);
+  if (!mine) return false;
+  for (const k of before) {
+    const at = k.indexOf("::");
+    const file = k.slice(0, at);
+    // Two files may hold tests of the same name (pytest's test_home): only a line without its file falls back.
+    if (file && c.file && file !== c.file) continue;
+    if (leaf(k.slice(at + 2)) === mine) return true;
+  }
+  return false;
+}
+
 export class RepoRun extends Run {
   private env: RepoEnv = { stack: [], tests: [], pathFirst: [], commands: [], notes: [], testHint: "" };
   private ref!: RepoRef;
@@ -219,7 +241,12 @@ export class RepoRun extends Run {
   protected async testsStep() { await this.baselineTests(); }
   protected keptOnResume(step: FlowStep): Promise<void> | void {
     if (step.action === "intake") return this.prepare();
-    if (step.action === "tests") this.failingBefore = new Set(((this.lastOf("factory.tests.locked")?.failingBefore ?? []) as string[]).map(String));
+    if (step.action === "tests") {
+      const locked = this.lastOf("factory.tests.locked");
+      this.failingBefore = new Set(((locked?.failingBefore ?? []) as string[]).map(String));
+      // The fast checks that already failed before the change stay off after a resume too.
+      if (typeof locked?.gatesOff === "string") this.gatesOff = locked.gatesOff;
+    }
   }
 
   protected shipped(sha: string) {
@@ -306,6 +333,15 @@ export class RepoRun extends Run {
     }
     return out;
   }
+  /**
+   * The review runs on this one computer. Run 7899 (2026-11-22) was sent back twice for "on win32 and on Linux":
+   * the hook passed on Windows, and the Linux half cannot be run here, so a pass was turned into "not met" and a
+   * Fixer round that could never succeed. What only another system can show is left to the repo's CI.
+   */
+  private hereNote(): string {
+    const os = process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : "Linux";
+    return `\n\nThis work is checked on one ${os} computer. The part of a criterion that only another operating system, or a service this computer cannot reach, could show is not this run's to fail: when everything checkable here passes, the criterion passes, with the evidence "checked on ${os}; the rest is not checkable on this computer". The repo's CI checks the other systems.`;
+  }
   /** A sliced plan (SF-64): what this run leaves to the next slice, so nobody holds it against this one. */
   private laterNote(): string {
     const later = [...(this.plan.slice?.later ?? []), ...this.leftOver()];
@@ -331,22 +367,26 @@ export class RepoRun extends Run {
 
   protected fixBrief(): { spec: string; where: string } {
     return {
-      spec: `The change being built, as approved:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, acceptance: this.plan.acceptance }, null, 2)}${this.laterNote()}`,
+      spec: `The change being built, as approved:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, acceptance: this.plan.acceptance }, null, 2)}${this.laterNote()}${this.hereNote()}`,
       where: `You are in a clone of ${this.info.source} on branch ${this.info.branch}. The plan and the design of the change are under .sf/ (read only, not part of the repo).${this.env.testHint ? ` Its tests run with: ${this.env.testHint}.` : ""} See what changed so far with: git diff ${this.base}`,
     };
   }
+  /** The last whole run of the repo's tests on the branch: the Reviewer is told it instead of running it again. */
+  protected lastSuite: { passed: number; failed: number; failing: string[]; seconds: number } | null = null;
   protected reviewBrief(): { prompt: string; verify: string } {
     let diff = "";
     try { diff = git(this.dir, "diff", "--no-color", this.base, "--", ".").slice(0, 40000); } catch { /* the Reviewer reads the folder */ }
     const site = siteProfile(this.dir);
     return {
-      prompt: `The approved plan:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, features: (this.plan.features ?? []).map((f) => `${f.id} ${f.title}`), acceptance: this.plan.acceptance }, null, 2)}${this.laterNote()}\n\nThe diff against ${this.base}, where the work started (${this.info.source}, branch ${this.info.branch}):\n${diff || "(empty)"}`,
+      prompt: `The approved plan:\n${JSON.stringify({ name: this.plan.name, summary: this.plan.summary, approach: this.plan.interface, features: (this.plan.features ?? []).map((f) => `${f.id} ${f.title}`), acceptance: this.plan.acceptance }, null, 2)}${this.laterNote()}${this.hereNote()}\n\nThe diff against ${this.base}, where the work started (${this.info.source}, branch ${this.info.branch}):\n${diff || "(empty)"}`,
       verify: [
         "You also verify the change, not only read it. You have a shell in the clone (read and run only: do not change files).",
         `For EACH acceptance criterion below, check it by running something: ${this.env.testHint ? `the repo's tests (${this.env.testHint}), ` : ""}the code itself${site ? `, or the running site (start it in the background with \`${site.command}\`, read the address it prints, fetch its pages, then stop it)` : ""}.`,
+        // Run 7899: the Reviewer ran SoftwareFactory's whole suite (about 10 minutes) and was stopped at its 15-minute limit with nothing said.
+        this.lastSuite ? reviewSuiteNote(this.lastSuite) : "",
         "Stop every process you start before you answer, and make the JSON your very last message: only the last message is read.",
         "Add to your JSON a \"criteria\" list, one entry per criterion in order: {\"text\": \"the criterion\", \"pass\": true|false, \"evidence\": \"what you ran and what you saw, short\"}. pass is true only when you saw it work.",
-      ].join("\n"),
+      ].filter(Boolean).join("\n"),
     };
   }
   protected acceptWord(): string { return `Accept the change (it is then handed over on branch ${this.info.branch}${this.ref?.github ? ", as a draft pull request when GitHub access allows" : ""}; never on the main line)`; }
@@ -475,6 +515,7 @@ export class RepoRun extends Run {
         "- Build only this, completely, in the style of the code around it. The smallest change that does it.",
         `- Keep everything that works working: no test that passed before your call may fail after it. Add or extend tests for the behaviour you add${this.env.testHint ? ` (the repo's tests run with ${this.env.testHint})` : ""}; never delete, skip or weaken a test that is there.`,
         "- Do not write under .sf/: the core keeps those files.",
+        "- If something the plan needs is not where it says (a file, a folder, a repo's layout), search the whole tree for it before you stop: a recursive listing, not only the top level. Use it where it really is. Only if it is truly nowhere, change no file and start your answer with BLOCKED: followed by every place you searched.",
         "- Work in few steps, because every step re-sends everything you have read so far: read the files you need in one command, write each file in one go, and run the tests once at the end (once more after a fix). Keep command output short (tail it).",
         "- End your answer with two or three lines for the next call: what you built, and anything it must know.",
       ].join("\n"),
@@ -491,9 +532,15 @@ export class RepoRun extends Run {
     const builder = this.builder = this.one("build");
     const features = this.featureList();
     const path = join(this.dir, SF_DIR, "features.json");
+    // A feature an earlier try left with no file changed (a Retry, a resume): the next call is told so, never sent in blind again.
+    const emptyBefore = new Set<string>();
     try {
       const kept = (JSON.parse(readFileSync(path, "utf8")).features ?? []) as { id: string; state: string }[];
-      for (const f of features) if (kept.find((k) => k.id === f.id)?.state === "built") f.state = "built";
+      for (const f of features) {
+        const k = kept.find((x) => x.id === f.id)?.state;
+        if (k === "built") f.state = "built";
+        else if (k === "empty") emptyBefore.add(f.id);
+      }
     } catch { /* first time */ }
     const progress = join(this.dir, SF_DIR, "PROGRESS.md");
     if (!existsSync(progress)) writeFileSync(progress, "# Progress\n\nOne entry per feature, written by SoftwareFactory after each build session.\n\n");
@@ -502,6 +549,7 @@ export class RepoRun extends Run {
     const suite = async () => (this.env.tests.length ? this.tools.runTests(this.dir, this.env) : null);
     let passing = new Set(((await suite())?.cases ?? []).filter((c) => c.pass).map(key));
     let wroteAny = features.some((f) => f.state === "built");
+    let emptyAnswer = "";
     const leftOver: { f: Feature; why: string }[] = [];
     // Room kept for the review and the judge, so a run that built something always reaches them (run 5669 ran dry mid-build).
     const reserve = Math.min(0.5, this.o.maxUsd * 0.12);
@@ -517,7 +565,7 @@ export class RepoRun extends Run {
           break;
         }
       }
-      let retry = "";
+      let retry = emptyBefore.has(f.id) ? emptyRetry("") : "";
       for (let attempt = 1; attempt <= 2; attempt++) {
         writeFileSync(path, featuresFile(features, f.id));
         const left = features.filter((x) => x.state !== "built").length;
@@ -526,13 +574,18 @@ export class RepoRun extends Run {
         const text = await this.askBench(builder, this.featurePrompt(features, f, retry), { round: i + 1 }, { capUsd: cap, raiseCap: cap > builder.budgetUsd });
         const res = this.takeWork(text);
         const files = res.written.map((w) => w.path);
-        const t = await suite();
-        const now = new Set((t?.cases ?? []).filter((c) => c.pass).map(key));
-        const broke = [...passing].filter((k) => !now.has(k));
+        // Nothing changed, nothing to test: the suite takes minutes in a big repo, and a flaky test would read as broken (run 7899).
+        const t = files.length ? await suite() : null;
+        const now = t ? new Set(t.cases.filter((c) => c.pass).map(key)) : passing;
+        const broke = t ? [...passing].filter((k) => !now.has(k)) : [];
         if (t) { f.passed = t.passed; f.total = t.passed + t.failed; }
         f.state = !files.length ? "empty" : broke.length ? "regressed" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, ...(this.bench ? { workbench: true } : {}) }); }
         this.log.append("factory.feature", { run: this.id, id: f.id, title: f.title, index: i + 1, of: features.length, state: f.state, attempt, files: files.slice(0, 40), passed: t?.passed ?? 0, failed: t?.failed ?? 0, ...(broke.length ? { broke: broke.slice(0, 10) } : {}) });
+        // Run 7899: the Builder looked at a repo's top level only, said BLOCKED and changed nothing; the files were one search away.
+        // An empty call gets one more, with its own answer back and the ask to search the whole tree before it stops.
+        if (f.state === "empty") emptyAnswer = text;
+        if (f.state === "empty" && attempt === 1) { retry = emptyRetry(text); continue; }
         if (f.state === "regressed" && attempt === 1) {
           retry = `These tests of the repo passed before your call and fail after it:\n${broke.slice(0, 10).map((k) => `- ${k.replace(/^::/, "").replace("::", ": ")}`).join("\n")}\n\n${(t?.output ?? "").slice(-1500)}`;
           continue;
@@ -554,7 +607,7 @@ export class RepoRun extends Run {
         break;
       }
     }
-    if (!features.some((f) => f.state === "built") && !(wroteAny && features.length === 1)) throw new Error(wroteAny ? "No feature was built without breaking tests that passed before" : "The Builder changed no file");
+    if (!features.some((f) => f.state === "built") && !(wroteAny && features.length === 1)) throw new Error(wroteAny ? "No feature was built without breaking tests that passed before" : emptyFailure(emptyAnswer));
     // What is not built goes to the next slice, a ticket of its own, so the run still hands over a branch that works.
     const planned = new Map((this.plan.features ?? []).map((p) => [p.id, p]));
     this.left = leftOver.map(({ f, why }) => { const p = planned.get(f.id); return { id: f.id, title: f.title, what: p?.what ?? f.what, done: f.done, files: p?.files ?? [], why }; });
@@ -598,8 +651,10 @@ export class RepoRun extends Run {
         return failed;
       }
     }
+    const began = Date.now();
     const r: TestRun = this.env.tests.length ? await this.tools.runTests(this.dir, this.env) : { cases: [], passed: 0, failed: 0, exitCode: 0, timedOut: false, output: "" };
-    const old = r.cases.filter((c) => !c.pass && this.failingBefore.has(key(c)));
+    const tookS = Math.round((Date.now() - began) / 1000);
+    const old = r.cases.filter((c) => !c.pass && failedBefore(c, this.failingBefore));
     r.cases = r.cases.filter((c) => !old.includes(c));
     if (old.length) r.cases.push({ name: `${old.length} test${old.length === 1 ? "" : "s"} that already failed before this change (not held against it)`, file: "", pass: true, durationMs: 0 });
     if (!this.env.tests.length) r.cases.push({ name: "the repo has no tests SoftwareFactory can run here", file: "", pass: true, durationMs: 0 });
@@ -613,7 +668,9 @@ export class RepoRun extends Run {
     if (gamed.length) r.output = `Test integrity:\n${describeIntegrity(gamed)}\nFix the code, not the tests.\n\n${r.output}`.slice(0, 6000);
     r.passed = r.cases.filter((c) => c.pass).length;
     r.failed = r.cases.length - r.passed;
-    this.log.append("factory.tests", { run: this.id, round, cases: r.cases.slice(0, 400), passed: r.passed, failed: r.failed, timedOut: r.timedOut });
+    // Failing cases first, so a long suite cut at 400 never drops the ones that matter.
+    this.log.append("factory.tests", { run: this.id, round, cases: [...r.cases.filter((c) => !c.pass), ...r.cases.filter((c) => c.pass)].slice(0, 400), passed: r.passed, failed: r.failed, timedOut: r.timedOut });
+    if (this.env.tests.length) this.lastSuite = { passed: r.passed, failed: r.failed, failing: r.cases.filter((c) => !c.pass).map((c) => c.name).slice(0, 10), seconds: tookS };
     return r;
   }
 
@@ -680,6 +737,29 @@ export class RepoRun extends Run {
 
 const briefLine = (b: { agreed: string[]; proposals: string[]; concerns: string[] }) =>
   ["The Council looked at the ask first.", b.agreed.length ? `Agreed: ${b.agreed.join("; ")}.` : "", b.proposals.length ? `Proposed: ${b.proposals.join("; ")}.` : "", b.concerns.length ? `Concerns: ${b.concerns.join("; ")}.` : ""].filter(Boolean).join(" ");
+
+/** What the Reviewer is told about the suite the core already ran: use it, and run only the tests of what changed. */
+export function reviewSuiteNote(s: { passed: number; failed: number; failing: string[]; seconds: number }): string {
+  return [
+    `SoftwareFactory already ran the repo's whole test suite on this branch just now (${s.seconds} s): ${s.passed} pass, ${s.failed} fail${s.failing.length ? ` (${s.failing.join("; ")})` : ""}. Take that as given.`,
+    "Do not run the whole suite again: you have a time limit. Run only the test files that cover what changed, one command each, and keep output short.",
+  ].join(" ");
+}
+
+/** What the next call is told after a call that changed no file: its own answer, and to search the whole tree before it stops again. */
+export function emptyRetry(answer: string): string {
+  return [
+    answer.trim() ? `Your call changed no file. Your answer was:\n${answer.trim().slice(-1500)}` : "An earlier call changed no file for this. Its answer is the last entry in .sf/PROGRESS.md.",
+    "If it stopped because something the plan needs seemed missing, look again before you stop: search the whole tree (a recursive listing of the repo; for a GitHub repo, its git/trees API with recursive=1), not only the top level. Files are often deeper than the plan says: use them where they really are.",
+    "Stop again only if it is truly nowhere: then start your answer with BLOCKED: and list every place you searched. Otherwise build it.",
+  ].join("\n\n");
+}
+
+/** Why a build that changed no file failed, in the Builder's own words first, so the Retry question says it (it is cut at 300 characters). */
+export function emptyFailure(answer: string): string {
+  const said = answer.replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
+  return said ? `The Builder changed no file. It said: ${said.slice(0, 240)}` : "The Builder changed no file";
+}
 
 /** The design of the change as the Planner reads it. */
 export function repoDocsForPlanner(d: ProductDocs): string {

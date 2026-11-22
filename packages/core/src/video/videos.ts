@@ -379,8 +379,18 @@ export class Videos {
 
   /** Video files in the Watch folder that nobody has tried yet (a failed one waits until the file changes). */
   private folders(s = this.settings()): string[] {
-    const found = this.o.cloudFolders ? this.o.cloudFolders() : cloudWatchFolders(this.o.homeDir ?? homedir());
-    return [...new Set([s.inbox, ...found])];
+    return [...new Set([s.inbox, ...this.cloudFolders()])];
+  }
+
+  /**
+   * The SF Watch folders in Google Drive or OneDrive, looked for again every 10 minutes. Looking means a stat of every
+   * folder in My Drive, which on a streamed Google Drive took 0.5 to 1.5 s, several times a minute (2026-11-22).
+   */
+  private cloud: { at: number; dirs: string[] } | null = null;
+  private cloudFolders(): string[] {
+    if (this.o.cloudFolders) return this.o.cloudFolders();
+    if (!this.cloud || Date.now() - this.cloud.at > 10 * 60_000) this.cloud = { at: Date.now(), dirs: cloudWatchFolders(this.o.homeDir ?? homedir()) };
+    return this.cloud.dirs;
   }
 
   private waiting(dir: string, now = Date.now()): { path: string; stamp: string; ready: boolean }[] {

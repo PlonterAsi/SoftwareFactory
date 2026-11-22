@@ -119,7 +119,7 @@ export type RunSettings = Required<Omit<RunOptions, "models" | "projectId" | "fl
 export type RunMaker = (x: { factory: Factory; log: EventLog; runtime: AgentRuntime; id: number; idea: string; o: RunSettings; started: Record<string, unknown> }) => Run;
 
 
-export interface Pending { gate: GateId; resolve: (d: GateDecision) => void }
+export interface Pending { gate: GateId; resolve: (d: GateDecision) => void; /** SF-115: ends the wait with StopRun. */ stop?: (e: Error) => void }
 
 
 /**

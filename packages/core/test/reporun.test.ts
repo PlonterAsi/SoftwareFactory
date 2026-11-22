@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { AgentBay, EventLog, Factory, MockRuntime, Tickets, createProject, git, type AgentRequest, type AgentRuntime, type TestRun } from "../src/index.js";
-import { REPO_ENGINE_MIN_USD, enableRepoRuns, repoBranch, validateRepoPlan, type BranchToShip, type RepoTools } from "../src/factory/reporun.js";
+import { REPO_ENGINE_MIN_USD, enableRepoRuns, failedBefore, repoBranch, validateRepoPlan, type BranchToShip, type RepoTools } from "../src/factory/reporun.js";
 import { parseCases, prepareEnv, readPages, runRepoTests, siteProfile, withSite, type RepoEnv } from "../src/factory/repoenv.js";
 import { intakeDoor, routeWork } from "../src/factory/route.js";
 import { withPathFirst } from "../src/runtime.js";
@@ -52,10 +52,11 @@ const PLAN = {
  * Planner returns a plan of two features, the Builder edits files with its tools (and breaks a test on its
  * first go at F2), and the Reviewer passes with the criteria it "ran".
  */
-function crew(o: { sloppy?: boolean; stubborn?: boolean; plan?: typeof PLAN; answer?: string; buildUsd?: number } = {}) {
+function crew(o: { sloppy?: boolean; stubborn?: boolean; plan?: typeof PLAN; answer?: string; buildUsd?: number; empty?: number } = {}) {
   const mock = new MockRuntime();
   const seen: { station: string; req: AgentRequest }[] = [];
   let f2 = 0;
+  let empties = 0;
   const rt: AgentRuntime = { name: "claude-code:fake", run: async (req) => {
     const st = station(req);
     seen.push({ station: st, req });
@@ -64,7 +65,10 @@ function crew(o: { sloppy?: boolean; stubborn?: boolean; plan?: typeof PLAN; ans
     if (st === "plan") r.text = block(o.plan ?? PLAN);
     else if (st === "research" && o.answer) r.text = o.answer;
     else if (st === "review") r.text = block({ verdict: "pass", findings: [], criteria: PLAN.acceptance.map((text) => ({ text, pass: true, evidence: "ran pytest" })) });
-    else if (st === "repo") {
+    else if (st === "repo" && o.empty && empties < o.empty) {
+      empties++;
+      r.text = "BLOCKED: **There is no references/ folder** at the top of the repo, so I changed no file.";
+    } else if (st === "repo") {
       const put = (p: string, c: string) => { mkdirSync(dirname(join(req.cwd!, p)), { recursive: true }); writeFileSync(join(req.cwd!, p), c); };
       if (/Your work, F1/.test(req.prompt)) { put("app.py", "def home():\n    return 'Plonter'\n\ndef contact():\n    return 'Contact'\n"); put("tests/test_contact.py", "def test_contact():\n    assert True\n"); }
       else if (/Your work, F2/.test(req.prompt)) {
@@ -82,7 +86,7 @@ function crew(o: { sloppy?: boolean; stubborn?: boolean; plan?: typeof PLAN; ans
   return { rt, seen };
 }
 
-function world(o: { sloppy?: boolean; stubborn?: boolean; answer?: string; buildUsd?: number; plan?: typeof PLAN; ship?: RepoTools["ship"]; site?: RepoTools["readSite"] } = {}) {
+function world(o: { sloppy?: boolean; stubborn?: boolean; empty?: number; answer?: string; buildUsd?: number; plan?: typeof PLAN; ship?: RepoTools["ship"]; site?: RepoTools["readSite"] } = {}) {
   const log = new EventLog();
   const { rt, seen } = crew(o);
   const bay = new AgentBay(log, rt);
@@ -316,6 +320,40 @@ describe("a sliced run still hands over a branch that works (reliability after r
     expect(next.blocked).toBe(true);
     // The reviewer was told what was left, so it does not hold it against this run.
     expect(w.seen.filter((x) => x.station === "review").at(-1)!.req.prompt).toMatch(/left to a run of their own[\s\S]*F2/);
+    // What only another system could show is left to CI, not failed here (run 7899).
+    expect(w.seen.filter((x) => x.station === "review").at(-1)!.req.prompt).toMatch(/not checkable on this computer/);
+  }, 60_000);
+});
+
+describe("a Builder call that changes no file (run 7899)", () => {
+  it("gets one more call with its own answer back and the ask to search the whole tree, and then builds", async () => {
+    const w = world({ empty: 1 });
+    const t = w.tickets.open({ kind: "request", project: w.project, title: "Contact page" });
+    const r = w.tickets.work(t.id, { route: "engine", maxUsd: 4, autoApprove: true });
+    await w.factory.wait(r.run!);
+    expect(events(w.log, "factory.run.finished").at(-1).outcome).toBe("shipped");
+    const builds = w.seen.filter((x) => x.station === "repo");
+    expect(builds[0].req.prompt).toMatch(/search the whole tree/);
+    expect(builds[1].req.prompt).toMatch(/Your call changed no file[\s\S]*BLOCKED: \*\*There is no references\/ folder[\s\S]*recursive=1/);
+    // No suite after a call that changed nothing; no escalation for the empty first try.
+    expect(events(w.log, "factory.feature").find((e) => e.state === "empty")).toMatchObject({ attempt: 1, passed: 0, failed: 0 });
+    expect(events(w.log, "factory.gate").filter((g) => g.gate === "escalation")).toHaveLength(0);
+    // The Reviewer is told the suite the core ran, and not to run all of it again (run 7899 timed out doing so).
+    const review = w.seen.filter((x) => x.station === "review").at(-1)!.req;
+    expect(`${review.systemPrompt}
+${review.prompt}`).toMatch(/already ran the repo's whole test suite on this branch[\s\S]*Do not run the whole suite again/);
+  }, 60_000);
+
+  it("fails in the Builder's own words when it still changes nothing, and a Retry is told about the empty try", async () => {
+    const w = world({ empty: 99, plan: { ...PLAN, features: [PLAN.features[0]] } });
+    const t = w.tickets.open({ kind: "request", project: w.project, title: "Contact page" });
+    const r = w.tickets.work(t.id, { route: "engine", maxUsd: 4, autoApprove: true });
+    await w.factory.wait(r.run!);
+    const asked = events(w.log, "factory.gate").filter((g) => g.gate === "escalation" && g.state === "waiting");
+    expect(asked[0].question).toMatch(/Build failed: The Builder changed no file\. It said: BLOCKED: There is no references\/ folder/);
+    // The station Retry starts the build again: its first call already knows an earlier try changed nothing.
+    const builds = w.seen.filter((x) => x.station === "repo");
+    expect(builds[2].req.prompt).toMatch(/An earlier call changed no file for this|Your call changed no file/);
   }, 60_000);
 });
 
@@ -408,6 +446,9 @@ describe("tickets in a repo project take the route that fits", () => {
     await w.factory.wait(r.run!);
     const built = w.tickets.get(t.id)!;
     expect(built).toMatchObject({ status: "built", branch: r.branch, pr: null, pushedUrl: null });
+    // Work it again on the built ticket points at the run that built it today, not a second build (run 8917).
+    expect(() => w.tickets.work(t.id, { autoApprove: true })).toThrow(/Run #\d+ already built it today/);
+    expect(events(w.log, "factory.run.started")).toHaveLength(1);
     const note = w.tickets.notes(t.id).at(-1)!.text;
     expect(note).toMatch(/Press Add to my folder on this ticket/);
     expect(note).not.toMatch(/git fetch/);
@@ -570,4 +611,16 @@ describe("a codebase on this computer, for real", () => {
     writeFileSync(join(dir, "app.py"), "from http.server import HTTPServer\nraise SystemExit('no database')\n");
     expect(await withSite(dir, { pathFirst: env.pathFirst }, async () => 1)).toMatchObject({ skipped: expect.stringMatching(/could not be started here.*no database/s) });
   }, 120_000);
+});
+
+describe("a test that already failed before the change", () => {
+  it("is known however vitest named it this time (run 7899)", () => {
+    const before = new Set(["::opens each screen of a built app and names the one that breaks", "tests/test_app.py::test_old"]);
+    expect(failedBefore({ file: "", name: "every screen in a real browser > opens each screen of a built app and names the one that breaks" }, before)).toBe(true);
+    expect(failedBefore({ file: "test/engine.test.ts", name: "every screen in a real browser > opens each screen of a built app and names the one that breaks" }, before)).toBe(true);
+    expect(failedBefore({ file: "tests/test_app.py", name: "test_old" }, before)).toBe(true);
+    // A new failure, or a test of the same name in another file, is still this run's.
+    expect(failedBefore({ file: "", name: "every screen > opens one screen" }, before)).toBe(false);
+    expect(failedBefore({ file: "tests/test_other.py", name: "test_old" }, before)).toBe(false);
+  });
 });

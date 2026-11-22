@@ -1,4 +1,4 @@
-import { GateActions, STEP } from "./GateActions";
+import { GateActions, STEP, StopRunButton } from "./GateActions";
 import { useEffect, useRef, useState } from "react";
 import { ReactFlow, Background, useNodesState, type ReactFlowInstance, type Edge, type Node, Handle, Position, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -118,6 +118,7 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
           <span className="fuel-bar"><span style={{ width: `${Math.max(0, Math.min(100, (left / run.maxUsd) * 100))}%` }} /></span>
           <span className="mono">${run.spentUsd.toFixed(4)} / ${run.maxUsd.toFixed(2)}</span>
           {run.finished && <span className={`outcome ${run.finished.outcome}`}>{run.finished.outcome}</span>}
+          {!run.finished && <StopRunButton key={run.run} run={run.run} />}
         </div>
       )}
       {run?.waiting && !run.finished && <GateBar run={run} />}
@@ -133,6 +134,7 @@ export function FactoryFloor({ runs, factoryRuns, selected, onSelect, crew = NO_
         <div className={`run-result ${run.finished.outcome}`}>
           <span>{run.finished.reason}{run.finished.totalUsd != null && ` · total $${run.finished.totalUsd.toFixed(4)} · ${run.finished.agentCalls ?? 0} agent calls`}</span>
           {run.finished.outcome === "stopped" && run.finished.resumable && <button className="sm" onClick={() => resumeRun(run.run).then(() => setOpenErr(null)).catch((e) => setOpenErr((e as Error).message))}>Resume from where it stopped</button>}
+          {run.finished.outcome === "stopped" && run.finished.resumable && <StopRunButton key={run.run} run={run.run} label="Stop for good" />}
           {run.finished.outcome !== "shipped" && !run.finished.resumable && <button className="sm" title="Picks the run up at the step it stopped at, keeps what it built, and adds money for what is left (not the same starved share again). The project's budget still bounds it." onClick={() => retryRun(run.run).then(() => setOpenErr(null)).catch((e) => setOpenErr((e as Error).message))}>Retry from where it stopped</button>}
           {run.finished.outcome === "shipped" && run.resumed && <span className="muted">resumed {run.resumed.count}× after the app closed</span>}
           {run.finished.outcome === "shipped" && <button className="ghost sm" onClick={() => setupApi.open("run", run.run).then(() => setOpenErr(null)).catch((e) => setOpenErr((e as Error).message))}>Open folder</button>}
