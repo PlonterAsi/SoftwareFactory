@@ -1,5 +1,5 @@
 import { chmodSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { git } from "../factory/workspace.js";
 
@@ -41,12 +41,40 @@ export function parseGitHubRepo(s: string): GitHubRepo | null {
 /** Remove anything that looks like a GitHub token from text before it is written anywhere. */
 export const hideTokens = (s: string) => s.replace(/\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, "[token]");
 
-/** The GitHub CLI's login on this PC (`gh auth token`), or null when gh is missing or signed out. */
+const GH_ARGS = ["auth", "token", "-h", "github.com"];
+const GH_FRESH_MS = 10 * 60_000;
+let ghTok: { at: number; t: string | null } | null = null;
+let ghAsking = false;
+
+/**
+ * The GitHub CLI's login on this PC (`gh auth token`), or null when gh is missing or signed out.
+ *
+ * Only the first call waits for gh. After that the answer is held in memory and asked again in the background every
+ * 10 minutes: a synchronous gh call blocked the whole core for up to 5 s on each PR follow (core.log "the core was
+ * busy", 2026-11-22), which made every screen and add-on wait.
+ */
 export function ghCliToken(): string | null {
-  try {
-    const r = spawnSync("gh", ["auth", "token", "-h", "github.com"], { windowsHide: true, timeout: 5000, encoding: "utf8" });
-    return r.status === 0 ? String(r.stdout ?? "").trim() || null : null;
-  } catch { return null; }
+  if (!ghTok) {
+    let t: string | null = null;
+    try {
+      const r = spawnSync("gh", GH_ARGS, { windowsHide: true, timeout: 5000, encoding: "utf8" });
+      t = r.status === 0 ? String(r.stdout ?? "").trim() || null : null;
+    } catch { /* no gh */ }
+    ghTok = { at: Date.now(), t };
+    return t;
+  }
+  if (Date.now() - ghTok.at > GH_FRESH_MS && !ghAsking) {
+    ghAsking = true;
+    try {
+      execFile("gh", GH_ARGS, { windowsHide: true, timeout: 15_000, encoding: "utf8" }, (err, stdout) => {
+        ghAsking = false;
+        // A gh that ran and said no (signed out) is no login; a slow or missing gh keeps what was known.
+        const ran = !err || typeof (err as { code?: unknown }).code === "number";
+        ghTok = { at: Date.now(), t: ran ? (!err ? String(stdout ?? "").trim() || null : null) : ghTok?.t ?? null };
+      });
+    } catch { ghAsking = false; ghTok = { ...ghTok, at: Date.now() }; }
+  }
+  return ghTok.t;
 }
 
 export class GitHub {
