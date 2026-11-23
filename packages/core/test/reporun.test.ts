@@ -86,7 +86,7 @@ function crew(o: { sloppy?: boolean; stubborn?: boolean; plan?: typeof PLAN; ans
   return { rt, seen };
 }
 
-function world(o: { sloppy?: boolean; stubborn?: boolean; empty?: number; answer?: string; buildUsd?: number; plan?: typeof PLAN; ship?: RepoTools["ship"]; site?: RepoTools["readSite"] } = {}) {
+function world(o: { sloppy?: boolean; stubborn?: boolean; empty?: number; answer?: string; buildUsd?: number; plan?: typeof PLAN; ship?: RepoTools["ship"]; site?: RepoTools["readSite"]; runTests?: RepoTools["runTests"] } = {}) {
   const log = new EventLog();
   const { rt, seen } = crew(o);
   const bay = new AgentBay(log, rt);
@@ -97,7 +97,7 @@ function world(o: { sloppy?: boolean; stubborn?: boolean; empty?: number; answer
   const shipped: BranchToShip[] = [];
   const tools: Partial<RepoTools> = {
     prepareEnv: () => ENV,
-    runTests: (dir) => suite(dir),
+    runTests: o.runTests ?? ((dir) => suite(dir)),
     readSite: o.site ?? (async () => ({ screens: [{ route: "/contact", text: "Contact us. Email. Send.", controls: ["input email", "button Send"] }] })),
     ship: o.ship ?? (async (b) => { shipped.push(b); return { pr: { number: 7, url: "https://github.com/acme/landing/pull/7", repo: "acme/landing" } }; }),
   };
@@ -322,6 +322,43 @@ describe("a sliced run still hands over a branch that works (reliability after r
     expect(w.seen.filter((x) => x.station === "review").at(-1)!.req.prompt).toMatch(/left to a run of their own[\s\S]*F2/);
     // What only another system could show is left to CI, not failed here (run 7899).
     expect(w.seen.filter((x) => x.station === "review").at(-1)!.req.prompt).toMatch(/not checkable on this computer/);
+  }, 60_000);
+});
+
+describe("a flaky test on a busy computer (run 9398)", () => {
+  it("fails once and passes when the suite runs again: it is not held against the change, and the run ships", async () => {
+    // The baseline passes; then every other run of the suite fails test_home, as a starved PC did.
+    let calls = 0;
+    const flakySuite = async (dir: string): Promise<TestRun> => {
+      calls++;
+      const t = await suite(dir);
+      if (calls > 1 && calls % 2 === 0) { t.cases[0] = { ...t.cases[0], pass: false, error: "Test timed out in 5000ms" }; t.passed--; t.failed++; }
+      return t;
+    };
+    const w = world({ runTests: flakySuite });
+    const t = w.tickets.open({ kind: "request", project: w.project, title: "Contact page" });
+    const r = w.tickets.work(t.id, { route: "engine", maxUsd: 4, autoApprove: true });
+    await w.factory.wait(r.run!);
+    const fin = events(w.log, "factory.run.finished").at(-1);
+    expect(fin.outcome).toBe("shipped");
+    expect(events(w.log, "factory.feature").map((f) => f.state)).not.toContain("regressed");
+    const flaky = events(w.log, "factory.tests.flaky");
+    expect(flaky.length).toBe(1);
+    expect(flaky[0].tests).toEqual(["tests/test_app.py::test_home"]);
+    // Once known as flaky, it is not run again just to check, and the build reuses the baseline instead of a second suite.
+    const builds = events(w.log, "factory.feature").filter((f) => f.state !== "building").length;
+    expect(calls).toBeLessThanOrEqual(1 + builds + 1 + 2);
+    const last = events(w.log, "factory.tests").at(-1);
+    expect(last.failed).toBe(0);
+  }, 60_000);
+
+  it("a test that fails both times is still the change's: the feature regresses as before", async () => {
+    const w = world({ stubborn: true, plan: { ...PLAN, features: [...PLAN.features, { id: "F3", title: "Part 3", what: "Part 3.", files: ["part3.py"], done: "It works." }] } });
+    const t = w.tickets.open({ kind: "request", project: w.project, title: "Contact page" });
+    const r = w.tickets.work(t.id, { route: "engine", maxUsd: 4, autoApprove: true });
+    await w.factory.wait(r.run!);
+    expect(events(w.log, "factory.feature").filter((f) => f.id === "F2" && f.state === "regressed").length).toBe(2);
+    expect(events(w.log, "factory.tests.flaky")).toEqual([]);
   }, 60_000);
 });
 

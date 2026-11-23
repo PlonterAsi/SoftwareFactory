@@ -223,6 +223,14 @@ export class RepoRun extends Run {
   private context = "";
   /** Tests that already failed before anything changed: they are not this run's work. */
   private failingBefore = new Set<string>();
+  /** The baseline suite, so the build's first look does not run the same suite again on the same commit (run 9398 did, 10 minutes). */
+  private baselineRun: TestRun | null = null;
+  /** How long the baseline suite took, in seconds: a slow suite is left to SoftwareFactory, not run by the Builder. */
+  private baselineSeconds = 0;
+  /** Tests that failed once after a change and passed when the suite ran again: this computer's flakiness, not the change. */
+  private flaky = new Set<string>();
+  /** Tests that failed twice in a row: real failures, never run again just to check. */
+  private failedTwice = new Set<string>();
   /** The fast checks (types, lint) already failed before the change, so they cannot judge it. */
   private gatesOff = "";
   private handed: Record<string, unknown> = {};
@@ -244,6 +252,7 @@ export class RepoRun extends Run {
     if (step.action === "tests") {
       const locked = this.lastOf("factory.tests.locked");
       this.failingBefore = new Set(((locked?.failingBefore ?? []) as string[]).map(String));
+      this.baselineSeconds = Number(locked?.baseline?.seconds) || 0;
       // The fast checks that already failed before the change stay off after a resume too.
       if (typeof locked?.gatesOff === "string") this.gatesOff = locked.gatesOff;
     }
@@ -260,6 +269,30 @@ export class RepoRun extends Run {
   private async suite(): Promise<TestRun> {
     const began = Date.now();
     try { return await this.tools.runTests(this.dir, this.env); } finally { this.suiteMs += Date.now() - began; }
+  }
+
+  /**
+   * Tests (as keys) that passed before and fail now get one more run of the suite before they are held against
+   * the change: only those that fail both times are returned; the rest are noted as flaky and left out from then
+   * on. Run 9398 (2026-11-23): a 10-minute suite on a busy PC failed 6, then 5, then 7 different process-starting
+   * tests in files the change never touched; the Builder spent its second attempt chasing them, and the run
+   * stopped at its time limit with 7 "failing" before a Fixer was even asked.
+   */
+  private async recheck(keys: string[]): Promise<string[]> {
+    const fresh = keys.filter((k) => !this.failedTwice.has(k) && !this.flaky.has(k));
+    const known = keys.filter((k) => this.failedTwice.has(k));
+    if (!fresh.length || !this.env.tests.length) return keys.filter((k) => !this.flaky.has(k));
+    const again = await this.suite();
+    const leaf = (k: string) => k.slice(k.indexOf("::") + 2).split(" > ").at(-1)!.trim();
+    const passed = new Set(again.cases.filter((c) => c.pass).map((c) => leaf(key(c))));
+    const failed = new Set(again.cases.filter((c) => !c.pass).map((c) => leaf(key(c))));
+    const still: string[] = [];
+    const flaky: string[] = [];
+    for (const k of fresh) (passed.has(leaf(k)) && !failed.has(leaf(k)) ? flaky : still).push(k);
+    for (const k of flaky) this.flaky.add(k);
+    for (const k of still) this.failedTwice.add(k);
+    if (flaky.length) this.log.append("factory.tests.flaky", { run: this.id, tests: flaky.slice(0, 50), failedTwice: still.length });
+    return [...known, ...still];
   }
 
   private lastOf(type: string): Record<string, any> | undefined {
@@ -317,7 +350,11 @@ export class RepoRun extends Run {
   }
   protected benchContract(): string {
     return workbenchContract({
-      test: this.env.testHint || "the repo has no tests of its own yet: run the code you changed",
+      // Run 9398: the Builder ran a 10-minute suite several times at once in the background; they starved each other and
+      // every one timed out, 19 minutes of its call. SoftwareFactory runs the whole suite after each call anyway.
+      test: !this.env.testHint ? "the repo has no tests of its own yet: run the code you changed"
+        : this.baselineSeconds > 120 ? `only the test files for what you change, one command at a time, never in the background; the whole suite (${this.env.testHint}) takes about ${Math.round(this.baselineSeconds / 60)} minutes here, and SoftwareFactory runs it after your call, so do not run it yourself`
+        : this.env.testHint,
       protect: ["a test that is already there to make it pass (fix the code instead; add tests for new behaviour)", "anything under .sf/ or .git"],
       extra: [`Beyond those commands you may run here: ${this.env.commands.join(", ") || "nothing more"}. Dependencies are already installed; do not install any.`, this.env.notes.length ? `Not set up on this computer: ${this.env.notes.join("; ")}.` : ""].filter(Boolean).join("\n"),
     });
@@ -496,9 +533,12 @@ export class RepoRun extends Run {
       this.mark("tests", "skipped", undefined, `This repo has no tests SoftwareFactory can run here${this.env.notes.length ? ` (${this.env.notes[0]})` : ""}. Each feature brings tests for what it adds.`);
       return;
     }
+    const began = Date.now();
     const t = await this.suite();
+    this.baselineRun = t;
+    this.baselineSeconds = Math.round((Date.now() - began) / 1000);
     this.failingBefore = new Set(t.cases.filter((c) => !c.pass).map(key));
-    this.log.append("factory.tests.locked", { run: this.id, hash: "", files: [...new Set(t.cases.map((c) => c.file).filter(Boolean))].slice(0, 200), sha: this.base, kept: "repo", baseline: { passed: t.passed, failed: t.failed, command: this.env.testHint }, failingBefore: [...this.failingBefore].slice(0, 500), ...(this.gatesOff ? { gatesOff: this.gatesOff } : {}) });
+    this.log.append("factory.tests.locked", { run: this.id, hash: "", files: [...new Set(t.cases.map((c) => c.file).filter(Boolean))].slice(0, 200), sha: this.base, kept: "repo", baseline: { passed: t.passed, failed: t.failed, command: this.env.testHint, seconds: this.baselineSeconds }, failingBefore: [...this.failingBefore].slice(0, 500), ...(this.gatesOff ? { gatesOff: this.gatesOff } : {}) });
     this.mark("tests", "pass", undefined, `The repo's own tests before the change: ${t.passed} pass${t.failed ? `, ${t.failed} already fail (not held against this run)` : ""}.`);
   }
 
@@ -553,7 +593,9 @@ export class RepoRun extends Run {
     const buildStart = this.spent;
     const pool = buildPoolUsd(this.o.maxUsd, buildStart);
     const suite = async () => (this.env.tests.length ? this.suite() : null);
-    let passing = new Set(((await suite())?.cases ?? []).filter((c) => c.pass).map(key));
+    // The baseline ran on this same commit moments ago; only a resumed run, which did not keep it, runs the suite here.
+    const first = this.baselineRun ?? await suite();
+    let passing = new Set((first?.cases ?? []).filter((c) => c.pass).map(key));
     let wroteAny = features.some((f) => f.state === "built");
     let emptyAnswer = "";
     const leftOver: { f: Feature; why: string }[] = [];
@@ -583,7 +625,9 @@ export class RepoRun extends Run {
         // Nothing changed, nothing to test: the suite takes minutes in a big repo, and a flaky test would read as broken (run 7899).
         const t = files.length ? await suite() : null;
         const now = t ? new Set(t.cases.filter((c) => c.pass).map(key)) : passing;
-        const broke = t ? [...passing].filter((k) => !now.has(k)) : [];
+        const broke = t ? await this.recheck([...passing].filter((k) => !now.has(k))) : [];
+        // A test that passed again on the second run stays among the passing ones the next feature must keep.
+        for (const k of passing) if (this.flaky.has(k)) now.add(k);
         if (t) { f.passed = t.passed; f.total = t.passed + t.failed; }
         f.state = !files.length ? "empty" : broke.length ? "regressed" : "built";
         if (files.length) { wroteAny = true; this.log.append("factory.files", { run: this.id, station: "build", round: i + 1, ...res, ...(this.bench ? { workbench: true } : {}) }); }
@@ -663,6 +707,13 @@ export class RepoRun extends Run {
     const old = r.cases.filter((c) => !c.pass && failedBefore(c, this.failingBefore));
     r.cases = r.cases.filter((c) => !old.includes(c));
     if (old.length) r.cases.push({ name: `${old.length} test${old.length === 1 ? "" : "s"} that already failed before this change (not held against it)`, file: "", pass: true, durationMs: 0 });
+    const failing = r.cases.filter((c) => !c.pass);
+    if (failing.length) {
+      const still = new Set(await this.recheck(failing.map(key)));
+      const flaky = failing.filter((c) => !still.has(key(c)));
+      r.cases = r.cases.filter((c) => !flaky.includes(c));
+      if (flaky.length) r.cases.push({ name: `${flaky.length} test${flaky.length === 1 ? "" : "s"} that failed once and passed when the suite ran again (flaky on this computer, not held against the change)`, file: "", pass: true, durationMs: 0 });
+    }
     if (!this.env.tests.length) r.cases.push({ name: "the repo has no tests SoftwareFactory can run here", file: "", pass: true, durationMs: 0 });
     const texts: Record<string, string> = {};
     for (const p of changed) { try { const abs = join(this.dir, p); if (statSync(abs).isFile() && statSync(abs).size < 400_000) texts[p] = readFileSync(abs, "utf8"); } catch { /* deleted */ } }
