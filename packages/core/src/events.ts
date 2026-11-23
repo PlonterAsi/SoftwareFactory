@@ -194,10 +194,12 @@ export class EventLog extends EventEmitter {
     return event;
   }
 
-  list(opts: { type?: EventType; sinceId?: number; limit?: number } = {}): SfEvent[] {
+  list(opts: { type?: EventType; types?: EventType[]; sinceId?: number; limit?: number } = {}): SfEvent[] {
     const where: string[] = [];
     const args: (string | number)[] = [];
     if (opts.type) { where.push("type = ?"); args.push(opts.type); }
+    // Several types in one indexed read, so a reader never parses the whole log to keep a few rows.
+    if (opts.types?.length) { where.push(`type IN (${opts.types.map(() => "?").join(",")})`); args.push(...opts.types); }
     if (opts.sinceId !== undefined) { where.push("id > ?"); args.push(opts.sinceId); }
     const sql = `SELECT id, ts, type, payload FROM events ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY id ASC LIMIT ?`;
     args.push(opts.limit ?? 1000);

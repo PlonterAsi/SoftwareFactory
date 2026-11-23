@@ -105,4 +105,21 @@ describe("the Configuration API", () => {
     const none = await (await fetch(`${base}/api/config/ran?run=1`)).json();
     expect(none.setups).toEqual([]);
   });
+
+  it("still loads when an agent was saved before a list field existed (no mcp in its stored copy)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sf-config-"));
+    const log = new EventLog(":memory:");
+    const core = createCore({ log, runtime: new MockRuntime({ delayMs: 0 }), projectsDir: join(dir, "projects"), order: { mode: "heuristic" } });
+    // As stored on a real PC: an agent saved before mcp was a field.
+    log.append("bay.agent.saved", { id: "old-agent", version: 1, def: { id: "old-agent", name: "Old agent", avatar: "◆", description: "", station: "none", model: "haiku", budgetUsd: 0.1, plugins: [], skills: [], tools: [], sample: "", prompt: "Do it." }, note: "old", by: "you" });
+    const server: Server = createServer(core);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    stops.push(() => { core.launcher.stopAll(); server.close(); });
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const r = await fetch(`${base}/api/config`);
+    expect(r.status).toBe(200);
+    const j = await r.json();
+    expect(j.entries.some((e: { id: string }) => e.id === "agent:old-agent")).toBe(true);
+    expect(core.bay.get("old-agent")?.def.mcp).toEqual([]);
+  });
 });

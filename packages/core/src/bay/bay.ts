@@ -101,9 +101,10 @@ export class AgentBay implements CrewSource {
 
   agents(): AgentView[] {
     const by = new Map<string, AgentView>();
-    for (const e of this.log.list({ limit: 1e6 }).filter((x) => x.type === "bay.agent.saved" || x.type === "bay.agent.retired")) {
+    for (const e of this.log.list({ types: ["bay.agent.saved", "bay.agent.retired"], limit: 1e6 })) {
       const p = e.payload as any;
       if (e.type === "bay.agent.saved") {
+        p.def = withLists(p.def);
         const cur = by.get(p.id);
         const v = { version: p.version, ts: e.ts, note: p.note ?? "", by: p.by ?? "you" };
         if (cur) Object.assign(cur, { def: p.def, version: p.version, updatedAt: e.ts, versions: [...cur.versions, v] });
@@ -119,7 +120,7 @@ export class AgentBay implements CrewSource {
     const e = this.events("bay.agent.saved").find((x) => (x.payload as any).id === id && (x.payload as any).version === version);
     if (!e) return undefined;
     const p = e.payload as any;
-    return { version, ts: e.ts, def: p.def, note: p.note ?? "", by: p.by ?? "you" };
+    return { version, ts: e.ts, def: withLists(p.def), note: p.note ?? "", by: p.by ?? "you" };
   }
 
   slots(): Record<Slot, string[]> {
@@ -471,4 +472,14 @@ export function heuristicDraft(text: string): AgentDef {
     description: text.slice(0, 300), sample: BUILTIN_AGENTS.find((b) => b.station === station)?.sample ?? "",
     prompt: `You are ${name}, an agent of SoftwareFactory. ${text.trim().replace(/([^.!?])$/, "$1.")} Be concise and concrete.`,
   } as any);
+}
+
+/**
+ * An agent saved before a list field existed has no such field in its
+ * stored copy. Every reader gets an empty list instead, so nothing trips over a missing field
+ * (the Configuration page failed on "mcp" for the 11 agents saved before then).
+ */
+function withLists(def: AgentDef): AgentDef {
+  const d = (def ?? {}) as Partial<AgentDef>;
+  return { ...d, plugins: d.plugins ?? [], skills: d.skills ?? [], tools: d.tools ?? [], mcp: d.mcp ?? [] } as AgentDef;
 }
