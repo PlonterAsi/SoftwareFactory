@@ -27,6 +27,8 @@ export interface RunProfile {
   /** What you would type in a terminal in the project folder. */
   command: string;
   exec?: Exec;
+  /** A workspace of a monorepo the profile starts in, relative to the project folder (siteProfile, run 9398). */
+  cwd?: string;
   /** For static: the folder to serve, relative to the project folder ("" is the folder itself). */
   root?: string;
   /** An arguments box is shown. */

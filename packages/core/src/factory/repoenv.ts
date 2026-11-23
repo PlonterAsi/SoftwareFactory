@@ -217,8 +217,30 @@ export async function runRepoTests(dir: string, env: Pick<RepoEnv, "tests" | "pa
 
 /** The way the Run tab would start this folder's site, if it has one: a web program first, else plain pages. */
 export function siteProfile(dir: string): RunProfile | null {
-  const p = detectProfiles(dir).profiles.filter((x) => !x.utility);
-  return p.find((x) => x.kind === "web") ?? p.find((x) => x.kind === "static") ?? null;
+  const pick = (d: string) => { const p = detectProfiles(d).profiles.filter((x) => !x.utility); return p.find((x) => x.kind === "web") ?? p.find((x) => x.kind === "static") ?? null; };
+  const own = pick(dir);
+  if (own?.kind === "web") return own;
+  // A monorepo whose site is one of its workspaces (SoftwareFactory's own apps/bridge): run 9398's product judge
+  // found "no site" at the top, so every screen criterion was left to code reading.
+  for (const ws of workspaceDirs(dir)) {
+    const p = pick(join(dir, ws));
+    if (p?.kind === "web") return { ...p, cwd: ws, command: `${p.command} (in ${ws})` };
+  }
+  return own;
+}
+
+/** The workspace folders package.json names, with "dir/*" expanded one level. */
+export function workspaceDirs(dir: string): string[] {
+  let globs: unknown = [];
+  try { const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")); globs = Array.isArray(pkg.workspaces) ? pkg.workspaces : pkg.workspaces?.packages ?? []; } catch { return []; }
+  const out: string[] = [];
+  for (const g of (Array.isArray(globs) ? globs : []).map(String)) {
+    if (g.includes("..")) continue;
+    const m = g.match(/^(.*?)\/\*$/);
+    if (!m) { if (existsSync(join(dir, g, "package.json"))) out.push(g); continue; }
+    try { for (const n of readdirSync(join(dir, m[1])).sort()) if (existsSync(join(dir, m[1], n, "package.json"))) out.push(`${m[1]}/${n}`); } catch { /* no such folder */ }
+  }
+  return out;
 }
 
 /**
@@ -236,7 +258,9 @@ export async function withSite<T>(dir: string, o: { pathFirst?: string[]; timeou
     finally { server.close(); }
   }
   const port = await freePort();
-  const env = { ...withPathFirst(projectEnv(dir, process.execPath, port), o.pathFirst ?? []), FLASK_RUN_PORT: String(port), FLASK_DEBUG: "0" };
+  const home = dir;
+  dir = join(dir, profile.cwd ?? "");
+  const env = { ...withPathFirst(projectEnv(home, process.execPath, port), [...(o.pathFirst ?? []), ...(profile.cwd ? [join(dir, "node_modules", ".bin")] : [])]), FLASK_RUN_PORT: String(port), FLASK_DEBUG: "0" };
   const exec = withDeclaredArgs(dir, profile.exec!);
   const child = "shell" in exec
     ? spawn(exec.shell, { cwd: dir, shell: true, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" })

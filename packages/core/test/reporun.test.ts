@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { AgentBay, EventLog, Factory, MockRuntime, Tickets, createProject, git, type AgentRequest, type AgentRuntime, type TestRun } from "../src/index.js";
 import { REPO_ENGINE_MIN_USD, ciTestSystems, enableRepoRuns, failedBefore, hereNote, repoBranch, validateRepoPlan, type BranchToShip, type RepoTools } from "../src/factory/reporun.js";
-import { parseCases, prepareEnv, readPages, runRepoTests, siteProfile, withSite, type RepoEnv } from "../src/factory/repoenv.js";
+import { parseCases, prepareEnv, readPages, runRepoTests, siteProfile, withSite, workspaceDirs, type RepoEnv } from "../src/factory/repoenv.js";
 import { intakeDoor, routeWork } from "../src/factory/route.js";
 import { withPathFirst } from "../src/runtime.js";
 
@@ -619,6 +619,23 @@ describe("a codebase on this computer, for real", () => {
     expect(screens[1].text).toMatch(/Contact us/);
     expect(screens[1].controls.join(" ")).toMatch(/Send/);
     expect(await withSite(tmp("sf-rr-empty-"), {}, async () => 1)).toMatchObject({ skipped: expect.stringMatching(/no site/) });
+  }, 120_000);
+
+  it("finds the site in a monorepo's workspace, starts it there, and reads it (run 9398)", async () => {
+    const dir = tmp("sf-rr-mono-");
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "mono", private: true, workspaces: ["apps/*", "packages/*"], scripts: { dev: "npm run dev -w web & npm run dev -w core", test: "npm test -w core" } }));
+    mkdirSync(join(dir, "apps", "web"), { recursive: true });
+    mkdirSync(join(dir, "packages", "core"), { recursive: true });
+    writeFileSync(join(dir, "packages", "core", "package.json"), JSON.stringify({ name: "core", scripts: { test: "node -e 1" } }));
+    writeFileSync(join(dir, "apps", "web", "package.json"), JSON.stringify({ name: "web", scripts: { dev: "node server.js --port" } }));
+    writeFileSync(join(dir, "apps", "web", "server.js"), "const http = require('http');\nconst s = http.createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end('<html><body><h1>Run map</h1></body></html>'); });\ns.listen(Number(process.env.PORT), '127.0.0.1', () => console.log('Local: http://127.0.0.1:' + process.env.PORT + '/'));\n");
+    expect(workspaceDirs(dir)).toEqual(["apps/web", "packages/core"]);
+    const site = siteProfile(dir);
+    expect(site?.kind).toBe("web");
+    expect(site?.cwd).toBe("apps/web");
+    const screens = await withSite(dir, {}, (url) => readPages(url, { browser: null }));
+    if (!Array.isArray(screens)) throw new Error(screens.skipped);
+    expect(screens[0].text).toMatch(/Run map/);
   }, 120_000);
 
   it("starts a Python web program on a free port with the repo's own Python, reads it, and leaves nothing running", async () => {
