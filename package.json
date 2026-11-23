@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "npm run dev -w @sf/core & npm run dev -w @sf/bridge",
     "build": "npm run build -w @sf/core && npm run build -w @sf/bridge",
-    "test": "npm test -w @sf/core",
+    "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck -w @sf/core && npm run typecheck -w @sf/bridge",
     "factory": "npm run factory -w @sf/core --",
     "app": "npm run build -w @sf/core && tauri dev",

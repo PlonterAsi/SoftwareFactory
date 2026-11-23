@@ -4,6 +4,8 @@ import { peekPendingTicket, takePendingTicket } from "./BugReport";
 import { TicketVerify, type VerificationView } from "./TicketVerify";
 import { RanWith } from "./Configuration";
 import { TicketProfile } from "./Profiles";
+import { TicketMap } from "./TicketMap.tsx"; // explicit extension: on a case-insensitive disk "./TicketMap" would also match ticketMap.ts
+import { buildTicketMap, STATION_ORDER } from "./ticketMap";
 
 /**
  * Tickets: every unit of work on a project, in one place. A list or a board,
@@ -429,8 +431,6 @@ function NewTicket({ meta, projectId, projects, onDone, onError }: { meta: Meta;
   );
 }
 
-const STATION_ORDER = ["intake", "council", "discover", "plan", "gateA", "tests", "build", "test", "fix", "review", "evaluate", "gateB", "ship"];
-
 /** The ticket page: the work document, edited one field at a time, with its thread and the crew hand-off. */
 function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowRun, onError }: {
   id: number; meta: Meta; last: number; crew: CrewRef[]; projects: { id: number; title: string }[];
@@ -450,6 +450,9 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
   const [flows, setFlows] = useState<FlowSummaryView[]>([]);
   useEffect(() => { ticketsApi.get(id).then(setD).catch((e) => onError((e as Error).message)); }, [id, last]);
   useEffect(() => { ticketsApi.check(id).then(setCheck).catch(() => setCheck(null)); }, [id, last]);
+  // The merge review of the PR, read again for the Run map's PR node (the same route MergeBox reads).
+  const [mergeCheck, setMergeCheck] = useState<MergeCheck | null>(null);
+  useEffect(() => { fetch(`${API}/api/git/tickets/${id}`).then((r) => r.json()).then((j) => setMergeCheck(j.check ?? null)).catch(() => setMergeCheck(null)); }, [id, last]);
   useEffect(() => { setReplies({}); }, [id]);
   useEffect(() => { flowsApi.list().then((j) => setFlows(j.flows.filter((f) => f.runner !== "door"))).catch(() => {}); }, []);
   if (!d) return <aside className="tk-page"><div className="empty">Loading…</div></aside>;
@@ -599,6 +602,7 @@ function TicketPage({ id, meta, last, crew, projects, onClose, onSelect, onShowR
       {d.verification && <TicketVerify v={d.verification} lookNow={t.status === "built"} />}
       <RanWith ticket={t.id} />
       <TicketProfile ticket={t.id} />
+      <TicketMap {...buildTicketMap({ run: d.run, steps: d.steps, pr: t.pr, check: mergeCheck })} onOpenRun={(rid) => onShowRun?.(rid)} onOpenMerge={() => document.getElementById("tk-merge-review")?.scrollIntoView({ behavior: "smooth" })} />
       {d.run && (
         <div className="tk-runstrip" aria-label={`Factory run ${d.run.id}`}>
           <button className="link mono" onClick={() => onShowRun?.(d.run!.id)}>run #{d.run.id}</button>
@@ -930,7 +934,7 @@ function MergeBox({ id, state, last }: { id: number; state: string; last: number
     );
   }
   return (
-    <section className="tk-merge" aria-label="Merge review">
+    <section className="tk-merge" id="tk-merge-review" aria-label="Merge review">
       <div className="row"><b>Merge review</b><span className="muted small">{!c ? "Not reviewed yet: SF reviews the PR when its CI ends." : c.ci === "green" ? (c.confident ? "Confident: every line passed" : `${c.score}% of the lines passed`) : c.ci === "red" ? "CI failed" : c.ci === "running" ? "CI is running" : "No CI on this PR"}</span></div>
       {c && <ul>{c.reasons.map((r) => <li key={r.key} className={r.ok ? "" : "no"}>{r.text}</li>)}</ul>}
       <div className="row">
