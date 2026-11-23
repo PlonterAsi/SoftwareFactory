@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { EventLog } from "../events.js";
@@ -379,12 +379,10 @@ export class RepoRun extends Run {
   /**
    * The review runs on this one computer. Run 7899 (2026-11-22) was sent back twice for "on win32 and on Linux":
    * the hook passed on Windows, and the Linux half cannot be run here, so a pass was turned into "not met" and a
-   * Fixer round that could never succeed. What only another system can show is left to the repo's CI.
+   * Fixer round that could never succeed. What only another system can show is left to the repo's CI, but only
+   * a system its CI really tests on (SF-114); a network or service criterion is never waved through.
    */
-  private hereNote(): string {
-    const os = process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : "Linux";
-    return `\n\nThis work is checked on one ${os} computer. The part of a criterion that only another operating system, or a service this computer cannot reach, could show is not this run's to fail: when everything checkable here passes, the criterion passes, with the evidence "checked on ${os}; the rest is not checkable on this computer". The repo's CI checks the other systems.`;
-  }
+  private hereNote(): string { return hereNote(process.platform, ciTestSystems(this.dir)); }
   /** A sliced plan (SF-64): what this run leaves to the next slice, so nobody holds it against this one. */
   private laterNote(): string {
     const later = [...(this.plan.slice?.later ?? []), ...this.leftOver()];
@@ -780,6 +778,8 @@ export class RepoRun extends Run {
       "## What was built", "", ...(this.plan.features ?? []).map((f) => `- ${f.title}`), "",
       "## Acceptance criteria", "", ...this.plan.acceptance.map((a) => `- ${unmet.some((c) => c.text === a) ? "[ ]" : "[x]"} ${a}`), "",
       ...((): string[] => { const l = [...(this.plan.slice?.later ?? []).map((f) => ({ ...f, why: "the plan was more than this run's money builds" })), ...this.leftOver()]; return l.length ? ["## Left for the next slice", "", ...l.map((f) => `- ${f.id} ${f.title}: ${f.why}`), "", "_A follow-up ticket holds these; this branch works without them._", ""] : []; })(),
+      // SF-114: what neither this computer nor the repo's CI tested is said before the merge, not passed on trust.
+      ...((): string[] => { const u = (this.reviewNotes?.criteria ?? []).filter((c) => /unverified/i.test(String((c as { evidence?: unknown }).evidence ?? ""))); return u.length ? ["## Unverified", "", ...u.map((c) => `- ${c.text}: ${String((c as { evidence?: unknown }).evidence)}`), "", "_Neither this computer nor the repo's CI tests these systems; check them before you merge._", ""] : []; })(),
       `Changed ${files.length} file${files.length === 1 ? "" : "s"}. ${this.env.testHint ? `The repo's own tests (${this.env.testHint}) pass.` : "The repo has no tests SoftwareFactory could run."}`, "",
       "_Opened as a draft by SoftwareFactory's crew after a design, a plan you approved, a review and your acceptance of the build. It never pushes to the main line; merging is your call._",
     ].join("\n");
@@ -876,4 +876,47 @@ export function enableRepoRuns(factory: Factory, log: EventLog, tools: Partial<R
       return { run: factory.launch("repo", ask, { repo: info }, { ...runOpts, projectId }), branch };
     },
   };
+}
+
+export type OsName = "Windows" | "Linux" | "macOS";
+const osOf = (platform: string): OsName => (platform === "win32" ? "Windows" : platform === "darwin" ? "macOS" : "Linux");
+
+/**
+ * The operating systems the repo's GitHub CI runs tests on: a workflow job whose runs-on names the system
+ * (also as the fallback inside an expression) and whose steps mention a test. A job that only publishes does not count.
+ */
+const TEST_COMMAND = /\b(?:npm|pnpm|yarn|bun)(?: run)? test\b|\bvitest\b|\bjest\b|\bpytest\b|\b(?:cargo|go|dotnet|mvn|gradlew?) test\b|\bunittest\b/i;
+export function ciTestSystems(dir: string): OsName[] {
+  const found = new Set<OsName>();
+  const wf = join(dir, ".github", "workflows");
+  let files: string[] = [];
+  try { files = readdirSync(wf).filter((f) => /\.ya?ml$/.test(f)); } catch { return []; }
+  for (const f of files) {
+    let text = "";
+    try { text = readFileSync(join(wf, f), "utf8"); } catch { continue; }
+    // Jobs are the two-space-indented keys under "jobs:"; each block is read on its own.
+    const jobs = text.split(/\r?\n(?=  [\w-]+:\s*$)/m);
+    for (const job of jobs) {
+      const on = job.match(/^\s*runs-on:\s*(.+)$/m)?.[1]?.toLowerCase() ?? "";
+      if (!on || !TEST_COMMAND.test(job.replace(/^\s*#.*$/gm, ""))) continue;
+      if (/windows/.test(on)) found.add("Windows");
+      if (/ubuntu|linux/.test(on)) found.add("Linux");
+      if (/macos|darwin/.test(on)) found.add("macOS");
+    }
+  }
+  return [...found];
+}
+
+/** What the Reviewer and Fixer are told about checking on this one computer (SF-114). */
+export function hereNote(platform: string, ci: OsName[]): string {
+  const os = osOf(platform);
+  const others = (["Windows", "Linux", "macOS"] as OsName[]).filter((o) => o !== os);
+  const byCi = others.filter((o) => ci.includes(o));
+  const unchecked = others.filter((o) => !ci.includes(o));
+  return [
+    `\n\nThis work is checked on one ${os} computer.`,
+    byCi.length ? ` The part of a criterion that only ${byCi.join(" or ")} could show is not this run's to fail: the repo's CI tests on ${byCi.join(" and ")}. When everything checkable here passes, the criterion passes, with the evidence "checked on ${os}; ${byCi.join(" and ")} checked by CI".` : "",
+    unchecked.length ? ` Nothing here or in the repo's CI tests on ${unchecked.join(" or ")}: a part of a criterion only ${unchecked.join(" or ")} could show passes only on what ${os} shows, and its evidence must say "${unchecked.join(" and ")} unverified", so the person sees it before merging.` : "",
+    " A criterion that needs the network or another service is tried here; if it cannot be reached, the criterion fails with that reason, never passes on trust.",
+  ].join("");
 }

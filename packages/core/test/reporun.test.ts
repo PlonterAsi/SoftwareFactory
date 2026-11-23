@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { AgentBay, EventLog, Factory, MockRuntime, Tickets, createProject, git, type AgentRequest, type AgentRuntime, type TestRun } from "../src/index.js";
-import { REPO_ENGINE_MIN_USD, enableRepoRuns, failedBefore, repoBranch, validateRepoPlan, type BranchToShip, type RepoTools } from "../src/factory/reporun.js";
+import { REPO_ENGINE_MIN_USD, ciTestSystems, enableRepoRuns, failedBefore, hereNote, repoBranch, validateRepoPlan, type BranchToShip, type RepoTools } from "../src/factory/reporun.js";
 import { parseCases, prepareEnv, readPages, runRepoTests, siteProfile, withSite, type RepoEnv } from "../src/factory/repoenv.js";
 import { intakeDoor, routeWork } from "../src/factory/route.js";
 import { withPathFirst } from "../src/runtime.js";
@@ -320,8 +320,8 @@ describe("a sliced run still hands over a branch that works (reliability after r
     expect(next.blocked).toBe(true);
     // The reviewer was told what was left, so it does not hold it against this run.
     expect(w.seen.filter((x) => x.station === "review").at(-1)!.req.prompt).toMatch(/left to a run of their own[\s\S]*F2/);
-    // What only another system could show is left to CI, not failed here (run 7899).
-    expect(w.seen.filter((x) => x.station === "review").at(-1)!.req.prompt).toMatch(/not checkable on this computer/);
+    // What only another system could show is said plainly: no CI tests it here, so it is unverified (run 7899, SF-114).
+    expect(w.seen.filter((x) => x.station === "review").at(-1)!.req.prompt).toMatch(/unverified/);
   }, 60_000);
 });
 
@@ -659,5 +659,29 @@ describe("a test that already failed before the change", () => {
     // A new failure, or a test of the same name in another file, is still this run's.
     expect(failedBefore({ file: "", name: "every screen > opens one screen" }, before)).toBe(false);
     expect(failedBefore({ file: "tests/test_other.py", name: "test_old" }, before)).toBe(false);
+  });
+});
+
+describe("checked on one computer (SF-114)", () => {
+  it("defers to CI only the systems its test jobs run on; a publish-only job does not count", () => {
+    const dir = tmp();
+    mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(dir, ".github", "workflows", "ci.yml"), [
+      "on: push", "jobs:", "  build:", "    runs-on: ${{ fromJSON(vars.CI_WINDOWS || '\"windows-latest\"') }}", "    steps:", "      - run: npm test",
+      "  publish:", "    runs-on: ubuntu-latest", "    steps:", "      - run: ./publish.sh", "",
+    ].join("\n"));
+    expect(ciTestSystems(dir)).toEqual(["Windows"]);
+    expect(ciTestSystems(tmp())).toEqual([]);
+  });
+
+  it("says the Linux half is unverified when no CI tests on Linux, and never waves a service through", () => {
+    const sf = hereNote("win32", ["Windows"]);
+    expect(sf).toMatch(/one Windows computer/);
+    expect(sf).toMatch(/Linux and macOS unverified/);
+    expect(sf).not.toMatch(/checked by CI/);
+    expect(sf).toMatch(/needs the network or another service is tried here.*fails with that reason/);
+    const withLinux = hereNote("win32", ["Windows", "Linux"]);
+    expect(withLinux).toMatch(/Linux checked by CI/);
+    expect(withLinux).toMatch(/macOS unverified/);
   });
 });
