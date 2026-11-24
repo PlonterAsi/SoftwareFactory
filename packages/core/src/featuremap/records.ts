@@ -485,15 +485,6 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     screens: ["/p/ID/review"], docs: ["docs/review.md", "docs/flows.md"], stations: ["inspect", "verdict"],
     files: [`${C}imports/review.ts`, `${C}imports/reviewcrew.ts`, `${C}imports/reviewTables.ts`, `${C}imports/evidence.ts`, `${B}RepoReview.tsx`], api: [],
   },
-  {
-    id: "runners", name: "Build runners", group: "Work",
-    purpose: "SoftwareFactory's own manager for GitHub runners on this PC, so a repository's checks and builds run here instead of on GitHub's machines.",
-    spec: ["Add, start, stop, restart and remove a runner.", "Show where a repository's builds run, the jobs waiting and done, and a live log.", "The core keeps runners running and closes what it started.", "It belongs to the app, not to a base."],
-    flow: ["Add a runner for a repository", "The core registers and starts it", "GitHub sends jobs", "Jobs and logs are shown live"],
-    design: "The Build runners page: runners, jobs with the machine each ran on, and the live log.",
-    screens: ["/runners"], docs: ["docs/runners.md"], stations: [],
-    files: [`${C}runners/`, `${B}Runners.tsx`], api: ["/api/runners"],
-  },
 
   // ───────────────────────────── Library
   {

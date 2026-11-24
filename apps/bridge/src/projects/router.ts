@@ -12,7 +12,6 @@ import { useEffect, useState } from "react";
  *   #/brain                the Brain: the principles every loop follows
  *   #/map[/id]             the Feature map: every feature's record, wiring and proof of life (one feature)
  *   #/config               configuration: what SoftwareFactory runs with now, and where each piece came from
- *   #/runners              build runners: GitHub's checks and builds, run on this PC
  *   #/bases                the factories this app hosts (open, create, rename, archive)
  *   #/factory[/view]       the whole factory (floor, bay, order, tickets, improve, flows), as before projects
  *   #/bridge[/mode]        the Factory Bridge dashboard (loom, score, quarter)
@@ -34,7 +33,6 @@ export type Route =
   | { page: "brain" }
   | { page: "map"; id?: string }
   | { page: "bases" }
-  | { page: "runners" }
   | { page: "config" }
   | { page: "kit" }
   | { page: "needs" }
@@ -56,7 +54,6 @@ export function parse(hash: string): Route {
   if (parts[0] === "map") return { page: "map", id: parts[1] ? decodeURIComponent(parts[1]) : undefined };
   if (parts[0] === "bases") return { page: "bases" };
   if (parts[0] === "projects") return { page: "projects" };
-  if (parts[0] === "runners") return { page: "runners" };
   if (parts[0] === "config") return { page: "config" };
   if (parts[0] === "_kit") return { page: "kit" };
   if (parts[0] === "needs") return { page: "needs" };
@@ -74,7 +71,6 @@ export function href(r: Route): string {
   if (r.page === "map") return r.id ? `#/map/${encodeURIComponent(r.id)}` : "#/map";
   if (r.page === "bases") return "#/bases";
   if (r.page === "projects") return "#/projects";
-  if (r.page === "runners") return "#/runners";
   if (r.page === "config") return "#/config";
   if (r.page === "kit") return "#/_kit";
   if (r.page === "needs") return "#/needs";

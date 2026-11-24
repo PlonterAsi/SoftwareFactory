@@ -79,7 +79,6 @@ flowchart LR
 | [reference.md](reference.md) | API routes, events, tables, environment variables, limits | current |
 | [storage.md](storage.md) | Database, files, cache; projections; resuming runs | current |
 | [updates.md](updates.md) | In-app updates and the updater key | current |
-| [runners.md](runners.md) | Build runners: GitHub's checks and builds on your own PC | current |
 | [development.md](development.md) | Setup, tests, CI, how to add things, working rules | current |
 | [dogfood.md](dogfood.md) | Judging SF by using the installed app | current |
 

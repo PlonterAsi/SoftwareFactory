@@ -89,8 +89,6 @@ export { installKit, checkApp, checkAppLive, probeStart, KIT_PATHS, type AppChec
 export { BaseRegistry, browse as browseFolders, type Base, type BaseCard, type BaseStatus } from "./bases/registry.js";
 export * from "./bases/host.js";
 export { bootBase } from "./server.js";
-export * from "./runners/manager.js";
-export * from "./runners/routes.js";
 export { brainUse, brainSuggestions, acceptSuggestion, dismissSuggestion, type BrainUse, type BrainSuggestion } from "./brain/learn.js";
 export { featureMap, featureRecords, saveFeature, resetFeature, recordProblems, type FeatureMap, type FeatureView, type FeatureLink } from "./featuremap/map.js";
 export { DEFAULT_FEATURES, type FeatureRecord } from "./featuremap/records.js";

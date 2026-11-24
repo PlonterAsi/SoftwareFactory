@@ -16,7 +16,6 @@ import { Timeline } from "./Timeline";
 import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
 import { UpdateBanner, VersionChip, useUpdates } from "./Updates";
-import { RunnersPage } from "./Runners";
 import { ConfigurationPage } from "./Configuration";
 import { Home } from "./projects/Home";
 import { Workspace } from "./projects/Workspace";
@@ -158,8 +157,6 @@ export function App() {
     ? <NeedsYou factoryRuns={f.factoryRuns} featuresWaiting={featuresWaiting} conflicts={open} ticketsForYou={ticketCounts?.you ?? 0} onShowRun={showRun} />
     : route.page === "bases"
     ? <BasesPage bases={bases.data} refresh={bases.refresh} />
-    : route.page === "runners"
-    ? <RunnersPage />
     : route.page === "config"
     ? <ConfigurationPage />
     : route.page === "kit"

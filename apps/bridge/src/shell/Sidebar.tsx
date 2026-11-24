@@ -61,7 +61,6 @@ export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0,
         <Item to={{ page: "factory", view: "flows" }} on={at("factory", "flows")} icon={<Ico d="M3.5 3.5h3v3h-3zM9.5 9.5h3v3h-3zM6.5 5h3.5v4.5M3.5 9.5v3h3" />}>Flows</Item>
         <Item to={{ page: "factory", view: "order" }} on={at("factory", "order")} icon={<Ico d="M8 2.5 13.5 8 8 13.5 2.5 8zM8 5.5v5M5.5 8h5" />} badge={conflicts || undefined} alert={conflicts > 0}>Rules and ideas</Item>
         <Item to={{ page: "factory", view: "improve" }} on={at("factory", "improve")} icon={<Ico d="M8 13V3M4 7l4-4 4 4" />} badge={proposals || undefined}>Improve</Item>
-        <Item to={{ page: "runners" }} on={at("runners")} icon={<Ico d="M2.5 3.5h11v4h-11zM2.5 9h11v4h-11zM5 5.5h.01M5 11h.01M8 5.5h3.5M8 11h3.5" />}>Build runners</Item>
       </div>
       <div className="sb-group">
         <div className="sb-label">Library</div>

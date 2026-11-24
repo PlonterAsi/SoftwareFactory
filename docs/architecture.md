@@ -73,7 +73,6 @@ All under `packages/core/src/`.
 | `launch/` | Finding how to run a finished project, starting and stopping it, its data files and tools | [run.md](run.md) |
 | `integrations/` | Installing a finished project into SF | [integrations.md](integrations.md) |
 | `plugins/` | Plugin manifest, host, sandboxed runner, page SDK | [plugins.md](plugins.md) |
-| `runners/` | Build runners: GitHub Actions runners on this PC, kept running by the core (belongs to the app, not to a base) | [runners.md](runners.md) |
 | `bridge/` | Things only the UI needs from the core: the status digest, the drop folder, "since you left" | |
 
 Beside `src/`: `kit/` is the app kit copied into every built app; `agent-skills/` are the skills agents may load; `agent-mcp.json` lists the MCP servers offered to agents; `plugin-examples/` ship with the app.

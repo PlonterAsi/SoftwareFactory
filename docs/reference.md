@@ -38,16 +38,6 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `POST /api/bases/:id` | Rename |
 | `POST /api/bases/:id/open` \| `archive` \| `reveal` | Switch to it; archive or restore; show its folder |
 
-### Build runners (answered by the app, before a base's own routes)
-
-| Route | What |
-|---|---|
-| `GET /api/runners` | The runners on this PC, the jobs they took, how many run now |
-| `GET /api/runners/suggest?repo=`, `GET /api/runners/github?repo=` | Suggested name, labels and folder; GitHub's side (runners, the variable, runs and each job's machine) |
-| `POST /api/runners` | Add a runner and set it up |
-| `GET /api/runners/:id/log?after=` | Its output after line n |
-| `POST /api/runners/:id/start` \| `stop` \| `restart` \| `setup` \| `route` \| `remove` | See [runners.md](runners.md) |
-
 ### Signals, chat and the Assistant
 
 | Method and path | Does |
