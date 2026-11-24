@@ -21,6 +21,7 @@ export * from "./store/migrations.js";
 export * from "./store/projections.js";
 export * from "./store/tables.js";
 export * from "./store/cache.js";
+export * from "./store/inspect.js";
 export * from "./bay/tables.js";
 export * from "./bay/memory.js";
 export * from "./setup.js";

@@ -23,6 +23,8 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/since` | The "since you left" lines |
 | `POST /api/presence` | Mark how far the person has seen |
 | `GET /api/updates`, `POST /api/updates` | Update status; record an update step reported by the shell |
+| `GET /api/store` | The three storage tiers in one report (the installed-app smoke test reads it) |
+| `POST /api/store/rebuild` | `{ name? }` rebuild one projection or all from the log |
 
 ### Signals, chat and the Assistant
 

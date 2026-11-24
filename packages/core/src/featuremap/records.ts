@@ -483,11 +483,11 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
   {
     id: "storage", name: "Event log", group: "Foundation",
     purpose: "The source of truth: an append-only event log, with typed tables folded from it and rebuilt from it whenever needed, so nothing is ever lost and everything can be shown.",
-    spec: ["Every change is an event in one append-only log.", "Tables are derived from the log in the same transaction and can be rebuilt from it.", "Schema changes are versioned migrations with a backup.", "Rebuild from log recreates any table (log.rebuild)."],
+    spec: ["Every change is an event in one append-only log.", "Tables are derived from the log in the same transaction and can be rebuilt from it.", "Schema changes are versioned migrations with a backup.", "GET /api/store reports the three tiers and POST /api/store/rebuild rebuilds from the log; the installed-app smoke test checks every upgrade with them."],
     flow: ["A feature appends an event", "Projections update their tables in the same transaction", "Listeners and the live stream get the event", "Rebuild from log recreates any table"],
     design: "No screen of its own (the Data vault page was removed 24 Nov 2026: a debug view nobody used).",
     screens: [], docs: ["docs/storage.md", "docs/reference.md"], stations: [],
-    files: [`${C}events.ts`, `${C}store/`], api: [],
+    files: [`${C}events.ts`, `${C}store/`], api: ["/api/store"],
   },
   {
     id: "core-api", name: "Core server and live stream", group: "Foundation",

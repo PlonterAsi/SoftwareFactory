@@ -25,6 +25,7 @@ import { OrderEngine, type OrderOptions } from "./order/engine.js";
 import { canonFor, type NodeKind } from "./order/model.js";
 import { AgentBay } from "./bay/bay.js";
 import { SLOTS, type Slot } from "./bay/agentfile.js";
+import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
 import { projectOf } from "./projects/service.js";
@@ -405,6 +406,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (url.pathname.startsWith("/api/bay/")) {
         const r = await bayRoute(bay, req, url);
         if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
+      }
+      // The storage report and a rebuild from the log: no screen, but the installed-app smoke test checks every upgrade with them.
+      if (req.method === "GET" && url.pathname === "/api/store") return json(res, 200, storeReport(log, projectsDir));
+      if (req.method === "POST" && url.pathname === "/api/store/rebuild") {
+        const body = await readJson(req);
+        log.rebuild(body.name ? String(body.name) : undefined);
+        return json(res, 200, storeReport(log, projectsDir));
       }
       if (url.pathname === "/api/projects" || url.pathname.startsWith("/api/projects/")) {
         const canBuild = () => gitReady() ? null : "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again.";
