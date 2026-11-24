@@ -9,9 +9,9 @@ import { shortName } from "../projects/shortName";
  * The left rail of the Foundry Glass shell: where you are, what needs you, and the projects you
  * were last in. Amber appears here only when something waits for you.
  */
-export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0, proposals = 0, tickets = 0, addons = [], children }: {
+export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0, tickets = 0, addons = [], children }: {
   route: Route; needs: number; projects: ProjectSummary[] | null; crewBusy: boolean; base?: string;
-  conflicts?: number; proposals?: number; tickets?: number; addons?: { id: string; panel: string; title: string; waiting?: boolean }[]; children?: ReactNode;
+  conflicts?: number; tickets?: number; addons?: { id: string; panel: string; title: string; waiting?: boolean }[]; children?: ReactNode;
 }) {
   const at = (r: Route["page"], view?: string) => route.page === r && (view == null || (route.page === "factory" && route.view === view));
   const recent = (projects ?? []).filter((p) => p.status !== "archived")
@@ -60,7 +60,6 @@ export function Sidebar({ route, needs, projects, crewBusy, base, conflicts = 0,
         <Item to={{ page: "config" }} on={at("config")} icon={<Ico d="M3 4h10M3 8h10M3 12h10M6 2.5v3M10 6.5v3M5 10.5v3" />}>Configuration</Item>
         <Item to={{ page: "factory", view: "flows" }} on={at("factory", "flows")} icon={<Ico d="M3.5 3.5h3v3h-3zM9.5 9.5h3v3h-3zM6.5 5h3.5v4.5M3.5 9.5v3h3" />}>Flows</Item>
         <Item to={{ page: "factory", view: "order" }} on={at("factory", "order")} icon={<Ico d="M8 2.5 13.5 8 8 13.5 2.5 8zM8 5.5v5M5.5 8h5" />} badge={conflicts || undefined} alert={conflicts > 0}>Rules and ideas</Item>
-        <Item to={{ page: "factory", view: "improve" }} on={at("factory", "improve")} icon={<Ico d="M8 13V3M4 7l4-4 4 4" />} badge={proposals || undefined}>Improve</Item>
       </div>
       <div className="sb-group">
         <div className="sb-label">Library</div>

@@ -116,7 +116,6 @@ Everything that waits for you, oldest first, in one list (`shell/NeedsYou.tsx`):
 | **Agents** | Build | Which agents worked here, with calls and spend. | `projects/builtin.tsx` |
 | **Use** | Ship | Start the finished app with one press, see its page or output inside SF, edit its data files as forms, run its tools without knowing arguments, stop it. An app that needs packages first (no `node_modules`, or a `requirements.txt` with no `.venv`) shows **Install packages** as the first press; a Python app gets its own `.venv` inside its folder and then starts by itself. | `projects/runPanel.tsx`, `useTool.tsx`, `dataFiles.tsx` |
 | **Integrate** | Ship | Readiness checks and the forms the project can take inside SF (tool, panel, plugin, into the source). Ask, then approve. | `Features.tsx` |
-| **Improvements** | Improve | This project's proposals from the Improvement Council; *Look now*. | `projects/improvePanel.tsx` |
 | **Code map** | Know | Import a git repository (URL, `owner/repo` or a folder), see its modules as a map, and the crew's suggestions as tickets. | `CodeMap.tsx` |
 | **History** | Know | Everything that happened in this project, newest first, in plain words. | `projects/builtin.tsx` |
 | **Settings** | Know | Rename, kind, status, summary, merge into another project, archive. | `projects/builtin.tsx` |
@@ -154,7 +153,6 @@ The engine's own record of one build (`RunDeck.tsx`), shown on the Builds tab an
 | **Base** (`#/bases`) | The factories this app hosts: open, create (with a folder picker), rename, archive. | `Bases.tsx` |
 | **All builds** (`#/factory`) | The factory floor (stations lit per run), the run deck and the timeline of every agent call with model, time and cost. | `FactoryFloor.tsx`, `RunDeck.tsx`, `Timeline.tsx` |
 | **Rules and ideas** (`#/factory/order`) | The star map of every project, idea and thread, and the Order deck: Canon, Unsorted tray, conflict cards, the briefing with undo. | `StarMap.tsx`, `OrderDeck.tsx` |
-| **Improve** (`#/factory/improve`) | The Improvement Council: the lens wheel, the cost meter, the queue of proposals to accept, park or reject. | `ImproveDeck.tsx` |
 
 ![Factory Bridge](img/app/factory-bridge.png)
 

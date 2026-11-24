@@ -61,7 +61,6 @@ import { ErrorCapture, isFault } from "./tickets/capture.js";
 import { classifyIntake, ensureSelfProject, filedAlready, projectToTicket } from "./tickets/intake.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
-import { ImproveCouncil, type Target } from "./improve/council.js";
 import { BaseHost, type BootedBase } from "./bases/host.js";
 import { BaseRegistry } from "./bases/registry.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
@@ -84,8 +83,6 @@ export interface CoreOptions {
   dropDir?: string;
   /** Where the database lives (shown in the setup panel). */
   dataDir?: string;
-  /** Improvement Council caps: daily USD and hours between automatic sessions. */
-  improve?: { maxUsd?: number; everyHours?: number };
   /** GitHub write access for the crew's PRs (tests pass one pointed at a fake GitHub). */
   github?: GitHub;
   /** The installed app's version, from the shell (SF_APP_VERSION). A new one is recorded as `app.updated`. */
@@ -93,7 +90,7 @@ export interface CoreOptions {
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion, github: githubIn }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, appVersion, github: githubIn }: CoreOptions) {
   // GitHub write access for the crew's PRs; the token lives in the data folder, never in the log.
   // Each agent's own skills and MCP servers: the person's library and the built kits live in the data folder.
   if (dataDir) configureKits({ dataDir });
@@ -197,12 +194,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   try { seedFirstTrial(log, (e) => saveEntry(log, e, "configuration")); } catch (e) { console.warn(`configuration: could not put the first trial on: ${(e as Error).message}`); }
   try { adoptScoutTickets(log, tickets); } catch (e) { console.warn(`catalog: could not adopt Scout's tickets: ${(e as Error).message}`); }
   setConfigSource(log, liveConfig({ log, bay, flows: factory.flows, plugins, crewMode, autoWork, maxRunMinutes: () => factory.maxRunMinutes }));
-  // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
-  const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
-    maxUsd: settings.improveMaxUsd ?? improveOpts?.maxUsd, everyHours: settings.improveEveryHours ?? improveOpts?.everyHours,
-    autoGate: () => ((runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime)) === "real" ? null : "the practice crew only answers when you press Look now; switch to the real crew in Systems for automatic sessions"),
-  }).listen();
-  improve.auto = settings.improveAuto ?? true;
   explorer.follow.on = settings.importsFollow ?? true;
   // A repo imported for the first time is reviewed by itself: run, read, judged, with next steps to approve (docs/review.md).
   const reviewer = new RepoReviewer(log, runtime, explorer, bay, { maxUsd: settings.importReviewMaxUsd, github, canShip });
@@ -576,13 +567,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await featureMapRoute({ log, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
-      if (url.pathname.startsWith("/api/improve/")) {
-        const r = await improveRoute(improve, req, url.pathname, log, factory, (idea, projectId) => {
-          if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");
-          return factory.start(idea, projectId != null ? { projectId } : {});
-        });
-        if (r) return json(res, r[0], r[1]);
-      }
       if (url.pathname.startsWith("/api/order/")) {
         const r = await orderRoute(order, req, url.pathname);
         if (r) return json(res, r[0], r[1]);
@@ -610,7 +594,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { github, git: gitman, watchers, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, videos, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, git: gitman, watchers, factory, order, bay, drop, tickets, explorer, reviewer, launcher, integrations, plugins, videos, errors, fault, ensureSelf });
 }
 
 /**
@@ -859,59 +843,6 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
   return null;
 }
 
-/** The Improvement Council's API. Every write is an event, so the Bridge sees it on the stream. */
-async function improveRoute(improve: ImproveCouncil, req: IncomingMessage, path: string, log: EventLog, factory: Pick<Factory, "duplicateOf">, build: (idea: string, projectId?: number) => number): Promise<[number, unknown] | null> {
-  if (req.method === "GET" && path === "/api/improve/state") return [200, improve.state()];
-  if (req.method !== "POST") return null;
-  const body = await readJson(req);
-  if (path === "/api/improve/run") {
-    const t = body.target as Partial<Target> | undefined;
-    const target = t && t.kind ? { kind: t.kind, id: t.id == null ? null : Number(t.id), title: String(t.title ?? "") } as Target : undefined;
-    try {
-      const p = improve.run({ target, trigger: "manual" });
-      p.catch((e) => console.error("improve session failed:", e));
-    } catch (e) { return [409, { error: (e as Error).message }]; }
-    // The session's start event is written before the first agent call, so it is already in the state.
-    return [202, { session: improve.sessions().at(-1) }];
-  }
-  if (path === "/api/improve/settings") {
-    const out: Record<string, unknown> = {};
-    if (typeof body.auto === "boolean") { improve.auto = body.auto; log.append("settings.changed", { key: "improveAuto", value: body.auto }); out.auto = body.auto; }
-    if (typeof body.maxUsd === "number") {
-      if (!(body.maxUsd >= 0 && body.maxUsd <= 5)) return [400, { error: "The daily cap must be between $0 and $5." }];
-      improve.opts.maxUsd = body.maxUsd; log.append("settings.changed", { key: "improveMaxUsd", value: body.maxUsd });
-    }
-    if (typeof body.everyHours === "number") {
-      if (!(body.everyHours >= 1 && body.everyHours <= 168)) return [400, { error: "Look every 1 to 168 hours." }];
-      improve.opts.everyHours = body.everyHours; log.append("settings.changed", { key: "improveEveryHours", value: body.everyHours });
-    }
-    return [200, improve.state()];
-  }
-  const m = path.match(/^\/api\/improve\/proposals\/(\d+)\/(decide|build)$/);
-  if (m) {
-    const id = Number(m[1]);
-    if (m[2] === "decide") {
-      const d = String(body.decision);
-      if (!["accepted", "rejected", "parked", "inbox"].includes(d)) return [400, { error: "decision is accepted, rejected, parked or inbox" }];
-      return [200, improve.decide(id, d as "accepted", body.note ? String(body.note) : undefined)];
-    }
-    const p = improve.proposals().find((x) => x.id === id);
-    if (!p) return [404, { error: `No proposal #${id}` }];
-    const idea = improve.buildIdea(id);
-    const dup = duplicateReply(factory, idea, body.again);
-    if (dup) return dup;
-    if (p.status !== "accepted") improve.decide(id, "accepted");
-    // A proposal about a project builds in that project, not as a new one beside it.
-    // (Proposal targets name Order Engine nodes and factory runs; the project is whoever owns that.)
-    const owner = p.target.id == null ? null
-      : p.target.kind === "run" ? projectOf(log, { kind: "factory_run", ref: p.target.id })
-      : p.target.kind === "project" || p.target.kind === "idea" ? projectOf(log, { kind: "order_node", ref: p.target.id }) : null;
-    const projectId = owner ?? undefined;
-    try { return [202, { run: build(idea, projectId) }]; } catch (e) { return [409, { error: (e as Error).message }]; }
-  }
-  return null;
-}
-
 /** The Order Engine's API. Every write is an event, so the Bridge sees it on the stream. */
 async function orderRoute(order: OrderEngine, req: IncomingMessage, path: string): Promise<[number, unknown] | null> {
   const id = (re: RegExp) => { const m = path.match(re); return m ? Number(m[1]) : null; };
@@ -981,10 +912,8 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
   const dropDir = isDefault ? process.env.SF_DROP : join(dataDir, "Drop");
   const orderMode = process.env.SF_ORDER_MODE as "agent" | "heuristic" | undefined;
   const orderMax = process.env.SF_ORDER_MAX_USD ? Number(process.env.SF_ORDER_MAX_USD) : undefined;
-  const improveMax = process.env.SF_IMPROVE_MAX_USD ? Number(process.env.SF_IMPROVE_MAX_USD) : undefined;
-  const improveEvery = process.env.SF_IMPROVE_EVERY_H ? Number(process.env.SF_IMPROVE_EVERY_H) : undefined;
   // The installed app may use the GitHub CLI's login for crew PRs; tests build a core without it, so they never reach the real GitHub.
-  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir, github: new GitHub({ dataDir, cli: process.env.VITEST ? undefined : ghCliToken }), order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION });
+  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir, github: new GitHub({ dataDir, cli: process.env.VITEST ? undefined : ghCliToken }), order: { mode: orderMode, maxUsd: orderMax }, appVersion: process.env.SF_APP_VERSION });
   core.drop.start();
   const timers: NodeJS.Timeout[] = [];
   faultCore = core; // the open base hears what the process throws
@@ -1017,9 +946,6 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
   const followTick = () => { core.explorer.followTick().catch((e) => console.error("following imported repos failed:", e)); };
   setTimeout(followTick, 3 * 60_000).unref();
   timers.push(setInterval(followTick, 30 * 60_000).unref());
-  const improveTick = () => { core.improve.tick().catch((e) => { console.error("improve tick failed:", e); core.fault("improvement council tick", e); }); };
-  timers.push(setTimeout(improveTick, 3 * 60_000).unref());
-  timers.push(setInterval(improveTick, 15 * 60_000).unref());
   // Plugins you turned on start with the core and stop with it.
   for (const id of core.plugins.startAll()) console.log(`Plugin ${id} started`);
   // The Watch folder: a video saved there (a reel from your phone, a screen recording) is watched within a minute (docs/videos.md).

@@ -10,12 +10,12 @@ Three parts make that hold: the **Brain** (the rules, written once, read by ever
 
 | Principle | Followed by |
 | --- | --- |
-| Build real programs, not scripts | Council, Planner, Tester, Builder, Reviewer, Fixer, Improvement Council, Overseer, Surveyor |
+| Build real programs, not scripts | Council, Planner, Tester, Builder, Reviewer, Fixer, Overseer, Surveyor |
 | Visualize everything: full CRUD and full visibility | same |
 | Never make the person write raw data | same |
-| Useful on first open, every control works | Council, Planner, Builder, Reviewer, Fixer, Improvement Council |
+| Useful on first open, every control works | Council, Planner, Builder, Reviewer, Fixer |
 
-The core puts the principles that name a station between the agent's own prompt and the station's contract (`systemPromptFor` in `bay/builtin.ts`), on every call. They come from the event log, so an edit applies to the next agent call of every loop: the factory, the Council, the Improvement Council, the Overseer, repo import. Agents saved in the Bay keep their own prompts; the Brain reaches them anyway because the core adds it, not the agent file.
+The core puts the principles that name a station between the agent's own prompt and the station's contract (`systemPromptFor` in `bay/builtin.ts`), on every call. They come from the event log, so an edit applies to the next agent call of every loop: the factory, the Council, the Overseer, repo import. Agents saved in the Bay keep their own prompts; the Brain reaches them anyway because the core adds it, not the agent file.
 
 **Brain page** (sidebar → Library → Brain): every principle with who follows it and where code checks it; Edit, Turn off, Reset to default, Add a principle; a matrix of station × principle; and the exact instructions an agent on any station reads right now.
 

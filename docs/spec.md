@@ -124,7 +124,6 @@ These hold for every feature. Each has a place in the code that enforces it.
 | One list of everything that waits for the person | Built | Needs you |
 | A dashboard of the whole factory | Built | Factory Bridge, three views |
 | In-app updates, automatic and by button | Built | Signed; waits for running builds |
-| Improvement Council | Built | Lens agents, daily cap, memory of past proposals |
 | Plugins | Partial | Tabs, sandboxed backend and agents are built. A network switch for backends, plugins calling agents with a cap, and a shared catalog are not. |
 | Data vault with rebuild | Built | |
 | Every feature has a record (purpose, spec, flow, design), its wiring is read from the code, and it shows proof it is alive | Built | Feature map; a check fails the build when a feature has no record ([feature-map.md](feature-map.md)) |
@@ -148,7 +147,6 @@ These hold for every feature. Each has a place in the code that enforces it.
 | Fix rounds before asking | 5 | `factory/loop.ts` |
 | Run time | 30 minutes up to $2, in proportion above, 4 hours at most | `factory/stoprules.ts` |
 | A ticket worked by the crew | $0.60, $3 a day, 2 at once per project | `tickets/` |
-| Improvement Council | $0.20 a day | [improve.md](improve.md) |
 | Archivist | $0.50 a day | `SF_ORDER_MAX_USD` |
 
 More in [reference.md](reference.md).

@@ -28,7 +28,7 @@ interface BrainState { principles: Principle[]; stations: string[]; crew: Record
 
 const STATION_NAMES: Record<string, string> = {
   council: "Council", design: "Designer", critique: "Critic", evaluate: "Judge", plan: "Planner", tests: "Tester", build: "Builder", review: "Reviewer", fix: "Fixer",
-  order: "Archivist", overseer: "Assistant", improve: "Improvement Council", map: "Cartographer", survey: "Surveyor", inspect: "Inspector", verdict: "Assessor",
+  order: "Archivist", overseer: "Assistant", map: "Cartographer", survey: "Surveyor", inspect: "Inspector", verdict: "Assessor",
 };
 
 async function put(path: string, body: unknown) {
@@ -186,7 +186,7 @@ function PromptViewer({ station, setStation, stations, at }: { station: string; 
 function PrincipleForm({ p, stations, onSave, onCancel }: { p?: Principle; stations: string[]; onSave: (b: { title: string; text: string; stations: string[]; enabled: boolean; note?: string }) => Promise<void>; onCancel: () => void }) {
   const [title, setTitle] = useState(p?.title ?? "");
   const [text, setText] = useState(p?.text ?? "");
-  const [picked, setPicked] = useState<string[]>(p?.stations ?? ["council", "plan", "build", "review", "fix", "improve"]);
+  const [picked, setPicked] = useState<string[]>(p?.stations ?? ["council", "plan", "build", "review", "fix"]);
   const [enabled, setEnabled] = useState(p?.enabled ?? true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);

@@ -19,7 +19,7 @@ import { useEffect, useState } from "react";
  *   #/_kit                 the shared component kit (not linked; the UI tour shoots it)
  * The old #order, #bay and #data still open the factory views.
  */
-export type FactoryView = "factory" | "order" | "bay" | "tickets" | "improve" | "flows";
+export type FactoryView = "factory" | "order" | "bay" | "tickets" | "flows";
 export type BridgeMode = "loom" | "score" | "quarter";
 const MODES: BridgeMode[] = ["loom", "score", "quarter"];
 export type Route =
@@ -38,7 +38,7 @@ export type Route =
   | { page: "needs" }
   | { page: "bridge"; mode: BridgeMode };
 
-const VIEWS: FactoryView[] = ["factory", "order", "bay", "tickets", "improve", "flows"];
+const VIEWS: FactoryView[] = ["factory", "order", "bay", "tickets", "flows"];
 
 export function parse(hash: string): Route {
   const h = hash.replace(/^#/, "");

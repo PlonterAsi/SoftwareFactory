@@ -24,8 +24,6 @@ import "./projects/builtin";
 import "./projects/mission/Mission";
 import { Tickets, useTicketCounts } from "./Tickets";
 import "./TicketsPanel";
-import { ImproveDeck, useImprove } from "./ImproveDeck";
-import "./projects/improvePanel";
 import "./projects/runPanel";
 import "./projects/budgetPanel";
 import "./projects/watchersPanel";
@@ -46,8 +44,6 @@ export function App() {
   const f = useFactory();
   const order = useOrder(f.events);
   const bay = useBay(f.events);
-  const improve = useImprove(f.events);
-  const waiting = improve.proposals.filter((p) => p.status === "inbox").length;
   const [route, go] = useRoute();
   const features = useIntegrations(f.events);
   const featuresWaiting = features.data?.integrations.filter((i) => i.status === "awaiting").length ?? 0;
@@ -142,7 +138,6 @@ export function App() {
         : view === "tickets" ? <div className="fpage"><Tickets events={f.events} onShowRun={showRun}
             crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))} /></div>
         : view === "flows" ? <FlowsPage />
-        : view === "improve" ? <div className="fpage"><ImproveDeck improve={improve} crew={bay.agents} onRunStarted={showRun} /></div>
         : (
           <div className="fpage fpage-rules">
             <StarMap signals={f.signals} order={order} selected={node} onSelect={pickNode} factoryRuns={f.factoryRuns} onShowRun={showRun} />
@@ -189,7 +184,7 @@ export function App() {
   return (
     <div className="shell2">
       <Sidebar route={route} needs={needsCount} projects={projects.list} crewBusy={Object.values(bay.stats).some((s) => s.state === "thinking")} base={bases.current?.name}
-        conflicts={open} proposals={waiting} tickets={ticketCounts?.open ?? 0} addons={addonNav(plugins.data)}>
+        conflicts={open} tickets={ticketCounts?.open ?? 0} addons={addonNav(plugins.data)}>
         <button className="sb-item sb-btn" onClick={() => setSetupOpen(true)}><span className="sb-icon"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden className="sb-ico"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" /></svg></span><span className="sb-text">Systems</span></button>
         <div className="sb-status">
           <span className={f.online ? "dot on" : "dot"} /> {f.online ? "Online" : "Offline"}

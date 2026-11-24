@@ -48,12 +48,22 @@ describe("Agent Bay", () => {
     const bay = new AgentBay(log);
     new AgentBay(log);
     expect(bay.agents().map((a) => a.def.id)).toEqual(["overseer", "archivist", "visionary", "architect", "skeptic", "designer", "critic", "judge", "planner", "tester", "builder", "reviewer", "fixer",
-      "integrator", "automator", "simplifier", "enricher", "ux-lens", "flow-lens", "cartographer", "surveyor", "inspector", "assessor", "researcher"]);
+      "cartographer", "surveyor", "inspector", "assessor", "researcher"]);
     expect(bay.slots().council).toEqual(["visionary", "architect", "skeptic"]);
     const [planner] = bay.crewFor("plan");
     expect(planner).toMatchObject({ id: "planner", version: 1, model: "haiku" });
     expect(planner.role).toContain("You are the Planner");
     expect(planner.role).toContain("Station contract: plan.");
+  });
+
+  it("retires the Improvement Council's lens agents once, on a log that still has them (24 Nov)", () => {
+    const log = new EventLog();
+    log.append("bay.agent.saved", { id: "simplifier", version: 1, def: { id: "simplifier", name: "Simplifier", station: "improve", model: "haiku", prompt: "x" }, note: "built-in crew", by: "builtin", builtin: true });
+    new AgentBay(log);
+    const bay = new AgentBay(log);
+    expect(bay.get("simplifier")?.retired).toBe(true);
+    expect(log.list({ type: "bay.agent.retired" })).toHaveLength(1);
+    expect(Object.keys(bay.slots())).not.toContain("improve");
   });
 
   it("versions every edit and rolls back without losing history", () => {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ReactFlow, Background, Handle, Position, MarkerType, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { API, type SfEvent } from "./api";
-import { panelsFor, registerProjectPanel } from "./projects/panels";
+import { registerProjectPanel } from "./projects/panels";
 import { href } from "./projects/router";
 
 /** Mirrors of the core's imports API (packages/core/src/imports/). */
@@ -28,16 +28,17 @@ const j = async <T,>(r: Response): Promise<T> => { const b = await r.json(); if 
 export const importsApi = {
   list: () => fetch(`${API}/api/imports`).then((r) => j<{ imports: ImportRowView[]; maxUsd: number; mode: string }>(r)),
   detail: (id: number) => fetch(`${API}/api/imports/${id}`).then((r) => j<ImportDetailView>(r)),
+  decide: (id: number, suggestion: string, decision: "accepted" | "rejected") => fetch(`${API}/api/imports/${id}/suggestions/${encodeURIComponent(suggestion)}/decide`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision }) }).then((r) => j<{ status: string }>(r)),
   start: (source: string, maxUsd?: number) => fetch(`${API}/api/imports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source, maxUsd }) }).then((r) => j<{ projectId: number; existing: boolean }>(r)),
   follow: (on: boolean) => fetch(`${API}/api/imports/follow`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on }) }).then((r) => j<{ on: boolean }>(r)),
   explore: (id: number) => fetch(`${API}/api/imports/${id}/explore`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).then((r) => j<{ projectId: number }>(r)),
 };
 
-/** One imported project's code map, refetched on every repo.* or improve.* event. */
+/** One imported project's code map, refetched on every repo.* event. */
 export function useImportDetail(projectId: number, events: SfEvent[]) {
   const [detail, setDetail] = useState<ImportDetailView | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const relevant = events.filter((e) => e.type.startsWith("repo.") || e.type.startsWith("improve.") || (e.type === "settings.changed" && (e.payload as { key?: string } | undefined)?.key === "importsFollow")).at(-1)?.id ?? 0;
+  const relevant = events.filter((e) => e.type.startsWith("repo.") || (e.type === "settings.changed" && (e.payload as { key?: string } | undefined)?.key === "importsFollow")).at(-1)?.id ?? 0;
   useEffect(() => {
     let stop = false;
     const t = setTimeout(() => importsApi.detail(projectId).then((d) => { if (!stop) { setDetail(d); setErr(null); } }).catch((e) => !stop && setErr((e as Error).message)), 150);
@@ -155,7 +156,7 @@ function layout(mods: CodeModuleView[], edges: { from: string; to: string; weigh
   return { pos, edges: es, back };
 }
 
-export function CodeMapPanel({ projectId, events, onOpenCouncil }: { projectId: number; events: SfEvent[]; onOpenCouncil?: () => void }) {
+export function CodeMapPanel({ projectId, events }: { projectId: number; events: SfEvent[] }) {
   const { detail, err } = useImportDetail(projectId, events);
   const [msg, setMsg] = useState<string | null>(null);
   const [mod, setMod] = useState<string | null>(null);
@@ -257,13 +258,17 @@ export function CodeMapPanel({ projectId, events, onOpenCouncil }: { projectId: 
                 </div>
               ) : null}
               <div className="cm-card">
-                <h4>Suggestions · {detail.suggestions.length}{onOpenCouncil && <button className="link small" onClick={onOpenCouncil}>open the Council's queue</button>}</h4>
-                <div className="muted small">Each one goes to the Council's queue; accepted ones become tickets the crew works on a branch.</div>
+                <h4>Suggestions · {detail.suggestions.length}</h4>
+                <div className="muted small">A yes opens a task ticket the crew works on a branch; a no drops it.</div>
                 {detail.suggestions.length ? detail.suggestions.map((s) => (
                   <div key={s.id} className={`cm-sug sv-${s.severity}`}>
                     <div className="cm-sug-head"><span className={`chip sv-${s.severity}`}>{s.severity}</span><b>{s.title}</b></div>
                     <div className="small">{s.body}</div>
-                    <div className="muted small mono">{s.kind} · {s.lens} · {s.effort} effort · by {s.by}{s.files.length ? ` · ${s.files.slice(0, 3).join(", ")}` : ""} · <span className={`cm-status st-${s.status}`}>{s.status === "pending" ? "waiting for the Council" : s.status}</span></div>
+                    <div className="muted small mono">{s.kind} · {s.lens} · {s.effort} effort · by {s.by}{s.files.length ? ` · ${s.files.slice(0, 3).join(", ")}` : ""} · <span className={`cm-status st-${s.status}`}>{s.status === "pending" || s.status === "proposed" ? "waiting for you" : s.status === "accepted" ? "ticket opened" : s.status}</span></div>
+                    {(s.status === "pending" || s.status === "proposed") && <div className="cm-sug-act">
+                      <button className="small" onClick={() => importsApi.decide(projectId, s.id, "accepted").then(() => setMsg(`Ticket opened: ${s.title}`), (e) => setMsg(String(e.message ?? e)))}>Yes, make a ticket</button>
+                      <button className="link small" onClick={() => importsApi.decide(projectId, s.id, "rejected").then(() => setMsg(`Dropped: ${s.title}`), (e) => setMsg(String(e.message ?? e)))}>No</button>
+                    </div>}
                   </div>
                 )) : <div className="muted small">{detail.busy ? "The Surveyor is reading the map…" : "None yet."}</div>}
               </div>
@@ -286,13 +291,10 @@ function HealthRing({ score }: { score: number | null }) {
   );
 }
 
-/** The Council's proposal panel, if that part of the app is loaded. */
-const queuePanel = (p: Parameters<typeof panelsFor>[0]) => panelsFor(p).find((x) => /improve|council|proposal/i.test(x.id))?.id;
-
 registerProjectPanel({
   id: "code", section: "know", title: "Code map", order: 15,
   appliesTo: (p) => (p.rollup.linked.repo ?? 0) > 0,
   badge: (c) => { const f = (c.project.facets as Record<string, any>).code; return f ? (f.status === "exploring" || f.status === "importing" ? "exploring" : f.openSuggestions || null) : null; },
   alert: (c) => (c.project.facets as Record<string, any>).code?.status === "failed",
-  render: (c) => <CodeMapPanel projectId={c.project.id} events={c.events} onOpenCouncil={queuePanel(c.project) ? () => c.go(queuePanel(c.project)!) : undefined} />,
+  render: (c) => <CodeMapPanel projectId={c.project.id} events={c.events} />,
 });

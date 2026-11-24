@@ -324,7 +324,7 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     flow: ["A principle is added or changed (by the person, or from one of their rules)", "The change is logged as an event", "The next agent call on a named station reads it", "The Brain counts the call as a read", "Checks in code hold builds to the built-in principles"],
     design: "The Brain page: a use strip (reads and changes), a card per principle with its stations, its checks and its reads, suggestions from the person's rules, the station by principle matrix, the exact instructions an agent reads now, and the history.",
     screens: ["/brain"], docs: ["docs/apps.md", "docs/feature-map.md"],
-    stations: ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "improve", "overseer", "survey"],
+    stations: ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "overseer", "survey"],
     files: [`${C}brain/brain.ts`, `${C}brain/routes.ts`, `${C}brain/learn.ts`, `${B}Brain.tsx`], api: ["/api/brain"],
   },
   {
@@ -442,15 +442,6 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     design: "The Bug button in the top strip, the error screen that replaces a broken page, and the Core down cover.",
     screens: [], docs: ["docs/tickets.md", "docs/app.md"], stations: [],
     files: [`${C}tickets/capture.ts`, `${B}BugReport.tsx`, `${B}CoreDown.tsx`], api: [],
-  },
-  {
-    id: "improve", name: "Improvement Council", group: "Work",
-    purpose: "A standing loop that looks again at what already exists through six lenses and proposes improvements, which the person accepts, parks or rejects.",
-    spec: ["Six lens agents look at a subject and answer with proposals.", "It runs by itself every few hours on the real crew, only when something changed, inside a daily cap.", "It pauses at 12 waiting proposals and never starts a build itself.", "An accepted proposal becomes a ticket."],
-    flow: ["A subject changed, or the person presses Look now", "The lenses answer", "Proposals enter the queue", "The person accepts, parks or rejects", "An accepted one becomes a ticket"],
-    design: "The Improve page (lens wheel, cost meter, queue) and the Improvements tab of every project.",
-    screens: ["/factory/improve", "/p/ID/improve"], docs: ["docs/improve.md", "docs/flows.md"], stations: ["improve"],
-    files: [`${C}improve/`, `${B}ImproveDeck.tsx`, `${B}projects/improvePanel.tsx`], api: ["/api/improve"],
   },
   {
     id: "imports", name: "Import a repository (code map)", group: "Work",

@@ -61,7 +61,6 @@ flowchart LR
 |---|---|---|
 | [projects.md](projects.md) | The project model, project chats, money limits | current |
 | [tickets.md](tickets.md) | Tickets, the ready queue, crew pull requests | current |
-| [improve.md](improve.md) | The Improvement Council | current |
 | [review.md](review.md) | Deep review of an imported repo: run it, read it, verdict, next steps, interview | current |
 | [run.md](run.md) | Running a finished project from the app (the Use tab) | current |
 | [integrations.md](integrations.md) | Adding a finished project into SF (Finished apps) | current |
@@ -113,7 +112,6 @@ flowchart LR
 | **Product judge** | An agent that reads the running app's screens and scores it as a product. |
 | **Engine cycle** | The same prompt built again after engine changes, compared side by side. |
 | **Ticket** | One unit of work on a project. The crew can work it and return a branch or a draft pull request. |
-| **Improvement Council** | Lens agents that propose improvements to your projects and to SF itself. |
 | **Finished app** | A shipped project installed into SF as a tool, a panel or a plugin. |
 | **Add-on** | A plugin: a folder with `plugin.json` that adds tabs, a backend or agents. |
 

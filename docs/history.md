@@ -20,7 +20,9 @@ The Bridge is now meant to be used every day, starting from a fresh Windows PC:
 
 ## Improvement Council (constant improvement)
 
-The **Improve** tab: six lens agents (integrate, automate, simplify, enrich, UX, flow) look again at your projects, ideas, shipped apps and SoftwareFactory itself, and queue ranked proposals you accept, park or reject with one tap. It remembers everything it proposed and never repeats itself or brings back what you rejected. Haiku, $0.20 a day cap with a live cost meter; on its own only on the real crew, when something changed. Accepting files a ticket or task; building takes a second tap. Details: [docs/improve.md](improve.md).
+**Removed 24 Nov 2026**: it was paused since 14 Nov with 33 proposals nobody read. Code suggestions from an imported repo now get a yes or no right on the Code map; a yes opens a task ticket.
+
+The **Improve** tab: six lens agents (integrate, automate, simplify, enrich, UX, flow) look again at your projects, ideas, shipped apps and SoftwareFactory itself, and queue ranked proposals you accept, park or reject with one tap. It remembers everything it proposed and never repeats itself or brings back what you rejected. Haiku, $0.20 a day cap with a live cost meter; on its own only on the real crew, when something changed. Accepting files a ticket or task; building takes a second tap. 
 
 ![The Improve tab: the lens wheel, the cost meter and the proposals queue](img/bridge-improve.png)
 

@@ -7,8 +7,9 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
   EventLog, MockRuntime, AgentBay, RepoExplorer, scanRepo, normalizeSource, codeMapSummary, importOf, suggestionsOf, moduleNotes, createCore,
-  projectOf, estimateUsd, verify,
+  projectOf, estimateUsd, verify, Tickets,
 } from "../src/index.js";
+import { decideSuggestion } from "../src/imports/routes.js";
 
 const tmp = (p = "sf-import-") => mkdtempSync(join(tmpdir(), p));
 const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -221,19 +222,22 @@ describe("importing and exploring", () => {
     expect(importOf(log, r.projectId)).toMatchObject({ status: "failed" });
   });
 
-  it("mirrors the Council's decisions on its suggestions", async () => {
+  it("a yes on a suggestion opens a task ticket on the project, a no drops it (24 Nov: no Council in between)", async () => {
     const log = new EventLog();
+    const t = new Tickets(log);
     const ex = new RepoExplorer(log, null, join(tmp(), "imports"));
     const { projectId, done } = ex.importRepo(fixtureRepo());
     await done;
     const [s1, s2] = suggestionsOf(log, projectId);
-    const p1 = log.append("improve.proposal", { title: s1.title, source: { kind: "repo.suggestion", eventId: s1.eventId, suggestionId: s1.id } });
-    log.append("improve.proposal", { title: s2.title, source: { kind: "repo.suggestion", eventId: s2.eventId, suggestionId: s2.id } });
-    log.append("improve.proposal.decided", { id: p1.id, decision: "rejected" });
-    log.append("improve.proposal.accepted", { source: { kind: "repo.suggestion", suggestionId: s2.id } });
+    expect(decideSuggestion(log, projectId, s1.id, "rejected")[0]).toBe(200);
+    expect(decideSuggestion(log, projectId, s2.id, "accepted")[0]).toBe(200);
+    expect(decideSuggestion(log, projectId, s2.id, "accepted")[0]).toBe(409);
+    expect(decideSuggestion(log, projectId, s2.id, "maybe")[0]).toBe(400);
     const after = suggestionsOf(log, projectId);
-    expect(after.find((x) => x.id === s1.id)).toMatchObject({ status: "rejected", proposalId: p1.id });
+    expect(after.find((x) => x.id === s1.id)?.status).toBe("rejected");
     expect(after.find((x) => x.id === s2.id)?.status).toBe("accepted");
+    expect(t.list({ q: s2.title })[0]).toMatchObject({ kind: "task", project: projectId, fingerprint: `suggestion:${s2.id}` });
+    expect(t.list({ q: s1.title })).toHaveLength(0);
     // Tables rebuild from the log with the same answer.
     log.rebuild("imports");
     expect(suggestionsOf(log, projectId).map((x) => x.status)).toEqual(after.map((x) => x.status));
@@ -263,8 +267,10 @@ describe("imports API", () => {
       expect(d.map.map.modules.length).toBe(5);
       expect(Object.keys(d.notes)).toContain("src/cart");
       expect(d.suggestions.length).toBeGreaterThan(2);
-      // The Improvement Council filed every suggestion in its queue.
-      expect(d.suggestions.every((s: any) => s.status === "proposed" && s.proposalId > 0)).toBe(true);
+      // Every suggestion waits for the person's yes or no.
+      expect(d.suggestions.every((s: any) => s.status === "pending")).toBe(true);
+      const yes = await fetch(`${base}/api/imports/${projectId}/suggestions/${encodeURIComponent(d.suggestions[0].id)}/decide`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision: "accepted" }) });
+      expect(yes.status).toBe(200);
       expect(d.explores.some((e: any) => e.type === "repo.explore.finished")).toBe(true);
       const list = await (await fetch(`${base}/api/imports`)).json();
       expect(list.imports[0]).toMatchObject({ projectId, health: expect.any(Number) });

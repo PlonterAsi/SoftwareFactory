@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventLog, MockRuntime, ClaudeCodeRuntime, Factory, AgentBay, Tickets, createCore, git, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, ideaFromTicket, captureSignal, OrderEngine, ImproveCouncil, listSignals, RepoExplorer, ErrorCapture, errorFingerprint, scrub, isFault, classifyIntake, ensureSelfProject, selfProject, projectToTicket, linkToProject } from "../src/index.js";
+import { EventLog, MockRuntime, ClaudeCodeRuntime, Factory, AgentBay, Tickets, createCore, git, createProject, projectOf, projectDetail, nextMoves, refuseMove, workDocument, ideaFromTicket, captureSignal, OrderEngine, listSignals, RepoExplorer, ErrorCapture, errorFingerprint, scrub, isFault, classifyIntake, ensureSelfProject, selfProject, projectToTicket, linkToProject } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-tickets-"));
 
@@ -195,7 +195,7 @@ describe("tickets: agents and the loop", () => {
     expect(log.db.prepare("SELECT station FROM agent_runs ORDER BY rowid DESC LIMIT 1").get()).toMatchObject({ station: "ticket" });
   });
 
-  it("opens tickets on its own: a failed run, a task the Order Engine files, a council proposal, a request event", () => {
+  it("opens tickets on its own: a failed run, a task the Order Engine files, a request event", () => {
     const log = new EventLog();
     const t = new Tickets(log);
     const started = log.append("factory.run.started", { idea: "a thing that breaks" });
@@ -210,15 +210,6 @@ describe("tickets: agents and the loop", () => {
     log.append("order.fragment", { signalId: sig.id, text: "add a frost alert", kind: "task", nodeId: node.id, confidence: 0.9 });
     log.append("order.fragment", { signalId: sig.id, text: "frost is cold", kind: "note", nodeId: node.id, confidence: 0.9 });
     expect(t.list({ kind: "task" })).toEqual([expect.objectContaining({ title: "add a frost alert", project: node.id, source: "order" })]);
-
-    log.append("improve.proposal.accepted" as any, { id: 41, title: "Show spend per project", body: "Spend is global today", lens: "ux", target: { kind: "project", id: node.id, title: "Garden app" } });
-    const idea = t.list({ kind: "idea" })[0];
-    expect(idea).toMatchObject({ title: "Show spend per project", project: node.id, source: "improve" });
-    const linked = log.list({ type: "improve.proposal.linked" as any });
-    expect(linked.map((e) => e.payload)).toEqual([{ id: 41, ticketId: idea.id }]);
-
-    log.append("improve.proposal.accepted" as any, { id: 42, title: "Pin a dependency", body: "lodash floats", lens: "risk", target: { kind: "project", id: node.id }, source: { kind: "repo.suggestion", suggestionId: 9 } });
-    expect(t.list({ q: "Pin a dependency" })[0]).toMatchObject({ kind: "task", fingerprint: "suggestion:9" });
 
     const req = log.append("ticket.requested", { title: "Pin lodash", kind: "task", source: "import-explore", fingerprint: "suggestion:10", ref: { repo: 3 } });
     const opened = log.list({ type: "ticket.opened" }).at(-1)!.payload as any;
@@ -376,26 +367,6 @@ describe("tickets: the API", () => {
     } finally {
       server.close();
     }
-  });
-});
-
-describe("tickets with the real Improvement Council", () => {
-  it("an accepted proposal becomes a ticket, linked back to the proposal, and no task Signal is filed", async () => {
-    const log = new EventLog();
-    const rt = new MockRuntime();
-    const bay = new AgentBay(log, rt);
-    const order = new OrderEngine(log, null, { mode: "heuristic" });
-    const t = new Tickets(log, { runtime: rt });
-    const council = new ImproveCouncil(log, rt, bay, () => order.state(), {});
-    const s = captureSignal(log, "Project: Photo renamer. It renames photos by date.", "bridge");
-    await order.ingest({ id: s.id, text: s.text, source: "bridge" });
-    await council.run();
-    const p = council.proposals()[0];
-    const before = listSignals(log).length;
-    const acc = council.decide(p.id, "accepted");
-    expect(acc.ticketId).toBeTypeOf("number");
-    expect(listSignals(log)).toHaveLength(before);
-    expect(t.get(acc.ticketId!)).toMatchObject({ title: p.title, source: "improve", kind: "idea", status: "open" });
   });
 });
 

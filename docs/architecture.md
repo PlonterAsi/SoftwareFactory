@@ -68,7 +68,6 @@ All under `packages/core/src/`.
 | `projects/` | Projects, links, adoption of old data, money limits | [projects.md](projects.md) |
 | `chat/` | Which chat an item belongs to (General or a project) | [projects.md](projects.md) |
 | `tickets/` | Tickets, intake, the ready queue, work in a repository, GitHub pull requests, error capture | [tickets.md](tickets.md) |
-| `improve/` | The Improvement Council and its lenses | [improve.md](improve.md) |
 | `imports/` | Importing a repository: scan, map, survey, suggestions | |
 | `launch/` | Finding how to run a finished project, starting and stopping it, its data files and tools | [run.md](run.md) |
 | `integrations/` | Installing a finished project into SF | [integrations.md](integrations.md) |
@@ -179,7 +178,7 @@ Two profiles exist. **Lean** (the default): no tools, the agent answers in a str
 | Boundary | How it is held |
 |---|---|
 | Network exposure | The core listens on `127.0.0.1` only |
-| Money | A cap on every call; a cap on every run; optional project totals; daily caps for the Archivist, the Improvement Council and the ticket queue. A budget rise always asks the person |
+| Money | A cap on every call; a cap on every run; optional project totals; daily caps for the Archivist and the ticket queue. A budget rise always asks the person |
 | What an agent may run | An allowlist of commands; no package installs, no git changes, no network from the shell |
 | What an agent may change | Only its build folder. The core puts back locked tests and the kit after every call |
 | Secrets | A scan of every changed file before tests run; a hook refuses to write a secret; the crew's GitHub token is kept in a file outside the database and never reaches a log, a ticket or a prompt |

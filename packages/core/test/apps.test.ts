@@ -92,7 +92,7 @@ describe("the Brain", () => {
     const planner = systemPromptFor({ prompt: "You are the Planner." }, "plan");
     expect(planner.indexOf("Build real programs, not scripts")).toBeGreaterThan(0);
     expect(planner.indexOf("full CRUD and full visibility")).toBeLessThan(planner.indexOf("Station contract: plan"));
-    for (const s of ["council", "plan", "tests", "build", "review", "fix", "improve", "overseer", "survey"] as const) expect(systemPromptFor({ prompt: "x" }, s)).toContain("Never make the person write raw data");
+    for (const s of ["council", "plan", "tests", "build", "review", "fix", "overseer", "survey"] as const) expect(systemPromptFor({ prompt: "x" }, s)).toContain("Never make the person write raw data");
     expect(systemPromptFor({ prompt: "x" }, "order")).not.toContain("SoftwareFactory principles");
     expect(CONTRACTS.build).toContain("src/schema.js");
     expect(CONTRACTS.review).toMatch(/script or CLI with no real app/);

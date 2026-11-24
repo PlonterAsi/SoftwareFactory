@@ -890,17 +890,6 @@ export class Tickets extends TicketPrs {
         by: p.by ?? String(p.source ?? "agent"), source: String(p.source ?? "agent"), fingerprint: p.fingerprint ?? `request:${e.id}`, tags: p.tags,
         request: e.id, ref: p.ref,
       });
-    } else if (e.type === ("improve.proposal.accepted" as SfEvent["type"])) {
-      // A code suggestion from an imported repo is a task on that repo; anything else is an idea, which is taste.
-      const fromRepo = p.source?.kind === "repo.suggestion" && p.source.suggestionId != null;
-      const t = this.open({
-        kind: fromRepo ? "task" : "idea", title: String(p.title ?? "An improvement"), body: String(p.body ?? ""), by: "council", source: "improve",
-        fingerprint: fromRepo ? `suggestion:${p.source.suggestionId}` : `improve:${p.id}`,
-        answers: fromRepo ? { todo: String(p.body || p.title || "") } : { core: String(p.title ?? ""), problem: String(p.body ?? ""), why_now: p.lens ? `Seen through the ${p.lens} lens${p.impact ? `, impact ${p.impact}` : ""}${p.effort ? `, effort ${p.effort}` : ""}` : "" },
-        project: p.target?.kind === "project" && p.target.id != null ? Number(p.target.id) : null,
-        tags: ["improvement"],
-      });
-      this.log.append("improve.proposal.linked" as SfEvent["type"], { id: p.id, ticketId: t.id });
     }
   }
 

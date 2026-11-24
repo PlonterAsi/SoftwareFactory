@@ -116,22 +116,14 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/tickets/github`, `POST /api/tickets/github` | Whether the crew's write token is set; set or clear it |
 | `GET /api/tickets/auto`, `POST /api/tickets/auto` | `{ on, maxUsd, dailyUsd, wip }` the ready queue's switch and caps |
 
-### Improvement Council
-
-| Method and path | Does |
-|---|---|
-| `GET /api/improve/state` | Sessions, proposals, spend, settings |
-| `POST /api/improve/run` | Look now (optionally at one project) |
-| `POST /api/improve/settings` | Caps, interval, automatic on or off |
-| `POST /api/improve/proposals/:id/decide` \| `build` | Accept, park or reject; build an accepted one |
-
 ### Imports, launch, finished apps, add-ons
 
 | Method and path | Does |
 |---|---|
 | `GET /api/imports`, `POST /api/imports` | List; import `{ source, name?, maxUsd? }` |
 | `GET /api/imports/:projectId`, `POST /api/imports/:projectId/explore` | Detail with code map; explore again |
-| `POST /api/imports/follow` | `{ on }`: keep imported repos current by themselves. Every 12 hours each source is asked for its newest commit (free); when it moved, the repo is explored again (at most $0.15 a time, $0.50 a day in all) and the Improvement Council has a reason to look at the project again. On by default; setting `importsFollow` |
+| `POST /api/imports/:projectId/suggestions/:id/decide` | `{ decision: "accepted" \| "rejected" }`: a yes opens a task ticket on the project, a no drops the suggestion |
+| `POST /api/imports/follow` | `{ on }`: keep imported repos current by themselves. Every 12 hours each source is asked for its newest commit (free); when it moved, the repo is explored again (at most $0.15 a time, $0.50 a day in all). On by default; setting `importsFollow` |
 | `GET /api/launch/projects/:id` | How this project can be run |
 | `POST /api/launch/projects/:id/start` \| `go` \| `folder` \| `terminal` \| `files` \| `samples` | Start a way of running it; one-press start; use a folder of yours; open a terminal; save, rename or delete a data file; make sample inputs |
 | `GET /api/launch/projects/:id/files?dir=&path=` | Its data files |
@@ -209,7 +201,6 @@ Each group is one projection, rebuilt from the log on demand ([storage.md](stora
 | `order_nodes`, `order_fragments`, `order_conflicts` | The Order Engine |
 | `projects`, `project_links` | Projects and what belongs to each |
 | `tickets`, `ticket_notes`, `ticket_links`, `ticket_keys` | Tickets |
-| `improve_sessions`, `improve_proposals` | The Improvement Council |
 | `repo_imports`, `code_maps`, `code_modules`, `code_suggestions` | Imported repositories |
 | `launch_sessions` | Apps started from the Use tab |
 | `integrations` | Finished apps installed into SF |
@@ -236,7 +227,6 @@ The installed app sets what it needs itself. These matter in development, tests 
 | `SF_MOCK_DELAY_MS` | `700` | How long a practice-crew call pretends to take |
 | `SF_ORDER_MODE` | `agent` on a real runtime, `heuristic` on the mock | Which Archivist files Signals |
 | `SF_ORDER_MAX_USD` | `0.50` | The Archivist's daily cap |
-| `SF_IMPROVE_MAX_USD`, `SF_IMPROVE_EVERY_H` | `0.20`, `6` | The Improvement Council's daily cap and interval |
 | `SF_IMPORT_MAX_USD` | `0.50` | Cap for exploring one imported repository |
 | `SF_SELF_REPO` | `PlonterAsi/SoftwareFactory` | The repository SF's own tickets work in |
 | `SF_PLUGINS_DIR` | none | Where an agent's plugin names resolve |
