@@ -30,10 +30,18 @@ describe("repos with their code in subfolders", () => {
     expect(env.testHint).toContain("npm run build (in web/)");
   });
 
-  it("reads go test output: passing packages, failing tests and failing packages", () => {
-    const out = "ok  \texample.com/x/a\t0.12s\n--- FAIL: TestRoundTrip (0.00s)\nFAIL\texample.com/x/b\t0.30s\n?   \texample.com/x/c\t[no test files]\n";
+  it("reads go test -v output: passing, failing and skipped tests, with a skip's reason", () => {
+    const out = [
+      "=== RUN   TestOk", "--- PASS: TestOk (0.00s)",
+      "=== RUN   TestNeedsDb", "    gig_test.go:16: TEST_DATABASE_URL not set", "--- SKIP: TestNeedsDb (0.00s)",
+      "=== RUN   TestOther", "--- SKIP: TestOther (0.00s)",
+      "--- FAIL: TestRoundTrip (0.00s)", "FAIL\texample.com/x/b\t0.30s", "ok  \texample.com/x/a\t0.12s",
+    ].join("\n");
     const cases = parseCases(out, "go");
-    expect(cases.map((c) => [c.name, c.pass])).toEqual([["example.com/x/a", true], ["TestRoundTrip", false], ["example.com/x/b (package)", false]]);
+    expect(cases.map((c) => [c.name, c.pass, c.skipped ?? null])).toEqual([
+      ["TestOk", true, null], ["TestNeedsDb", true, "TEST_DATABASE_URL not set"], ["TestOther", true, "skipped"],
+      ["TestRoundTrip", false, null], ["example.com/x/b (package)", false, null],
+    ]);
     expect(parseCases("anything at all", "check")).toEqual([]);
   });
 });

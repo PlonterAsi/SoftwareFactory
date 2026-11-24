@@ -141,7 +141,7 @@ export function commitAll(root: string, message: string): string | null {
   return git(root, "rev-parse", "--short", "HEAD");
 }
 
-export interface TestCase { name: string; file: string; pass: boolean; error?: string; durationMs: number }
+export interface TestCase { name: string; file: string; pass: boolean; error?: string; durationMs: number; /** It did not run: skipped, with the reason it gave ("TEST_DATABASE_URL not set"). Never counted as a pass. */ skipped?: string }
 export interface TestRun { cases: TestCase[]; passed: number; failed: number; exitCode: number | null; timedOut: boolean; output: string; /** Node's notes that name a test file: errors no test owns. */ fileNotes?: { file: string; message: string }[] }
 
 /** node --test reporter: one JSON line per leaf test. Written to a temp file so it ships inside the compiled core. */
