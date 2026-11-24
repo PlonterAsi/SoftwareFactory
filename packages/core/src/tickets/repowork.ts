@@ -308,6 +308,9 @@ export async function defaultRunTests(dir: string, files: string[]): Promise<Che
  * A test that skipped did not run, and says so: RTM-2's light session passed with "no package with a test script"
  * while a Go test it should have run failed (415 where 409 was meant). Null when no Go file changed.
  */
+/** Go's commands for an agent working in a repo with Go code. */
+const GO_COMMANDS = ["go test", "go vet", "go build", "gofmt"];
+
 async function goTests(dir: string, files: string[]): Promise<CheckResult | null> {
   const mods = [...(existsSync(join(dir, "go.mod")) ? [""] : []), ...subPackages(dir).go];
   const want = new Map<string, Set<string>>();
@@ -437,17 +440,19 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
   // One Builder call (the first build, or a fix). `share` is the largest part of the budget it may use.
   const build = async (prompt: string, share: number, name: string) => {
     step(name, "running");
+    // A repo with Go code gets Go's own commands (RTM-2: the Builder could not run go test or go vet).
+    const goHere = existsSync(join(dir, "go.mod")) || subPackages(dir).go.length > 0;
     const run = await runAgent(log, runtime, b?.id ?? "builder", {
       prompt,
       model: b?.model ?? "sonnet",
-      systemPrompt: `${b?.role.split("Station contract:")[0].trim() ?? "You are the Builder: you write working code."}\n\n${REPO_CONTRACT}\n${flow.brief ? `${flow.brief}\n` : ""}${REPO_BENCH}`,
+      systemPrompt: `${b?.role.split("Station contract:")[0].trim() ?? "You are the Builder: you write working code."}\n\n${REPO_CONTRACT}\n${flow.brief ? `${flow.brief}\n` : ""}${REPO_BENCH}${goHere ? `\nGo is here too: ${GO_COMMANDS.join(", ")} (run them in the Go module's folder).` : ""}`,
       budgetUsd: Math.min(left(), share, b?.budgetUsd ?? share),
       pluginDirs: b?.pluginDirs.length ? b.pluginDirs : undefined,
       // The working-copy tools, plus the Builder's own skills and MCP servers.
       tools: [...new Set([...TOOLS, ...(b?.tools ?? [])])],
       mcpConfig: b?.mcpConfig,
       cwd: dir,
-      commands: WORKBENCH_COMMANDS,
+      commands: [...WORKBENCH_COMMANDS, ...(goHere ? GO_COMMANDS : [])],
       timeoutMs: 25 * 60_000,
     }, { agentVersion: b?.version, station: "repo", workbench: true, ticket: o.id });
     spent += run.result?.costUsd ?? 0;
