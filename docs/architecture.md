@@ -53,9 +53,8 @@ All under `packages/core/src/`.
 | Module | Job | Read more |
 |---|---|---|
 | `events.ts` | The append-only event log (SQLite), full-text search, live listeners | [storage.md](storage.md) |
-| `store/` | Schema migrations, projections (tables folded from events), cache, the Data vault report | [storage.md](storage.md) |
+| `store/` | Schema migrations, projections (tables folded from events), cache | [storage.md](storage.md) |
 | `server.ts` | The HTTP server, routing, the live event stream, start-up of one base | [reference.md](reference.md) |
-| `bases/` | The registry of bases and the host that switches between them | [bases.md](bases.md) |
 | `runtime.ts`, `agents.ts` | The `AgentRuntime` adapter: Claude Code (lean or full), the mock practice crew, a switchable wrapper; per-call caps, timeouts, cost recording | [spike-runtime.md](spike-runtime.md) |
 | `setup.ts` | Checks for Node.js, Claude Code and Git; crew mode | |
 | `signals.ts` | Capturing a Signal | |
@@ -68,13 +67,11 @@ All under `packages/core/src/`.
 | `projects/` | Projects, links, adoption of old data, money limits | [projects.md](projects.md) |
 | `chat/` | Which chat an item belongs to (General or a project) | [projects.md](projects.md) |
 | `tickets/` | Tickets, intake, the ready queue, work in a repository, GitHub pull requests, error capture | [tickets.md](tickets.md) |
-| `improve/` | The Improvement Council and its lenses | [improve.md](improve.md) |
 | `imports/` | Importing a repository: scan, map, survey, suggestions | |
 | `launch/` | Finding how to run a finished project, starting and stopping it, its data files and tools | [run.md](run.md) |
 | `integrations/` | Installing a finished project into SF | [integrations.md](integrations.md) |
 | `plugins/` | Plugin manifest, host, sandboxed runner, page SDK | [plugins.md](plugins.md) |
-| `runners/` | Build runners: GitHub Actions runners on this PC, kept running by the core (belongs to the app, not to a base) | [runners.md](runners.md) |
-| `bridge/` | Things only the UI needs from the core: the status digest, the drop folder, "since you left" | |
+| `bridge/` | Things only the UI needs from the core: settings, "since you left" | |
 
 Beside `src/`: `kit/` is the app kit copied into every built app; `agent-skills/` are the skills agents may load; `agent-mcp.json` lists the MCP servers offered to agents; `plugin-examples/` ship with the app.
 
@@ -98,7 +95,7 @@ Beside `src/`: `kit/` is the app kit copied into every built app; `agent-skills/
 | `linkcheck.ts` | Opening every link the app contains |
 | `appkit.ts`, `kitFiles.ts` | Installing the kit; checking an app against it |
 | `evaluate.ts` | The product judge's rubric, the per-screen look, repair features |
-| `retro.ts`, `cycles.ts` | The engine review and the cycle comparison |
+| `retro.ts` | The engine review |
 | `visualize.ts` | The visualizeEverything check |
 | `appagent.ts` | A built app asking one of the person's agents |
 | `crew.ts` | Binding an agent to a station: prompt, principles, contract, kit |
@@ -180,7 +177,7 @@ Two profiles exist. **Lean** (the default): no tools, the agent answers in a str
 | Boundary | How it is held |
 |---|---|
 | Network exposure | The core listens on `127.0.0.1` only |
-| Money | A cap on every call; a cap on every run; optional project totals; daily caps for the Archivist, the Improvement Council and the ticket queue. A budget rise always asks the person |
+| Money | A cap on every call; a cap on every run; optional project totals; daily caps for the Archivist and the ticket queue. A budget rise always asks the person |
 | What an agent may run | An allowlist of commands; no package installs, no git changes, no network from the shell |
 | What an agent may change | Only its build folder. The core puts back locked tests and the kit after every call |
 | Secrets | A scan of every changed file before tests run; a hook refuses to write a secret; the crew's GitHub token is kept in a file outside the database and never reaches a log, a ticket or a prompt |

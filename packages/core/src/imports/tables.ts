@@ -10,8 +10,7 @@ import { registerProjection, type Projection } from "../store/projections.js";
  *
  * Events: repo.import.started, repo.imported, repo.import.failed,
  * repo.explore.started, repo.explore.station, repo.mapped, repo.module.understood,
- * repo.suggestion, repo.explore.finished; and the Council's improve.proposal /
- * improve.proposal.decided / improve.proposal.accepted when their source is a repo.suggestion.
+ * repo.suggestion, repo.suggestion.decided (a yes or no from the Code map), repo.explore.finished.
  */
 type P = Record<string, any>;
 
@@ -111,23 +110,12 @@ export const importsProjection: Projection = {
           .run(String(p.suggestionId), p.projectId, e.id, e.ts, String(p.title), String(p.body ?? ""), String(p.kind ?? "improvement"), String(p.lens ?? "code-health"),
             String(p.severity ?? "medium"), String(p.effort ?? "medium"), JSON.stringify(p.files ?? []), String(p.by ?? "heuristic"));
         return;
+      case "repo.suggestion.decided":
+        db.prepare("UPDATE code_suggestions SET status = ? WHERE id = ? AND project_id = ?").run(String(p.decision), String(p.suggestionId), p.projectId);
+        return;
       case "repo.explore.finished":
         db.prepare("UPDATE repo_imports SET status = ?, explored_at = ?, spent_usd = spent_usd + ?, mapped_head = coalesce(?, mapped_head), error = ? WHERE project_id = ?")
           .run(p.outcome === "failed" ? "failed" : "ready", e.ts, Number(p.spentUsd ?? 0), p.head ?? null, p.outcome === "failed" ? String(p.error ?? "failed").slice(0, 500) : null, p.projectId);
-        return;
-      // The Council files each suggestion as a proposal and decides it; mirror that here.
-      case "improve.proposal":
-        if (p.source?.kind === "repo.suggestion" && p.source.suggestionId) {
-          db.prepare("UPDATE code_suggestions SET status = 'proposed', proposal_id = ? WHERE id = ?").run(Number(p.id ?? e.id), String(p.source.suggestionId));
-        }
-        return;
-      case "improve.proposal.decided": {
-        const decision = String(p.decision ?? "");
-        if (decision) db.prepare("UPDATE code_suggestions SET status = ? WHERE proposal_id = ?").run(decision, Number(p.id));
-        return;
-      }
-      case "improve.proposal.accepted":
-        if (p.source?.kind === "repo.suggestion" && p.source.suggestionId) db.prepare("UPDATE code_suggestions SET status = 'accepted' WHERE id = ?").run(String(p.source.suggestionId));
         return;
     }
   },

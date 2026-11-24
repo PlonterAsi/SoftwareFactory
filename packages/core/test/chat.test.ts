@@ -79,12 +79,6 @@ describe("project chats", () => {
       r = await post("/api/signals", { text: "a general thought" });
       expect((await r.json()).projectId).toBeUndefined();
 
-      r = await post("/api/agent/run", { prompt: "what is next here?", projectId: created.id });
-      const ask = await r.json();
-      const started = log.get(ask.runId)!;
-      expect((started.payload as any).projectId).toBe(created.id);
-      expect((started.payload as any).prompt).toContain('chat of the project "Galaxy"');
-
       // Let the Order Engine file the Signals, then read the routes.
       for (let i = 0; i < 100; i++) { const routes = await (await fetch(base + "/api/chat/routes")).json(); if (routes.filed[sig.id]) break; await new Promise((res) => setTimeout(res, 10)); }
       const routes = await (await fetch(base + "/api/chat/routes")).json();

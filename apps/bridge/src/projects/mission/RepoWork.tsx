@@ -154,9 +154,9 @@ export function RepoWork({ ctx, repo }: { ctx: PanelContext; repo: WorkedRepo })
                 <p><em>{code.files ?? 0}</em> files, <em>{(code.lines ?? 0).toLocaleString()}</em> lines in <em>{code.modules ?? 0}</em> parts{code.health != null && <>. Health <em>{code.health}</em> of 100</>}.</p>
                 <span className="rw-go">Open the code map</span>
               </a>
-              <a className="ms-card rw-fact" href={`#/p/${p.id}/improve`}>
+              <a className="ms-card rw-fact" href={`#/p/${p.id}/code`}>
                 <h4>The crew's suggestions</h4>
-                <p>{code.openSuggestions ? <><em>{code.openSuggestions}</em> wait for your yes or no. A yes makes a ticket.</> : "None waiting. The council looks again when the code changes."}</p>
+                <p>{code.openSuggestions ? <><em>{code.openSuggestions}</em> wait for your yes or no. A yes makes a ticket.</> : "None waiting. The Surveyor suggests more when the code changes."}</p>
                 <span className="rw-go">Open the suggestions</span>
               </a>
               <a className="ms-card rw-fact" href={`#/p/${p.id}/run`}>

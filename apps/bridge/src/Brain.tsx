@@ -28,7 +28,7 @@ interface BrainState { principles: Principle[]; stations: string[]; crew: Record
 
 const STATION_NAMES: Record<string, string> = {
   council: "Council", design: "Designer", critique: "Critic", evaluate: "Judge", plan: "Planner", tests: "Tester", build: "Builder", review: "Reviewer", fix: "Fixer",
-  order: "Archivist", overseer: "Assistant", improve: "Improvement Council", map: "Cartographer", survey: "Surveyor", inspect: "Inspector", verdict: "Assessor",
+  order: "Archivist", overseer: "Assistant", map: "Cartographer", survey: "Surveyor", inspect: "Inspector", verdict: "Assessor",
 };
 
 async function put(path: string, body: unknown) {
@@ -54,7 +54,6 @@ export function BrainPage({ events }: { events: SfEvent[] }) {
   if (!state) return <section className="br-page"><p className="muted">{err ? `The Brain cannot be read: ${err}` : "Reading the Brain…"}</p></section>;
   const on = state.principles.filter((p) => p.enabled);
   const use = state.use;
-  const suggestions = state.suggestions ?? [];
   const act = async (fragment: number, what: "accept" | "dismiss") => {
     setBusy(fragment); setErr(null);
     try { setState(await post(`/api/brain/suggestions/${fragment}/${what}`)); } catch (x) { setErr((x as Error).message); } finally { setBusy(null); }
@@ -108,26 +107,6 @@ export function BrainPage({ events }: { events: SfEvent[] }) {
             </article>
           ))}
       </div>
-
-      <h3 className="br-sub">From your rules ({suggestions.length})</h3>
-      {suggestions.length === 0
-        ? <p className="br-none">Nothing waits. When you write a rule or a decision (in the Assistant, the Helm or Rules and ideas), it appears here, and one press makes it a principle every agent reads.</p>
-        : (
-          <div className="br-suggest">
-            {suggestions.map((s) => (
-              <div key={s.fragment} className="br-sug">
-                <div>
-                  <p>{s.text}</p>
-                  <span className="muted">Your {s.kind}{s.node ? ` on "${s.node}"` : ""}{s.important ? " · marked important" : ""} · {ago(s.ts)}</span>
-                </div>
-                <div className="br-sug-actions">
-                  <button className="sm" disabled={busy === s.fragment} onClick={() => act(s.fragment, "accept")} title="Makes it a principle for the agents that make and judge the product, in every project. You can edit its stations after.">Add to the Brain</button>
-                  <button className="sm ghost" disabled={busy === s.fragment} onClick={() => act(s.fragment, "dismiss")} title="Keeps it as a rule where it is; it is not offered here again.">Not for the Brain</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
 
       <h3 className="br-sub">Who follows what</h3>
       <div className="br-matrix-wrap">
@@ -186,7 +165,7 @@ function PromptViewer({ station, setStation, stations, at }: { station: string; 
 function PrincipleForm({ p, stations, onSave, onCancel }: { p?: Principle; stations: string[]; onSave: (b: { title: string; text: string; stations: string[]; enabled: boolean; note?: string }) => Promise<void>; onCancel: () => void }) {
   const [title, setTitle] = useState(p?.title ?? "");
   const [text, setText] = useState(p?.text ?? "");
-  const [picked, setPicked] = useState<string[]>(p?.stations ?? ["council", "plan", "build", "review", "fix", "improve"]);
+  const [picked, setPicked] = useState<string[]>(p?.stations ?? ["council", "plan", "build", "review", "fix"]);
   const [enabled, setEnabled] = useState(p?.enabled ?? true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);

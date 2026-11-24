@@ -451,9 +451,7 @@ export class Tickets extends TicketPrs {
     // The flow it follows (tickets/flowpick.ts): the one you picked, else its kind's.
     const first = pickFlow(this.flows, t, { repo: !!repo, routeChosen: !!o.route });
     const named = (f: FlowDef) => ({ id: f.id, name: f.name });
-    // A proposed flow change you chose to try once is what this ticket follows (flows/improver.ts).
-    const tried = (f: FlowDef) => this.flows.trial?.(f.id, t.id) ?? f;
-    if (routeOfFlow(first.flow) === "answer" && !o.route) { const f = tried(first.flow); return { ...this.workAnswer(t, repo, o, f), flow: named(f) }; }
+    if (routeOfFlow(first.flow) === "answer" && !o.route) { const f = first.flow; return { ...this.workAnswer(t, repo, o, f), flow: named(f) }; }
     if (repo) {
       const held = epicOfTickets(t);
       if (held) throw new Error(held);
@@ -465,7 +463,7 @@ export class Tickets extends TicketPrs {
         const started = this.workEngine(t, o, routed, pick.flow.id);
         if (started) return { ...started, flow: named(pick.flow) };
       }
-      const session = tried(runnerOf(pick.flow) === "session" ? pick.flow : pickFlow(this.flows, { kind: t.kind }, { repo: true, route: "light", routeChosen: true }).flow);
+      const session = runnerOf(pick.flow) === "session" ? pick.flow : pickFlow(this.flows, { kind: t.kind }, { repo: true, route: "light", routeChosen: true }).flow;
       return { ...this.workRepo(t, repo, o.maxUsd, session), route: routed.route === "light" ? routed : { route: "light", why: "the engine could not take it (see the ticket's thread)" }, flow: named(session) };
     }
     if (first.chosen && runnerOf(first.flow) !== "engine") throw new Error(`"${first.flow.name}" works in a repo, and this ticket's project has none. Pick New project, or import the repo first.`);
@@ -892,17 +890,6 @@ export class Tickets extends TicketPrs {
         by: p.by ?? String(p.source ?? "agent"), source: String(p.source ?? "agent"), fingerprint: p.fingerprint ?? `request:${e.id}`, tags: p.tags,
         request: e.id, ref: p.ref,
       });
-    } else if (e.type === ("improve.proposal.accepted" as SfEvent["type"])) {
-      // A code suggestion from an imported repo is a task on that repo; anything else is an idea, which is taste.
-      const fromRepo = p.source?.kind === "repo.suggestion" && p.source.suggestionId != null;
-      const t = this.open({
-        kind: fromRepo ? "task" : "idea", title: String(p.title ?? "An improvement"), body: String(p.body ?? ""), by: "council", source: "improve",
-        fingerprint: fromRepo ? `suggestion:${p.source.suggestionId}` : `improve:${p.id}`,
-        answers: fromRepo ? { todo: String(p.body || p.title || "") } : { core: String(p.title ?? ""), problem: String(p.body ?? ""), why_now: p.lens ? `Seen through the ${p.lens} lens${p.impact ? `, impact ${p.impact}` : ""}${p.effort ? `, effort ${p.effort}` : ""}` : "" },
-        project: p.target?.kind === "project" && p.target.id != null ? Number(p.target.id) : null,
-        tags: ["improvement"],
-      });
-      this.log.append("improve.proposal.linked" as SfEvent["type"], { id: p.id, ticketId: t.id });
     }
   }
 

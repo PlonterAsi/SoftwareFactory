@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SLOTS, SLOT_LABEL, bayApi, type AgentDef, type AgentStats, type AgentView, type BayLibrary, type BayState, type BayTest, type DreamView, type Lesson, type Slot } from "./api";
+import { SLOTS, SLOT_LABEL, bayApi, type AgentDef, type AgentStats, type AgentView, type BayLibrary, type BayState, type BayTest, type Lesson, type Slot } from "./api";
 
 /**
  * The Agent Bay: every worker is a crew card (avatar, state, current task, cost).
@@ -151,7 +151,6 @@ function AgentPanel({ a, bay, onSelect, onError, onAssign }: { a: AgentView; bay
   const tests = bay.tests.filter((t) => t.agent === a.def.id);
   const working = stationsOf(a.def.id, bay.slots);
   const lessons = bay.memory?.[a.def.id] ?? [];
-  const dreams = (bay.dreams ?? []).filter((d) => d.agent === a.def.id);
   // Made for a station but not working one: one press seats it (a free seat, or the station's only seat).
   const home = a.def.station !== "none" && !a.retired && !working.includes(a.def.station as Slot) ? (a.def.station as Slot) : null;
   const homeIds = home ? bay.slots[home] ?? [] : [];
@@ -170,12 +169,12 @@ function AgentPanel({ a, bay, onSelect, onError, onAssign }: { a: AgentView; bay
         </div>
       </div>
       <div className="tabs ap-tabs" role="tablist">
-        {([["edit", "Edit"], ["memory", `Memory${lessons.length ? ` · ${lessons.length}` : ""}${dreams.some((d) => d.state === "proposed") ? " · 1 to review" : ""}`], ["versions", `Versions · ${a.versions.length}`], ["tests", `Tests${tests.length ? ` · ${tests.filter((t) => t.pass).length}/${tests.filter((t) => t.state === "done").length}` : ""}`], ["stats", "Stats"]] as [Tab, string][]).map(([id, label]) =>
+        {([["edit", "Edit"], ["memory", `Memory${lessons.length ? ` · ${lessons.length}` : ""}`], ["versions", `Versions · ${a.versions.length}`], ["tests", `Tests${tests.length ? ` · ${tests.filter((t) => t.pass).length}/${tests.filter((t) => t.state === "done").length}` : ""}`], ["stats", "Stats"]] as [Tab, string][]).map(([id, label]) =>
           <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "tab on" : "tab"} onClick={() => setTab(id)}>{label}</button>)}
       </div>
       <div className="ap-body">
         {tab === "edit" && <Editor a={a} models={bay.models} lib={bay.library} onSelect={onSelect} onError={onError} />}
-        {tab === "memory" && <Memory a={a} lessons={lessons} dreams={dreams} onError={onError} />}
+        {tab === "memory" && <Memory a={a} lessons={lessons} onError={onError} />}
         {tab === "versions" && <Versions a={a} onError={onError} />}
         {tab === "tests" && <Tests a={a} tests={tests} onError={onError} />}
         {tab === "stats" && <Stats a={a} st={st} />}
@@ -363,16 +362,12 @@ const ago = (iso: string) => new Date(iso).toLocaleDateString([], { month: "shor
 
 /**
  * An agent's own memory: the lessons that go into its prompt on every call, in every project. You teach it, it
- * notes lessons itself, and a review that sends its build back teaches it. Tidy is free; a cleaning (dream) is one
- * capped call whose result you read side by side and accept before the agent uses it.
+ * notes lessons itself, and a review that sends its build back teaches it. Tidy is free.
  */
-function Memory({ a, lessons, dreams, onError }: { a: AgentView; lessons: Lesson[]; dreams: DreamView[]; onError: (e: string) => void }) {
+function Memory({ a, lessons, onError }: { a: AgentView; lessons: Lesson[]; onError: (e: string) => void }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const open = dreams.find((d) => d.state === "proposed");
-  const past = dreams.filter((d) => d.state !== "proposed").slice(0, 3);
   const act = async (what: string, fn: () => Promise<unknown>) => { setBusy(what); try { await fn(); } catch (e) { onError((e as Error).message); } finally { setBusy(null); } };
-  const byId = new Map(lessons.map((l) => [l.id, l]));
   return (
     <div className="bay-memory">
       <p className="muted small">What {a.def.name} has learned from its own work. The newest twelve go into its prompt on every call, yours first, in every project it works on.</p>
@@ -380,7 +375,6 @@ function Memory({ a, lessons, dreams, onError }: { a: AgentView; lessons: Lesson
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Teach it a lesson, in one sentence" aria-label={`Teach ${a.def.name} a lesson`} maxLength={300} />
         <button disabled={!!busy || !text.trim()}>{busy === "teach" ? "Teaching…" : "Teach"}</button>
       </form>
-      {open && <DreamReview d={open} byId={byId} busy={busy} onDecide={(ok) => act(ok ? "accept" : "reject", () => bayApi.decideDream(open.id, ok))} />}
       {!lessons.length ? <div className="empty">No lessons yet. They come from you, from its own "Remember:" notes, and from reviews that send its work back.</div> : (
         <ul className="mem-list">
           {[...lessons].reverse().map((l) => (
@@ -394,31 +388,7 @@ function Memory({ a, lessons, dreams, onError }: { a: AgentView; lessons: Lesson
       )}
       <div className="mem-actions">
         <button type="button" className="ghost" disabled={!!busy || lessons.length < 2} onClick={() => act("tidy", () => bayApi.tidy(a.def.id))}>{busy === "tidy" ? "Tidying…" : "Tidy (free)"}</button>
-        <button type="button" disabled={!!busy || lessons.length < 2 || !!open} onClick={() => act("dream", () => bayApi.dream(a.def.id))} title="One haiku call reads the whole memory and proposes a shorter one; you review it before it is used">{busy === "dream" ? "Cleaning…" : "Clean it up (dream, up to $0.10)"}</button>
-        <span className="muted small">Tidy drops repeats and the oldest past 40, never what you taught. A dream merges and prunes; nothing changes until you accept it.</span>
-      </div>
-      {past.length > 0 && <div className="mem-past muted small">{past.map((d) => <div key={d.id}>Cleaning #{d.id} {d.state} · {d.saw.length} → {d.lessons.length} lessons · {d.by === "agent" ? `$${d.costUsd.toFixed(4)}` : "free"} · {ago(d.decidedAt ?? d.at)}</div>)}</div>}
-    </div>
-  );
-}
-
-/** A proposed cleaning, before and after: each new lesson beside the ones it replaces, and what it would drop. */
-function DreamReview({ d, byId, busy, onDecide }: { d: DreamView; byId: Map<number, Lesson>; busy: string | null; onDecide: (accept: boolean) => void }) {
-  const merged = d.lessons.filter((k) => k.from.length > 1 || byId.get(k.from[0])?.text !== k.text);
-  const kept = d.lessons.length - merged.length;
-  return (
-    <div className="dream-review" role="region" aria-label="Cleaning to review">
-      <div className="dream-head"><b>A cleaning waits on you</b> <span className="muted small">{d.saw.length} lessons → {d.lessons.length} · {d.by === "agent" ? `cleaned by one call, $${d.costUsd.toFixed(4)}` : "the free tidy"}{kept ? ` · ${kept} kept as they are` : ""}</span></div>
-      {d.error && <p className="muted small">{d.error}</p>}
-      {merged.length > 0 && <table className="dream-table"><thead><tr><th>Before</th><th>After</th></tr></thead><tbody>
-        {merged.map((k, i) => <tr key={i}><td>{k.from.map((id) => <div key={id} className="dream-old">{byId.get(id)?.text ?? `lesson #${id} (gone since)`}</div>)}</td><td className="dream-new">{k.text}</td></tr>)}
-      </tbody></table>}
-      {d.dropped.length > 0 && <div className="dream-drop"><span className="muted small">Would forget:</span><ul>{d.dropped.map((x) => <li key={x.id}><s>{byId.get(x.id)?.text ?? `lesson #${x.id}`}</s> <span className="muted small">{x.why}</span></li>)}</ul></div>}
-      {!merged.length && !d.dropped.length && <p className="muted small">Nothing to change: every lesson stays as it is.</p>}
-      <div className="row">
-        <button type="button" disabled={!!busy} onClick={() => onDecide(true)}>{busy === "accept" ? "Accepting…" : "Accept"}</button>
-        <button type="button" className="ghost" disabled={!!busy} onClick={() => onDecide(false)}>Reject</button>
-        <span className="muted small">Lessons noted since this cleaning started stay either way.</span>
+        <span className="muted small">Tidy drops repeats and the oldest past 40, never what you taught. It also runs by itself past 40.</span>
       </div>
     </div>
   );

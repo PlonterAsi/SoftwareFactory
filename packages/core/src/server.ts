@@ -1,4 +1,3 @@
-import { engineCycles } from "./factory/cycles.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
@@ -52,23 +51,16 @@ import { videosRoute } from "./video/routes.js";
 import { Videos } from "./video/videos.js";
 import { monthLeft } from "./watch/spend.js";
 import { Watchers } from "./watch/watchers.js";
-import { FlowImprover } from "./flows/improver.js";
 import { GitManager } from "./git/manager.js";
 import { gitRoute } from "./git/routes.js";
-import { DropFolder } from "./bridge/drop.js";
 import { askForApp } from "./factory/appagent.js";
 import { AUTO_WORK_DEFAULT, TICKET_FILE_MAX, Tickets, type AutoWork, type TicketFile } from "./tickets/tickets.js";
 import { GitHub, ghCliToken, parseGitHubRepo } from "./tickets/github.js";
-import { RunnerManager } from "./runners/manager.js";
-import { runnersRoute } from "./runners/routes.js";
 import { linkToProject } from "./projects/service.js";
 import { ErrorCapture, isFault } from "./tickets/capture.js";
 import { classifyIntake, ensureSelfProject, filedAlready, projectToTicket } from "./tickets/intake.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
-import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
-import { ImproveCouncil, type Target } from "./improve/council.js";
-import { BaseHost, type BootedBase } from "./bases/host.js";
-import { BaseRegistry } from "./bases/registry.js";
+import { lastSeen, sinceReport } from "./bridge/status.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
 import { freeBytesAt, lastAgentCall, preflight, type PreflightReport } from "./safety/preflight.js";
 
@@ -85,22 +77,16 @@ export interface CoreOptions {
   projectsDir?: string;
   /** Order Engine options; by default the agent Archivist runs on any real runtime, heuristics on the mock. */
   order?: OrderOptions;
-  /** The drop folder: notes saved here become Signals. Off when absent. */
-  dropDir?: string;
   /** Where the database lives (shown in the setup panel). */
   dataDir?: string;
-  /** Improvement Council caps: daily USD and hours between automatic sessions. */
-  improve?: { maxUsd?: number; everyHours?: number };
   /** GitHub write access for the crew's PRs (tests pass one pointed at a fake GitHub). */
   github?: GitHub;
   /** The installed app's version, from the shell (SF_APP_VERSION). A new one is recorded as `app.updated`. */
   appVersion?: string;
-  /** Jobs running on this PC's build runners right now (the app's own, not a base's). An update that installs by itself waits for them. */
-  runnerJobs?: () => number;
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, improve: improveOpts, appVersion, github: githubIn, runnerJobs = () => 0 }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dataDir, appVersion, github: githubIn }: CoreOptions) {
   // GitHub write access for the crew's PRs; the token lives in the data folder, never in the log.
   // Each agent's own skills and MCP servers: the person's library and the built kits live in the data folder.
   if (dataDir) configureKits({ dataDir });
@@ -108,7 +94,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const crewMode = () => (runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime));
   const bay = new AgentBay(log, runtime);
   const settings = readSettings(log);
-  const drop = new DropFolder(log, settings.dropDir ?? dropDir ?? join(homedir(), "SoftwareFactory", "Drop"));
   // Git is needed to ship anything; checking costs a process spawn, so remember it for a minute.
   let gitOk: { ok: boolean; at: number } = { ok: true, at: 0 };
   const gitReady = () => {
@@ -161,13 +146,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const watchers = new Watchers(log, tickets);
   // A flow step may name a Bay agent; saving one that names an agent the Bay does not have is refused.
   factory.flows.agentsKnown = () => new Set(bay.agents().filter((a) => !a.retired).map((a) => a.def.id));
-  // Flows that improve themselves (flows/improve.ts): proposals replayed on past runs, one live trial, your decision.
-  const flowImprover = new FlowImprover(log, factory.flows, {
-    runtime,
-    agents: () => bay.agents().filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, station: a.def.station })),
-    record: (id) => { const s = bay.stats()[id]; return s ? { passRate: s.passRate, avgUsd: s.avgUsd, calls: s.calls } : null; },
-  });
-  factory.flows.trial = (id, ticket) => flowImprover.takeTrial(id, ticket);
   // The git manager: local first then a private repo, the merge policy, outside work, versions (docs/git.md).
   const gitman = new GitManager(log, tickets, { github, canShip });
   /** An ask in a project that lives in a repo: a ticket there, sent down the route that fits (the reply both doors share). */
@@ -211,12 +189,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   try { seedFirstTrial(log, (e) => saveEntry(log, e, "configuration")); } catch (e) { console.warn(`configuration: could not put the first trial on: ${(e as Error).message}`); }
   try { adoptScoutTickets(log, tickets); } catch (e) { console.warn(`catalog: could not adopt Scout's tickets: ${(e as Error).message}`); }
   setConfigSource(log, liveConfig({ log, bay, flows: factory.flows, plugins, crewMode, autoWork, maxRunMinutes: () => factory.maxRunMinutes }));
-  // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
-  const improve = new ImproveCouncil(log, runtime, bay, () => order.state(), {
-    maxUsd: settings.improveMaxUsd ?? improveOpts?.maxUsd, everyHours: settings.improveEveryHours ?? improveOpts?.everyHours,
-    autoGate: () => ((runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime)) === "real" ? null : "the practice crew only answers when you press Look now; switch to the real crew in Systems for automatic sessions"),
-  }).listen();
-  improve.auto = settings.improveAuto ?? true;
   explorer.follow.on = settings.importsFollow ?? true;
   // A repo imported for the first time is reviewed by itself: run, read, judged, with next steps to approve (docs/review.md).
   const reviewer = new RepoReviewer(log, runtime, explorer, bay, { maxUsd: settings.importReviewMaxUsd, github, canShip });
@@ -255,15 +227,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     if (!Number.isInteger(id)) return null;
     return log.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(id) ? id : false;
   };
-  /** What the Overseer reads first when asked in a project's chat: that project, not the whole factory. */
-  const projectBrief = (id: number): string => {
-    const p = log.db.prepare("SELECT name, kind, status, summary FROM projects WHERE id = ?").get(id) as { name: string; kind: string; status: string; summary: string } | undefined;
-    if (!p) return "";
-    const runs = log.db.prepare(`SELECT r.id, r.idea, r.outcome, r.reason FROM factory_runs r JOIN project_links l ON l.kind = 'factory_run' AND l.ref = CAST(r.id AS TEXT)
-      WHERE l.project_id = ? ORDER BY r.id DESC LIMIT 5`).all(id) as { id: number; idea: string; outcome: string | null; reason: string | null }[];
-    const lines = runs.map((r) => `- run #${r.id}: ${r.idea.slice(0, 120)} (${r.outcome ?? "running"}${r.reason ? `: ${r.reason.slice(0, 120)}` : ""})`);
-    return `You are in the chat of the project "${p.name}" (${p.kind}, ${p.status})${p.summary ? `: ${p.summary.slice(0, 400)}` : ""}. Answer about this project unless asked otherwise.\n${lines.length ? `Its latest factory runs:\n${lines.join("\n")}\n` : ""}\n`;
-  };
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const origin = typeof req.headers.origin === "string" ? req.headers.origin.slice(0, 100) : null;
     if (origin) clients.origins.set(origin, new Date().toISOString());
@@ -282,13 +245,12 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         clients: { origins: Object.fromEntries(clients.origins), streams: Object.fromEntries(clients.streams) },
       });
       if (req.method === "GET" && url.pathname === "/api/preflight") { const r = preflightNow(url.searchParams.get("fresh") === "1"); return json(res, 200, { ...r.auto, press: r.manual }); }
-      if (req.method === "GET" && url.pathname === "/api/factory/cycles") return json(res, 200, { cycles: log.view("engine-cycles", engineCycles) });
-      if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeRuns(), agentCalls.size, runnerJobs()));
+      if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeRuns(), agentCalls.size));
       if (req.method === "POST" && url.pathname === "/api/updates") {
         const body = await readJson(req);
         if (typeof body.auto !== "boolean") return json(res, 400, { error: "Send { auto: true } or { auto: false }." });
         log.append("settings.changed", { key: "autoUpdate", value: body.auto });
-        return json(res, 200, updatesReport(log, appVersion, factory.activeRuns(), agentCalls.size, runnerJobs()));
+        return json(res, 200, updatesReport(log, appVersion, factory.activeRuns(), agentCalls.size));
       }
       if (req.method === "POST" && url.pathname === "/api/updates/install") {
         // The Bridge says so before it installs. An install that starts by itself is refused while anything is
@@ -300,10 +262,10 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         // A run parked at the plan or build gate costs nothing while it waits, and after the restart it waits at the
         // same gate again (restoreState resumes it from gateA/gateB with no agent call), so it does not hold an update.
         const working = runs.filter((r) => !parkedAtGate(r.gate)).length;
-        const payload = { by, version: typeof body.version === "string" ? body.version.slice(0, 40) : null, from: appVersion ?? null, activeRuns: working, parkedRuns: runs.length - working, agentCalls: agentCalls.size, runnerJobs: runnerJobs(), runs: runs.slice(0, 10) };
-        if (by === "auto" && (working || agentCalls.size || payload.runnerJobs)) {
+        const payload = { by, version: typeof body.version === "string" ? body.version.slice(0, 40) : null, from: appVersion ?? null, activeRuns: working, parkedRuns: runs.length - working, agentCalls: agentCalls.size, runs: runs.slice(0, 10) };
+        if (by === "auto" && (working || agentCalls.size)) {
           log.append("app.update.held", payload);
-          return json(res, 409, { ok: false, activeRuns: working, agentCalls: agentCalls.size, runnerJobs: payload.runnerJobs, error: "Work is in flight, so the update waits." });
+          return json(res, 409, { ok: false, activeRuns: working, agentCalls: agentCalls.size, error: "Work is in flight, so the update waits." });
         }
         log.append("app.update.started", payload);
         return json(res, 200, { ok: true, activeRuns: working, agentCalls: agentCalls.size });
@@ -311,7 +273,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (req.method === "GET" && url.pathname === "/api/setup") {
         const fresh = url.searchParams.get("fresh") === "1";
         if (fresh) gitOk.at = 0;
-        return json(res, 200, { ...setupReport(runtime, fresh), paths: { data: dataDir ?? dirname(projectsDir), projects: projectsDir, drop: drop.dir }, drops: drop.recent(10) });
+        return json(res, 200, { ...setupReport(runtime, fresh), paths: { data: dataDir ?? dirname(projectsDir), projects: projectsDir } });
       }
       if (req.method === "POST" && url.pathname === "/api/setup/mode") {
         const body = await readJson(req);
@@ -323,25 +285,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         // The Archivist follows the crew unless its mode was pinned (SF_ORDER_MODE).
         if (!orderOpts?.mode) order.opts.mode = mode === "real" ? "agent" : "heuristic";
         log.append("settings.changed", { key: "crewMode", value: mode });
-        return json(res, 200, { ...setupReport(runtime), paths: { data: dataDir ?? dirname(projectsDir), projects: projectsDir, drop: drop.dir }, drops: drop.recent(10) });
+        return json(res, 200, { ...setupReport(runtime), paths: { data: dataDir ?? dirname(projectsDir), projects: projectsDir } });
       }
-      if (req.method === "POST" && url.pathname === "/api/setup/drop") {
-        const body = await readJson(req);
-        const dir = String(body.dir ?? "").trim();
-        if (!dir || !isAbsolute(dir)) return json(res, 400, { error: "Give a full folder path, for example C:\\Users\\you\\OneDrive\\SoftwareFactory Drop" });
-        mkdirSync(dir, { recursive: true });
-        drop.dir = dir;
-        log.append("settings.changed", { key: "dropDir", value: dir });
-        drop.scan();
-        return json(res, 200, { dir });
-      }
-      if (req.method === "POST" && url.pathname === "/api/setup/drop/scan") return json(res, 200, { results: drop.scan(), drops: drop.recent(10) });
       if (req.method === "POST" && url.pathname === "/api/open") {
         const body = await readJson(req);
         const target = String(body.target ?? "");
         let dir: string | null = null;
         if (target === "projects") dir = projectsDir;
-        else if (target === "drop") dir = drop.dir;
         else if (target === "data") dir = dataDir ?? dirname(projectsDir);
         else if (target === "run") {
           const row = log.db.prepare("SELECT dir FROM factory_runs WHERE id = ?").get(Number(body.run)) as { dir: string | null } | undefined;
@@ -376,26 +326,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (req.method === "GET" && url.pathname === "/api/chat/routes") {
         return json(res, 200, chatRoutes(log, order.state()));
-      }
-      if (req.method === "POST" && url.pathname === "/api/agent/run") {
-        const body = await readJson(req);
-        const prompt = String(body.prompt ?? "").trim();
-        if (!prompt) return json(res, 400, { error: "prompt is required" });
-        // The Overseer is an agent like the others: its prompt, model and cap live in the Agent Bay.
-        const o = bay.crewFor("overseer")[0];
-        const projectId = chatProject(body.projectId);
-        if (projectId === false) return json(res, 404, { error: "That project no longer exists, so its chat is closed. Pick another chat." });
-        // The Overseer reads a live status digest first, so it answers about this factory, not in general.
-        const digest = statusDigest(log, order.state(), runtime.name);
-        const room = projectId != null ? projectBrief(projectId) : "";
-        const run = await runAgent(log, runtime, o.id, {
-          prompt: `Status of the factory right now:\n${digest}\n\n${room}The person says:\n${prompt}`,
-          model: body.model ? String(body.model) : o.model,
-          systemPrompt: o.role,
-          budgetUsd: typeof body.budgetUsd === "number" ? body.budgetUsd : Math.min(budgetUsd, o.budgetUsd),
-          ...kitArgs(o),
-        }, { agentVersion: o.version, station: "overseer", ...(projectId != null ? { projectId } : {}) });
-        return json(res, run.error ? 502 : 200, { ...run, suggestion: run.result ? buildSuggestion(run.result.text).build : undefined });
       }
       if (req.method === "POST" && url.pathname === "/api/apps/agent") {
         // An app the factory built asks one of your agents (the Researcher by default) for work plain code cannot do.
@@ -477,6 +407,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const r = await bayRoute(bay, req, url);
         if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
       }
+      // The storage report and a rebuild from the log: no screen, but the installed-app smoke test checks every upgrade with them.
       if (req.method === "GET" && url.pathname === "/api/store") return json(res, 200, storeReport(log, projectsDir));
       if (req.method === "POST" && url.pathname === "/api/store/rebuild") {
         const body = await readJson(req);
@@ -578,7 +509,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/flows" || url.pathname.startsWith("/api/flows/")) {
-        const r = await flowsRoute({ flows: factory.flows, improver: flowImprover, readJson }, req, url);
+        const r = await flowsRoute({ flows: factory.flows, readJson }, req, url);
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname === "/api/videos" || url.pathname.startsWith("/api/videos/")) {
@@ -595,13 +526,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (url.pathname === "/api/feature-map" || url.pathname.startsWith("/api/feature-map/")) {
         const r = await featureMapRoute({ log, readJson }, req, url);
-        if (r) return json(res, r[0], r[1]);
-      }
-      if (url.pathname.startsWith("/api/improve/")) {
-        const r = await improveRoute(improve, req, url.pathname, log, factory, (idea, projectId) => {
-          if (!gitReady()) throw new Error("Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build again.");
-          return factory.start(idea, projectId != null ? { projectId } : {});
-        });
         if (r) return json(res, r[0], r[1]);
       }
       if (url.pathname.startsWith("/api/order/")) {
@@ -631,7 +555,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { github, git: gitman, flowImprover, watchers, factory, order, bay, drop, tickets, improve, explorer, reviewer, launcher, integrations, plugins, videos, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, git: gitman, watchers, factory, order, bay, tickets, explorer, reviewer, launcher, integrations, plugins, videos, errors, fault, ensureSelf });
 }
 
 /**
@@ -656,8 +580,6 @@ export interface UpdatesReport {
   parkedRuns?: number;
   /** Agent calls in flight anywhere in the core: a ticket's crew, a Council session, an import, the Overseer. */
   agentCalls: number;
-  /** Jobs running on this PC's build runners. Installing would cut them off, so an update that installs by itself waits. */
-  runnerJobs: number;
   /** Versions this install has run, newest first. */
   history: { ts: string; from: string | null; to: string }[];
 }
@@ -666,12 +588,12 @@ export interface UpdatesReport {
 export const parkedAtGate = (gate: GateId | null) => gate === "gateA" || gate === "gateB";
 
 /** activeRuns counts the runs at work; parkedRuns those waiting for you at the plan or build gate, which do not hold an update. */
-export function updatesReport(log: EventLog, appVersion: string | undefined, runs: number | { gate: GateId | null }[], agentCalls = 0, runnerJobs = 0): UpdatesReport {
+export function updatesReport(log: EventLog, appVersion: string | undefined, runs: number | { gate: GateId | null }[], agentCalls = 0): UpdatesReport {
   const history = (log.db.prepare("SELECT ts, from_version, to_version FROM app_versions ORDER BY id DESC LIMIT 10").all() as { ts: string; from_version: string | null; to_version: string }[])
     .map((r) => ({ ts: r.ts, from: r.from_version, to: r.to_version }));
   const list = typeof runs === "number" ? Array.from({ length: runs }, () => ({ gate: null })) : runs;
   const parkedRuns = list.filter((r) => parkedAtGate(r.gate)).length;
-  return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns: list.length - parkedRuns, parkedRuns, agentCalls, runnerJobs, history };
+  return { auto: readSettings(log).autoUpdate !== false, appVersion: appVersion ?? null, activeRuns: list.length - parkedRuns, parkedRuns, agentCalls, history };
 }
 
 /** Link SoftwareFactory's own project to its GitHub repo once, so its tickets are worked there. */
@@ -690,7 +612,7 @@ function selfGitHub(log: EventLog) {
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
 export function readSettings(log: EventLog): {
-  crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean; importsFollow?: boolean;
+  crewMode?: CrewMode; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean; importsFollow?: boolean;
   importReviewMaxUsd?: number; importReviewAuto?: boolean; importHomeStack?: string;
   ticketsAutoWork?: boolean; ticketsAutoMaxUsd?: number; ticketsAskedMaxUsd?: number; ticketsAutoDailyUsd?: number; ticketsWip?: number;
   maxRunMinutes?: number;
@@ -744,17 +666,14 @@ async function bayRoute(bay: AgentBay, req: IncomingMessage, url: URL): Promise<
     if (verb === "retire") { bay.retire(id, body.retired !== false); return [200, { ok: true }]; }
     if (verb === "test") return [200, await bay.test(id, body.task ? String(body.task) : undefined)];
   }
-  // Each agent's own memory (bay/memory.ts): teach, forget, the free tidy, and a capped cleaning you accept or reject.
-  m = path.match(/^\/api\/bay\/agents\/([a-z0-9-]+)\/memory(?:\/(forget|tidy|dream))?$/);
+  // Each agent's own memory (bay/memory.ts): teach, forget, and the free tidy.
+  m = path.match(/^\/api\/bay\/agents\/([a-z0-9-]+)\/memory(?:\/(forget|tidy))?$/);
   if (m) {
     const [, id, verb] = m;
     if (!verb) return [201, bay.teach(id, String(body.text ?? ""))];
     if (verb === "forget") return [200, { removed: bay.forget(id, (Array.isArray(body.ids) ? body.ids : [body.id]).map(Number)) }];
     if (verb === "tidy") return [200, bay.tidy(id)];
-    if (verb === "dream") return [200, await bay.dream(id, body.maxUsd == null ? undefined : Number(body.maxUsd))];
   }
-  m = path.match(/^\/api\/bay\/dreams\/(\d+)\/(accept|reject)$/);
-  if (m) return [200, m[2] === "accept" ? bay.acceptDream(Number(m[1])) : bay.rejectDream(Number(m[1]))];
   m = path.match(/^\/api\/bay\/slots\/([a-z]+)$/);
   if (m && SLOTS.includes(m[1] as Slot)) return [200, bay.assign(m[1] as Slot, (Array.isArray(body.agents) ? body.agents : []).map(String))];
   return null;
@@ -882,59 +801,6 @@ async function ticketRoute(tickets: Tickets, req: IncomingMessage, url: URL, git
   return null;
 }
 
-/** The Improvement Council's API. Every write is an event, so the Bridge sees it on the stream. */
-async function improveRoute(improve: ImproveCouncil, req: IncomingMessage, path: string, log: EventLog, factory: Pick<Factory, "duplicateOf">, build: (idea: string, projectId?: number) => number): Promise<[number, unknown] | null> {
-  if (req.method === "GET" && path === "/api/improve/state") return [200, improve.state()];
-  if (req.method !== "POST") return null;
-  const body = await readJson(req);
-  if (path === "/api/improve/run") {
-    const t = body.target as Partial<Target> | undefined;
-    const target = t && t.kind ? { kind: t.kind, id: t.id == null ? null : Number(t.id), title: String(t.title ?? "") } as Target : undefined;
-    try {
-      const p = improve.run({ target, trigger: "manual" });
-      p.catch((e) => console.error("improve session failed:", e));
-    } catch (e) { return [409, { error: (e as Error).message }]; }
-    // The session's start event is written before the first agent call, so it is already in the state.
-    return [202, { session: improve.sessions().at(-1) }];
-  }
-  if (path === "/api/improve/settings") {
-    const out: Record<string, unknown> = {};
-    if (typeof body.auto === "boolean") { improve.auto = body.auto; log.append("settings.changed", { key: "improveAuto", value: body.auto }); out.auto = body.auto; }
-    if (typeof body.maxUsd === "number") {
-      if (!(body.maxUsd >= 0 && body.maxUsd <= 5)) return [400, { error: "The daily cap must be between $0 and $5." }];
-      improve.opts.maxUsd = body.maxUsd; log.append("settings.changed", { key: "improveMaxUsd", value: body.maxUsd });
-    }
-    if (typeof body.everyHours === "number") {
-      if (!(body.everyHours >= 1 && body.everyHours <= 168)) return [400, { error: "Look every 1 to 168 hours." }];
-      improve.opts.everyHours = body.everyHours; log.append("settings.changed", { key: "improveEveryHours", value: body.everyHours });
-    }
-    return [200, improve.state()];
-  }
-  const m = path.match(/^\/api\/improve\/proposals\/(\d+)\/(decide|build)$/);
-  if (m) {
-    const id = Number(m[1]);
-    if (m[2] === "decide") {
-      const d = String(body.decision);
-      if (!["accepted", "rejected", "parked", "inbox"].includes(d)) return [400, { error: "decision is accepted, rejected, parked or inbox" }];
-      return [200, improve.decide(id, d as "accepted", body.note ? String(body.note) : undefined)];
-    }
-    const p = improve.proposals().find((x) => x.id === id);
-    if (!p) return [404, { error: `No proposal #${id}` }];
-    const idea = improve.buildIdea(id);
-    const dup = duplicateReply(factory, idea, body.again);
-    if (dup) return dup;
-    if (p.status !== "accepted") improve.decide(id, "accepted");
-    // A proposal about a project builds in that project, not as a new one beside it.
-    // (Proposal targets name Order Engine nodes and factory runs; the project is whoever owns that.)
-    const owner = p.target.id == null ? null
-      : p.target.kind === "run" ? projectOf(log, { kind: "factory_run", ref: p.target.id })
-      : p.target.kind === "project" || p.target.kind === "idea" ? projectOf(log, { kind: "order_node", ref: p.target.id }) : null;
-    const projectId = owner ?? undefined;
-    try { return [202, { run: build(idea, projectId) }]; } catch (e) { return [409, { error: (e as Error).message }]; }
-  }
-  return null;
-}
-
 /** The Order Engine's API. Every write is an event, so the Bridge sees it on the stream. */
 async function orderRoute(order: OrderEngine, req: IncomingMessage, path: string): Promise<[number, unknown] | null> {
   const id = (re: RegExp) => { const m = path.match(re); return m ? Number(m[1]) : null; };
@@ -983,12 +849,20 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   return raw ? JSON.parse(raw) : {};
 }
 
+/** The open factory: its HTTP handler, how busy it is, and how to shut it down cleanly. */
+export interface BootedBase {
+  handler: (req: IncomingMessage, res: ServerResponse) => unknown;
+  /** Factory runs working right now. */
+  activeRuns: () => number;
+  /** Stop timers, plugins and launched apps, then close the database. */
+  dispose: () => void;
+}
+
 /**
- * Open one base's factory: its database, crew, core and background timers.
- * The default base keeps the old env overrides (SF_PROJECTS, SF_DROP); other bases keep
- * everything inside their own folder.
+ * Open the factory: its database, crew, core and background timers. `isDefault: false` keeps
+ * everything inside the database's folder (no SF_PROJECTS / SF_DROP overrides); tests use it.
  */
-export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isDefault?: boolean; runnerJobs?: () => number } = {}): BootedBase & { core: ReturnType<typeof createCore>; log: EventLog } {
+export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boolean } = {}): BootedBase & { core: ReturnType<typeof createCore>; log: EventLog } {
   if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
   const log = new EventLog(dbPath);
   // Switches you set on the Configuration page (configs/switches.ts) win over this PC's environment. One process, one
@@ -1001,14 +875,10 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
   const runtime = new SwitchableRuntime(mode === "real" && process.env.SF_RUNTIME?.startsWith("claude-code") ? runtimeFromEnv() : runtimeFor(mode), mode);
   const dataDir = dbPath === ":memory:" ? process.cwd() : dirname(dbPath);
   const projectsDir = (isDefault ? process.env.SF_PROJECTS : undefined) ?? resolve(dataDir, "projects");
-  const dropDir = isDefault ? process.env.SF_DROP : join(dataDir, "Drop");
   const orderMode = process.env.SF_ORDER_MODE as "agent" | "heuristic" | undefined;
   const orderMax = process.env.SF_ORDER_MAX_USD ? Number(process.env.SF_ORDER_MAX_USD) : undefined;
-  const improveMax = process.env.SF_IMPROVE_MAX_USD ? Number(process.env.SF_IMPROVE_MAX_USD) : undefined;
-  const improveEvery = process.env.SF_IMPROVE_EVERY_H ? Number(process.env.SF_IMPROVE_EVERY_H) : undefined;
   // The installed app may use the GitHub CLI's login for crew PRs; tests build a core without it, so they never reach the real GitHub.
-  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir, github: new GitHub({ dataDir, cli: process.env.VITEST ? undefined : ghCliToken }), order: { mode: orderMode, maxUsd: orderMax }, improve: { maxUsd: improveMax, everyHours: improveEvery }, appVersion: process.env.SF_APP_VERSION, runnerJobs });
-  core.drop.start();
+  const core = createCore({ log, runtime, projectsDir, dataDir, github: new GitHub({ dataDir, cli: process.env.VITEST ? undefined : ghCliToken }), order: { mode: orderMode, maxUsd: orderMax }, appVersion: process.env.SF_APP_VERSION });
   const timers: NodeJS.Timeout[] = [];
   faultCore = core; // the open base hears what the process throws
   core.ensureSelf(); // SoftwareFactory has a project of its own from the first start
@@ -1018,7 +888,7 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
   // Follow the crew's open PRs: a merge moves the ticket on. At start, then every 5 minutes.
   // Work merged without the crew's own PR (a thread's PR that names SF-13) moves its ticket too.
   // Then the git manager: a merge review of each crew PR whose CI ended (and a merge under "auto"), and outside work.
-  const follow = () => core.tickets.followPrs().then(() => core.tickets.followMerges()).then(() => core.git.tend()).then(() => core.git.watchAll()).then(() => core.flowImprover.suggestAll()).catch((e) => console.error("following PRs failed:", e));
+  const follow = () => core.tickets.followPrs().then(() => core.tickets.followMerges()).then(() => core.git.tend()).then(() => core.git.watchAll()).catch((e) => console.error("following PRs failed:", e));
   follow();
   timers.push(setInterval(follow, 5 * 60_000).unref());
   // The Order Engine's daily sweep and briefing: at start if the last one is a day old, then once a day.
@@ -1031,7 +901,6 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
   };
   sweepIfDue();
   timers.push(setInterval(sweepIfDue, 3_600_000).unref());
-  // The Improvement Council looks again on its own (real crew only, within its caps): first a few minutes after start, then every 15 minutes it checks if a look is due.
   // Imported repos are kept current: a free look at each source, and a capped exploration when it moved.
   // Watchers look when they are due (free; they only open tickets), then the queue gets a look: a new month's budget lets waiting tickets start.
   const watchTick = () => { core.watchers.runDue().then(() => core.tickets.dispatch()).catch((e) => console.error("watchers failed:", e)); };
@@ -1040,9 +909,6 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
   const followTick = () => { core.explorer.followTick().catch((e) => console.error("following imported repos failed:", e)); };
   setTimeout(followTick, 3 * 60_000).unref();
   timers.push(setInterval(followTick, 30 * 60_000).unref());
-  const improveTick = () => { core.improve.tick().catch((e) => { console.error("improve tick failed:", e); core.fault("improvement council tick", e); }); };
-  timers.push(setTimeout(improveTick, 3 * 60_000).unref());
-  timers.push(setInterval(improveTick, 15 * 60_000).unref());
   // Plugins you turned on start with the core and stop with it.
   for (const id of core.plugins.startAll()) console.log(`Plugin ${id} started`);
   // The Watch folder: a video saved there (a reel from your phone, a screen recording) is watched within a minute (docs/videos.md).
@@ -1065,7 +931,6 @@ export function bootBase(dbPath: string, { isDefault = true, runnerJobs }: { isD
     if (disposed) return;
     disposed = true;
     for (const t of timers) clearTimeout(t);
-    try { core.drop.stop(); } catch { /* not watching */ }
     try { core.plugins.stopAll(true); } catch (e) { console.error("stopping plugins failed:", e); }
     try { core.launcher.stopAll(); } catch (e) { console.error("stopping launched apps failed:", e); }
     log.removeAllListeners();
@@ -1082,26 +947,10 @@ const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(imp
 if (isMain) {
   const dbPath = process.env.SF_DB ?? resolve(process.cwd(), ".sf-data/factory.db");
   const port = Number(process.env.SF_PORT ?? 4317);
-  // Bases: the home folder (where factory.db has always been) keeps the list of factories this app hosts.
-  // The factory that was here before is "Main factory"; the others live in their own folders.
-  const home = dbPath === ":memory:" ? null : dirname(dbPath);
-  // Build runners belong to the app, not to a base: they keep working across a base switch and stop with the core.
-  // The GitHub sign-in used is the GitHub CLI's on this PC, else the token pasted in Systems; neither is stored here.
-  const runners = home ? new RunnerManager({ home, token: () => ghCliToken() ?? pastedToken(home) }) : null;
-  const runnerJobs = () => runners?.busyCount() ?? 0;
-  const host = home ? new BaseHost(new BaseRegistry(home), (b) => {
-    console.log(`${new Date().toISOString()} opening base #${b.id} "${b.name}" at ${b.folder}`);
-    return bootBase(b.isDefault ? dbPath : join(b.folder, "factory.db"), { isDefault: b.isDefault, runnerJobs });
-  }, openFolder) : null;
-  const single = host ? null : bootBase(dbPath);
-  const inner = host ? host.handle : single!.handler;
-  const server = createServer(async (req, res) => {
-    if (runners && (req.url ?? "").startsWith("/api/runners")) {
-      try { if (await runnersRoute(runners, req, res, new URL(req.url ?? "/", "http://localhost"))) return; } catch (e) { console.error("runners route failed:", e); }
-    }
-    return inner(req, res);
-  });
-  process.on("exit", () => { runners?.stopAll(); if (host) host.dispose(); else single!.dispose(); });
+  // One factory per app (Bases, several factories in one app, were removed 24 Nov 2026: only the main one was ever used).
+  const open = bootBase(dbPath);
+  const server = createServer((req, res) => open.handler(req, res));
+  process.on("exit", () => open.dispose());
   // Nothing thrown is lost: it is a bug ticket on the open base before anything else happens.
   process.on("unhandledRejection", (e) => { console.error("unhandled rejection:", e); faultCore?.fault("the core (unhandled promise rejection)", e); });
   process.on("uncaughtException", (e) => {
@@ -1142,11 +991,5 @@ if (isMain) {
     else if (stalled >= 2_000) console.error(`${new Date(now).toISOString()} the core was busy for ${(stalled / 1000).toFixed(1)} s and could not answer`);
     tick = now;
   }, 500).unref();
-  runners?.startAll();
-  server.listen(port, "127.0.0.1", () => console.log(`${new Date().toISOString()} SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, base ${host ? `"${host.current.name}" at ${host.current.folder}` : dbPath})`));
-}
-
-/** The GitHub token pasted in Systems (the file `github-token` in the data folder), or null. */
-function pastedToken(home: string): string | null {
-  try { return readFileSync(join(home, "github-token"), "utf8").trim() || null; } catch { return null; }
+  server.listen(port, "127.0.0.1", () => console.log(`${new Date().toISOString()} SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, data ${dbPath})`));
 }

@@ -19,34 +19,12 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/cost` | Spend summary |
 | `GET /api/setup` (`?fresh=1`) | Checks for Node.js, Claude Code, Git; crew mode; paths |
 | `POST /api/setup/mode` | `{ mode: "practice" \| "real" }` |
-| `POST /api/setup/drop` | Change the drop folder |
-| `POST /api/setup/drop/scan` | Read the drop folder now |
 | `POST /api/open` | Open a known folder (projects, drop, data, a run's folder) in the file manager |
 | `GET /api/since` | The "since you left" lines |
 | `POST /api/presence` | Mark how far the person has seen |
 | `GET /api/updates`, `POST /api/updates` | Update status; record an update step reported by the shell |
-| `GET /api/store` | The three storage tiers in one report |
+| `GET /api/store` | The three storage tiers in one report (the installed-app smoke test reads it) |
 | `POST /api/store/rebuild` | `{ name? }` rebuild one projection or all from the log |
-
-### Bases (answered by the host, before a base's own routes)
-
-| Method and path | Does |
-|---|---|
-| `GET /api/bases` | Every base and which is open |
-| `GET /api/bases/browse?path=`, `GET /api/bases/suggest?name=` | Folder picker; a suggested folder |
-| `POST /api/bases` | Create a base |
-| `POST /api/bases/:id` | Rename |
-| `POST /api/bases/:id/open` \| `archive` \| `reveal` | Switch to it; archive or restore; show its folder |
-
-### Build runners (answered by the app, before a base's own routes)
-
-| Route | What |
-|---|---|
-| `GET /api/runners` | The runners on this PC, the jobs they took, how many run now |
-| `GET /api/runners/suggest?repo=`, `GET /api/runners/github?repo=` | Suggested name, labels and folder; GitHub's side (runners, the variable, runs and each job's machine) |
-| `POST /api/runners` | Add a runner and set it up |
-| `GET /api/runners/:id/log?after=` | Its output after line n |
-| `POST /api/runners/:id/start` \| `stop` \| `restart` \| `setup` \| `route` \| `remove` | See [runners.md](runners.md) |
 
 ### Signals, chat and the Assistant
 
@@ -55,7 +33,6 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/signals?q=` | List or search Signals |
 | `POST /api/signals` | `{ text, source?, projectId? }` capture a Signal (free) |
 | `GET /api/chat/routes` | Which chat each run, Signal and ticket belongs to |
-| `POST /api/agent/run` | `{ prompt, projectId?, model?, budgetUsd? }` ask the Overseer; the answer may carry a Build suggestion |
 | `POST /api/apps/agent` | A built app asks one of the person's agents. Local callers only |
 
 ### Factory runs
@@ -66,7 +43,6 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/factory/runs/:id` | The run's row and current station |
 | `POST /api/factory/runs/:id/gate` | `{ gate, approve, note? }` answer gate A, gate B or an escalation |
 | `POST /api/factory/runs/:id/resume` | Resume a stopped run |
-| `GET /api/factory/cycles` | Runs of the same prompt, compared |
 
 ### Projects
 
@@ -95,7 +71,6 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/brain` | Principles, stations, who works each |
 | `GET /api/brain/prompt?station=` | The exact system prompt that station's agent runs with now |
 | `POST /api/brain`, `PUT /api/brain/:id`, `POST /api/brain/:id/reset` | Add, edit, reset a principle |
-| `POST /api/brain/suggestions/:fragment/accept`, `.../dismiss` | Make one of the person's rules a principle, or turn it away |
 | `GET /api/feature-map` | Every feature: its record, its wiring from the code, its proof of life, and what is connected to nothing |
 | `POST /api/feature-map`, `PUT /api/feature-map/:id`, `POST /api/feature-map/:id/reset` | Add a planned feature, edit a record, reset or remove it |
 
@@ -126,22 +101,14 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/tickets/github`, `POST /api/tickets/github` | Whether the crew's write token is set; set or clear it |
 | `GET /api/tickets/auto`, `POST /api/tickets/auto` | `{ on, maxUsd, dailyUsd, wip }` the ready queue's switch and caps |
 
-### Improvement Council
-
-| Method and path | Does |
-|---|---|
-| `GET /api/improve/state` | Sessions, proposals, spend, settings |
-| `POST /api/improve/run` | Look now (optionally at one project) |
-| `POST /api/improve/settings` | Caps, interval, automatic on or off |
-| `POST /api/improve/proposals/:id/decide` \| `build` | Accept, park or reject; build an accepted one |
-
 ### Imports, launch, finished apps, add-ons
 
 | Method and path | Does |
 |---|---|
 | `GET /api/imports`, `POST /api/imports` | List; import `{ source, name?, maxUsd? }` |
 | `GET /api/imports/:projectId`, `POST /api/imports/:projectId/explore` | Detail with code map; explore again |
-| `POST /api/imports/follow` | `{ on }`: keep imported repos current by themselves. Every 12 hours each source is asked for its newest commit (free); when it moved, the repo is explored again (at most $0.15 a time, $0.50 a day in all) and the Improvement Council has a reason to look at the project again. On by default; setting `importsFollow` |
+| `POST /api/imports/:projectId/suggestions/:id/decide` | `{ decision: "accepted" \| "rejected" }`: a yes opens a task ticket on the project, a no drops the suggestion |
+| `POST /api/imports/follow` | `{ on }`: keep imported repos current by themselves. Every 12 hours each source is asked for its newest commit (free); when it moved, the repo is explored again (at most $0.15 a time, $0.50 a day in all). On by default; setting `importsFollow` |
 | `GET /api/launch/projects/:id` | How this project can be run |
 | `POST /api/launch/projects/:id/start` \| `go` \| `folder` \| `terminal` \| `files` \| `samples` | Start a way of running it; one-press start; use a folder of yours; open a terminal; save, rename or delete a data file; make sample inputs |
 | `GET /api/launch/projects/:id/files?dir=&path=` | Its data files |
@@ -185,8 +152,7 @@ Every row of the log is `{ id, ts, type, payload }`. A run's id is the id of its
 | Launch | `launch.started`, `launch.url`, `launch.stopped`, `launch.exited` |
 | Finished apps | `integration.requested`, `integration.briefed`, `integration.decided`, `integration.installed`, `integration.failed`, `integration.removed`, `integration.used` |
 | Add-ons | `plugin.installed`, `plugin.enabled`, `plugin.disabled`, `plugin.failed`, `plugin.removed`, `plugin.data`, `plugin.log`, `plugin.emitted` |
-| Bases | `base.created`, `base.opened`, `base.renamed`, `base.archived` (in `bases.db`) |
-| App | `settings.changed`, `drop.filed`, `drop.skipped`, `bridge.seen`, `app.updated`, `store.migrated`, `store.rebuilt` |
+| App | `settings.changed`, `bridge.seen`, `app.updated`, `store.migrated`, `store.rebuilt` |
 
 ### Station states
 
@@ -219,7 +185,6 @@ Each group is one projection, rebuilt from the log on demand ([storage.md](stora
 | `order_nodes`, `order_fragments`, `order_conflicts` | The Order Engine |
 | `projects`, `project_links` | Projects and what belongs to each |
 | `tickets`, `ticket_notes`, `ticket_links`, `ticket_keys` | Tickets |
-| `improve_sessions`, `improve_proposals` | The Improvement Council |
 | `repo_imports`, `code_maps`, `code_modules`, `code_suggestions` | Imported repositories |
 | `launch_sessions` | Apps started from the Use tab |
 | `integrations` | Finished apps installed into SF |
@@ -237,7 +202,6 @@ The installed app sets what it needs itself. These matter in development, tests 
 | `SF_PORT` | `4317` | The core's port |
 | `SF_DB` | `.sf-data/factory.db` in development | The Main factory's database |
 | `SF_PROJECTS` | `projects/` next to the database | Where builds are written |
-| `SF_DROP` | `%USERPROFILE%\SoftwareFactory\Drop` | The drop folder of the Main factory |
 | `SF_AUTO_RESUME` | on | `0` stops unfinished runs from resuming at start |
 | `SF_SCREEN_CHECK` | on | `off` skips opening screens in a browser |
 | `SF_LINK_CHECK` | on | `off` skips opening links |
@@ -246,7 +210,6 @@ The installed app sets what it needs itself. These matter in development, tests 
 | `SF_MOCK_DELAY_MS` | `700` | How long a practice-crew call pretends to take |
 | `SF_ORDER_MODE` | `agent` on a real runtime, `heuristic` on the mock | Which Archivist files Signals |
 | `SF_ORDER_MAX_USD` | `0.50` | The Archivist's daily cap |
-| `SF_IMPROVE_MAX_USD`, `SF_IMPROVE_EVERY_H` | `0.20`, `6` | The Improvement Council's daily cap and interval |
 | `SF_IMPORT_MAX_USD` | `0.50` | Cap for exploring one imported repository |
 | `SF_SELF_REPO` | `PlonterAsi/SoftwareFactory` | The repository SF's own tickets work in |
 | `SF_PLUGINS_DIR` | none | Where an agent's plugin names resolve |

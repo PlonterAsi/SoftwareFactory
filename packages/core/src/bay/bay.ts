@@ -12,12 +12,11 @@ import { archivistPrompt, parseArchivistPlan } from "../order/archivist.js";
 import { foldOrder } from "../order/model.js";
 import { parseModuleNotes, parseSuggestions } from "../imports/crew.js";
 import { parseUnderstanding, parseVerdict } from "../imports/reviewcrew.js";
-import { parseLensAnswer } from "../improve/lenses.js";
 import { MODELS, SLOTS, normalizeAgent, parseAgentFile, serializeAgent, slugify, type AgentDef, type HomeStation, type Slot } from "./agentfile.js";
 import { BUILTIN_AGENTS, DEFAULT_SLOTS, SLOT_SEATS, systemPromptFor } from "./builtin.js";
 import { principles } from "../brain/brain.js";
 import { library } from "./kits.js";
-import { DREAM_CONTRACT, DREAM_MAX_USD, DREAM_USD, acceptDream, allMemory, dreamPrompt, dreams, forget, freeDream, memoryBlock, memoryOf, noteLesson, parseDream, rejectDream, tidyMemory, type DreamView, type Lesson } from "./memory.js";
+import { allMemory, forget, memoryBlock, memoryOf, noteLesson, tidyMemory, type Lesson } from "./memory.js";
 
 /**
  * The Agent Bay: where workers are created, edited, tested and assigned.
@@ -68,7 +67,6 @@ export interface BayState {
   library: ReturnType<typeof library>;
   /** Each agent's own memory (bay/memory.ts), and the cleanings waiting on you or decided lately. */
   memory: Record<string, Lesson[]>;
-  dreams: DreamView[];
 }
 
 const DRAFT_CONTRACT = `Station contract: draft.
@@ -76,6 +74,9 @@ Turn the person's one-line description into a new SoftwareFactory agent.
 Answer with ONE fenced json block and nothing else, shaped exactly like:
 {"name": "Short Name", "avatar": "one symbol", "description": "one sentence", "station": "none", "model": "haiku", "budgetUsd": 0.05, "sample": "a sample task to test it on", "prompt": "You are ... (3 to 6 sentences: who it is, how it works, what it never does)"}
 station is one of: ${SLOTS.join(", ")}, none. model is haiku unless the description asks for depth (sonnet) or the very best (opus). budgetUsd is at most 0.6.`;
+
+/** Built-in agents whose station no longer exists; retired once at start. */
+const DROPPED_BUILTINS = ["integrator", "automator", "simplifier", "enricher", "ux-lens", "flow-lens"];
 
 export class AgentBay implements CrewSource {
   constructor(private log: EventLog, private runtime: AgentRuntime | null = null) {
@@ -91,6 +92,8 @@ export class AgentBay implements CrewSource {
       if (was && JSON.stringify(was) === JSON.stringify(normalizeAgent({ ...a }))) continue;
       this.log.append("bay.agent.saved", { id: a.id, version: cur.version + 1, def: a, note: `built-in update: ${was ? changeNote(was, a) : "replaced"}`, by: "builtin", builtin: true });
     }
+    // Built-ins whose station was removed (the Improvement Council lenses, 24 Nov) leave the crew list.
+    for (const id of DROPPED_BUILTINS) { const cur = this.get(id); if (cur && cur.builtin && !cur.retired) this.log.append("bay.agent.retired", { id, retired: true }); }
     // A test cut off by a restart would show as running forever.
     for (const t of this.tests()) if (t.state === "running") this.log.append("bay.test", { id: t.id, agent: t.agent, version: t.version, state: "done", pass: false, error: "The core restarted during this test." });
   }
@@ -126,7 +129,7 @@ export class AgentBay implements CrewSource {
   slots(): Record<Slot, string[]> {
     const live = new Set(this.agents().filter((a) => !a.retired).map((a) => a.def.id));
     const out = { ...DEFAULT_SLOTS } as Record<Slot, string[]>;
-    for (const e of this.events("bay.assign")) { const p = e.payload as { slot: Slot; agents: string[] }; out[p.slot] = p.agents; }
+    for (const e of this.events("bay.assign")) { const p = e.payload as { slot: Slot; agents: string[] }; if ((SLOTS as readonly string[]).includes(p.slot)) out[p.slot] = p.agents; }
     for (const s of SLOTS) {
       const ok = out[s].filter((id) => live.has(id));
       // A station is never left without a worker: an emptied slot falls back to its built-in crew.
@@ -168,39 +171,6 @@ export class AgentBay implements CrewSource {
   /** The free tidy: repeats and near repeats go, then the oldest past the limit (never one you taught). */
   tidy(id: string): { removed: number } { return { removed: tidyMemory(this.log, this.must(id).def.id).length }; }
 
-  /**
-   * Clean a memory the way Claude Code's Auto Dream does: one capped call reads it and proposes a shorter one.
-   * Nothing changes until you accept it. On the practice crew (or when the answer is unusable) the proposal is
-   * the free tidy, so the screen works without spending anything.
-   */
-  async dream(id: string, maxUsd = DREAM_USD): Promise<DreamView> {
-    const a = this.must(id);
-    const cap = Number(maxUsd);
-    if (!Number.isFinite(cap) || cap <= 0 || cap > DREAM_MAX_USD) throw new Error(`A cleaning may spend above $0 and at most $${DREAM_MAX_USD.toFixed(2)}.`);
-    if (dreams(this.log, a.def.id).some((d) => d.state === "proposed")) throw new Error(`${a.def.name} already has a cleaning waiting on you: accept or reject it first.`);
-    const lessons = memoryOf(this.log, a.def.id);
-    if (lessons.length < 2) throw new Error(`${a.def.name} has ${lessons.length ? "one lesson" : "no lessons"}: nothing to clean yet.`);
-    let plan = freeDream(lessons);
-    let by: "free" | "agent" = "free";
-    let costUsd = 0;
-    let error: string | undefined;
-    if (this.runtime && this.runtime.name !== "mock") {
-      const r = await runAgent(this.log, this.runtime, a.def.id, {
-        prompt: dreamPrompt(a.def.name, lessons), model: "haiku", systemPrompt: `${a.def.prompt.trim()}\n\n${DREAM_CONTRACT}`, budgetUsd: cap,
-      }, { agentVersion: a.version, station: "dream" });
-      costUsd = r.result?.costUsd ?? r.costUsd ?? 0;
-      if (r.result) {
-        try { plan = parseDream(r.result.text, lessons); by = "agent"; }
-        catch (e) { error = `The cleaned memory was unusable (${(e as Error).message}); this is the free tidy instead.`; }
-      } else error = `${r.error ?? "The call failed"}; this is the free tidy instead.`;
-    }
-    const e = this.log.append("agent.memory.dream", { agent: a.def.id, state: "proposed", saw: lessons.map((l) => l.id), lessons: plan.lessons, dropped: plan.dropped, costUsd, by, ...(error ? { error } : {}) });
-    return dreams(this.log, a.def.id).find((d) => d.id === e.id)!;
-  }
-
-  acceptDream(dreamId: number): DreamView { return acceptDream(this.log, dreamId); }
-  rejectDream(dreamId: number): DreamView { return rejectDream(this.log, dreamId); }
-
   private must(id: string): AgentView {
     const a = this.get(id);
     if (!a) throw new Error(`No agent "${id}"`);
@@ -221,7 +191,7 @@ export class AgentBay implements CrewSource {
     return {
       agents: this.agents(), slots: this.slots(), seats: SLOT_SEATS, tests: this.tests().slice(-60), stats: this.stats(),
       visuals: this.events("bay.visual").slice(-40).map((e) => ({ id: e.id, ts: e.ts, ...(e.payload as any) })), models: MODELS, library: library(),
-      memory: allMemory(this.log), dreams: dreams(this.log),
+      memory: allMemory(this.log),
     };
   }
 
@@ -425,7 +395,6 @@ function samplePrompt(station: HomeStation, sample: string): string {
     case "tests": return `Approved spec:\n${sample}`;
     case "build": return `Spec:\n${sample}`;
     case "order": return archivistPrompt(sample, foldOrder([]));
-    case "improve": return `${sample}\n\nAlready proposed for this subject: nothing yet.`;
     default: return sample;
   }
 }
@@ -447,7 +416,6 @@ export function verify(station: HomeStation, text: string): { label: string; pas
     case "survey": return [check("suggestions with severity and files (survey format)", () => !!parseSuggestions(text)?.length)];
     case "inspect": return [check("what the app is: a purpose, features and a flow (inspect format)", () => !!parseUnderstanding(text))];
     case "verdict": return [check("scores, a recommendation and next steps (verdict format)", () => !!parseVerdict(text))];
-    case "improve": return [check("proposals with impact and effort (improve format)", () => Array.isArray(parseLensAnswer(text)))];
     default: return [check("a non-empty answer", () => text.trim().length > 0)];
   }
 }
@@ -462,11 +430,11 @@ export function heuristicDraft(text: string): AgentDef {
   const station: HomeStation =
     /\b(test|tests|qa)\b/.test(t) ? "tests" : /\breview|audit|check\b/.test(t) ? "review" : /\b(spec|plan|planner)\b/.test(t) ? "plan"
       : /\b(fix|debug|repair)\b/.test(t) ? "fix" : /\b(council|critic|critique|brainstorm|devil)\b/.test(t) ? "council"
-        : /\b(improve|improvement|improvements|lens)\b/.test(t) ? "improve" : /\b(file|sort|archive|organi[sz]e)\b/.test(t) ? "order" : /\b(build|code|write|implement)\b/.test(t) ? "build" : "none";
+        : /\b(file|sort|archive|organi[sz]e)\b/.test(t) ? "order" : /\b(build|code|write|implement)\b/.test(t) ? "build" : "none";
   const model = /\b(opus|best|deepest)\b/.test(t) ? "opus" : /\b(sonnet|strong|smart|careful|senior|deep)\b/.test(t) ? "sonnet" : "haiku";
   const words = text.replace(/[^A-Za-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 2 && !/^(the|and|for|that|who|which|with|agent|an|a|my|our|this)$/i.test(w));
   const name = (named ?? words.slice(0, 2).map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ")) || "New Agent";
-  const avatar = ({ council: "✶", plan: "◇", tests: "⊘", build: "▣", review: "◎", fix: "⚒", order: "❖", overseer: "◈", improve: "✧", map: "⌖", survey: "⌕", inspect: "⊙", verdict: "⚖", none: "◆" } as const)[station];
+  const avatar = ({ council: "✶", plan: "◇", tests: "⊘", build: "▣", review: "◎", fix: "⚒", order: "❖", overseer: "◈", map: "⌖", survey: "⌕", inspect: "⊙", verdict: "⚖", none: "◆" } as const)[station];
   return normalizeAgent({
     name, avatar, station, model, budgetUsd: model === "haiku" ? 0.05 : model === "sonnet" ? 0.3 : 0.6,
     description: text.slice(0, 300), sample: BUILTIN_AGENTS.find((b) => b.station === station)?.sample ?? "",

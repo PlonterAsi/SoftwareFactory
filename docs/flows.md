@@ -2,7 +2,7 @@
 
 How a person moves through SoftwareFactory, and how the app moves work through itself. Every flow here is built and was read from the code; where a flow has a planned extension it says **Planned**. Screen names are the ones in [app.md](app.md); engine detail is in [engine.md](engine.md).
 
-Contents: [1. First launch](#1-first-launch) · [2. One line to a shipped app](#2-one-line-to-a-shipped-app) · [3. Inside the engine](#3-inside-the-engine) · [4. Where the engine stops for you](#4-where-the-engine-stops-for-you) · [5. A note becomes order](#5-a-note-becomes-order) · [6. A ticket becomes a pull request](#6-a-ticket-becomes-a-pull-request) · [7. Using a finished app](#7-using-a-finished-app) · [8. The next version](#8-the-next-version-of-a-shipped-app) · [9. Import a repository](#9-import-a-repository) · [10. Improvement](#10-improvement) · [11. Stop, crash and resume](#11-stop-crash-and-resume) · [12. Updates](#12-updates) · [13. Engine cycle](#13-an-engine-cycle)
+Contents: [1. First launch](#1-first-launch) · [2. One line to a shipped app](#2-one-line-to-a-shipped-app) · [3. Inside the engine](#3-inside-the-engine) · [4. Where the engine stops for you](#4-where-the-engine-stops-for-you) · [5. A note becomes order](#5-a-note-becomes-order) · [6. A ticket becomes a pull request](#6-a-ticket-becomes-a-pull-request) · [7. Using a finished app](#7-using-a-finished-app) · [8. The next version](#8-the-next-version-of-a-shipped-app) · [9. Import a repository](#9-import-a-repository) · [10. Stop, crash and resume](#10-stop-crash-and-resume) · [11. Updates](#11-updates) · [12. Engine cycle](#12-an-engine-cycle)
 
 ## 1. First launch
 
@@ -115,7 +115,7 @@ Runs started with `autoApprove` (headless runs, and tickets the crew picks up by
 
 ```mermaid
 flowchart LR
-  say["Capture in the Assistant,<br/>Enter in the Helm,<br/>or a file in the drop folder"] --> sig["Signal<br/>stored raw"]
+  say["Capture in the Assistant,<br/>or Enter in the Helm"] --> sig["Signal<br/>stored raw"]
   sig --> arch["Archivist<br/>split · classify · route"]
   arch --> frag["Fragments under<br/>project ▸ idea ▸ thread"]
   frag --> canon["Rules and decisions<br/>enter the Canon"]
@@ -207,20 +207,7 @@ flowchart LR
   said -->|"Update the verdict"| verdict
 ```
 
-## 10. Improvement
-
-```mermaid
-flowchart LR
-  trig["Something changed on the real crew,<br/>or you press Look now"] --> lenses["Lens agents:<br/>integrate, automate, simplify, enrich, UX, flow"]
-  lenses --> props["Ranked proposals,<br/>never one it already made or you rejected"]
-  props --> you{{"Accept · Park · Reject"}}
-  you -->|"Accept"| ticket["Opens an idea or task ticket"]
-  ticket -->|"second tap"| build["Build"]
-```
-
-Capped per day with a live meter. See [improve.md](improve.md).
-
-## 11. Stop, crash and resume
+## 10. Stop, crash and resume
 
 A run has no state outside the event log.
 
@@ -235,7 +222,7 @@ flowchart TD
   reset --> cont["Continue at the first station not finished.<br/>A run at a gate waits there again.<br/>An unanswered send-back is carried out first"]
 ```
 
-## 12. Updates
+## 11. Updates
 
 ```mermaid
 flowchart LR
@@ -250,7 +237,7 @@ flowchart LR
 
 Each build is version `0.2.<CI run number>`. See [updates.md](updates.md).
 
-## 13. An engine cycle
+## 12. An engine cycle
 
 How the engine itself is improved. This is a working method, partly inside the app.
 
@@ -258,8 +245,7 @@ How the engine itself is improved. This is a working method, partly inside the a
 flowchart LR
   prompt["The same prompt, the same cap"] --> run["One run"]
   run --> retro["Engine review, written by the core:<br/>what it did badly, well, where money went"]
-  retro --> cycles["Engine cycles page: runs side by side"]
-  cycles --> change["An engine change for each failure,<br/>so it cannot happen again"]
+  retro --> change["An engine change for each failure,<br/>so it cannot happen again"]
   change --> prompt
 ```
 

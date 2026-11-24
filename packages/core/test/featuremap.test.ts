@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   EventLog, Factory, MockRuntime, AgentBay, OrderEngine, captureSignal, principles, savePrinciple,
   featureMap, featureRecords, saveFeature, resetFeature, recordProblems, DEFAULT_FEATURES,
-  brainUse, brainSuggestions, acceptSuggestion, dismissSuggestion,
+  brainUse,
 } from "../src/index.js";
 import { WIRING } from "../src/featuremap/wiring.generated.js";
 
@@ -105,33 +105,5 @@ describe("the Brain shows its use and learns from the person's rules", () => {
     expect(later.byPrinciple["hebrew-first"].reads).toBe(0);
     expect(later.changes).toBe(1);
     expect(later.history[0]).toMatchObject({ what: "saved", title: "Hebrew first" });
-  });
-
-  it("a rule the person wrote is offered once, and becomes a principle agents read", async () => {
-    const log = new EventLog();
-    const order = new OrderEngine(log, null, { mode: "heuristic" });
-    const say = async (text: string) => { const s = captureSignal(log, text, "bridge"); await order.ingest({ id: s.id, text: s.text, source: "bridge" }); };
-    await say("Project: Recipes\nRule: every screen must work with the keyboard alone, never the mouse only.");
-    await say("Rule: always show prices in shekels.");
-    // What the Improvement Council captured is its own task, not the person's rule.
-    const own = captureSignal(log, "Rule: always keep the human gate for a failed review.", "improve");
-    await order.ingest({ id: own.id, text: own.text, source: "improve" });
-    const offered = brainSuggestions(log, order.state());
-    expect(offered.length).toBeGreaterThanOrEqual(2);
-    expect(offered.some((s) => /human gate/.test(s.text))).toBe(false);
-    const keys = offered.find((s) => /keyboard/.test(s.text))!;
-    const id = acceptSuggestion(log, order.state(), keys.fragment);
-    const p = principles(log).find((x) => x.id === id)!;
-    expect(p.source).toMatchObject({ kind: "rule", fragment: keys.fragment });
-    expect(p.text).toMatch(/keyboard alone/);
-    const bay = new AgentBay(log, new MockRuntime());
-    expect(bay.crewFor("build")[0].role).toMatch(/keyboard alone/);
-    const other = offered.find((s) => s.fragment !== keys.fragment)!;
-    dismissSuggestion(log, order.state(), other.fragment);
-    const left = brainSuggestions(log, order.state()).map((s) => s.fragment);
-    expect(left).not.toContain(keys.fragment);
-    expect(left).not.toContain(other.fragment);
-    expect(() => acceptSuggestion(log, order.state(), keys.fragment)).toThrow(/not waiting/);
-    expect(brainUse(log).history.map((h) => h.what)).toEqual(["dismissed", "saved"]);
   });
 });

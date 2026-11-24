@@ -30,12 +30,9 @@ flowchart TB
   factory --> builds["All builds<br/>#/factory"]
   factory --> order["Rules and ideas<br/>#/factory/order"]
   factory --> imp["Improve<br/>#/factory/improve"]
-  factory --> cyc["Engine cycles<br/>#/factory/cycles"]
-  factory --> data["Data vault<br/>#/factory/data"]
 
   lib --> feat["Finished apps<br/>#/features"]
   lib --> plug["Add-ons<br/>#/plugins"]
-  lib --> brain["Brain<br/>#/brain"]
   lib --> fmap["Feature map<br/>#/map"]
 
   proj --> t1["Mission · Product · Use · Ideas"]
@@ -55,7 +52,7 @@ Drawn by `App.tsx`. It is the same on every screen.
 | **Sidebar foot** | *Systems* button, online dot with total spend on agents, the crew chip (Practice crew · free / Real crew), the version chip, and the keyboard shortcuts link. | `App.tsx`, `Updates.tsx` |
 | **Helm** (Ctrl K) | One line. Enter files what you typed as a note (in the open project, if any). Ctrl Enter builds it. Arrow keys jump to a project or page. | `shell/Helm.tsx` |
 | **Top strip** | The Helm button, a conflicts link when a rule conflict is open, *Bug* (report a bug with the screen attached), and the Assistant toggle (Ctrl J). | `App.tsx`, `BugReport.tsx` |
-| **Assistant** | The chat on the right. *General* chat plus one chat per project. Three buttons: **Capture** (file a note, free, no answer), **Ask** (the Overseer answers from a live status digest, capped, on the model picked next to it), **Build it** (start a run). A "Since you left" card appears after 10 minutes away. Gates waiting for you are also said here with a *Show me* button. | `Overseer.tsx` |
+| **Assistant** | The chat on the right. *General* chat plus one chat per project. Two buttons: **Capture** (file a note, free, no answer; Ctrl+Enter) and **Build it** (start a run). The Overseer answers on tickets instead (*Ask the Overseer* on a ticket). A "Since you left" card appears after 10 minutes away. Gates waiting for you are also said here with a *Show me* button. | `Overseer.tsx` |
 | **Update strip** | Appears under the top strip while an update counts down or waits for a build to finish. | `Updates.tsx` |
 | **Core down** | Covers the window when the core does not answer: says why, shows the core log and offers *Restart the core*. | `CoreDown.tsx` |
 | **Error boundary** | A screen that throws shows what happened and files a bug ticket instead of a blank window. | `BugReport.tsx` |
@@ -67,7 +64,7 @@ Drawn by `App.tsx`. It is the same on every screen.
 | Ctrl K | Open the Helm |
 | Ctrl Enter (in the Helm) | Build what you typed |
 | Ctrl J | Show or hide the Assistant |
-| G then N / P / A / F / D / L / O / B / M | Go to Needs you / Projects / Agents / All builds / Factory Bridge / Finished apps / Add-ons / Brain / Feature map |
+| G then N / P / A / F / D / L / O / B / M | Go to Needs you / Projects / Agents / All builds / Factory Bridge / Finished apps / Add-ons / Agents and principles / Feature map |
 | ? | Show the shortcut list |
 | Esc | Close |
 
@@ -79,7 +76,7 @@ Opened from the sidebar, the crew chip or the Helm (`Setup.tsx`).
 |---|---|
 | **Crew** | Switch between the practice crew and the real crew. Remembered in the database. |
 | **This computer** | Checks for Node.js, Claude Code and Git, each with the one thing to do if it is missing. *Check again*. |
-| **Where things land** | The built-apps folder, the drop folder (changeable) and the database, each with *Open* and *Copy path*. |
+| **Where things land** | The built-apps folder and the database, each with *Open* and *Copy path*. |
 | **Updates** | Current version, *Check for updates*, install now, and the GitHub read token used when the repository is private (`Updates.tsx`). |
 | **Crew pull requests** | The GitHub write token the crew uses to open draft pull requests for tickets (`CrewGitHub.tsx`). |
 
@@ -118,7 +115,6 @@ Everything that waits for you, oldest first, in one list (`shell/NeedsYou.tsx`):
 | **Agents** | Build | Which agents worked here, with calls and spend. | `projects/builtin.tsx` |
 | **Use** | Ship | Start the finished app with one press, see its page or output inside SF, edit its data files as forms, run its tools without knowing arguments, stop it. An app that needs packages first (no `node_modules`, or a `requirements.txt` with no `.venv`) shows **Install packages** as the first press; a Python app gets its own `.venv` inside its folder and then starts by itself. | `projects/runPanel.tsx`, `useTool.tsx`, `dataFiles.tsx` |
 | **Integrate** | Ship | Readiness checks and the forms the project can take inside SF (tool, panel, plugin, into the source). Ask, then approve. | `Features.tsx` |
-| **Improvements** | Improve | This project's proposals from the Improvement Council; *Look now*. | `projects/improvePanel.tsx` |
 | **Code map** | Know | Import a git repository (URL, `owner/repo` or a folder), see its modules as a map, and the crew's suggestions as tickets. | `CodeMap.tsx` |
 | **History** | Know | Everything that happened in this project, newest first, in plain words. | `projects/builtin.tsx` |
 | **Settings** | Know | Rename, kind, status, summary, merge into another project, archive. | `projects/builtin.tsx` |
@@ -153,13 +149,8 @@ The engine's own record of one build (`RunDeck.tsx`), shown on the Builds tab an
 | **Factory Bridge** (`#/bridge`) | A dashboard in three views. *Signal Loom*: where every build is and which waits for you. *Partitura*: which agent worked when, on which build, at what cost. *Lantern Quarter*: how every project is doing. | `bridge/` |
 | **Agents** (`#/factory/bay`) | The Agent Bay. Every agent with name, avatar, model, cap per call, plugins, skills, tools, MCP servers and prompt. Create from one line, clone, import and download as a file, edit (every save is a version, with diff and rollback), test on a sample task, assign to station seats, see stats and live state. | `AgentBay.tsx` |
 | **Tickets** (`#/factory/tickets`) | Views: Waiting on you, Open, Crew working, Epics, Closed, All, and a Board; a ticket page with its questions, thread, links, *Work it with the crew*, *Work it in the repo*, *Ask an agent*; the "Crew picks up" switch. | `Tickets.tsx`, `Intake.tsx` |
-| **Base** (`#/bases`) | The factories this app hosts: open, create (with a folder picker), rename, archive. | `Bases.tsx` |
-| **Build runners** (`#/runners`) | GitHub runners on this PC: add, start, stop, restart, remove; where a repository's builds run; jobs waiting and done with the machine each ran on; live log. See [runners.md](runners.md). | `Runners.tsx` |
 | **All builds** (`#/factory`) | The factory floor (stations lit per run), the run deck and the timeline of every agent call with model, time and cost. | `FactoryFloor.tsx`, `RunDeck.tsx`, `Timeline.tsx` |
 | **Rules and ideas** (`#/factory/order`) | The star map of every project, idea and thread, and the Order deck: Canon, Unsorted tray, conflict cards, the briefing with undo. | `StarMap.tsx`, `OrderDeck.tsx` |
-| **Improve** (`#/factory/improve`) | The Improvement Council: the lens wheel, the cost meter, the queue of proposals to accept, park or reject. | `ImproveDeck.tsx` |
-| **Engine cycles** (`#/factory/cycles`) | Runs of the same prompt in columns: app version, design scores, the judge's last look, money, minutes, and the engine review. | `Cycles.tsx` |
-| **Data vault** (`#/factory/data`) | The three storage tiers live: event log, tables with health, files on disk, cache; *Rebuild from log*. | `DataDeck.tsx` |
 
 ![Factory Bridge](img/app/factory-bridge.png)
 
@@ -167,7 +158,6 @@ The engine's own record of one build (`RunDeck.tsx`), shown on the Builds tab an
 
 ![Tickets](img/app/tickets.png)
 
-![Engine cycles](img/app/engine-cycles.png)
 
 ## Library group
 
@@ -175,7 +165,7 @@ The engine's own record of one build (`RunDeck.tsx`), shown on the Builds tab an
 |---|---|---|
 | **Finished apps** (`#/features`) | Projects installed into SF. A tool gets an arguments box and its output; a panel opens its page inside SF. Approve waiting requests, update, remove. | `Features.tsx` |
 | **Add-ons** (`#/plugins`) | Installed plugins, bundled examples, what each may do, on/off, its log and its own pages. | `Plugins.tsx` |
-| **Brain** (`#/brain`) | The principles agents follow: edit, turn off, reset, add; a use strip (agent calls that read it, last read, changes) and reads per principle; the rules you wrote, offered to add with one press; a station × principle matrix; the exact instructions an agent on any station reads now; the history of changes. | `Brain.tsx` |
+| **Principles (the Brain)** (on the Agents page, below the crew; `#/brain` opens it) | The principles agents follow: edit, turn off, reset, add; a use strip (agent calls that read it, last read, changes) and reads per principle; who follows what; the exact instructions an agent reads now; the history of changes. | `Brain.tsx` |
 | **Feature map** (`#/map`) | One record per feature (purpose, spec, flow, design, screens, documents, agents), its connections read from the code, its proof of life from the log, and what is connected to nothing. Add a planned feature, edit a record, reset it. See [feature-map.md](feature-map.md). | `FeatureMap.tsx` |
 
 ## Not linked from the sidebar
@@ -197,4 +187,4 @@ Details: [apps.md](apps.md) and [screens.md](screens.md).
 
 ## Not in the app yet
 
-These were discussed and are **Planned**, not built: a real-time strategy view of the factory ("Sector"), a shared plugin catalog, and the judge clicking through journeys instead of reading screens. The full list with status is in [spec.md](spec.md).
+These were discussed and are **Planned**, not built: a shared plugin catalog, and the judge clicking through journeys instead of reading screens. The full list with status is in [spec.md](spec.md).

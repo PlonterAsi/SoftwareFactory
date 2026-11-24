@@ -20,13 +20,9 @@ const PAGES: { label: string; to: Route; words: string }[] = [
   { label: "Tickets", to: { page: "factory", view: "tickets" }, words: "tickets bugs tasks work" },
   { label: "All builds", to: { page: "factory", view: "factory" }, words: "floor runs builds whole factory" },
   { label: "Rules and ideas", to: { page: "factory", view: "order" }, words: "order canon unsorted conflicts rules" },
-  { label: "Improve", to: { page: "factory", view: "improve" }, words: "council improvements proposals" },
-  { label: "Engine cycles", to: { page: "factory", view: "cycles" }, words: "benchmark same prompt engine review compare runs" },
-  { label: "Build runners", to: { page: "runners" }, words: "runner github actions ci builds checks local self-hosted" },
-  { label: "Data vault", to: { page: "factory", view: "data" }, words: "database store tables" },
   { label: "Finished apps", to: { page: "features" }, words: "features integrate" },
   { label: "Add-ons", to: { page: "plugins" }, words: "plugins extensions game" },
-  { label: "Brain", to: { page: "brain" }, words: "principles rules loops" },
+  { label: "Principles (Brain)", to: { page: "factory", view: "bay" }, words: "brain principles rules loops" },
   { label: "Feature map", to: { page: "map" }, words: "features registry wiring connected spec flow design records alive unused" },
 ];
 

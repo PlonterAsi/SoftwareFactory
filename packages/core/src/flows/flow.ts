@@ -72,7 +72,7 @@ export const RUNNER_ACTIONS: Record<Exclude<FlowRunner, "door">, Record<string, 
 export const RUNNER_WORD: Record<FlowRunner, string> = { engine: "the whole engine", session: "one Builder session", answer: "one reader, no changes", door: "its own screen" };
 
 /** Crew slots a step may name (the Agent Bay's stations). Each is one of SLOTS in bay/agentfile.ts. */
-export const STEP_AGENTS = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "survey", "map", "inspect", "verdict", "improve"] as const;
+export const STEP_AGENTS = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "survey", "map", "inspect", "verdict"] as const;
 
 /** Milestones a resume reads from the log (restoreState): a step whose milestone is reached is not done again. */
 export const RESUME_KEYS = ["intake", "council", "discover", "plan", "tests", "build", "reviewed", "accepted"] as const;
@@ -150,8 +150,6 @@ export interface FlowDef {
   kinds?: string[];
   /** Words added to the worker's instructions on every run of this flow (what makes a refactor a refactor). */
   brief?: string;
-  /** Set on the copy a run follows when that run is the live trial of a proposed change (flows/improve.ts). */
-  trialOf?: number;
   /** For a door flow: which screen carries it out today. */
   door?: string;
   steps: FlowStep[];
@@ -356,13 +354,6 @@ export const IMPORT_FLOW = door({
   steps: [["clone", "Clone", "a copy SF works in"], ["map", "Map the code", "Cartographer, Surveyor", ["map", "survey"]], ["review", "Deep review", "run it, judge it", ["inspect", "verdict"]], ["propose", "Next steps", "proposed as tickets"]],
 });
 
-/** The improve loop: lenses look at a project and propose changes. Carried out by Improve. */
-export const IMPROVE_FLOW = door({
-  id: "improve", name: "Improve loop", door: "Improve, on the whole factory or a project",
-  purpose: "Lenses look at what exists (its code, its screens, how its runs went) and propose changes; what you accept becomes work.",
-  steps: [["look", "Look", "each lens reads the project", ["improve"]], ["propose", "Propose", "one card per change"], ["accept", "Your OK", "accept or drop each"], ["work", "Work", "accepted ones become tickets"]],
-});
-
 /** A release: merged tickets become a version. Carried out by shipping today; the git manager takes it over. */
 export const RELEASE_FLOW = door({
   id: "release", name: "Release", door: "Ship tags each version today; release notes and the version timeline come with the git manager (phase 3)",
@@ -370,7 +361,7 @@ export const RELEASE_FLOW = door({
   steps: [["collect", "Collect", "tickets merged since the last version"], ["notes", "Release notes", "from each ticket's timeline"], ["accept", "Your OK", "on the notes"], ["tag", "Tag", "the version on main"]],
 });
 
-export const BUILT_IN_FLOWS: FlowDef[] = [NEW_PROJECT_FLOW, REPO_CHANGE_FLOW, BUG_FIX_FLOW, SMALL_CHANGE_FLOW, REFACTOR_FLOW, RESEARCH_FLOW, IMPORT_FLOW, IMPROVE_FLOW, RELEASE_FLOW];
+export const BUILT_IN_FLOWS: FlowDef[] = [NEW_PROJECT_FLOW, REPO_CHANGE_FLOW, BUG_FIX_FLOW, SMALL_CHANGE_FLOW, REFACTOR_FLOW, RESEARCH_FLOW, IMPORT_FLOW, RELEASE_FLOW];
 
 /** The built-in flow a kind of run starts with when nothing else is chosen. */
 export function builtInFlowFor(kind?: string): FlowDef {

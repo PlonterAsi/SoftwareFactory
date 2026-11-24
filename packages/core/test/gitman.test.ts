@@ -160,7 +160,7 @@ describe("git manager: outside work and versions", () => {
   }
 
   it("remembers where a repo stands on the first look, then turns outside PRs and commits into tickets", async () => {
-    const { g, t, s, proj } = onGitHub();
+    const { g, t, s, proj, log } = onGitHub();
     const named = t.open({ kind: "bug", title: "Logo is blurry", project: proj });
     expect(await g.watch(proj)).toBe(0);
     const since = g.status(proj).watchedAt!;
@@ -181,6 +181,13 @@ describe("git manager: outside work and versions", () => {
     expect(outside.find((x) => x.title === "Add a dark theme")!.pr).toMatchObject({ number: 12, state: "open" });
     // Seen once: the next look adds nothing.
     expect(await g.watch(proj)).toBe(0);
+    // A look that finds nothing new leaves no event behind (24 Nov: ~150 empty looks a day filled the log).
+    s.recent = []; s.commits = [];
+    const before = g.status(proj).watchedAt;
+    const n = log.list({ type: "repo.watched", limit: 1e6 }).length;
+    expect(await g.watch(proj)).toBe(0);
+    expect(log.list({ type: "repo.watched", limit: 1e6 })).toHaveLength(n);
+    expect(g.status(proj).watchedAt).toBe(before);
   });
 
   it("cuts a version from merged tickets with notes and a GitHub release, and the next one starts after it", async () => {

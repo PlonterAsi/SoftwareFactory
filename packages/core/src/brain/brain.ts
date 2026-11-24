@@ -43,7 +43,7 @@ export interface PrincipleView extends Principle {
   source?: PrincipleSource;
 }
 
-const MAKERS: Slot[] = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "improve", "overseer", "survey"];
+const MAKERS: Slot[] = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "overseer", "survey"];
 
 export const DEFAULT_PRINCIPLES: Principle[] = [
   {
@@ -71,7 +71,7 @@ export const DEFAULT_PRINCIPLES: Principle[] = [
     id: "first-use",
     title: "Useful on first open, every control works",
     text: "On first open the app already shows realistic sample data and what it can do. Every button, link and form is wired. Errors appear on the screen, in plain words, next to what caused them; nothing fails silently. Think about the person using it: the common task takes few steps and the screen says what happened.",
-    stations: ["council", "plan", "build", "review", "fix", "improve"], enabled: true,
+    stations: ["council", "plan", "build", "review", "fix"], enabled: true,
     enforcedBy: ["Page check: every script and module the page loads exists and parses", "Reviewer: a blank page or a dead button is a high finding"],
   },
 ];

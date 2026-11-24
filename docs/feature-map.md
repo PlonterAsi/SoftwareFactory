@@ -97,7 +97,7 @@ What changed (`brain/learn.ts`, `Brain.tsx`):
 - **Suggestions from your rules**: every live rule or decision in your own words is offered on the Brain page. *Add to the Brain* makes it a principle (it keeps its source) that the next agent call reads; *Not for the Brain* is remembered. No agent call, no cost.
 - **History**: every add, edit, reset and turned-away rule is listed.
 
-Events: `brain.principle.saved` now may carry `source {kind: "rule", fragment, node?}`; `brain.suggestion.dismissed {fragment, text, by}`. API: `POST /api/brain/suggestions/:fragment/accept` and `.../dismiss`; `GET /api/brain` also returns `use` and `suggestions`.
+Events: `brain.principle.saved` now may carry `source {kind: "rule", fragment, node?}`; `brain.suggestion.dismissed {fragment, text, by}`. API: `POST /api/brain/suggestions/:fragment/accept` and `.../dismiss`; `GET /api/brain` also returns `use` and `suggestions`. (The offer of the person's rules was removed 24 Nov 2026: none was ever added.)
 
 ## Adding a feature to SF
 

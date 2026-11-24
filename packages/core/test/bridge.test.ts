@@ -4,45 +4,12 @@ import { existsSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  EventLog, MockRuntime, OrderEngine, Factory, DropFolder, SwitchableRuntime, createCore, captureSignal, listSignals, sinceReport, statusDigest,
-  buildSuggestion, explainAgentError, projectTitle, runAgent, readSettings,
+  EventLog, MockRuntime, OrderEngine, Factory, SwitchableRuntime, createCore, captureSignal, listSignals, sinceReport,
+  explainAgentError, projectTitle, runAgent, readSettings,
 } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-m5-"));
 const old = (p: string) => { const t = new Date(Date.now() - 60_000); utimesSync(p, t, t); };
-
-describe("drop folder", () => {
-  it("turns each note into a Signal once, moves it to filed/, and leaves other files alone", () => {
-    const log = new EventLog();
-    const dir = tmp();
-    writeFileSync(join(dir, "idea.txt"), "Idea: a weekly watering calendar");
-    writeFileSync(join(dir, "photo.jpg"), "not text");
-    old(join(dir, "idea.txt")); old(join(dir, "photo.jpg"));
-    const drop = new DropFolder(log, dir);
-    const r = drop.scan();
-    expect(r.find((x) => x.file === "idea.txt")?.status).toBe("filed");
-    expect(r.find((x) => x.file === "photo.jpg")?.status).toBe("skipped");
-    expect(listSignals(log).map((s) => [s.text, s.source])).toEqual([["Idea: a weekly watering calendar", "drop"]]);
-    expect(existsSync(join(dir, "idea.txt"))).toBe(false);
-    expect(readdirSync(join(dir, "filed"))[0]).toMatch(/idea\.txt$/);
-    expect(existsSync(join(dir, "photo.jpg"))).toBe(true);
-    // The same note dropped again is not captured twice; a scan with nothing new does nothing.
-    writeFileSync(join(dir, "again.md"), "Idea: a weekly watering calendar");
-    old(join(dir, "again.md"));
-    expect(drop.scan().map((x) => x.status)).toEqual(["skipped"]);
-    expect(drop.scan()).toEqual([]);
-    expect(listSignals(log)).toHaveLength(1);
-    expect(drop.recent().map((d) => d.status)).toEqual(["skipped", "skipped", "filed"]);
-  });
-
-  it("waits for a note that is still being written", () => {
-    const log = new EventLog();
-    const dir = tmp();
-    writeFileSync(join(dir, "fresh.txt"), "half a thought");
-    expect(new DropFolder(log, dir).scan()).toEqual([]);
-    expect(existsSync(join(dir, "fresh.txt"))).toBe(true);
-  });
-});
 
 describe("factory ideas on the star map", () => {
   it("gives each factory idea its own project body, with no Archivist call", async () => {
@@ -95,29 +62,6 @@ describe("since you left", () => {
 });
 
 describe("the Overseer", () => {
-  it("reads a live status digest and can suggest a build", async () => {
-    const log = new EventLog();
-    const rt = new MockRuntime();
-    const order = new OrderEngine(log, rt);
-    captureSignal(log, "Project: Garden. Rule: it must work offline.");
-    await order.ingest(listSignals(log)[0]);
-    const d = statusDigest(log, order.state(), "mock");
-    expect(d).toMatch(/practice/);
-    expect(d).toMatch(/Project "Garden"; rules: .*offline/);
-    expect(buildSuggestion("Sounds good.\nBUILD: a CLI that waters plants").build).toBe("a CLI that waters plants");
-    expect(buildSuggestion("No build here.").build).toBeUndefined();
-
-    const server = createServer(createCore({ log, runtime: rt, projectsDir: tmp(), dropDir: tmp() }));
-    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
-    try {
-      const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-      const r = await (await fetch(`${base}/api/agent/run`, { method: "POST", body: JSON.stringify({ prompt: "what is going on?" }) })).json();
-      expect(r.result.text).toMatch(/Practice Overseer/);
-      expect(rt.calls.at(-1)!.prompt).toMatch(/^Status of the factory right now:/);
-      expect(rt.calls.at(-1)!.prompt).toMatch(/The person says:\nwhat is going on\?$/);
-    } finally { server.close(); }
-  });
-
   it("explains agent failures in words you can act on, keeping the raw text", async () => {
     expect(explainAgentError("claude exited 1: Invalid API key · Please run /login")).toMatch(/not signed in/);
     expect(explainAgentError("spawn claude ENOENT")).toMatch(/not found/);
@@ -134,7 +78,7 @@ describe("setup", () => {
   it("reports this computer, remembers the crew picked, and guards its inputs", async () => {
     const log = new EventLog();
     const rt = new SwitchableRuntime(new MockRuntime(), "practice");
-    const core = createCore({ log, runtime: rt, projectsDir: tmp(), dropDir: tmp() });
+    const core = createCore({ log, runtime: rt, projectsDir: tmp() });
     const server = createServer(core);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
     try {
@@ -148,8 +92,6 @@ describe("setup", () => {
       expect(readSettings(log).crewMode).toBe("practice");
       const health = await (await fetch(`${base}/api/health`)).json();
       expect(health).toMatchObject({ runtime: "mock", mode: "practice" });
-      const bad = await fetch(`${base}/api/setup/drop`, { method: "POST", body: JSON.stringify({ dir: "relative/path" }) });
-      expect(bad.status).toBe(400);
       const none = await fetch(`${base}/api/open`, { method: "POST", body: JSON.stringify({ target: "run", run: 999 }) });
       expect(none.status).toBe(404);
       // Presence: a marker only moves forward.
@@ -163,10 +105,10 @@ describe("setup", () => {
 describe("in-app updates", () => {
   it("records each installed version once and reports update settings and history", async () => {
     const log = new EventLog();
-    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp(), appVersion: "0.2.5" });
+    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), appVersion: "0.2.5" });
     // A restart on the same version records nothing new; a newer one records the step.
-    createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp(), appVersion: "0.2.5" });
-    createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp(), appVersion: "0.2.9" });
+    createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), appVersion: "0.2.5" });
+    createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), appVersion: "0.2.9" });
     expect(log.list({ type: "app.updated" }).map((e) => e.payload)).toEqual([{ from: null, to: "0.2.5" }, { from: "0.2.5", to: "0.2.9" }]);
 
     const server = createServer(core);
@@ -223,7 +165,7 @@ describe("in-app updates", () => {
 
   it("records nothing when the shell does not say its version (dev runs, tests)", () => {
     const log = new EventLog();
-    createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp() });
+    createCore({ log, runtime: new MockRuntime(), projectsDir: tmp() });
     expect(log.list({ type: "app.updated" })).toEqual([]);
   });
 });

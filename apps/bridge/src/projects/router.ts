@@ -9,18 +9,16 @@ import { useEffect, useState } from "react";
  *   #/features[/7]         features added from finished projects (feature 7)
  *   #/plugins[/id[/panel]] plugins (one plugin, one of its pages)
  *   #/a/id[/panel]         an add-on's own page from the main menu (its "nav" panel), the whole window
- *   #/brain                the Brain: the principles every loop follows
+ *   #/brain                old link: opens Agents, where the principles live now
  *   #/map[/id]             the Feature map: every feature's record, wiring and proof of life (one feature)
  *   #/config               configuration: what SoftwareFactory runs with now, and where each piece came from
- *   #/runners              build runners: GitHub's checks and builds, run on this PC
- *   #/bases                the factories this app hosts (open, create, rename, archive)
- *   #/factory[/view]       the whole factory (floor, bay, order, tickets, improve, cycles, flows, data), as before projects
+ *   #/factory[/view]       the whole factory (floor, bay, order, tickets, improve, flows), as before projects
  *   #/bridge[/mode]        the Factory Bridge dashboard (loom, score, quarter)
  *   #/needs                everything waiting on you (the new shell's first item)
  *   #/_kit                 the shared component kit (not linked; the UI tour shoots it)
  * The old #order, #bay and #data still open the factory views.
  */
-export type FactoryView = "factory" | "order" | "bay" | "data" | "tickets" | "improve" | "cycles" | "flows";
+export type FactoryView = "factory" | "order" | "bay" | "tickets" | "flows";
 export type BridgeMode = "loom" | "score" | "quarter";
 const MODES: BridgeMode[] = ["loom", "score", "quarter"];
 export type Route =
@@ -31,16 +29,13 @@ export type Route =
   | { page: "features"; id?: number }
   | { page: "plugins"; id?: string; panel?: string }
   | { page: "addon"; id: string; panel?: string }
-  | { page: "brain" }
   | { page: "map"; id?: string }
-  | { page: "bases" }
-  | { page: "runners" }
   | { page: "config" }
   | { page: "kit" }
   | { page: "needs" }
   | { page: "bridge"; mode: BridgeMode };
 
-const VIEWS: FactoryView[] = ["factory", "order", "bay", "data", "tickets", "improve", "cycles", "flows"];
+const VIEWS: FactoryView[] = ["factory", "order", "bay", "tickets", "flows"];
 
 export function parse(hash: string): Route {
   const h = hash.replace(/^#/, "");
@@ -52,11 +47,9 @@ export function parse(hash: string): Route {
   if (parts[0] === "features") return { page: "features", id: /^\d+$/.test(parts[1] ?? "") ? Number(parts[1]) : undefined };
   if (parts[0] === "a" && parts[1]) return { page: "addon", id: parts[1], panel: parts[2] || undefined };
   if (parts[0] === "plugins") return { page: "plugins", id: parts[1] || undefined, panel: parts[2] || undefined };
-  if (parts[0] === "brain") return { page: "brain" };
+  if (parts[0] === "brain") return { page: "factory", view: "bay" };
   if (parts[0] === "map") return { page: "map", id: parts[1] ? decodeURIComponent(parts[1]) : undefined };
-  if (parts[0] === "bases") return { page: "bases" };
   if (parts[0] === "projects") return { page: "projects" };
-  if (parts[0] === "runners") return { page: "runners" };
   if (parts[0] === "config") return { page: "config" };
   if (parts[0] === "_kit") return { page: "kit" };
   if (parts[0] === "needs") return { page: "needs" };
@@ -70,11 +63,8 @@ export function href(r: Route): string {
   if (r.page === "features") return r.id ? `#/features/${r.id}` : "#/features";
   if (r.page === "addon") return `#/a/${r.id}${r.panel ? `/${r.panel}` : ""}`;
   if (r.page === "plugins") return `#/plugins${r.id ? `/${r.id}${r.panel ? `/${r.panel}` : ""}` : ""}`;
-  if (r.page === "brain") return "#/brain";
   if (r.page === "map") return r.id ? `#/map/${encodeURIComponent(r.id)}` : "#/map";
-  if (r.page === "bases") return "#/bases";
   if (r.page === "projects") return "#/projects";
-  if (r.page === "runners") return "#/runners";
   if (r.page === "config") return "#/config";
   if (r.page === "kit") return "#/_kit";
   if (r.page === "needs") return "#/needs";

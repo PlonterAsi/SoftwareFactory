@@ -78,26 +78,21 @@ const PROOF: Record<string, string[]> = {
   checks: ["factory.tests", "factory.tests.locked", "factory.tests.dryrun", "factory.screens", "factory.links", "factory.fastgate", "factory.visual"],
   judge: ["factory.evaluation", "factory.screen.look"],
   "engine-review": ["factory.retro"],
-  recall: ["factory.recall"],
   "needs-you": ["factory.gate"],
-  money: ["project.budget", "factory.budget"],
+  money: ["project.budget", "factory.budget", "budget.monthly"],
   mission: ["factory.plan"],
   "crew-prs": ["ticket.branch", "ticket.pushed"],
   "use-apps": ["launch.started"],
   // Every run follows a flow, and carries its copy on its started event.
   flows: ["factory.run.started"],
-  "check-before-money": ["ticket.checked"],
   "home-board": ["ticket.opened"],
   "git-manager": ["project.published", "ticket.mergecheck", "project.version", "repo.watched"],
-  "agent-memory": ["agent.memory.noted", "agent.memory.dream"],
-  "flow-improve": ["flow.proposed"],
+  "agent-memory": ["agent.memory.noted"],
   watchers: ["watcher.ran"],
-  "monthly-budgets": ["budget.monthly"],
 };
 
 /** Features whose events are kept outside a base's log, so the log cannot prove them either way. */
 const ELSEWHERE: Record<string, string> = {
-  bases: "Its events are kept in the app's own registry of bases, not in this base's log, so the map cannot show when it was last used.",
 };
 
 type Saved = Omit<FeatureRecord, "files" | "api"> & { by?: string };

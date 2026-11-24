@@ -344,7 +344,8 @@ export class GitManager {
       this.log.append("ticket.pr", { id: t.id, by: "github", repo: name, number: 0, url: `https://github.com/${name}/commit/${loose[0].sha}`, state: "merged", sha: loose[0].sha });
       touched++;
     }
-    this.log.append("repo.watched", { projectId, repo: name, at: startedAt, sha: commits[0]?.sha ?? this.row(projectId)?.watched_sha ?? null, prs: prs.length, commits: commits.length });
+    // A look that found nothing leaves no event (24 Nov: ~150 empty repo.watched a day); the next look reads from the same point, so nothing is missed.
+    if (prs.length || commits.length) this.log.append("repo.watched", { projectId, repo: name, at: startedAt, sha: commits[0]?.sha ?? this.row(projectId)?.watched_sha ?? null, prs: prs.length, commits: commits.length });
     return touched;
   }
 

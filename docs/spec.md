@@ -75,7 +75,6 @@ These hold for every feature. Each has a place in the code that enforces it.
 | Requirement | Status | Notes |
 |---|---|---|
 | File anything said, in any order | Built | Signals, Archivist, fragments |
-| Capture from outside the app | Built | Drop folder: a `.txt` or `.md` file becomes a Signal |
 | Rules and decisions kept as Canon with their source | Built | |
 | Conflict detection and resolution | Built | Precedence in code; a card when tied |
 | Unsure placements never block | Built | Unsorted tray |
@@ -124,13 +123,12 @@ These hold for every feature. Each has a place in the code that enforces it.
 | One list of everything that waits for the person | Built | Needs you |
 | A dashboard of the whole factory | Built | Factory Bridge, three views |
 | In-app updates, automatic and by button | Built | Signed; waits for running builds |
-| Improvement Council | Built | Lens agents, daily cap, memory of past proposals |
 | Plugins | Partial | Tabs, sandboxed backend and agents are built. A network switch for backends, plugins calling agents with a cap, and a shared catalog are not. |
 | Data vault with rebuild | Built | |
 | Every feature has a record (purpose, spec, flow, design), its wiring is read from the code, and it shows proof it is alive | Built | Feature map; a check fails the build when a feature has no record ([feature-map.md](feature-map.md)) |
 | The same record rule for features of the apps the factory builds | Built | Each feature in `src/schema.js` needs a purpose, a flow and a place; the app check refuses a build without them |
 | The Brain changes from what the person and the runs say | Partial | The person's rules are offered to it with one press. Lessons from runs are not yet. |
-| The factory as a game ("Sector": a real-time strategy base over SF's data) | Planned | Design approved in direction; three small demos exist as plugins ([game-door.md](game-door.md)) |
+| The factory as a game ("Sector": a real-time strategy base over SF's data) | Dropped | The demo add-ons were removed in the 24 Nov 2026 audit (all turned off, unused) |
 | macOS and Linux installers | Planned | Runs from source on any system with Node 22.5+; only Windows is built and tested |
 | Code-signed installer | Planned | Costs money; Windows SmartScreen warns until then |
 | Private repository | Planned | The app can already update from a private repository with a read token |
@@ -148,7 +146,6 @@ These hold for every feature. Each has a place in the code that enforces it.
 | Fix rounds before asking | 5 | `factory/loop.ts` |
 | Run time | 30 minutes up to $2, in proportion above, 4 hours at most | `factory/stoprules.ts` |
 | A ticket worked by the crew | $0.60, $3 a day, 2 at once per project | `tickets/` |
-| Improvement Council | $0.20 a day | [improve.md](improve.md) |
 | Archivist | $0.50 a day | `SF_ORDER_MAX_USD` |
 
 More in [reference.md](reference.md).

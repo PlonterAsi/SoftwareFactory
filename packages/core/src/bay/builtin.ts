@@ -152,17 +152,9 @@ ${TARGET}
 ${APP_TARGET}
 ${FILE_FORMAT}`,
   order: `Station contract: order.\n${ARCHIVIST_ROLE}`,
-  improve: `Station contract: improve.
-You hold one seat on the Improvement Council. It looks again at something that already exists (a project, an idea, a shipped app, or SoftwareFactory itself) and proposes how to make it better through your lens only.
-Read the subject, its notes and what was already proposed. Never repeat or reword an earlier proposal, and never bring back one the person rejected.
-Propose at most 2 changes, each concrete enough to act on (what to change, where), each worth doing. Zero is a fine answer when nothing is worth it.
-Answer with ONE fenced json block and nothing else, shaped exactly like:
-{"proposals": [{"title": "short imperative, under 12 words", "why": "one sentence: the problem or the gain", "change": "one or two sentences: exactly what to change", "impact": "high", "effort": "small"}]}
-impact is "high", "medium" or "low". effort is "small", "medium" or "large".`,
   overseer: `Station contract: overseer.
-Before the person's message you get a live status digest of the factory (runs, gates waiting, conflicts, projects and their rules). Use it; never invent runs or numbers that are not in it.
-Answer in at most 4 short sentences. Be concrete, say what happens next and what, if anything, the person must do.
-If the person describes software they want made, end with one extra line: BUILD: <the idea in one line>. The Bridge turns that line into a Build button; nothing starts until they press it.`,
+You answer the person on a ticket, or split a large ticket into parts. Use only what the ticket and its notes say; never invent runs or numbers.
+Answer in at most 4 short sentences. Be concrete, say what happens next and what, if anything, the person must do.`,
   map: `Station contract: map.
 You read digests of modules of an EXISTING codebase that was imported into the factory: file list with line counts, exported names, and the start of its key files. You only read; nothing you say changes the code.
 For every module given, say what it is for. Answer with ONE fenced json block and nothing else, shaped exactly like:
@@ -219,7 +211,7 @@ The understanding keeps the shape you were given: features have id, name, what, 
 export const BUILTIN_AGENTS: AgentDef[] = [
   {
     id: "overseer", name: "Overseer", avatar: "◈", station: "overseer", model: "haiku", budgetUsd: 0.25, plugins: [], skills: [], tools: ["WebSearch", "WebFetch"], mcp: [],
-    description: "The manager AI you talk to on the Bridge.",
+    description: "The manager AI: answers on tickets and splits large ones into parts.",
     sample: "What should I build first: a habit tracker or a recipe scaler?",
     prompt: "You are the Overseer, the manager AI of SoftwareFactory. You speak for the crew, keep the person's goal in view and say plainly what happens next.",
   },
@@ -295,12 +287,6 @@ export const BUILTIN_AGENTS: AgentDef[] = [
     sample: "Failing test: slugify('A b') should be 'a-b'. Code: export const slugify = (t) => t.replace(/ /g, '-');",
     prompt: "You are the Fixer of SoftwareFactory. You read the failures, find the smallest change that fixes them and leave everything else alone.",
   },
-  ...lens("integrator", "Integrator", "⇄", "integrate", "Finds where this should connect to the person's other projects, ideas and tools: shared parts, data passed between them, one doing another's job.", "You look for connections: where two projects should share a part, pass data, or where one already solves the other's problem. You name both sides of every link."),
-  ...lens("automator", "Automator", "⟳", "automate", "Finds manual steps, repeats and waits that a loop or an agent could take over.", "You look for work a person still does by hand: repeated steps, copy and paste, checks, approvals that never say no. You propose the loop, trigger or agent that takes it over, and keep a human stop only where a mistake costs money or trust."),
-  ...lens("simplifier", "Simplifier", "◌", "simplify", "Finds what to cut, merge or hide so the thing does the same with less.", "You look for what to remove: steps, options, screens, files and concepts that cost more than they give. Your best proposal deletes something."),
-  ...lens("enricher", "Enricher", "✚", "enrich", "Finds where more depth would pay off: a richer model, a missing capability, a stronger core.", "You look for where the thing is too thin: a missing capability people will hit, a data model that cannot grow, a feature that would make it worth using daily. You add depth only where it pays off."),
-  ...lens("ux-lens", "UX Lens", "◐", "ux", "Looks at what the person sees and taps: clarity, feedback, visuals, first use.", "You look at the experience: what the person sees first, what is unclear, where feedback is missing, what should be visual, how many taps a common task takes."),
-  ...lens("flow-lens", "Flow Lens", "⇢", "flow", "Looks at the order of steps, handoffs, loops and waits.", "You look at the flow: the order of steps, handoffs between people and agents, loops that never end or end too early, and waits nobody notices."),
   {
     id: "cartographer", name: "Cartographer", avatar: "⌖", station: "map", model: "haiku", budgetUsd: 0.08, plugins: [], skills: ["code-exploration"], tools: ["Read", "Glob", "Grep"], mcp: [],
     description: "Reads an imported repo module by module and says what each part is for.",
@@ -333,25 +319,15 @@ export const BUILTIN_AGENTS: AgentDef[] = [
   },
 ];
 
-/** An Improvement Council seat: an ordinary agent made for the improve station. */
-function lens(id: string, name: string, avatar: string, focus: string, description: string, how: string): AgentDef[] {
-  return [{
-    id, name, avatar, station: "improve", model: "haiku", budgetUsd: 0.03, plugins: [], skills: [], tools: [], mcp: [],
-    description: `Improvement Council seat (${focus}): ${description}`,
-    sample: "Subject: project \"Photo renamer\", a CLI that renames photos by the date they were taken. Shipped once; notes: wants a dry-run mode; runs by hand every week.",
-    prompt: `You are the ${name} on the SoftwareFactory Improvement Council. Your lens is "${focus}". ${how}`,
-  }];
-}
-
 /** Who works each station when nobody has been assigned. The Council seats three by default and takes up to six. */
 export const DEFAULT_SLOTS: Record<Slot, string[]> = {
   council: ["visionary", "architect", "skeptic"],
   design: ["designer"], critique: ["critic"], evaluate: ["judge"],
   plan: ["planner"], tests: ["tester"], build: ["builder"], review: ["reviewer"], fix: ["fixer"], order: ["archivist"], overseer: ["overseer"],
-  improve: ["integrator", "automator", "simplifier", "enricher", "ux-lens", "flow-lens"], map: ["cartographer"], survey: ["surveyor"], inspect: ["inspector"], verdict: ["assessor"],
+  map: ["cartographer"], survey: ["surveyor"], inspect: ["inspector"], verdict: ["assessor"],
 };
 
-export const SLOT_SEATS: Record<Slot, number> = { council: 6, design: 1, critique: 1, plan: 1, tests: 1, build: 1, review: 1, evaluate: 1, fix: 1, order: 1, overseer: 1, improve: 6, map: 1, survey: 1, inspect: 1, verdict: 1 };
+export const SLOT_SEATS: Record<Slot, number> = { council: 6, design: 1, critique: 1, plan: 1, tests: 1, build: 1, review: 1, evaluate: 1, fix: 1, order: 1, overseer: 1, map: 1, survey: 1, inspect: 1, verdict: 1 };
 
 /**
  * The system prompt an agent runs with on a station: its own prompt, then the Brain's principles

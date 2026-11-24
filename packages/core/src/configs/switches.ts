@@ -39,8 +39,6 @@ export const SWITCHES: SwitchDef[] = [
   { name: "SF_REVIEW_MAX_USD", what: "Spend cap for reviewing an imported repo, in dollars", kind: "number", unset: "the built-in review cap", live: true, min: 0, max: 20 },
   { name: "SF_ORDER_MODE", what: "How the Archivist sorts your ideas: an agent, or free rules", kind: "choice", choices: ["agent", "heuristic"], unset: "Follows the crew mode", live: false },
   { name: "SF_ORDER_MAX_USD", what: "Spend cap for one Archivist pass, in dollars", kind: "number", unset: "the built-in cap", live: false, min: 0, max: 10 },
-  { name: "SF_IMPROVE_MAX_USD", what: "Spend cap for one improvement council, in dollars", kind: "number", unset: "the built-in cap", live: false, min: 0, max: 20 },
-  { name: "SF_IMPROVE_EVERY_H", what: "Hours between improvement councils", kind: "number", unset: "the built-in interval", live: false, min: 1, max: 24 * 30 },
   { name: "SF_SIGNIN_RETRY_MS", what: "Wait before one more try when a call fails its sign-in check at start, in milliseconds", kind: "number", unset: "1500", live: true, min: 0, max: 60_000 },
   { name: "SF_BROWSER", what: "The browser the screen check uses (a path)", kind: "text", unset: "The first headless browser found on this PC", live: true },
 ];

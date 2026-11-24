@@ -11,16 +11,18 @@ The Bridge is now meant to be used every day, starting from a fresh Windows PC:
 
 - **Ship's systems** (the *Systems* button or the crew chip in the top bar): switch Practice / Real at any time (remembered in the database), see what this computer has (Node.js, Claude Code, Git, each with the one thing to do if it is missing) and **where things land**: the built-apps folder, the drop folder and the database, each with *Open* and *Copy path*.
 - **Welcome and guidance**: a first launch shows what Build it, Capture and Ask do, with examples to try. A gate waiting for you is also said in the Overseer channel with a *Show me* button. A shipped run has an *Open folder* button. Agent failures read as what to do ("Claude Code is installed but not signed in: run `claude` and sign in"); the raw text stays in the log.
-- **The Overseer** answers from a live status digest of the factory (runs, gates, conflicts, projects and their rules, spend), and when you describe something to build it offers a one-tap **Build** button. Nothing starts until you press it.
+- **The Overseer** (its chat Ask was removed 24 Nov 2026: used 4 times; it answers on tickets now) answered from a live status digest of the factory (runs, gates, conflicts, projects and their rules, spend), and when you describe something to build it offers a one-tap **Build** button. Nothing starts until you press it.
 - **Since you left**: when you come back after 10 minutes or more, one card lists what shipped or failed, what waits for you, new conflicts, what was filed where, drops and spend.
-- **Drop folder** (default `%USERPROFILE%\SoftwareFactory\Drop`, changeable in Systems): save a `.txt` or `.md` note there, even from your phone through OneDrive or Google Drive, and it becomes a Signal within seconds. The note moves to `filed/`; the same note is never read twice.
+- **Drop folder** (removed 24 Nov 2026: no note ever came in through it) (default `%USERPROFILE%\SoftwareFactory\Drop`, changeable in Systems): save a `.txt` or `.md` note there, even from your phone through OneDrive or Google Drive, and it becomes a Signal within seconds. The note moves to `filed/`; the same note is never read twice.
 - **Live factory floor**: the agent working a station docks on it with its avatar, a scan line sweeps the active station, and the flowing edge glows. **Star map**: every factory idea becomes its own system at once (no Archivist call), ringed while building, amber when it waits for you, green when shipped; double-click it to watch its run.
 - **When the core will not start**, the desktop app says why (Node missing, the core crashed), shows the core's log and has a *Restart the core* button. The core writes `core.log` in the data folder.
 - **Storage**: crew mode and drop folder are `settings` rows, picked-up notes are `drops` rows, and "seen up to here" is a `bridge.seen` event, all derived from the log like every other table.
 
 ## Improvement Council (constant improvement)
 
-The **Improve** tab: six lens agents (integrate, automate, simplify, enrich, UX, flow) look again at your projects, ideas, shipped apps and SoftwareFactory itself, and queue ranked proposals you accept, park or reject with one tap. It remembers everything it proposed and never repeats itself or brings back what you rejected. Haiku, $0.20 a day cap with a live cost meter; on its own only on the real crew, when something changed. Accepting files a ticket or task; building takes a second tap. Details: [docs/improve.md](improve.md).
+**Removed 24 Nov 2026**: it was paused since 14 Nov with 33 proposals nobody read. Code suggestions from an imported repo now get a yes or no right on the Code map; a yes opens a task ticket.
+
+The **Improve** tab: six lens agents (integrate, automate, simplify, enrich, UX, flow) look again at your projects, ideas, shipped apps and SoftwareFactory itself, and queue ranked proposals you accept, park or reject with one tap. It remembers everything it proposed and never repeats itself or brings back what you rejected. Haiku, $0.20 a day cap with a live cost meter; on its own only on the real crew, when something changed. Accepting files a ticket or task; building takes a second tap. 
 
 ![The Improve tab: the lens wheel, the cost meter and the proposals queue](img/bridge-improve.png)
 

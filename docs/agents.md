@@ -40,7 +40,7 @@ Lessons come from four places, all free:
 | you taught it | you press Teach on the agent's Memory tab |
 | it noted it | the agent ends an answer with a `Remember: ...` line (picked up in `agents.ts`; a Bay test run teaches nothing) |
 | a review found it | a Reviewer sent its build back: the serious findings become lessons of the agent that built it (engine and one-session tickets, at most two per review) |
-| cleaned | a lesson from a cleaning you accepted |
+| cleaned | a lesson from a cleaning accepted before 24 Nov 2026 |
 
 A repeat, or a lesson that shares four fifths of its words with one the agent already has, is not
 noted again.
@@ -55,22 +55,10 @@ the Brain it was told as a 12-character hash (`brain` on `factory.run.started`, 
 
 ## Cleaning a memory
 
-Cleaning works the way Claude Code's Auto Dream cleans its own memory: it merges, dedupes and prunes.
+**Tidy (free).** Removes repeats and near repeats (the newest copy stays), then the oldest lessons
+past 40. It never removes a lesson you taught. It runs by itself when a memory grows past 40.
 
-- **Tidy (free).** Removes repeats and near repeats (the newest copy stays), then the oldest lessons
-  past 40. It never removes a lesson you taught. It runs by itself when a memory grows past 40.
-- **Clean it up (dream).** One haiku call reads the whole memory and proposes a shorter one. Its cap
-  is $0.10 unless you say otherwise, and $0.60 at most.
-  - On the practice crew, or when the answer is unusable, the proposal is the free tidy. The proposal
-    says which one you got.
-  - The call never invents lessons. Lessons you taught stay word for word. Lessons the answer forgot
-    to mention stay as they are.
-- **Review before use.** A cleaning changes nothing until you accept it. The Memory tab shows each new
-  lesson beside the ones it replaces, and what it would forget. Accepting replaces only the lessons
-  the cleaning read; lessons noted since it started stay. Only one cleaning per agent waits at a time.
-
-The official Dreams API comes later, with an API key. Switching billing to an API key is your
-decision.
+The paid cleaning (a "dream": one call proposing a shorter memory) was removed on 24 Nov 2026. It never ran.
 
 ## The advisor
 
@@ -80,14 +68,12 @@ Agents that work in a folder with edit tools (the Builder, the Fixer, a ticket's
 
 | Event | Payload |
 | --- | --- |
-| `agent.memory.noted` | `{ agent, text, source, ref? }` (ref: `run:N`, `ticket:N`, `dream:N`) |
+| `agent.memory.noted` | `{ agent, text, source, ref? }` (ref: `run:N`, `ticket:N`) |
 | `agent.memory.removed` | `{ agent, ids, why, by }` (by: you, auto, or the tidy) |
-| `agent.memory.dream` | `{ agent, state: "proposed", saw, lessons, dropped, costUsd, by, error? }`, then `{ id, agent, state: "accepted" \| "rejected" }` |
 
 These events fill the `memory` projection's tables:
 
 - `agent_memory`: every lesson, with `removed_at` and `removed_why` once it is gone.
-- `agent_dreams`: every cleaning and your decision on it.
 
 ## API
 
@@ -95,8 +81,6 @@ These events fill the `memory` projection's tables:
 POST /api/bay/agents/:id/memory          { text }      teach a lesson
 POST /api/bay/agents/:id/memory/forget   { ids }       forget lessons
 POST /api/bay/agents/:id/memory/tidy                   the free tidy
-POST /api/bay/agents/:id/memory/dream    { maxUsd? }   propose a cleaning (capped, $0.60 at most)
-POST /api/bay/dreams/:id/accept | reject               decide on a cleaning
-GET  /api/bay/state                                    includes memory (by agent) and dreams
+GET  /api/bay/state                                    includes memory (by agent)
 PUT  /api/flows/:id                      { flow }      a step's `crew` names its agents
 ```

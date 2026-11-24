@@ -52,7 +52,6 @@ flowchart LR
 | [screens.md](screens.md) | Every project has a screen; adding a screen to a finished project | current |
 | [mcp-safety.md](mcp-safety.md) | The safety rule for agents' MCP servers | current |
 | [watchers.md](watchers.md) | Watchers that only open tickets; monthly budgets, the burn rate, and a queue that fits them | current (phase 6) |
-| [flows-improve.md](flows-improve.md) | Flows that improve themselves: proposals, replay on past runs, one live trial | current (phase 5) |
 | [agents.md](agents.md) | Named agents: who works each flow step, each agent's memory and its cleaning | current (phase 4) |
 | [git.md](git.md) | The git manager: local first, merge policy, outside work, versions | current (phase 3) |
 
@@ -62,14 +61,11 @@ flowchart LR
 |---|---|---|
 | [projects.md](projects.md) | The project model, project chats, money limits | current |
 | [tickets.md](tickets.md) | Tickets, the ready queue, crew pull requests | current |
-| [improve.md](improve.md) | The Improvement Council | current |
 | [review.md](review.md) | Deep review of an imported repo: run it, read it, verdict, next steps, interview | current |
 | [run.md](run.md) | Running a finished project from the app (the Use tab) | current |
 | [integrations.md](integrations.md) | Adding a finished project into SF (Finished apps) | current |
 | [plugins.md](plugins.md) | Add-ons: the plugin format, permissions, sandbox | current |
-| [bases.md](bases.md) | Several factories in one app | current |
 | [feature-map.md](feature-map.md) | One record per feature, the wiring map read from the code, proof of life, the check; the Brain as the first case | current |
-| [game-door.md](game-door.md) | The three game demos and the Sector direction | demos built; Sector is **Planned** |
 
 ### Technical
 
@@ -79,7 +75,6 @@ flowchart LR
 | [reference.md](reference.md) | API routes, events, tables, environment variables, limits | current |
 | [storage.md](storage.md) | Database, files, cache; projections; resuming runs | current |
 | [updates.md](updates.md) | In-app updates and the updater key | current |
-| [runners.md](runners.md) | Build runners: GitHub's checks and builds on your own PC | current |
 | [development.md](development.md) | Setup, tests, CI, how to add things, working rules | current |
 | [dogfood.md](dogfood.md) | Judging SF by using the installed app | current |
 
@@ -116,7 +111,6 @@ flowchart LR
 | **Product judge** | An agent that reads the running app's screens and scores it as a product. |
 | **Engine cycle** | The same prompt built again after engine changes, compared side by side. |
 | **Ticket** | One unit of work on a project. The crew can work it and return a branch or a draft pull request. |
-| **Improvement Council** | Lens agents that propose improvements to your projects and to SF itself. |
 | **Finished app** | A shipped project installed into SF as a tool, a panel or a plugin. |
 | **Add-on** | A plugin: a folder with `plugin.json` that adds tabs, a backend or agents. |
 

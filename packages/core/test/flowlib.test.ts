@@ -40,7 +40,7 @@ describe("the flow library: one flow per kind of work", () => {
     for (const f of BUILT_IN_FLOWS) expect(flowProblems(f), f.id).toEqual([]);
     const lib = new FlowLibrary(new EventLog(":memory:"));
     const list = lib.list();
-    expect(list.map((f) => f.id)).toEqual(["new-project", "repo-change", "bug-fix", "small-change", "refactor", "research", "import", "improve", "release"]);
+    expect(list.map((f) => f.id)).toEqual(["new-project", "repo-change", "bug-fix", "small-change", "refactor", "research", "import", "release"]);
     expect(Object.fromEntries(list.map((f) => [f.id, f.runner]))).toMatchObject({ "new-project": "engine", "repo-change": "engine", "bug-fix": "session", refactor: "session", research: "answer", release: "door" });
     expect(list.find((f) => f.id === "import")!.door).toMatch(/Import from git/);
   });

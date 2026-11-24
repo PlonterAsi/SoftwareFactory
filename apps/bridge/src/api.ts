@@ -111,23 +111,6 @@ export interface FlowStepView {
 export interface FlowEdgeView { from: string; to: string; kind: "next" | "back" | "branch"; label?: string; fromSide?: string; toSide?: string }
 export type FlowRunnerView = "engine" | "session" | "answer" | "door";
 export interface FlowView { id: string; name: string; purpose: string; version: number; builtIn: boolean; runner?: FlowRunnerView; kinds?: string[]; brief?: string; door?: string; steps: FlowStepView[]; edges: FlowEdgeView[] }
-/** A proposed change to a flow, replayed on its past runs (core: flows/improve.ts). */
-export interface FlowReplayView {
-  runs: { run: number; kind: "run" | "ticket"; at: string; outcome: string; beforeUsd: number; afterUsd: number; risk: "none" | "low" | "high"; notes: string[] }[];
-  beforeUsd: number; afterUsd: number; risky: number; helped: number; verdict: "cheaper" | "costlier" | "risky" | "may-help" | "same" | "no-history";
-  summary: string; changes: { kind: string; step?: string; text: string }[]; unpriced: string[];
-}
-export interface FlowProposalView {
-  id: number; flowId: string; baseVersion: number; at: string; by: "sf" | "words" | "you"; why: string; words?: string; replay: FlowReplayView; costUsd: number;
-  state: "proposed" | "armed" | "taken" | "tried" | "accepted" | "rejected";
-  trial?: { run?: number; ticket?: number; outcome?: string; totalUsd?: number | null; at: string }; decidedAt?: string; note?: string;
-}
-async function flowPost(path: string, body: unknown = {}) {
-  const r = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error ?? `The core said ${r.status}`);
-  return j;
-}
 export interface FlowSummaryView { id: string; name: string; purpose: string; version: number; builtIn: boolean; runner: FlowRunnerView; kinds: string[]; door: string | null; steps: number; savedBy: string | null; savedAt: string | null }
 
 export interface FactoryRunView {
@@ -300,11 +283,6 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
   return [...runs.values()];
 }
 
-export async function askOverseer(prompt: string, model: string, projectId?: number) {
-  const r = await fetch(`${API}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt, model, projectId }) });
-  return r.json();
-}
-
 /** Subscribe to the core's event stream and fold it into views. Everything on screen is derived from events. */
 export function useFactory() {
   const [events, setEvents] = useState<SfEvent[]>([]);
@@ -435,9 +413,9 @@ export function useOrder(events: SfEvent[]) {
 
 // ---- Agent Bay (milestone 4) ----
 
-export const SLOTS = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "order", "overseer", "improve", "map", "survey", "inspect", "verdict"] as const;
+export const SLOTS = ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "order", "overseer", "map", "survey", "inspect", "verdict"] as const;
 export type Slot = (typeof SLOTS)[number];
-export const SLOT_LABEL: Record<Slot, string> = { council: "Council", design: "Product design", critique: "Design critic", plan: "Spec and plan", tests: "Acceptance tests", build: "Build", review: "Review", evaluate: "Product judge", fix: "Fix", order: "Order Engine", overseer: "Assistant", improve: "Improvement Council", map: "Code map", survey: "Code survey", inspect: "Repo inspection", verdict: "Repo verdict" };
+export const SLOT_LABEL: Record<Slot, string> = { council: "Council", design: "Product design", critique: "Design critic", plan: "Spec and plan", tests: "Acceptance tests", build: "Build", review: "Review", evaluate: "Product judge", fix: "Fix", order: "Order Engine", overseer: "Assistant", map: "Code map", survey: "Code survey", inspect: "Repo inspection", verdict: "Repo verdict" };
 export interface AgentDef { id: string; name: string; avatar: string; description: string; station: Slot | "none"; model: string; budgetUsd: number; plugins: string[]; skills: string[]; tools: string[]; mcp?: string[]; sample: string; prompt: string }
 /** What an agent's settings can choose from (core: bay/kits.ts). */
 export interface BayLibrary { skills: { name: string; description: string; source: "bundled" | "yours" }[]; tools: { name: string; note: string }[]; mcp: { name: string; command: string; note?: string; source?: "bundled" | "yours" }[]; mcpFile: string | null }
@@ -451,17 +429,11 @@ export interface AgentStats {
 }
 /** One lesson in an agent's own memory (core: bay/memory.ts). */
 export interface Lesson { id: number; agent: string; text: string; source: "person" | "self" | "review" | "dream"; ref: string | null; at: string }
-/** A proposed cleaning of a memory: nothing changes until you accept it. */
-export interface DreamView {
-  id: number; agent: string; at: string; state: "proposed" | "accepted" | "rejected"; by: "free" | "agent"; saw: number[];
-  lessons: { text: string; from: number[] }[]; dropped: { id: number; why: string }[]; costUsd: number; decidedAt: string | null; error?: string;
-}
 export interface BayState {
   agents: AgentView[]; slots: Record<Slot, string[]>; seats: Record<Slot, number>; tests: BayTest[]; stats: Record<string, AgentStats>;
   visuals: { id: number; ts: string; scope: string; pass: boolean; items: string[]; missing: string[] }[]; models: string[];
   library?: BayLibrary;
   memory?: Record<string, Lesson[]>;
-  dreams?: DreamView[];
 }
 const EMPTY_BAY: BayState = { agents: [], slots: {} as Record<Slot, string[]>, seats: {} as Record<Slot, number>, tests: [], stats: {}, visuals: [], models: ["haiku", "sonnet", "opus"] };
 
@@ -480,8 +452,6 @@ export const bayApi = {
   teach: (id: string, text: string) => post(`/api/bay/agents/${id}/memory`, { text }) as Promise<Lesson>,
   forget: (id: string, ids: number[]) => post(`/api/bay/agents/${id}/memory/forget`, { ids }),
   tidy: (id: string) => post(`/api/bay/agents/${id}/memory/tidy`) as Promise<{ removed: number }>,
-  dream: (id: string, maxUsd?: number) => post(`/api/bay/agents/${id}/memory/dream`, { maxUsd }) as Promise<DreamView>,
-  decideDream: (dreamId: number, accept: boolean) => post(`/api/bay/dreams/${dreamId}/${accept ? "accept" : "reject"}`) as Promise<DreamView>,
 };
 
 /** The Bay's state is folded by the core; refetch whenever a Bay event or an agent call lands, so crew cards stay live. */
@@ -502,19 +472,17 @@ export function useBay(events: SfEvent[]) {
 
 export type CrewMode = "practice" | "real";
 export interface ToolCheck { found: boolean; path?: string; version?: string; hint: string }
-export interface DropView { id: number; ts: string; file: string; bytes: number; signalId: number | null; status: "filed" | "skipped"; note?: string }
+
 export interface SetupView {
   mode: CrewMode; runtime: string; node: { version: string; ok: boolean; path: string }; claude: ToolCheck; git: ToolCheck;
-  realReady: boolean; blocker?: string; paths: { data: string; projects: string; drop: string }; drops: DropView[];
+  realReady: boolean; blocker?: string; paths: { data: string; projects: string };
 }
 export interface SinceView { fromEvent: number; toEvent: number; leftAt: string | null; awayMinutes: number; lines: { kind: string; text: string; ref?: number }[] }
 
 export const setupApi = {
   get: async (fresh = false) => (await fetch(`${API}/api/setup${fresh ? "?fresh=1" : ""}`)).json() as Promise<SetupView>,
   mode: (mode: CrewMode) => post(`/api/setup/mode`, { mode }) as Promise<SetupView>,
-  drop: (dir: string) => post(`/api/setup/drop`, { dir }) as Promise<{ dir: string }>,
-  scanDrop: () => post(`/api/setup/drop/scan`) as Promise<{ drops: DropView[] }>,
-  open: (target: "projects" | "drop" | "data" | "run", run?: number) => post(`/api/open`, { target, run }) as Promise<{ dir: string }>,
+  open: (target: "projects" | "data" | "run", run?: number) => post(`/api/open`, { target, run }) as Promise<{ dir: string }>,
   since: async () => (await fetch(`${API}/api/since`)).json() as Promise<SinceView>,
   // keepalive: this is sent as the window hides or closes.
   seen: (eventId: number) => fetch(`${API}/api/presence`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ eventId }), keepalive: true }).catch(() => {}),
@@ -733,10 +701,6 @@ export const watchApi = {
 export const flowsApi = {
   list: () => getJson("/api/flows", "could not list the flows") as Promise<{ flows: FlowSummaryView[]; actions: Record<string, { label: string; needs: string[]; required: boolean }>; agents: string[] }>,
   get: (id: string) => getJson(`/api/flows/${encodeURIComponent(id)}`, "could not open the flow") as Promise<{ flow: FlowView; history: { version: number; savedBy: string; savedAt: string }[] }>,
-  proposals: (id: string) => getJson(`/api/flows/${encodeURIComponent(id)}/proposals`, "could not read the proposals") as Promise<{ proposals: FlowProposalView[] }>,
-  propose: (id: string, words: string) => flowPost(`/api/flows/${encodeURIComponent(id)}/propose`, { words }) as Promise<FlowProposalView>,
-  suggest: (id: string) => flowPost(`/api/flows/${encodeURIComponent(id)}/suggest`) as Promise<{ proposals: FlowProposalView[] }>,
-  decide: (pid: number, what: "try" | "accept" | "reject") => flowPost(`/api/flows/proposals/${pid}/${what}`) as Promise<FlowProposalView>,
   /** Save the flow as its next version; refused with every problem when it could not run. */
   save: async (flow: FlowView) => {
     const r = await fetch(`${API}/api/flows/${encodeURIComponent(flow.id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ flow }) });

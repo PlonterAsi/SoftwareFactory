@@ -9,7 +9,7 @@ import { canonFor } from "../order/model.js";
  * Both are plain code over tables and events; no model call.
  */
 
-export interface SinceLine { kind: "shipped" | "failed" | "stopped" | "gate" | "conflict" | "filed" | "drop" | "spend" | "running" | "improve"; text: string; ref?: number }
+export interface SinceLine { kind: "shipped" | "failed" | "stopped" | "gate" | "conflict" | "filed" | "drop" | "spend" | "running"; text: string; ref?: number }
 export interface SinceReport { fromEvent: number; toEvent: number; leftAt: string | null; awayMinutes: number; lines: SinceLine[] }
 
 interface RunRow { id: number; idea: string; plan_name: string | null; outcome: string | null; reason: string | null; total_usd: number | null; dir: string | null; finished_at: string | null; resumed_from?: string | null }
@@ -66,47 +66,7 @@ export function sinceReport(log: EventLog, order: OrderState, from?: number, now
     const top = [...where.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `${n} to ${t}`).join(", ");
     lines.push({ kind: "filed", text: `${filed.length} new note${filed.length > 1 ? "s" : ""} filed: ${top}.` });
   }
-  const drops = Number((log.db.prepare("SELECT count(*) AS n FROM drops WHERE id > ? AND status = 'filed'").get(fromEvent) as { n: number }).n);
-  if (drops) lines.push({ kind: "drop", text: `${drops} note${drops > 1 ? "s" : ""} came in through the drop folder.` });
-  const ideas = countIfTable(log, "SELECT count(*) AS n FROM improve_proposals WHERE id > ? AND status = 'inbox'", fromEvent);
-  if (ideas) lines.push({ kind: "improve", text: `The Improvement Council has ${ideas} new proposal${ideas > 1 ? "s" : ""} for you in the Improve tab.` });
   const spend = Number((log.db.prepare("SELECT coalesce(sum(cost_usd), 0) AS s, count(*) AS n FROM agent_runs WHERE id > ? AND status = 'done'").get(fromEvent) as { s: number }).s);
   if (spend > 0) lines.push({ kind: "spend", text: `Agents spent $${spend.toFixed(4)} meanwhile.` });
   return { fromEvent, toEvent, leftAt, awayMinutes, lines };
-}
-
-/** What the Overseer agent reads before your message: short, factual, from the log. */
-export function statusDigest(log: EventLog, order: OrderState, runtimeName: string): string {
-  const out: string[] = [`Crew: ${runtimeName === "mock" ? "practice (free mock crew; it always builds a sample word counter)" : `real (${runtimeName})`}.`];
-  const active = log.db.prepare("SELECT id, idea, plan_name FROM factory_runs WHERE outcome IS NULL ORDER BY id DESC LIMIT 3").all() as unknown as RunRow[];
-  for (const r of active) out.push(`Running: run #${r.id} ${runName(r)}.`);
-  for (const g of waitingGates(log)) out.push(`Waiting for the person: run #${g.run}: ${g.question}`);
-  const recent = log.db.prepare("SELECT id, idea, plan_name, outcome, reason, total_usd, dir FROM factory_runs WHERE outcome IS NOT NULL ORDER BY id DESC LIMIT 4").all() as unknown as RunRow[];
-  for (const r of recent) out.push(`Finished: run #${r.id} ${runName(r)}: ${r.outcome}${r.total_usd != null ? `, $${r.total_usd.toFixed(4)}` : ""}${r.outcome === "shipped" && r.dir ? `, repo at ${r.dir}` : r.reason ? ` (${r.reason.slice(0, 100)})` : ""}.`);
-  const open = order.conflicts.filter((c) => c.status === "open").length;
-  if (open) out.push(`Open conflicts between rules: ${open}.`);
-  const tray = order.fragments.filter((f) => f.nodeId == null && f.state === "live" && f.kind !== "noise").length;
-  if (tray) out.push(`Unsorted notes: ${tray}.`);
-  const projects = order.nodes.filter((n) => n.parentId == null && n.mergedInto == null).sort((a, b) => b.lastActive.localeCompare(a.lastActive)).slice(0, 5);
-  for (const p of projects) {
-    const rules = canonFor(order, p.id).slice(0, 3).map((c) => c.fragment.text.slice(0, 90));
-    out.push(`Project "${p.title}"${rules.length ? `; rules: ${rules.join(" | ")}` : ""}.`);
-  }
-  const waiting = countIfTable(log, "SELECT count(*) AS n FROM improve_proposals WHERE status = 'inbox'");
-  if (waiting) out.push(`Improvement proposals waiting for the person (Improve tab): ${waiting}.`);
-  const spend = (log.db.prepare("SELECT coalesce(sum(cost_usd), 0) AS s FROM agent_runs WHERE status = 'done' AND started_at >= ?").get(new Date(Date.now() - 86_400_000).toISOString()) as { s: number }).s;
-  out.push(`Agent spend in the last 24 h: $${Number(spend).toFixed(4)}.`);
-  return out.join("\n");
-}
-
-/** The Overseer may end with "BUILD: <idea>"; the Bridge turns it into a Build button. */
-export function buildSuggestion(text: string): { text: string; build?: string } {
-  const m = text.match(/^\s*BUILD:\s*(.+?)\s*$/m);
-  if (!m) return { text };
-  return { text: text.replace(m[0], "").trim(), build: m[1].slice(0, 300) };
-}
-
-/** A count from a table that a module may not have registered (the Improvement Council's), 0 when absent. */
-function countIfTable(log: EventLog, sql: string, ...args: number[]): number {
-  try { return Number((log.db.prepare(sql).get(...args) as { n: number }).n); } catch { return 0; }
 }

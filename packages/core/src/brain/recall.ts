@@ -3,7 +3,7 @@ import type { EventLog } from "../events.js";
 
 /**
  * Full-text recall over what the person and the crew already said (SF-22): captured notes, filed
- * fragments, tickets and their notes, Council briefs, plans and improvement proposals. An SQLite
+ * fragments, tickets and their notes, Council briefs and plans. An SQLite
  * FTS5 index derived from the event log like every other table, so it rebuilds from the log.
  * The Planner and the Council get the top few matches for the idea in front of them, so they
  * build on past decisions instead of rediscovering them.
@@ -22,7 +22,6 @@ function entry(type: string, p: P): { kind: string; ref: string; text: string } 
       const t = [...(b.agreed ?? []), ...(b.concerns ?? [])].map(String).join("\n");
       return t ? { kind: "Council decision", ref: `run ${p.run}`, text: t } : null;
     }
-    case "improve.proposal": return p.title ? { kind: "proposal", ref: p.target?.title ? String(p.target.title) : "", text: `${p.title}\n${p.why ?? ""}\n${p.change ?? ""}` } : null;
     default: return null;
   }
 }

@@ -24,7 +24,7 @@ export interface OpenTicket {
   tags?: string[];
   /** Who opened it: "you", or an agent id. */
   by?: string;
-  /** Where it came from: you, order, council, agent, factory, improve. */
+  /** Where it came from: you, order, council, agent, factory. */
   source?: string;
   /** The same fingerprint twice adds a note to the open ticket instead of a second ticket. */
   fingerprint?: string;

@@ -1,7 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { EventLog } from "../events.js";
 import { projectOf, registerProjectFacet } from "../projects/service.js";
-import { registerImproveChange, registerImproveContext } from "../improve/council.js";
 import { codeMapSummary, importDetail, importOf, latestMap, listImports, suggestionsOf, type RepoExplorer } from "./explorer.js";
 import { REVIEW_MAX_USD, REVIEW_MIN_USD, latestReview, reviewBrief, type RepoReviewer } from "./review.js";
 
@@ -13,6 +12,7 @@ import { REVIEW_MAX_USD, REVIEW_MIN_USD, latestReview, reviewBrief, type RepoRev
  *   GET  /api/imports/:projectId          the import, newest code map, module notes, suggestions, exploration log
  *   POST /api/imports/:projectId/explore  { maxUsd? }   explore again (pull, rescan, map what changed)
  *   POST /api/imports/follow              { on }   keep imported repos current on their own (on by default)
+ *   POST /api/imports/:projectId/suggestions/:id/decide  { decision: "accepted" | "rejected" }   a yes opens a task ticket
  *
  * The deep review of an import (imports/review.ts):
  *
@@ -52,6 +52,8 @@ export async function importsRoute(
     reviewer?.afterImport(r, { review: typeof body.review === "boolean" ? body.review : undefined, maxUsd: typeof body.reviewMaxUsd === "number" && body.reviewMaxUsd >= 0 ? body.reviewMaxUsd : undefined });
     return [202, { projectId: r.projectId, existing: r.existing }];
   }
+  const d = path.match(/^\/api\/imports\/(\d+)\/suggestions\/([^/]+)\/decide$/);
+  if (d && req.method === "POST") return decideSuggestion(log, Number(d[1]), decodeURIComponent(d[2]), String((await ctx.readJson(req)).decision ?? ""));
   const m = path.match(/^\/api\/imports\/(\d+)(?:\/(explore))?$/);
   if (!m) return null;
   const id = Number(m[1]);
@@ -66,6 +68,21 @@ export async function importsRoute(
     return [202, { projectId: id }];
   }
   return null;
+}
+
+/** A yes on a code suggestion opens a task ticket on the project; a no closes it. Either way it leaves the waiting list. */
+export function decideSuggestion(log: EventLog, projectId: number, suggestionId: string, decision: string): [number, unknown] {
+  if (decision !== "accepted" && decision !== "rejected") return [400, { error: 'decision is "accepted" or "rejected"' }];
+  const s = log.db.prepare("SELECT * FROM code_suggestions WHERE id = ? AND project_id = ?").get(suggestionId, projectId) as Record<string, any> | undefined;
+  if (!s) return [404, { error: `No suggestion ${suggestionId} on project #${projectId}` }];
+  if (s.status === "accepted" || s.status === "rejected") return [409, { error: `Already ${s.status}` }];
+  log.append("repo.suggestion.decided", { projectId, suggestionId, decision });
+  if (decision === "accepted") {
+    const files = (() => { try { return (JSON.parse(String(s.files ?? "[]")) as string[]).slice(0, 8); } catch { return []; } })();
+    const body = `${s.body}${files.length ? `\n\nFiles: ${files.join(", ")}` : ""}`;
+    log.append("ticket.requested", { kind: "task", title: String(s.title).slice(0, 120), body, answers: { todo: body }, project: projectId, by: "you", source: "import", fingerprint: `suggestion:${suggestionId}`, tags: ["code-suggestion", String(s.lens ?? "")].filter(Boolean) });
+  }
+  return [200, { suggestionId, status: decision }];
 }
 
 async function reviewRoute(ctx: { log: EventLog; reviewer: RepoReviewer; readJson: (req: IncomingMessage) => Promise<Record<string, unknown>> }, req: IncomingMessage, path: string): Promise<[number, unknown] | null> {
@@ -149,26 +166,3 @@ function reviewFacet(log: EventLog, projectId: number) {
   const pending = Number((log.db.prepare("SELECT count(*) AS n FROM repo_review_notes WHERE project_id = ? AND applied IS NULL").get(projectId) as { n: number }).n);
   return { review: { status: r.status, call: v?.recommendation.call ?? null, headline: v?.headline ?? null, questions: v?.questions.length ?? 0, pending, scores: v ? { codeHealth: v.scores.codeHealth.score, goalFit: v.scores.goalFit.score, costToFix: v.scores.costToFix.score } : null } };
 }
-
-// The Improvement Council's lenses read the code map of an imported project before they propose anything.
-// A project target may carry the project id or its Order Engine root node id; both find the import.
-registerImproveContext("code-map", (log, t) => {
-  if (t.kind !== "project" || t.id == null) return null;
-  return codeMapSummary(log, Number(t.id)) ?? (() => { const p = projectOf(log, { kind: "order_node", ref: t.id }); return p == null ? null : codeMapSummary(log, p); })();
-});
-// ...and what the review found the app to be, so a lens proposes for this app and not for any codebase.
-registerImproveContext("repo-review", (log, t) => {
-  if (t.kind !== "project" || t.id == null) return null;
-  const direct = reviewBrief(log, Number(t.id), 1800);
-  if (direct) return direct.trim();
-  const p = projectOf(log, { kind: "order_node", ref: t.id });
-  return p == null ? null : reviewBrief(log, p, 1800).trim() || null;
-});
-
-// A new understanding of the code (an exploration that mapped something) counts as a change, so the
-// Council looks at an imported project again after its repo moved, not only every two weeks.
-registerImproveChange("code-map", (log, projectId) => {
-  const r = log.db.prepare(`SELECT max(ts) AS t FROM events WHERE type = 'repo.explore.finished'
-    AND json_extract(payload, '$.projectId') = ? AND json_extract(payload, '$.outcome') IN ('done', 'partial')`).get(projectId) as { t: string | null } | undefined;
-  return r?.t ?? null;
-});

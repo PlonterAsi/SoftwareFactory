@@ -71,7 +71,7 @@ const api = {
   removeNote: (id: number, note: number) => send(`/api/imports/${id}/review/notes/${note}`, {}, "DELETE").then((r) => j<unknown>(r)),
   saveBrief: (id: number) => send(`/api/imports/${id}/review/brief`).then((r) => j<{ branch: string; where: string; url: string | null }>(r)),
   settings: (body: { maxUsd?: number; auto?: boolean; homeStack?: string }) => send("/api/imports/review/settings", body).then((r) => j<Detail["settings"]>(r)),
-  decide: (proposal: number, decision: "accepted" | "rejected") => send(`/api/improve/proposals/${proposal}/decide`, { decision }).then((r) => j<unknown>(r)),
+  decide: (id: number, suggestion: string, decision: "accepted" | "rejected") => send(`/api/imports/${id}/suggestions/${encodeURIComponent(suggestion)}/decide`, { decision }).then((r) => j<unknown>(r)),
 };
 
 const usd = (n: number) => (n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
@@ -92,7 +92,7 @@ const CALL_SUB = { keep: "Fix the short list and build on it.", refactor: "Keep 
 function useReview(projectId: number, events: SfEvent[]) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const tick = events.filter((e) => e.type.startsWith("repo.review.") || e.type === "repo.suggestion" || e.type.startsWith("improve.proposal") || (e.type === "settings.changed" && String((e.payload as { key?: string } | undefined)?.key ?? "").startsWith("import"))).at(-1)?.id ?? 0;
+  const tick = events.filter((e) => e.type.startsWith("repo.review.") || e.type === "repo.suggestion" || e.type === "repo.suggestion.decided" || (e.type === "settings.changed" && String((e.payload as { key?: string } | undefined)?.key ?? "").startsWith("import"))).at(-1)?.id ?? 0;
   const [bump, setBump] = useState(0);
   useEffect(() => {
     let stop = false;
@@ -311,9 +311,8 @@ export function RepoReviewPanel({ projectId, events, go }: { projectId: number; 
                     <div className="rv-row">
                       {status === "accepted" ? <><span className="rv-ok small">✓ Approved: it is a ticket now.</span><button className="link small" onClick={() => go("tickets")}>open tickets</button></>
                         : status === "rejected" ? <span className="muted small">Dismissed.</span>
-                          : status === "parked" ? <span className="muted small">Parked in the Council's queue.</span>
-                            : row?.proposalId != null ? <><button className="sm" onClick={() => act(api.decide(row.proposalId!, "accepted"), `"${n.title}" is a ticket now.`)}>Approve</button><button className="ghost sm" onClick={() => act(api.decide(row.proposalId!, "rejected"))}>Dismiss</button></>
-                              : <><span className="muted small">The Council already holds this under another name.</span><button className="link small" onClick={() => go("improve")}>open its queue</button></>}
+                          : row ? <><button className="sm" onClick={() => act(api.decide(projectId, row.id, "accepted"), `"${n.title}" is a ticket now.`)}>Approve</button><button className="ghost sm" onClick={() => act(api.decide(projectId, row.id, "rejected"))}>Dismiss</button></>
+                            : <span className="muted small">Not saved as a suggestion.</span>}
                     </div>
                   </div>
                 );

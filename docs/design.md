@@ -58,7 +58,7 @@ Switch it on in **Systems → Layout → Foundry Glass** (kept per computer in `
 ## One shell (phase 6)
 
 - The classic top bar and the Systems → Layout switch are gone; Foundry Glass is the only shell.
-- The Whole factory screen is dissolved. Each part is its own page with a sidebar item: All builds (`#/factory`), Agents (`#/factory/bay`), Tickets (`#/factory/tickets`), Rules and ideas (`#/factory/order`, star map beside project rules, loose ideas and conflicts), Improve (`#/factory/improve`), Data vault (`#/factory/data`). Old links keep working.
+- The Whole factory screen is dissolved. Each part is its own page with a sidebar item: All builds (`#/factory`), Agents (`#/factory/bay`), Tickets (`#/factory/tickets`), Rules and ideas (`#/factory/order`, star map beside project rules, loose ideas and conflicts), Improve (`#/factory/improve`). Old links keep working.
 - Sidebar counts are neutral; only "needs you" counts (Needs you, conflicts) are amber.
 - Light theme stays a later step.
 

@@ -15,9 +15,7 @@ import { FactoryFloor } from "./FactoryFloor";
 import { Timeline } from "./Timeline";
 import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
-import { DataDeck, useStore } from "./DataDeck";
 import { UpdateBanner, VersionChip, useUpdates } from "./Updates";
-import { RunnersPage } from "./Runners";
 import { ConfigurationPage } from "./Configuration";
 import { Home } from "./projects/Home";
 import { Workspace } from "./projects/Workspace";
@@ -26,9 +24,6 @@ import "./projects/builtin";
 import "./projects/mission/Mission";
 import { Tickets, useTicketCounts } from "./Tickets";
 import "./TicketsPanel";
-import { ImproveDeck, useImprove } from "./ImproveDeck";
-import { Cycles } from "./Cycles";
-import "./projects/improvePanel";
 import "./projects/runPanel";
 import "./projects/budgetPanel";
 import "./projects/watchersPanel";
@@ -42,15 +37,12 @@ import { Sidebar } from "./shell/Sidebar";
 import { Helm, HelmButton } from "./shell/Helm";
 import { NeedsYou } from "./shell/NeedsYou";
 import { ShortcutSheet, useShortcuts } from "./shell/Shortcuts";
-import { BasesPage, useBases } from "./Bases";
 import { FactoryBridge } from "./bridge/FactoryBridge";
 
 export function App() {
   const f = useFactory();
   const order = useOrder(f.events);
   const bay = useBay(f.events);
-  const improve = useImprove(f.events);
-  const waiting = improve.proposals.filter((p) => p.status === "inbox").length;
   const [route, go] = useRoute();
   const features = useIntegrations(f.events);
   const featuresWaiting = features.data?.integrations.filter((i) => i.status === "awaiting").length ?? 0;
@@ -59,12 +51,10 @@ export function App() {
   // Enabled plugins' tabs join every project before the workspace renders.
   syncPluginPanels(plugins.data?.plugins, f.events);
   const chatRoutes = useChatRoutes(f.events, f.online);
-  const bases = useBases(f.online);
   const [picked, setPicked] = useState<number | null>(null);
   const [node, setNode] = useState<number | null>(null);
   const view: FactoryView = route.page === "factory" ? route.view : "factory";
   const setView = (v: FactoryView) => go({ page: "factory", view: v });
-  const store = useStore(f.events, route.page === "factory" && view === "data");
   const ticketCounts = useTicketCounts(f.events);
   // Follow the newest run unless one was picked.
   const selected = f.factoryRuns.find((r) => r.run === picked) ?? f.factoryRuns.at(-1);
@@ -137,39 +127,31 @@ export function App() {
     <ErrorBoundary key={view} where={`bridge #/factory/${view}`}>
       {view === "factory" ? (
         <section className="pane fpage fpage-builds" aria-label="All builds">
-          <header className="page-head"><h1>All builds</h1><p>Every build in this base, station by station. Each also lives in its project.</p></header>
+          <header className="page-head"><h1>All builds</h1><p>Every build, station by station. Each also lives in its project.</p></header>
           <FactoryFloor runs={f.runs} factoryRuns={f.factoryRuns} selected={selected} onSelect={setPicked} crew={crew} mode={f.mode} />
           <RunDeck run={selected} />
           <Timeline runs={f.runs} totalUsd={f.totalUsd} />
         </section>
-      ) : view === "bay" ? <div className="fpage"><AgentBay bay={bay} /></div>
+      ) : view === "bay" ? <div className="fpage"><AgentBay bay={bay} /><BrainPage events={f.events} /></div>
         : view === "tickets" ? <div className="fpage"><Tickets events={f.events} onShowRun={showRun}
             crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))} /></div>
         : view === "flows" ? <FlowsPage />
-        : view === "cycles" ? <Cycles onShowRun={showRun} tick={f.factoryRuns.filter((r) => r.finished).length + f.factoryRuns.length} />
-        : view === "improve" ? <div className="fpage"><ImproveDeck improve={improve} crew={bay.agents} onRunStarted={showRun} /></div>
-        : view === "order" ? (
+        : (
           <div className="fpage fpage-rules">
             <StarMap signals={f.signals} order={order} selected={node} onSelect={pickNode} factoryRuns={f.factoryRuns} onShowRun={showRun} />
             <OrderDeck order={order} selected={node} onSelect={pickNode} />
           </div>
-        ) : <div className="fpage"><DataDeck store={store} /></div>}
+        )}
     </ErrorBoundary>
   );
   const pageInner = route.page === "bridge"
     ? <FactoryBridge mode={route.mode} factoryRuns={f.factoryRuns} runs={f.runs} crew={crew} agents={bay.agents} stats={bay.stats} projects={projects.list} projectOfRun={chatRoutes.factoryRuns} events={f.events} onShowRun={showRun} />
     : route.page === "needs"
     ? <NeedsYou factoryRuns={f.factoryRuns} featuresWaiting={featuresWaiting} conflicts={open} ticketsForYou={ticketCounts?.you ?? 0} onShowRun={showRun} />
-    : route.page === "bases"
-    ? <BasesPage bases={bases.data} refresh={bases.refresh} />
-    : route.page === "runners"
-    ? <RunnersPage />
     : route.page === "config"
     ? <ConfigurationPage />
     : route.page === "kit"
     ? <KitPage />
-    : route.page === "brain"
-    ? <BrainPage events={f.events} />
     : route.page === "map"
     ? <FeatureMapPage events={f.events} id={route.id} go={(id) => go({ page: "map", id })} />
     : route.page === "plugins"
@@ -188,15 +170,15 @@ export function App() {
   const crewChip = <button className={`crew-chip ${f.mode ?? ""}`} onClick={() => setSetupOpen(true)} title={`Runtime: ${f.runtime}. Click for crew, checks and folders.`}>{f.mode === "real" ? "Real crew" : f.mode === "practice" ? "Practice crew · free" : "Crew …"}</button>;
   const setup = <>
     <Setup open={setupOpen} onClose={() => setSetupOpen(false)} updates={updates}
-    dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />
+    dropsAt={f.events.filter((e) => e.type === "settings.changed").at(-1)?.id ?? 0} />
     <BugReport open={bugOpen} onClose={() => setBugOpen(false)} />
   </>;
 
   const assistOpen = assist === "open";
   return (
     <div className="shell2">
-      <Sidebar route={route} needs={needsCount} projects={projects.list} crewBusy={Object.values(bay.stats).some((s) => s.state === "thinking")} base={bases.current?.name}
-        conflicts={open} proposals={waiting} tickets={ticketCounts?.open ?? 0} addons={addonNav(plugins.data)}>
+      <Sidebar route={route} needs={needsCount} projects={projects.list} crewBusy={Object.values(bay.stats).some((s) => s.state === "thinking")}
+        conflicts={open} tickets={ticketCounts?.open ?? 0} addons={addonNav(plugins.data)}>
         <button className="sb-item sb-btn" onClick={() => setSetupOpen(true)}><span className="sb-icon"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden className="sb-ico"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" /></svg></span><span className="sb-text">Systems</span></button>
         <div className="sb-status">
           <span className={f.online ? "dot on" : "dot"} /> {f.online ? "Online" : "Offline"}
