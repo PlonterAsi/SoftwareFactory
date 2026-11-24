@@ -11,7 +11,6 @@ const GO: Record<string, { label: string; to: Route }> = {
   a: { label: "Agents", to: { page: "factory", view: "bay" } },
   f: { label: "All builds", to: { page: "factory", view: "factory" } },
   d: { label: "Factory Bridge (dashboard)", to: { page: "bridge", mode: "loom" } },
-  l: { label: "Finished apps (Library)", to: { page: "features" } },
   o: { label: "Add-ons", to: { page: "plugins" } },
   b: { label: "Agents and principles", to: { page: "factory", view: "bay" } },
   m: { label: "Feature map", to: { page: "map" } },

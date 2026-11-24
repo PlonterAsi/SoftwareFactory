@@ -154,15 +154,6 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}factory/appkit.ts`, `${C}factory/kitFiles.ts`], api: [],
   },
   {
-    id: "app-agents", name: "App agents", group: "Engine",
-    purpose: "Lets an app the factory built ask one of the person's agents for work it cannot do itself, inside a cap.",
-    spec: ["A built app can ask an agent through the core.", "Each call is capped and recorded like any other agent call."],
-    flow: ["The built app asks", "The core picks the agent and runs the call", "The answer returns to the app"],
-    design: "No screen of its own; the calls appear in the timeline of agent calls.",
-    screens: [], docs: ["docs/apps.md"], stations: [],
-    files: [`${C}factory/appagent.ts`], api: ["/api/apps"],
-  },
-  {
     id: "judge", name: "Product judge", group: "Engine",
     purpose: "A separate agent looks at the running app the way its user would and scores it against the requirements, so a build that passes its tests but misses the product is caught.",
     spec: ["The judge reads every screen's text and controls and marks each must-have requirement as seen or not.", "What is not met is built as repair features, then judged once more.", "Gate B names what is still open."],
@@ -397,22 +388,13 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
 
   // ───────────────────────────── Library
   {
-    id: "use-apps", name: "Use a finished app", group: "Library",
+    id: "use-apps", name: "Run a finished app (parked)", group: "Library",
     purpose: "Starts a finished project with one press and shows it inside SoftwareFactory, so the person never guesses a command, an argument or a data file.",
-    spec: ["How to run a project is found by looking at its folder.", "Start and Stop are one press; the app's page or output shows inside the window.", "Its data files are edited as forms.", "A command-line tool is used through a form of its arguments.", "The core closes every process it started, and never hands keys to a project's code."],
+    spec: ["How to run a project is found by looking at its folder.", "Start and Stop are one press; the app's page or output shows inside the window.", "Its data files are edited as forms.", "A command-line tool is used through a form of its arguments.", "The core closes every process it started, and never hands keys to a project's code.", "A finished app can be installed into SoftwareFactory and used from a project's Integrate tab.", "An app the factory built may ask one of the person's agents (the Researcher by default) for work plain code cannot do, inside a cap."],
     flow: ["Open the project's Use tab", "Press Start", "The core starts it and finds its address", "The page opens inside the tab", "Press Stop"],
     design: "The Use tab of a project.",
-    screens: ["/p/ID/run"], docs: ["docs/run.md", "docs/flows.md"], stations: [],
-    files: [`${C}launch/`, `${B}projects/runPanel.tsx`, `${B}projects/useTool.tsx`, `${B}projects/dataFiles.tsx`], api: ["/api/launch"],
-  },
-  {
-    id: "finished-apps", name: "Finished apps inside SoftwareFactory", group: "Library",
-    purpose: "Installs a finished project into SoftwareFactory itself as a tool, a panel or a plugin, after readiness checks and one approval.",
-    spec: ["Readiness checks say which forms a project can take.", "Installing needs one approval.", "A tool gets an arguments box and its output; a panel opens its page inside the app.", "An installed app can be updated and removed; each use is counted."],
-    flow: ["Open the project's Integrate tab", "See the readiness checks", "Pick a form and ask", "Approve", "It appears under Finished apps"],
-    design: "The Finished apps page and the Integrate tab of every project.",
-    screens: ["/features", "/p/ID/integrate"], docs: ["docs/integrations.md", "docs/flows.md"], stations: [],
-    files: [`${C}integrations/`, `${B}Features.tsx`], api: ["/api/integrations"],
+    screens: ["/p/ID/run", "/features", "/p/ID/integrate"], docs: ["docs/run.md", "docs/flows.md", "docs/integrations.md", "docs/apps.md"], stations: [],
+    files: [`${C}launch/`, `${B}projects/runPanel.tsx`, `${B}projects/useTool.tsx`, `${B}projects/dataFiles.tsx`, `${C}integrations/`, `${B}Features.tsx`, `${C}factory/appagent.ts`], api: ["/api/launch", "/api/integrations", "/api/apps"],
   },
   {
     id: "plugins", name: "Add-ons (plugins)", group: "Library",
