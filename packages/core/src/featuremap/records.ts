@@ -201,7 +201,7 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     flow: ["A feature-sized ask or ticket in a repo project is routed to the engine", "The repo is cloned on a new branch and its tools are set up", "The change is designed and criticised", "The plan waits for the person at the plan gate", "The repo's tests are run as the baseline", "Each feature is built in its own session, with the tests after each", "The Reviewer runs the acceptance criteria", "The judge reads the running site", "The person accepts at the build gate", "The branch becomes a draft pull request"],
     design: "A run like any other on the run deck, with the repo and branch on its header; started from a ticket's Work it on the engine or from the idea box of a project that lives in a repo.",
     screens: ["/factory", "/factory/tickets"], docs: ["docs/engine.md", "docs/tickets.md"], stations: ["design", "critique", "plan", "build", "fix", "review", "evaluate"],
-    files: [`${C}factory/reporun.ts`, `${C}factory/repoenv.ts`], api: [],
+    files: [`${C}factory/reporun.ts`, `${C}factory/repoenv.ts`, `${C}factory/suitememo.ts`], api: [],
   },
   {
     id: "engine-review", name: "Engine review and cycles", group: "Engine",

@@ -1,3 +1,4 @@
+import { SuiteMemo } from "./suitememo.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -234,6 +235,7 @@ export class RepoRun extends Run {
   /** The fast checks (types, lint) already failed before the change, so they cannot judge it. */
   private gatesOff = "";
   private handed: Record<string, unknown> = {};
+  private memo = new SuiteMemo<TestRun>();
 
   constructor(x: Parameters<RunMaker>[0], private info: RepoRunInfo, private tools: RepoTools) {
     super(x.factory, x.log, x.runtime, x.id, x.idea, x.o, null);
@@ -266,9 +268,14 @@ export class RepoRun extends Run {
   }
 
   /** The repo's own suite, timed so the run's clock leaves it out (suiteMs). */
-  private async suite(): Promise<TestRun> {
+  private async suite(fresh = false): Promise<TestRun> {
     const began = Date.now();
-    try { return await this.tools.runTests(this.dir, this.env); } finally { this.suiteMs += Date.now() - began; }
+    try {
+      // The same files as the last run give its result back (factory/suitememo.ts); a re-check always runs again.
+      const { result, reused } = await this.memo.get(this.dir, () => this.tools.runTests(this.dir, this.env), fresh);
+      if (reused) this.log.append("factory.tests.reused", { run: this.id, why: "no file changed since the suite last ran" });
+      return result;
+    } finally { this.suiteMs += Date.now() - began; }
   }
 
   /**
@@ -282,7 +289,7 @@ export class RepoRun extends Run {
     const fresh = keys.filter((k) => !this.failedTwice.has(k) && !this.flaky.has(k));
     const known = keys.filter((k) => this.failedTwice.has(k));
     if (!fresh.length || !this.env.tests.length) return keys.filter((k) => !this.flaky.has(k));
-    const again = await this.suite();
+    const again = await this.suite(true);
     const leaf = (k: string) => k.slice(k.indexOf("::") + 2).split(" > ").at(-1)!.trim();
     const passed = new Set(again.cases.filter((c) => c.pass).map((c) => leaf(key(c))));
     const failed = new Set(again.cases.filter((c) => !c.pass).map((c) => leaf(key(c))));
