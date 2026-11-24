@@ -64,7 +64,7 @@ Drawn by `App.tsx`. It is the same on every screen.
 | Ctrl K | Open the Helm |
 | Ctrl Enter (in the Helm) | Build what you typed |
 | Ctrl J | Show or hide the Assistant |
-| G then N / P / A / F / D / L / O / B / M | Go to Needs you / Projects / Agents / All builds / Factory Bridge / Finished apps / Add-ons / Agents and principles / Feature map |
+| G then N / P / A / F / D / O / B / M | Go to Needs you / Projects / Agents / All builds / Factory Bridge / Add-ons / Agents and principles / Feature map |
 | ? | Show the shortcut list |
 | Esc | Close |
 
