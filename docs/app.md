@@ -30,8 +30,6 @@ flowchart TB
   factory --> builds["All builds<br/>#/factory"]
   factory --> order["Rules and ideas<br/>#/factory/order"]
   factory --> imp["Improve<br/>#/factory/improve"]
-  factory --> cyc["Engine cycles<br/>#/factory/cycles"]
-  factory --> data["Data vault<br/>#/factory/data"]
 
   lib --> feat["Finished apps<br/>#/features"]
   lib --> plug["Add-ons<br/>#/plugins"]
@@ -158,8 +156,6 @@ The engine's own record of one build (`RunDeck.tsx`), shown on the Builds tab an
 | **All builds** (`#/factory`) | The factory floor (stations lit per run), the run deck and the timeline of every agent call with model, time and cost. | `FactoryFloor.tsx`, `RunDeck.tsx`, `Timeline.tsx` |
 | **Rules and ideas** (`#/factory/order`) | The star map of every project, idea and thread, and the Order deck: Canon, Unsorted tray, conflict cards, the briefing with undo. | `StarMap.tsx`, `OrderDeck.tsx` |
 | **Improve** (`#/factory/improve`) | The Improvement Council: the lens wheel, the cost meter, the queue of proposals to accept, park or reject. | `ImproveDeck.tsx` |
-| **Engine cycles** (`#/factory/cycles`) | Runs of the same prompt in columns: app version, design scores, the judge's last look, money, minutes, and the engine review. | `Cycles.tsx` |
-| **Data vault** (`#/factory/data`) | The three storage tiers live: event log, tables with health, files on disk, cache; *Rebuild from log*. | `DataDeck.tsx` |
 
 ![Factory Bridge](img/app/factory-bridge.png)
 
@@ -167,7 +163,6 @@ The engine's own record of one build (`RunDeck.tsx`), shown on the Builds tab an
 
 ![Tickets](img/app/tickets.png)
 
-![Engine cycles](img/app/engine-cycles.png)
 
 ## Library group
 

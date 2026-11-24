@@ -258,8 +258,7 @@ How the engine itself is improved. This is a working method, partly inside the a
 flowchart LR
   prompt["The same prompt, the same cap"] --> run["One run"]
   run --> retro["Engine review, written by the core:<br/>what it did badly, well, where money went"]
-  retro --> cycles["Engine cycles page: runs side by side"]
-  cycles --> change["An engine change for each failure,<br/>so it cannot happen again"]
+  retro --> change["An engine change for each failure,<br/>so it cannot happen again"]
   change --> prompt
 ```
 

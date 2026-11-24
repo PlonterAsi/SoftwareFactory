@@ -14,13 +14,13 @@ import { useEffect, useState } from "react";
  *   #/config               configuration: what SoftwareFactory runs with now, and where each piece came from
  *   #/runners              build runners: GitHub's checks and builds, run on this PC
  *   #/bases                the factories this app hosts (open, create, rename, archive)
- *   #/factory[/view]       the whole factory (floor, bay, order, tickets, improve, cycles, flows, data), as before projects
+ *   #/factory[/view]       the whole factory (floor, bay, order, tickets, improve, flows), as before projects
  *   #/bridge[/mode]        the Factory Bridge dashboard (loom, score, quarter)
  *   #/needs                everything waiting on you (the new shell's first item)
  *   #/_kit                 the shared component kit (not linked; the UI tour shoots it)
  * The old #order, #bay and #data still open the factory views.
  */
-export type FactoryView = "factory" | "order" | "bay" | "data" | "tickets" | "improve" | "cycles" | "flows";
+export type FactoryView = "factory" | "order" | "bay" | "tickets" | "improve" | "flows";
 export type BridgeMode = "loom" | "score" | "quarter";
 const MODES: BridgeMode[] = ["loom", "score", "quarter"];
 export type Route =
@@ -40,7 +40,7 @@ export type Route =
   | { page: "needs" }
   | { page: "bridge"; mode: BridgeMode };
 
-const VIEWS: FactoryView[] = ["factory", "order", "bay", "data", "tickets", "improve", "cycles", "flows"];
+const VIEWS: FactoryView[] = ["factory", "order", "bay", "tickets", "improve", "flows"];
 
 export function parse(hash: string): Route {
   const h = hash.replace(/^#/, "");

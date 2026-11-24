@@ -53,7 +53,7 @@ All under `packages/core/src/`.
 | Module | Job | Read more |
 |---|---|---|
 | `events.ts` | The append-only event log (SQLite), full-text search, live listeners | [storage.md](storage.md) |
-| `store/` | Schema migrations, projections (tables folded from events), cache, the Data vault report | [storage.md](storage.md) |
+| `store/` | Schema migrations, projections (tables folded from events), cache | [storage.md](storage.md) |
 | `server.ts` | The HTTP server, routing, the live event stream, start-up of one base | [reference.md](reference.md) |
 | `bases/` | The registry of bases and the host that switches between them | [bases.md](bases.md) |
 | `runtime.ts`, `agents.ts` | The `AgentRuntime` adapter: Claude Code (lean or full), the mock practice crew, a switchable wrapper; per-call caps, timeouts, cost recording | [spike-runtime.md](spike-runtime.md) |
@@ -98,7 +98,7 @@ Beside `src/`: `kit/` is the app kit copied into every built app; `agent-skills/
 | `linkcheck.ts` | Opening every link the app contains |
 | `appkit.ts`, `kitFiles.ts` | Installing the kit; checking an app against it |
 | `evaluate.ts` | The product judge's rubric, the per-screen look, repair features |
-| `retro.ts`, `cycles.ts` | The engine review and the cycle comparison |
+| `retro.ts` | The engine review |
 | `visualize.ts` | The visualizeEverything check |
 | `appagent.ts` | A built app asking one of the person's agents |
 | `crew.ts` | Binding an agent to a station: prompt, principles, contract, kit |

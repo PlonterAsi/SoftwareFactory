@@ -70,7 +70,7 @@ A loop needs a goal that can be measured, an observer other than the agent that 
 | Test ⇄ fix | Fixer (sonnet) at the workbench | The core runs the suite and the fast checks (syntax, types, lint, secrets) | Every locked test is green | 5 rounds, or a stall: then the ladder (question the test, stronger model, you) | The attempt record, in the log |
 | Review | Reviewer (haiku) at the workbench | It runs the product for each criterion; the core reads its verdict | Every criterion seen working | High-severity findings go to the Fixer once; the rest ride to gate B | The review, in the log |
 | Judge | Product Judge (sonnet), who sees no code | The core reads every screen's text and controls, and decides against the thresholds | Every must-have requirement seen working and function, design, content at 4 or more | 2 looks. Repairs get 25% of the budget, in groups of 5 requirements | The evaluation, in the log |
-| The factory itself | The core, no agent | You, on the Engine tab and the Engine cycles page | | | `factory.retro` |
+| The factory itself | The core, no agent | You, on the Engine tab | | | `factory.retro` |
 
 ### What changes the route
 
@@ -207,14 +207,9 @@ On the Bridge, in the Run deck:
 
 The shell is an allowlist. Any other command is refused, because the agent runs headless with no one to approve it. `node` runs the project's own code, which the core already does on every test round, so it adds no new kind of risk. Agents may not install packages, change git, or reach the network through the shell. The core reverts locked files after every call, whatever the agent did.
 
-## Engine cycles: the same prompt, side by side
+## Engine cycles (removed 24 Nov 2026)
 
-A benchmark run tests the engine, not the product. When the same prompt has been built more than once, the
-**Engine cycles** page (sidebar, `#/factory/cycles`, `GET /api/factory/cycles`) puts the runs in columns: the app
-version that built each, the design loop's best scores, the product judge's last look, money, minutes, and the
-engine review (what the engine did badly and well, and each agent's record). It is worked out from the log
-(`packages/core/src/factory/cycles.ts`) with no agent call and nothing written, so runs from before reviews were
-logged get theirs too. Read across the row to see whether an engine change helped.
+The Engine cycles page, which laid runs of the same prompt side by side, was removed in the 24 Nov audit: no benchmark series had run since 17 Nov. Each run's engine review (`factory.retro`) is still on its Engine tab.
 
 ## What cycle 3 changed (run 3185)
 

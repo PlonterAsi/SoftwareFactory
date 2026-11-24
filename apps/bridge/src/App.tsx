@@ -15,7 +15,6 @@ import { FactoryFloor } from "./FactoryFloor";
 import { Timeline } from "./Timeline";
 import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
-import { DataDeck, useStore } from "./DataDeck";
 import { UpdateBanner, VersionChip, useUpdates } from "./Updates";
 import { RunnersPage } from "./Runners";
 import { ConfigurationPage } from "./Configuration";
@@ -27,7 +26,6 @@ import "./projects/mission/Mission";
 import { Tickets, useTicketCounts } from "./Tickets";
 import "./TicketsPanel";
 import { ImproveDeck, useImprove } from "./ImproveDeck";
-import { Cycles } from "./Cycles";
 import "./projects/improvePanel";
 import "./projects/runPanel";
 import "./projects/budgetPanel";
@@ -64,7 +62,6 @@ export function App() {
   const [node, setNode] = useState<number | null>(null);
   const view: FactoryView = route.page === "factory" ? route.view : "factory";
   const setView = (v: FactoryView) => go({ page: "factory", view: v });
-  const store = useStore(f.events, route.page === "factory" && view === "data");
   const ticketCounts = useTicketCounts(f.events);
   // Follow the newest run unless one was picked.
   const selected = f.factoryRuns.find((r) => r.run === picked) ?? f.factoryRuns.at(-1);
@@ -146,14 +143,13 @@ export function App() {
         : view === "tickets" ? <div className="fpage"><Tickets events={f.events} onShowRun={showRun}
             crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))} /></div>
         : view === "flows" ? <FlowsPage />
-        : view === "cycles" ? <Cycles onShowRun={showRun} tick={f.factoryRuns.filter((r) => r.finished).length + f.factoryRuns.length} />
         : view === "improve" ? <div className="fpage"><ImproveDeck improve={improve} crew={bay.agents} onRunStarted={showRun} /></div>
-        : view === "order" ? (
+        : (
           <div className="fpage fpage-rules">
             <StarMap signals={f.signals} order={order} selected={node} onSelect={pickNode} factoryRuns={f.factoryRuns} onShowRun={showRun} />
             <OrderDeck order={order} selected={node} onSelect={pickNode} />
           </div>
-        ) : <div className="fpage"><DataDeck store={store} /></div>}
+        )}
     </ErrorBoundary>
   );
   const pageInner = route.page === "bridge"

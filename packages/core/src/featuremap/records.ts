@@ -204,13 +204,13 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}factory/reporun.ts`, `${C}factory/repoenv.ts`, `${C}factory/suitememo.ts`], api: [],
   },
   {
-    id: "engine-review", name: "Engine review and cycles", group: "Engine",
-    purpose: "Every run ends with the engine's review of its own work, and runs of the same prompt are compared side by side, so the engine itself can be improved from evidence.",
-    spec: ["The review is written by the core from events, with no agent call.", "Runs of the same prompt are shown as columns: version, scores, money, minutes, review."],
-    flow: ["A run ends", "The core folds its events into a review", "The review is logged", "Engine cycles lines it up with earlier runs of the same prompt"],
-    design: "The Engine tab of the run deck, and the Engine cycles page with one column per run.",
-    screens: ["/factory/cycles"], docs: ["docs/engine.md", "docs/flows.md"], stations: [],
-    files: [`${C}factory/retro.ts`, `${C}factory/cycles.ts`, `${B}Cycles.tsx`], api: [],
+    id: "engine-review", name: "Engine review", group: "Engine",
+    purpose: "Every run ends with the engine's review of its own work, so the engine itself can be improved from evidence.",
+    spec: ["The review is written by the core from events, with no agent call."],
+    flow: ["A run ends", "The core folds its events into a review", "The review is logged"],
+    design: "The Engine tab of the run deck.",
+    screens: [], docs: ["docs/engine.md", "docs/flows.md"], stations: [],
+    files: [`${C}factory/retro.ts`], api: [],
   },
 
   // ───────────────────────────── Agents
@@ -589,13 +589,13 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
 
   // ───────────────────────────── Foundation
   {
-    id: "storage", name: "Event log and data vault", group: "Foundation",
+    id: "storage", name: "Event log", group: "Foundation",
     purpose: "The source of truth: an append-only event log, with typed tables folded from it and rebuilt from it whenever needed, so nothing is ever lost and everything can be shown.",
-    spec: ["Every change is an event in one append-only log.", "Tables are derived from the log in the same transaction and can be rebuilt from it.", "Schema changes are versioned migrations with a backup.", "The Data vault shows the log, the tables with their health, the files on disk and the cache."],
+    spec: ["Every change is an event in one append-only log.", "Tables are derived from the log in the same transaction and can be rebuilt from it.", "Schema changes are versioned migrations with a backup.", "Rebuild from log recreates any table (log.rebuild)."],
     flow: ["A feature appends an event", "Projections update their tables in the same transaction", "Listeners and the live stream get the event", "Rebuild from log recreates any table"],
-    design: "The Data vault page: three storage tiers drawn live, with Rebuild from log.",
-    screens: ["/factory/data"], docs: ["docs/storage.md", "docs/reference.md"], stations: [],
-    files: [`${C}events.ts`, `${C}store/`, `${B}DataDeck.tsx`], api: ["/api/store"],
+    design: "No screen of its own (the Data vault page was removed 24 Nov 2026: a debug view nobody used).",
+    screens: [], docs: ["docs/storage.md", "docs/reference.md"], stations: [],
+    files: [`${C}events.ts`, `${C}store/`], api: [],
   },
   {
     id: "core-api", name: "Core server and live stream", group: "Foundation",

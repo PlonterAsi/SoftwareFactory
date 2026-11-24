@@ -1,4 +1,3 @@
-import { engineCycles } from "./factory/cycles.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
@@ -26,7 +25,6 @@ import { OrderEngine, type OrderOptions } from "./order/engine.js";
 import { canonFor, type NodeKind } from "./order/model.js";
 import { AgentBay } from "./bay/bay.js";
 import { SLOTS, type Slot } from "./bay/agentfile.js";
-import { storeReport } from "./store/inspect.js";
 import "./bridge/tables.js";
 import { projectsRoute } from "./projects/routes.js";
 import { projectOf } from "./projects/service.js";
@@ -282,7 +280,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         clients: { origins: Object.fromEntries(clients.origins), streams: Object.fromEntries(clients.streams) },
       });
       if (req.method === "GET" && url.pathname === "/api/preflight") { const r = preflightNow(url.searchParams.get("fresh") === "1"); return json(res, 200, { ...r.auto, press: r.manual }); }
-      if (req.method === "GET" && url.pathname === "/api/factory/cycles") return json(res, 200, { cycles: log.view("engine-cycles", engineCycles) });
       if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeRuns(), agentCalls.size, runnerJobs()));
       if (req.method === "POST" && url.pathname === "/api/updates") {
         const body = await readJson(req);
@@ -476,12 +473,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (url.pathname.startsWith("/api/bay/")) {
         const r = await bayRoute(bay, req, url);
         if (r) return r[0] === -1 ? text(res, 200, String(r[1])) : json(res, r[0], r[1]);
-      }
-      if (req.method === "GET" && url.pathname === "/api/store") return json(res, 200, storeReport(log, projectsDir));
-      if (req.method === "POST" && url.pathname === "/api/store/rebuild") {
-        const body = await readJson(req);
-        log.rebuild(body.name ? String(body.name) : undefined);
-        return json(res, 200, storeReport(log, projectsDir));
       }
       if (url.pathname === "/api/projects" || url.pathname.startsWith("/api/projects/")) {
         const canBuild = () => gitReady() ? null : "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again.";

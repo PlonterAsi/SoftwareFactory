@@ -4,7 +4,7 @@ import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  EventLog, OrderEngine, Factory, MockRuntime, captureSignal, listSignals, runAgent, costSummary, storeReport,
+  EventLog, OrderEngine, Factory, MockRuntime, captureSignal, listSignals, runAgent, costSummary,
   registerProjection, SCHEMA_VERSION, type Projection,
 } from "../src/index.js";
 
@@ -136,21 +136,5 @@ describe("storage: database, files and cache", () => {
     expect(v().key).toBe(log.lastId());
     log.cache.clear();
     expect(order.state().fragments.length).toBeGreaterThan(0); // recomputed from the database
-  });
-
-  it("reports the three tiers, including files the database cannot find", async () => {
-    const dir = tmp();
-    const { log } = await seeded(dir);
-    const run = rows(log, "SELECT dir FROM factory_runs")[0];
-    rmSync(join(run.dir, "SPEC.md"));
-    const r = storeReport(log, join(dir, "projects"));
-    expect(r.database.schemaVersion).toBe(SCHEMA_VERSION);
-    expect(r.database.tables.find((t) => t.name === "events")!.rows).toBe(log.lastId());
-    expect(r.database.projections.every((p) => p.behind === 0)).toBe(true);
-    expect(r.files.projects[0]).toMatchObject({ onDisk: true, missing: ["SPEC.md"] });
-    expect(r.files.projects[0].files).toBeGreaterThan(3);
-    expect(r.files.orphans).toEqual([]);
-    expect(r.cache.views.map((v) => v.name)).toContain("order");
-    log.close();
   });
 });
