@@ -68,7 +68,6 @@ flowchart LR
 | [plugins.md](plugins.md) | Add-ons: the plugin format, permissions, sandbox | current |
 | [bases.md](bases.md) | Several factories in one app | current |
 | [feature-map.md](feature-map.md) | One record per feature, the wiring map read from the code, proof of life, the check; the Brain as the first case | current |
-| [game-door.md](game-door.md) | The three game demos and the Sector direction | demos built; Sector is **Planned** |
 
 ### Technical
 

@@ -61,24 +61,6 @@ describe("plugin manifests", () => {
     expect(matchesType("order.node", "order.node")).toBe(true);
   });
 
-  it("the three game demos are page-only plugins that load nothing from outside; only Sector reaches the real factory", () => {
-    for (const id of ["game-dock", "game-sector", "game-workshop"]) {
-      const m = readManifest(join(EXAMPLES_DIR, id));
-      // Sector alone reaches the real factory: it reads records and may open a ticket, nothing else.
-      expect(m).toMatchObject({ id, permissions: id === "game-sector" ? ["records:read", "actions"] : [], actions: id === "game-sector" ? ["ticket.open"] : [], main: null, agents: [] });
-      expect(m.panels).toEqual([expect.objectContaining({ where: "page", entry: "ui/index.html" })]);
-      const html = readFileSync(join(EXAMPLES_DIR, id, "ui/index.html"), "utf8");
-      expect(html).not.toMatch(/<(script|link|img)[^>]+(src|href)="https?:/i);
-      expect(html).toMatch(id === "game-sector" ? /The only thing written to SoftwareFactory is a ticket/ : /nothing is written to SoftwareFactory/i);
-    }
-  });
-
-  it("the field desk example asks for real records and two named actions", () => {
-    const m = readManifest(join(EXAMPLES_DIR, "field-desk"));
-    expect(m).toMatchObject({ id: "field-desk", permissions: ["records:read", "actions"], actions: ["ticket.open", "ticket.note"], main: null });
-    expect(readFileSync(join(EXAMPLES_DIR, "field-desk", "ui/index.html"), "utf8")).not.toMatch(/<(script|link|img)[^>]+(src|href)="https?:/i);
-  });
-
   it("the bundled example is a valid plugin", () => {
     const m = readManifest(join(EXAMPLES_DIR, "run-stats"));
     expect(m).toMatchObject({ id: "run-stats", main: "main.mjs", agents: ["agents/run-critic.md"] });

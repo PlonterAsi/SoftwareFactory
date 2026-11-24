@@ -191,4 +191,4 @@ Details: [apps.md](apps.md) and [screens.md](screens.md).
 
 ## Not in the app yet
 
-These were discussed and are **Planned**, not built: a real-time strategy view of the factory ("Sector"), a shared plugin catalog, and the judge clicking through journeys instead of reading screens. The full list with status is in [spec.md](spec.md).
+These were discussed and are **Planned**, not built: a shared plugin catalog, and the judge clicking through journeys instead of reading screens. The full list with status is in [spec.md](spec.md).

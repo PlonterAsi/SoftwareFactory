@@ -45,7 +45,7 @@ The full example is in `packages/core/plugin-examples/run-stats/` and ships with
 
 ### Actions: a plugin that does real work
 
-With `actions`, a plugin's page can do real things in SoftwareFactory. This is what a second way into the app (the game door, [game-door.md](game-door.md)) is built on.
+With `actions`, a plugin's page can do real things in SoftwareFactory.
 
 ```json
 { "permissions": ["records:read", "actions"], "actions": ["ticket.open", "ticket.note"] }
@@ -201,7 +201,7 @@ GET  /plugins/_sdk/sf.js | sf.css
 ## Not yet
 
 - Page network access and a backend network switch: Node 22's permission model does not limit the network, so a backend can still make web requests. Pages cannot.
-- Actions that spend money (work a ticket, start a build), each with its price and a hold to confirm, and the Sector game reading real records and giving orders from its map.
+- Actions that spend money (work a ticket, start a build), each with its price and a hold to confirm.
 - Plugins starting full agents (with files and tools) and adding factory stations of their own; for now `ai` is Claude with the web only.
 - A sandbox for trying a find (a throwaway Linux box with no access to your drives or keys).
 - A shared plugin catalog; for now a plugin comes from a folder, an example, GitHub, or a finished project.
