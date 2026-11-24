@@ -165,8 +165,9 @@ describe("attempt memory and the escalation ladder", () => {
     await f.wait(run);
     expect(events(log, "factory.run.finished").at(-1).outcome).toBe("stopped");
     expect(events(log, "factory.ladder").map((l) => l.to)).toEqual(["deeper", "dispute"]);
-    expect(events(log, "factory.attempt").map((a) => a.model)).toEqual(["sonnet", "opus"]);
-    expect(prompts[1].model).toBe("opus");
+    // The deeper round goes straight to Fable when the run can pay for it (hard debugging, 24 Nov 2026).
+    expect(events(log, "factory.attempt").map((a) => a.model)).toEqual(["sonnet", "fable"]);
+    expect(prompts[1].model).toBe("fable");
     expect(prompts[1].prompt).toMatch(/What was already tried/);
     expect(prompts[1].prompt).toMatch(/I can't see what fails/);
     expect(prompts[1].prompt).toMatch(/Step back/);
