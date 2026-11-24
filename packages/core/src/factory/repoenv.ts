@@ -196,7 +196,8 @@ export async function prepareEnv(dir: string, o: { install?: boolean; platform?:
       for (const g of goRoots) {
         const where = g ? ` (${g})` : "";
         env.tests.push({ label: `go vet${where}`, file: "go", args: ["vet", "./..."], kind: "check", ...(g ? { cwd: g } : {}) });
-        env.tests.push({ label: `go test${where}`, file: "go", args: ["test", "./..."], kind: "go", ...(g ? { cwd: g } : {}) });
+        // -v names every test, so one that skipped is seen as not run (run 10486: two failing tests skipped for want of a database read as green).
+        env.tests.push({ label: `go test${where}`, file: "go", args: ["test", "-v", "./..."], kind: "go", ...(g ? { cwd: g } : {}) });
       }
     }
   }
@@ -238,13 +239,19 @@ export function parseCases(output: string, kind: TestCommand["kind"]): TestCase[
     seen.add(key);
     out.push({ name, file, pass, durationMs: 0, ...(error ? { error } : {}) });
   };
+  let lastLog = "";
   for (const raw of output.split(/\r?\n/)) {
     const line = raw.replace(/\u001b\[[0-9;]*m/g, "");
     let m: RegExpMatchArray | null;
     if (kind === "check") continue;
     if (kind === "go") {
       // Without -v: "ok  	pkg	0.1s" per package that passed, "--- FAIL: TestX (0.00s)" per failing test, "FAIL	pkg" per package.
-      if ((m = line.match(/^ok\s+(\S+)/))) add(m[1], m[1], true);
+      // With -v: "--- PASS/FAIL/SKIP: TestX (0.00s)" per test; a skip's reason is the indented line after it.
+      // Go prints the t.Skip reason ("    x_test.go:16: TEST_DATABASE_URL not set") just before "--- SKIP".
+      if (/^\s{4,}\S+_test\.go:\d+:/.test(line)) { lastLog = line.trim().replace(/^\S+_test\.go:\d+:\s*/, "").slice(0, 200); continue; }
+      if (/^=== (RUN|CONT|PAUSE)/.test(line)) { lastLog = ""; continue; }
+      if ((m = line.match(/^\s*--- PASS: (\S+)/))) add(m[1], "", true);
+      else if ((m = line.match(/^\s*--- SKIP: (\S+)/))) { add(m[1], "", true); const last = out[out.length - 1]; if (last?.name === m[1]) last.skipped = lastLog || "skipped"; }
       else if ((m = line.match(/^\s*--- FAIL: (\S+)/))) add(m[1], "", false, "failed");
       else if ((m = line.match(/^FAIL\s+(\S+)\s/))) add(`${m[1]} (package)`, m[1], false, "failed");
       continue;
@@ -287,8 +294,8 @@ export async function runRepoTests(dir: string, env: Pick<RepoEnv, "tests" | "pa
     if (r.code !== 0) all.exitCode = r.code ?? 1;
     all.timedOut ||= r.timedOut;
   }
-  all.passed = all.cases.filter((c) => c.pass).length;
-  all.failed = all.cases.length - all.passed;
+  all.passed = all.cases.filter((c) => c.pass && !c.skipped).length;
+  all.failed = all.cases.filter((c) => !c.pass).length;
   all.output = trim(all.output, 6000);
   return all;
 }

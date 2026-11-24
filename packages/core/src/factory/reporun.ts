@@ -420,7 +420,7 @@ export class RepoRun extends Run {
     };
   }
   /** The last whole run of the repo's tests on the branch: the Reviewer is told it instead of running it again. */
-  protected lastSuite: { passed: number; failed: number; failing: string[]; seconds: number } | null = null;
+  protected lastSuite: { passed: number; failed: number; failing: string[]; seconds: number; skipped?: string[] } | null = null;
   protected reviewBrief(): { prompt: string; verify: string } {
     let diff = "";
     try { diff = git(this.dir, "diff", "--no-color", this.base, "--", ".").slice(0, 40000); } catch { /* the Reviewer reads the folder */ }
@@ -544,7 +544,8 @@ export class RepoRun extends Run {
     this.baselineSeconds = Math.round((Date.now() - began) / 1000);
     this.failingBefore = new Set(t.cases.filter((c) => !c.pass).map(key));
     this.log.append("factory.tests.locked", { run: this.id, hash: "", files: [...new Set(t.cases.map((c) => c.file).filter(Boolean))].slice(0, 200), sha: this.base, kept: "repo", baseline: { passed: t.passed, failed: t.failed, command: this.env.testHint, seconds: this.baselineSeconds }, failingBefore: [...this.failingBefore].slice(0, 500), ...(this.gatesOff ? { gatesOff: this.gatesOff } : {}) });
-    this.mark("tests", "pass", undefined, `The repo's own tests before the change: ${t.passed} pass${t.failed ? `, ${t.failed} already fail (not held against this run)` : ""}.`);
+    const notRun = t.cases.filter((c) => c.skipped);
+    this.mark("tests", "pass", undefined, `The repo's own tests before the change: ${t.passed} pass${t.failed ? `, ${t.failed} already fail (not held against this run)` : ""}${notRun.length ? `, ${notRun.length} did not run here (${[...new Set(notRun.map((c) => c.skipped))].slice(0, 2).join("; ")})` : ""}.`);
   }
 
   /** The plan's features as build work. A small run, or a crew without a workbench, builds them in one session. */
@@ -719,6 +720,13 @@ export class RepoRun extends Run {
       r.cases = r.cases.filter((c) => !flaky.includes(c));
       if (flaky.length) r.cases.push({ name: `${flaky.length} test${flaky.length === 1 ? "" : "s"} that failed once and passed when the suite ran again (flaky on this computer, not held against the change)`, file: "", pass: true, durationMs: 0 });
     }
+    // Tests that skipped did not run: they are one visible line, never passes (run 10486 read two failing tests as green).
+    const skipped = r.cases.filter((c) => c.skipped);
+    if (skipped.length) {
+      r.cases = r.cases.filter((c) => !c.skipped);
+      const why = [...new Set(skipped.map((c) => c.skipped!))].slice(0, 3).join("; ");
+      r.cases.push({ name: `${skipped.length} test${skipped.length === 1 ? "" : "s"} did not run here (${why}): they prove nothing about this change until they run where that is set`, file: "", pass: true, durationMs: 0, skipped: why });
+    }
     if (!this.env.tests.length) r.cases.push({ name: "the repo has no tests SoftwareFactory can run here", file: "", pass: true, durationMs: 0 });
     const texts: Record<string, string> = {};
     for (const p of changed) { try { const abs = join(this.dir, p); if (statSync(abs).isFile() && statSync(abs).size < 400_000) texts[p] = readFileSync(abs, "utf8"); } catch { /* deleted */ } }
@@ -732,7 +740,7 @@ export class RepoRun extends Run {
     r.failed = r.cases.length - r.passed;
     // Failing cases first, so a long suite cut at 400 never drops the ones that matter.
     this.log.append("factory.tests", { run: this.id, round, cases: [...r.cases.filter((c) => !c.pass), ...r.cases.filter((c) => c.pass)].slice(0, 400), passed: r.passed, failed: r.failed, timedOut: r.timedOut });
-    if (this.env.tests.length) this.lastSuite = { passed: r.passed, failed: r.failed, failing: r.cases.filter((c) => !c.pass).map((c) => c.name).slice(0, 10), seconds: tookS };
+    if (this.env.tests.length) this.lastSuite = { passed: r.passed, failed: r.failed, failing: r.cases.filter((c) => !c.pass).map((c) => c.name).slice(0, 10), seconds: tookS, skipped: skipped.map((c) => c.name).slice(0, 10) };
     return r;
   }
 
@@ -803,11 +811,12 @@ const briefLine = (b: { agreed: string[]; proposals: string[]; concerns: string[
   ["The Council looked at the ask first.", b.agreed.length ? `Agreed: ${b.agreed.join("; ")}.` : "", b.proposals.length ? `Proposed: ${b.proposals.join("; ")}.` : "", b.concerns.length ? `Concerns: ${b.concerns.join("; ")}.` : ""].filter(Boolean).join(" ");
 
 /** What the Reviewer is told about the suite the core already ran: use it, and run only the tests of what changed. */
-export function reviewSuiteNote(s: { passed: number; failed: number; failing: string[]; seconds: number }): string {
+export function reviewSuiteNote(s: { passed: number; failed: number; failing: string[]; seconds: number; skipped?: string[] }): string {
   return [
     `SoftwareFactory already ran the repo's whole test suite on this branch just now (${s.seconds} s): ${s.passed} pass, ${s.failed} fail${s.failing.length ? ` (${s.failing.join("; ")})` : ""}. Take that as given.`,
     "Do not run the whole suite again: you have a time limit. Run only the test files that cover what changed, one command each, and keep output short.",
-  ].join(" ");
+    s.skipped?.length ? `Some tests did not run here (they skipped): ${s.skipped.join("; ")}. Do not count them as passing: review the code they cover as if it had no tests.` : "",
+  ].filter(Boolean).join(" ");
 }
 
 /** What the next call is told after a call that changed no file: its own answer, and to search the whole tree before it stops again. */

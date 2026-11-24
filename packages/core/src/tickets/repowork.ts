@@ -142,7 +142,13 @@ export function prepareClone(repo: RepoRef, workRoot: string, id: number, branch
     // A clone of a GitHub repo starts each pass from the newest main, so a PR does not trail behind.
     try { run(dir, "fetch", "-q", "origin"); } catch { /* offline: work from what the clone has */ }
   }
-  const branches = git(dir, "branch", "--list", branch);
+  let branches = git(dir, "branch", "--list", branch);
+  // SF-135: the ticket's branch is already on GitHub (an earlier run shipped it as a pull request, then the ticket
+  // was reopened to fix it). It continues there; a fresh branch from main would drop that work, and its push be refused.
+  if (!branches && repo.github) {
+    try { run(dir, "fetch", "-q", `https://github.com/${repo.github.owner}/${repo.github.name}.git`, `refs/heads/${branch}:refs/heads/${branch}`); } catch { /* not on GitHub: a new branch */ }
+    branches = git(dir, "branch", "--list", branch);
+  }
   if (branches) git(dir, "checkout", "-q", branch);
   else {
     let from = "HEAD";
