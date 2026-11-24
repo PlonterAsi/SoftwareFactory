@@ -72,32 +72,3 @@ export function sinceReport(log: EventLog, order: OrderState, from?: number, now
   if (spend > 0) lines.push({ kind: "spend", text: `Agents spent $${spend.toFixed(4)} meanwhile.` });
   return { fromEvent, toEvent, leftAt, awayMinutes, lines };
 }
-
-/** What the Overseer agent reads before your message: short, factual, from the log. */
-export function statusDigest(log: EventLog, order: OrderState, runtimeName: string): string {
-  const out: string[] = [`Crew: ${runtimeName === "mock" ? "practice (free mock crew; it always builds a sample word counter)" : `real (${runtimeName})`}.`];
-  const active = log.db.prepare("SELECT id, idea, plan_name FROM factory_runs WHERE outcome IS NULL ORDER BY id DESC LIMIT 3").all() as unknown as RunRow[];
-  for (const r of active) out.push(`Running: run #${r.id} ${runName(r)}.`);
-  for (const g of waitingGates(log)) out.push(`Waiting for the person: run #${g.run}: ${g.question}`);
-  const recent = log.db.prepare("SELECT id, idea, plan_name, outcome, reason, total_usd, dir FROM factory_runs WHERE outcome IS NOT NULL ORDER BY id DESC LIMIT 4").all() as unknown as RunRow[];
-  for (const r of recent) out.push(`Finished: run #${r.id} ${runName(r)}: ${r.outcome}${r.total_usd != null ? `, $${r.total_usd.toFixed(4)}` : ""}${r.outcome === "shipped" && r.dir ? `, repo at ${r.dir}` : r.reason ? ` (${r.reason.slice(0, 100)})` : ""}.`);
-  const open = order.conflicts.filter((c) => c.status === "open").length;
-  if (open) out.push(`Open conflicts between rules: ${open}.`);
-  const tray = order.fragments.filter((f) => f.nodeId == null && f.state === "live" && f.kind !== "noise").length;
-  if (tray) out.push(`Unsorted notes: ${tray}.`);
-  const projects = order.nodes.filter((n) => n.parentId == null && n.mergedInto == null).sort((a, b) => b.lastActive.localeCompare(a.lastActive)).slice(0, 5);
-  for (const p of projects) {
-    const rules = canonFor(order, p.id).slice(0, 3).map((c) => c.fragment.text.slice(0, 90));
-    out.push(`Project "${p.title}"${rules.length ? `; rules: ${rules.join(" | ")}` : ""}.`);
-  }
-  const spend = (log.db.prepare("SELECT coalesce(sum(cost_usd), 0) AS s FROM agent_runs WHERE status = 'done' AND started_at >= ?").get(new Date(Date.now() - 86_400_000).toISOString()) as { s: number }).s;
-  out.push(`Agent spend in the last 24 h: $${Number(spend).toFixed(4)}.`);
-  return out.join("\n");
-}
-
-/** The Overseer may end with "BUILD: <idea>"; the Bridge turns it into a Build button. */
-export function buildSuggestion(text: string): { text: string; build?: string } {
-  const m = text.match(/^\s*BUILD:\s*(.+?)\s*$/m);
-  if (!m) return { text };
-  return { text: text.replace(m[0], "").trim(), build: m[1].slice(0, 300) };
-}

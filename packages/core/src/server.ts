@@ -60,7 +60,7 @@ import { linkToProject } from "./projects/service.js";
 import { ErrorCapture, isFault } from "./tickets/capture.js";
 import { classifyIntake, ensureSelfProject, filedAlready, projectToTicket } from "./tickets/intake.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
-import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
+import { lastSeen, sinceReport } from "./bridge/status.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
 import { freeBytesAt, lastAgentCall, preflight, type PreflightReport } from "./safety/preflight.js";
 
@@ -230,15 +230,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     if (!Number.isInteger(id)) return null;
     return log.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(id) ? id : false;
   };
-  /** What the Overseer reads first when asked in a project's chat: that project, not the whole factory. */
-  const projectBrief = (id: number): string => {
-    const p = log.db.prepare("SELECT name, kind, status, summary FROM projects WHERE id = ?").get(id) as { name: string; kind: string; status: string; summary: string } | undefined;
-    if (!p) return "";
-    const runs = log.db.prepare(`SELECT r.id, r.idea, r.outcome, r.reason FROM factory_runs r JOIN project_links l ON l.kind = 'factory_run' AND l.ref = CAST(r.id AS TEXT)
-      WHERE l.project_id = ? ORDER BY r.id DESC LIMIT 5`).all(id) as { id: number; idea: string; outcome: string | null; reason: string | null }[];
-    const lines = runs.map((r) => `- run #${r.id}: ${r.idea.slice(0, 120)} (${r.outcome ?? "running"}${r.reason ? `: ${r.reason.slice(0, 120)}` : ""})`);
-    return `You are in the chat of the project "${p.name}" (${p.kind}, ${p.status})${p.summary ? `: ${p.summary.slice(0, 400)}` : ""}. Answer about this project unless asked otherwise.\n${lines.length ? `Its latest factory runs:\n${lines.join("\n")}\n` : ""}\n`;
-  };
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const origin = typeof req.headers.origin === "string" ? req.headers.origin.slice(0, 100) : null;
     if (origin) clients.origins.set(origin, new Date().toISOString());
@@ -350,26 +341,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       }
       if (req.method === "GET" && url.pathname === "/api/chat/routes") {
         return json(res, 200, chatRoutes(log, order.state()));
-      }
-      if (req.method === "POST" && url.pathname === "/api/agent/run") {
-        const body = await readJson(req);
-        const prompt = String(body.prompt ?? "").trim();
-        if (!prompt) return json(res, 400, { error: "prompt is required" });
-        // The Overseer is an agent like the others: its prompt, model and cap live in the Agent Bay.
-        const o = bay.crewFor("overseer")[0];
-        const projectId = chatProject(body.projectId);
-        if (projectId === false) return json(res, 404, { error: "That project no longer exists, so its chat is closed. Pick another chat." });
-        // The Overseer reads a live status digest first, so it answers about this factory, not in general.
-        const digest = statusDigest(log, order.state(), runtime.name);
-        const room = projectId != null ? projectBrief(projectId) : "";
-        const run = await runAgent(log, runtime, o.id, {
-          prompt: `Status of the factory right now:\n${digest}\n\n${room}The person says:\n${prompt}`,
-          model: body.model ? String(body.model) : o.model,
-          systemPrompt: o.role,
-          budgetUsd: typeof body.budgetUsd === "number" ? body.budgetUsd : Math.min(budgetUsd, o.budgetUsd),
-          ...kitArgs(o),
-        }, { agentVersion: o.version, station: "overseer", ...(projectId != null ? { projectId } : {}) });
-        return json(res, run.error ? 502 : 200, { ...run, suggestion: run.result ? buildSuggestion(run.result.text).build : undefined });
       }
       if (req.method === "POST" && url.pathname === "/api/apps/agent") {
         // An app the factory built asks one of your agents (the Researcher by default) for work plain code cannot do.

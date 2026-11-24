@@ -3,7 +3,7 @@ import { GateActions, STEP } from "./GateActions";
 import { AskNotProject, checkIntake, type IntakeVerdict } from "./Intake";
 import { showTicket } from "./BugReport";
 import { DuplicateNotice } from "./DuplicateNotice";
-import { askOverseer, captureSignal, duplicateOf, normIdea, setupApi, splitBuild, startFactoryRun, type AgentRunView, type DuplicateRun, type ChatRoutes, type CrewMode, type FactoryRunView, type OrderState, type ProjectSummary, type Signal, type SinceView } from "./api";
+import { captureSignal, duplicateOf, normIdea, setupApi, splitBuild, startFactoryRun, type AgentRunView, type DuplicateRun, type ChatRoutes, type CrewMode, type FactoryRunView, type OrderState, type ProjectSummary, type Signal, type SinceView } from "./api";
 
 type Item = {
   key: string; ts: string; kind: "signal" | "reply" | "error" | "factory" | "briefing" | "filed" | "gate"; text: string; meta?: string; build?: string; run?: number; open?: boolean;
@@ -79,7 +79,6 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
   projects: ProjectSummary[] | null; routes: ChatRoutes;
 }) {
   const [text, setText] = useState("");
-  const [model, setModel] = useState("haiku");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ask, setAsk] = useState<{ text: string; v: IntakeVerdict } | null>(null);
@@ -163,7 +162,7 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
     return factoryRuns.filter((r) => r.startedAt >= i.ts && normIdea(r.idea) === n).sort((a, b) => a.run - b.run)[0];
   };
 
-  async function submit(e: FormEvent | KeyboardEvent | MouseEvent, ask: boolean) {
+  async function submit(e: FormEvent | KeyboardEvent | MouseEvent) {
     e.preventDefault();
     const t = text.trim();
     if (!t || busy) return;
@@ -172,7 +171,6 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
     try {
       await captureSignal(t, chatProject);
       setText("");
-      if (ask) await askOverseer(t, model, chatProject);
     } catch (x) {
       setErr((x as Error).message);
     } finally {
@@ -237,23 +235,17 @@ export function Overseer({ signals, runs, factoryRuns, briefings, ingests, onRun
           </div>
         ))}
       </div>
-      <form className="composer" onSubmit={(e) => submit(e, true)}>
+      <form className="composer" onSubmit={(e) => submit(e)}>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={channel === "general" ? "One line or a whole messy brain dump…" : `Anything about ${channelName}…`}
           rows={3}
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(e, true); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(e); }}
         />
         <div className="composer-row">
-          <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Assistant model" title="Model the Assistant answers with">
-            <option value="haiku">Haiku</option>
-            <option value="sonnet">Sonnet</option>
-            <option value="opus">Opus</option>
-          </select>
           <span className="grow" />
-          <button type="button" className="ghost" disabled={busy || !text.trim()} onClick={(e) => submit(e, false)} title="Save it as a note; the Order Engine files it. No answer, no cost.">Capture</button>
-          <button type="submit" className="ghost" disabled={busy || !text.trim()} title="Save it and ask the Assistant (Ctrl+Enter)">Ask</button>
+          <button type="submit" className="ghost" disabled={busy || !text.trim()} title="Save it as a note; the Order Engine files it. No answer, no cost. (Ctrl+Enter)">Capture</button>
           <button type="button" disabled={busy || !text.trim()} onClick={(e) => build(e)} title="Run the factory loop: plan, tests, build, fix, with two approval taps">Build it</button>
         </div>
         {mode === "practice" && <div className="composer-note">Practice crew: Build it makes a sample word counter, free. <button type="button" className="link" onClick={onSetup}>Use real agents</button></div>}

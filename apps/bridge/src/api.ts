@@ -283,11 +283,6 @@ export function foldRuns(events: SfEvent[]): FactoryRunView[] {
   return [...runs.values()];
 }
 
-export async function askOverseer(prompt: string, model: string, projectId?: number) {
-  const r = await fetch(`${API}/api/agent/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt, model, projectId }) });
-  return r.json();
-}
-
 /** Subscribe to the core's event stream and fold it into views. Everything on screen is derived from events. */
 export function useFactory() {
   const [events, setEvents] = useState<SfEvent[]>([]);

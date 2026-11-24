@@ -365,7 +365,7 @@ export class RepoExplorer {
       this.log.append("repo.suggestion", { projectId, explore: ex, suggestionId: id, ...s, grounded: s.files.some((f) => knownFiles.has(f) || [...knownFiles].some((k) => f.startsWith(k))), by: byThis });
       filed++;
     }
-    this.station(projectId, ex, "survey", "pass", `${filed} new suggestion${filed === 1 ? "" : "s"} sent to the Council's queue${all.length - filed ? `, ${all.length - filed} already known` : ""}`, { spentUsd: Number(spent.toFixed(6)) });
+    this.station(projectId, ex, "survey", "pass", `${filed} new suggestion${filed === 1 ? "" : "s"} waiting for a yes or no on the Code map${all.length - filed ? `, ${all.length - filed} already known` : ""}`, { spentUsd: Number(spent.toFixed(6)) });
 
     this.visualCheck(projectId, ex, map);
     const outcome = mode === "agent" && take.length < digests.length ? "partial" : "done";

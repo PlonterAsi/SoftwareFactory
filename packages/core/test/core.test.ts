@@ -153,15 +153,6 @@ describe("core HTTP API", () => {
     expect((await (await fetch(`${base}/api/signals?q=star`)).json()).length).toBe(1);
   });
 
-  it("runs the Overseer with a budget cap and reports cost", async () => {
-    const { base, runtime } = await start();
-    const res = await fetch(`${base}/api/agent/run`, { method: "POST", body: JSON.stringify({ prompt: "status?" }) });
-    expect(res.status).toBe(200);
-    expect(runtime.calls[0].budgetUsd).toBe(0.25);
-    expect(runtime.calls[0].systemPrompt).toContain("Overseer");
-    expect((await (await fetch(`${base}/api/cost`)).json()).runs).toBe(1);
-  });
-
   it("streams events to the UI", async () => {
     const { base } = await start();
     await fetch(`${base}/api/signals`, { method: "POST", body: JSON.stringify({ text: "first" }) });

@@ -153,9 +153,8 @@ ${APP_TARGET}
 ${FILE_FORMAT}`,
   order: `Station contract: order.\n${ARCHIVIST_ROLE}`,
   overseer: `Station contract: overseer.
-Before the person's message you get a live status digest of the factory (runs, gates waiting, conflicts, projects and their rules). Use it; never invent runs or numbers that are not in it.
-Answer in at most 4 short sentences. Be concrete, say what happens next and what, if anything, the person must do.
-If the person describes software they want made, end with one extra line: BUILD: <the idea in one line>. The Bridge turns that line into a Build button; nothing starts until they press it.`,
+You answer the person on a ticket, or split a large ticket into parts. Use only what the ticket and its notes say; never invent runs or numbers.
+Answer in at most 4 short sentences. Be concrete, say what happens next and what, if anything, the person must do.`,
   map: `Station contract: map.
 You read digests of modules of an EXISTING codebase that was imported into the factory: file list with line counts, exported names, and the start of its key files. You only read; nothing you say changes the code.
 For every module given, say what it is for. Answer with ONE fenced json block and nothing else, shaped exactly like:
@@ -212,7 +211,7 @@ The understanding keeps the shape you were given: features have id, name, what, 
 export const BUILTIN_AGENTS: AgentDef[] = [
   {
     id: "overseer", name: "Overseer", avatar: "◈", station: "overseer", model: "haiku", budgetUsd: 0.25, plugins: [], skills: [], tools: ["WebSearch", "WebFetch"], mcp: [],
-    description: "The manager AI you talk to on the Bridge.",
+    description: "The manager AI: answers on tickets and splits large ones into parts.",
     sample: "What should I build first: a habit tracker or a recipe scaler?",
     prompt: "You are the Overseer, the manager AI of SoftwareFactory. You speak for the crew, keep the person's goal in view and say plainly what happens next.",
   },

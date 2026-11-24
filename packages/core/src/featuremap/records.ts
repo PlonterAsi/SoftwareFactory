@@ -359,9 +359,9 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
   },
   {
     id: "assistant", name: "Assistant, chats and the Helm", group: "Order",
-    purpose: "The place to talk to the factory: capture a note, ask what is going on, or start a build, in a General chat or one chat per project, or from one line anywhere with Ctrl K.",
-    spec: ["Capture files a note for free.", "Ask is answered by the Overseer from a live status digest, inside a cap.", "Build it starts a run.", "Each project has its own chat, next to a General chat.", "A Since you left card says what happened after 10 minutes away."],
-    flow: ["The person types one line", "Capture, Ask or Build it", "The line is filed in the chat it belongs to", "Gates waiting are said here with a Show me button"],
+    purpose: "The place to talk to the factory: capture a note or start a build, in a General chat or one chat per project, or from one line anywhere with Ctrl K.",
+    spec: ["Capture files a note for free.", "Build it starts a run.", "Each project has its own chat, next to a General chat.", "A Since you left card says what happened after 10 minutes away."],
+    flow: ["The person types one line", "Capture or Build it", "The line is filed in the chat it belongs to", "Gates waiting are said here with a Show me button"],
     design: "The Assistant panel on the right of every screen (Ctrl J), and the Helm (Ctrl K).",
     screens: [], docs: ["docs/app.md", "docs/projects.md"], stations: ["overseer"],
     files: [`${C}bridge/status.ts`, `${C}chat/`, `${B}Overseer.tsx`, `${B}shell/Helm.tsx`],

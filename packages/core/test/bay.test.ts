@@ -290,9 +290,6 @@ describe("Agent Bay API", () => {
       const st = await (await fetch(`${base}/api/bay/state`)).json();
       expect(st.agents).toHaveLength(BUILTIN_AGENTS.length + 2);
       expect(st.stats.pinch.calls).toBe(1);
-      // The Overseer answers with its Bay prompt.
-      const [, ans] = await post("/api/agent/run", { prompt: "hi" });
-      expect(ans.agent).toBe("overseer");
     } finally { server.close(); }
   });
 });

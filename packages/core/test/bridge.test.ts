@@ -4,8 +4,8 @@ import { existsSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  EventLog, MockRuntime, OrderEngine, Factory, DropFolder, SwitchableRuntime, createCore, captureSignal, listSignals, sinceReport, statusDigest,
-  buildSuggestion, explainAgentError, projectTitle, runAgent, readSettings,
+  EventLog, MockRuntime, OrderEngine, Factory, DropFolder, SwitchableRuntime, createCore, captureSignal, listSignals, sinceReport,
+  explainAgentError, projectTitle, runAgent, readSettings,
 } from "../src/index.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-m5-"));
@@ -95,29 +95,6 @@ describe("since you left", () => {
 });
 
 describe("the Overseer", () => {
-  it("reads a live status digest and can suggest a build", async () => {
-    const log = new EventLog();
-    const rt = new MockRuntime();
-    const order = new OrderEngine(log, rt);
-    captureSignal(log, "Project: Garden. Rule: it must work offline.");
-    await order.ingest(listSignals(log)[0]);
-    const d = statusDigest(log, order.state(), "mock");
-    expect(d).toMatch(/practice/);
-    expect(d).toMatch(/Project "Garden"; rules: .*offline/);
-    expect(buildSuggestion("Sounds good.\nBUILD: a CLI that waters plants").build).toBe("a CLI that waters plants");
-    expect(buildSuggestion("No build here.").build).toBeUndefined();
-
-    const server = createServer(createCore({ log, runtime: rt, projectsDir: tmp(), dropDir: tmp() }));
-    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
-    try {
-      const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-      const r = await (await fetch(`${base}/api/agent/run`, { method: "POST", body: JSON.stringify({ prompt: "what is going on?" }) })).json();
-      expect(r.result.text).toMatch(/Practice Overseer/);
-      expect(rt.calls.at(-1)!.prompt).toMatch(/^Status of the factory right now:/);
-      expect(rt.calls.at(-1)!.prompt).toMatch(/The person says:\nwhat is going on\?$/);
-    } finally { server.close(); }
-  });
-
   it("explains agent failures in words you can act on, keeping the raw text", async () => {
     expect(explainAgentError("claude exited 1: Invalid API key · Please run /login")).toMatch(/not signed in/);
     expect(explainAgentError("spawn claude ENOENT")).toMatch(/not found/);

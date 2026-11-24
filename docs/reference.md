@@ -33,7 +33,6 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/signals?q=` | List or search Signals |
 | `POST /api/signals` | `{ text, source?, projectId? }` capture a Signal (free) |
 | `GET /api/chat/routes` | Which chat each run, Signal and ticket belongs to |
-| `POST /api/agent/run` | `{ prompt, projectId?, model?, budgetUsd? }` ask the Overseer; the answer may carry a Build suggestion |
 | `POST /api/apps/agent` | A built app asks one of the person's agents. Local callers only |
 
 ### Factory runs

@@ -92,7 +92,7 @@ const CALL_SUB = { keep: "Fix the short list and build on it.", refactor: "Keep 
 function useReview(projectId: number, events: SfEvent[]) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const tick = events.filter((e) => e.type.startsWith("repo.review.") || e.type === "repo.suggestion" || e.type.startsWith("improve.proposal") || (e.type === "settings.changed" && String((e.payload as { key?: string } | undefined)?.key ?? "").startsWith("import"))).at(-1)?.id ?? 0;
+  const tick = events.filter((e) => e.type.startsWith("repo.review.") || e.type === "repo.suggestion" || e.type === "repo.suggestion.decided" || (e.type === "settings.changed" && String((e.payload as { key?: string } | undefined)?.key ?? "").startsWith("import"))).at(-1)?.id ?? 0;
   const [bump, setBump] = useState(0);
   useEffect(() => {
     let stop = false;
