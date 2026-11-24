@@ -135,6 +135,7 @@ export function explainAgentError(raw: string): string {
   if (/enoent|not recognized|command not found|spawn .*claude/.test(t)) return "Claude Code was not found on this computer. Install it and sign in, or switch to the practice crew.";
   if (isSignInError(raw)) return "Claude Code is installed but not signed in. Open a terminal, run `claude`, sign in, then try again.";
   if (/max-budget|budget/.test(t) && /exceed|reached|spent/.test(t)) return "This call hit its spend cap and was stopped. Raise the agent's cap in the Agent Bay if this keeps happening.";
+  if (/agent stuck/.test(t)) return "The agent showed no sign of work for 10 minutes, so SoftwareFactory cut the call as stuck. The run tries again by itself.";
   if (/timed out/.test(t)) return "The agent took too long and was stopped. Try again, or pick a faster model for that agent.";
   if (/rate limit|overloaded|529|429/.test(t)) return "Claude is busy right now (rate limit). Wait a minute and try again.";
   return raw;

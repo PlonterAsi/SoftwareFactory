@@ -40,7 +40,7 @@ describe("event log and signals", () => {
 describe("agent runtime", () => {
   it("lean profile skips MCP and tools, sets model and budget", () => {
     const args = new ClaudeCodeRuntime({ profile: "lean" }).buildArgs({ prompt: "hi", model: "haiku", budgetUsd: 0.1, pluginDirs: ["/p/superpowers"] });
-    expect(args).toEqual(["-p", "--output-format", "json", "--model", "haiku", "--max-budget-usd", "0.1", "--plugin-dir", "/p/superpowers", "--strict-mcp-config", "--tools", "", "--setting-sources", "project,local"]);
+    expect(args).toEqual(["-p", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--max-budget-usd", "0.1", "--plugin-dir", "/p/superpowers", "--strict-mcp-config", "--tools", "", "--setting-sources", "project,local"]);
   });
 
   it("runs station agents without the person's own CLAUDE.md and memory; a working copy keeps its own", () => {

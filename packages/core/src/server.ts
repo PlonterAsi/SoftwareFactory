@@ -1,3 +1,4 @@
+import { Supervisor } from "./factory/supervisor.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
@@ -144,6 +145,9 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   });
   // Watchers (watch/watchers.ts): scheduled, free looks at each project that only open tickets.
   const watchers = new Watchers(log, tickets);
+  // The supervisor (factory/supervisor.ts): once a minute it keeps the PC awake while the crew works, cuts stuck runs,
+  // tries stopped runs again within the caps, and keeps the ticket queue moving. bootBase starts its tick.
+  const supervisor = new Supervisor(log, factory, tickets, { canWork: () => (gitReady() ? preflightNow().auto.problem : "Git is not installed") });
   // A flow step may name a Bay agent; saving one that names an agent the Bay does not have is refused.
   factory.flows.agentsKnown = () => new Set(bay.agents().filter((a) => !a.retired).map((a) => a.def.id));
   // The git manager: local first then a private repo, the merge policy, outside work, versions (docs/git.md).
@@ -244,6 +248,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         appVersion: appVersion ?? null, activeRuns: factory.activeCount(), agentCalls: agentCalls.size,
         clients: { origins: Object.fromEntries(clients.origins), streams: Object.fromEntries(clients.streams) },
       });
+      if (req.method === "GET" && url.pathname === "/api/supervisor") return json(res, 200, supervisor.state());
       if (req.method === "GET" && url.pathname === "/api/preflight") { const r = preflightNow(url.searchParams.get("fresh") === "1"); return json(res, 200, { ...r.auto, press: r.manual }); }
       if (req.method === "GET" && url.pathname === "/api/updates") return json(res, 200, updatesReport(log, appVersion, factory.activeRuns(), agentCalls.size));
       if (req.method === "POST" && url.pathname === "/api/updates") {
@@ -555,7 +560,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { github, git: gitman, watchers, factory, order, bay, tickets, explorer, reviewer, launcher, integrations, plugins, videos, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, git: gitman, watchers, supervisor, factory, order, bay, tickets, explorer, reviewer, launcher, integrations, plugins, videos, errors, fault, ensureSelf });
 }
 
 /**
@@ -923,6 +928,12 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
     if (!checkGit().found) console.log("Not resuming interrupted runs: Git is not installed.");
     else for (const id of core.factory.resumeInterrupted()) console.log(`Resumed run #${id} where it left off`);
   }
+  // The supervisor's look, once a minute (the first two minutes after start, so a restart's own resumes go first).
+  if (!process.env.VITEST) {
+    const superviseTick = () => { try { core.supervisor.tick(); } catch (e) { console.error("supervisor failed:", e); } };
+    timers.push(setTimeout(superviseTick, 2 * 60_000).unref());
+    timers.push(setInterval(superviseTick, 60_000).unref());
+  }
   // SF-94: a Builder session in a ticket's clone does not survive the core; its ticket goes back in line instead of sitting In progress.
   for (const id of core.tickets.recoverInterrupted()) console.log(`Ticket #${id} was cut off by the restart; it is back in line`);
 
@@ -931,6 +942,7 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
     if (disposed) return;
     disposed = true;
     for (const t of timers) clearTimeout(t);
+    try { core.supervisor.awake.stop(); } catch { /* nothing held */ }
     try { core.plugins.stopAll(true); } catch (e) { console.error("stopping plugins failed:", e); }
     try { core.launcher.stopAll(); } catch (e) { console.error("stopping launched apps failed:", e); }
     log.removeAllListeners();

@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from "node:fs";
+import { sleptBetween } from "../factory/awake.js";
 import { join, resolve } from "node:path";
 import type { EventLog } from "../events.js";
 import { runAgent } from "../agents.js";
@@ -276,7 +277,8 @@ export function harnessChecks(o: { maxMinutes?: number; now?: () => number } = {
       return { ok: !f.length, output: f.length ? `${describeIntegrity(f)}\nFix the code, not the tests.` : "" };
     },
     // The same failure twice means the fix changed nothing that matters; past the wall clock, stop too.
-    stopRule: (s) => stopReason({ rounds: s.failures.map((f) => ({ failing: 1, names: f })), startedAt, now: now(), maxMinutes: o.maxMinutes }),
+    // The wall clock leaves out the time the PC slept (factory/awake.ts, run 10486).
+    stopRule: (s) => { const n = now(); return stopReason({ rounds: s.failures.map((f) => ({ failing: 1, names: f })), startedAt: startedAt + sleptBetween(startedAt, n), now: n, maxMinutes: o.maxMinutes }); },
   };
 }
 
