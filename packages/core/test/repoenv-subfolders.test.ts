@@ -54,7 +54,7 @@ describe("a front end that proxies to its backend", () => {
     writeFileSync(join(dir, "backend", "cmd", "hosted", "main.go"), 'package main; const addr = ":8080"');
     mkdirSync(join(dir, "backend", "cmd", "local"), { recursive: true });
     writeFileSync(join(dir, "backend", "cmd", "local", "main.go"), 'package main; const addr = "127.0.0.1:8787"');
-    expect(backendFor(dir, { cwd: "web" })).toEqual({ port: 8787, cwd: "backend", file: "go", args: ["run", "./cmd/local"], label: "go run ./cmd/local (in backend)" });
+    expect(backendFor(dir, { cwd: "web" })).toEqual({ port: 8787, cwd: "backend", file: "go", args: ["run", "./cmd/local"], label: "go run ./cmd/local (in backend)", addrFlag: false });
     expect(backendFor(dir, {})).toBeNull();
   });
 });
