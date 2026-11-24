@@ -153,12 +153,14 @@ export const VERIFY_CONTRACT = [
 /** One step up the model ladder, for a fix round that has to think harder (H6). */
 /** The least a model needs left in the run's budget to do a real fix round. */
 export function modelFloorUsd(model: string): number {
-  return /opus/i.test(model) ? 0.4 : /sonnet/i.test(model) ? 0.15 : 0.02;
+  return /fable/i.test(model) ? 0.8 : /opus/i.test(model) ? 0.4 : /sonnet/i.test(model) ? 0.15 : 0.02;
 }
 
 export function strongerModel(model: string): string {
   if (/haiku/i.test(model)) return "sonnet";
   if (/sonnet/i.test(model)) return "opus";
+  // Fable is the top step, for hard debugging only: a fix already deepened to Opus that still fails (Assaf, 24 Nov 2026).
+  if (/opus/i.test(model)) return "fable";
   return model;
 }
 

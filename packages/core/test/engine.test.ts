@@ -68,7 +68,8 @@ describe("the workbench", () => {
     expect(testDispute("all good")).toBeNull();
     expect(strongerModel("haiku")).toBe("sonnet");
     expect(strongerModel("sonnet")).toBe("opus");
-    expect(strongerModel("claude-opus-5-5")).toBe("claude-opus-5-5");
+    expect(strongerModel("claude-opus-5-5")).toBe("fable");
+    expect(strongerModel("fable")).toBe("fable");
   });
 
   it("a real crew's Builder and Fixer work in the folder with the shell; the core reverts locked files and judges", async () => {
@@ -220,6 +221,7 @@ describe("attempt memory and the escalation ladder", () => {
 
   it("no stronger model without the money it needs: the deeper round keeps the model", async () => {
     expect(modelFloorUsd("opus")).toBeGreaterThan(modelFloorUsd("sonnet"));
+    expect(modelFloorUsd("fable")).toBeGreaterThan(modelFloorUsd("opus"));
     const log = new EventLog();
     const rt = new MockRuntime();
     const lazy: AgentRuntime = { name: "lazy", run: async (req) => {

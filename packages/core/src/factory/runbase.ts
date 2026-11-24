@@ -118,6 +118,8 @@ export abstract class RunBase {
   /** One step up in model for a deeper fix, if what is left of the run's budget can pay for it; else none. */
   protected deeperModel(m: CrewMember): string | undefined {
     const cur = this.modelOf(m);
+    // Hard debugging (a normal fix failed) goes to Fable when the run can pay for it, else one step up (Assaf, 24 Nov 2026).
+    if (!/fable/i.test(cur) && this.o.maxUsd - this.spent >= modelFloorUsd("fable")) return "fable";
     const up = strongerModel(cur);
     if (up === cur) return undefined;
     return this.o.maxUsd - this.spent >= modelFloorUsd(up) ? up : undefined;
@@ -342,7 +344,7 @@ export abstract class RunBase {
     const kit = kitArgs(m);
     const reads = this.readsFolder(m);
     const r = await runAgent(this.log, this.runtime, m.id, {
-      prompt, model: x.model ?? this.modelOf(m), systemPrompt: this.roleOf(m, bench), budgetUsd: Number(cap.toFixed(4)),
+      prompt, model: x.model ?? this.modelOf(m), systemPrompt: this.roleOf(m, bench), budgetUsd: Number(cap.toFixed(4)), ceilingUsd: Number(Math.max(cap, this.o.maxUsd - this.spent).toFixed(4)),
       ...kit,
       // An agent that reads files reads this project's folder, once there is one.
       ...(this.dir && existsSync(this.dir) && (reads || m.tools.some((t) => READ_TOOLS.includes(t))) ? { cwd: this.dir, ...(reads ? { tools: [...new Set([...(kit.tools ?? []), ...READ_TOOLS])] } : {}) } : {}),

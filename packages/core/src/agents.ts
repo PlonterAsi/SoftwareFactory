@@ -62,6 +62,15 @@ export async function runAgent(log: EventLog, runtime: AgentRuntime, agent: stri
   }
 }
 
+/**
+ * Rough price of a model per call, Haiku = 1. Fable measured on 24 Nov 2026 at about 2x Opus per token
+ * (same short prompt, lean profile: Opus $0.026, Fable $0.075 with 1.5x the tokens).
+ */
+export function modelPrice(model: string): number {
+  const m = model.toLowerCase();
+  return m.includes("fable") ? 10 : m.includes("opus") ? 5 : m.includes("sonnet") ? 3 : 1;
+}
+
 /** A profile's settings applied to one call: the agent's model and cap, the advisor, the person's own settings. Never throws. */
 function profilesFor(log: EventLog, agent: string, req: AgentRequest, meta: { projectId?: number; ticket?: number; factoryRun?: number }): { req: AgentRequest; advisor?: string | null; chain: string[]; trial?: { entry: string; unit: string; arm: "with" | "without" } } {
   try {
@@ -74,9 +83,15 @@ function profilesFor(log: EventLog, agent: string, req: AgentRequest, meta: { pr
     const out: AgentRequest = { ...req };
     const model = s[`agent.${agent}.model`]?.value;
     if (typeof model === "string") out.model = model;
+    // A cap sized for a cheap model starves a pricier one inside its first answer (a Fable council seat on a Haiku
+    // cap). Moving to a pricier model lifts the cap by the price ratio, never past what the run has left (ceilingUsd).
+    if (typeof model === "string" && req.budgetUsd !== undefined && req.ceilingUsd !== undefined) {
+      const ratio = modelPrice(model) / modelPrice(req.model ?? "haiku");
+      if (ratio > 1) out.budgetUsd = Math.min(req.budgetUsd * ratio, Math.max(req.budgetUsd, req.ceilingUsd));
+    }
     // A profile can lower a cap, never lift it past what the run has left.
     const cap = s[`agent.${agent}.budgetUsd`]?.value;
-    if (typeof cap === "number") out.budgetUsd = req.budgetUsd !== undefined ? Math.min(req.budgetUsd, cap) : cap;
+    if (typeof cap === "number") out.budgetUsd = out.budgetUsd !== undefined ? Math.min(out.budgetUsd, cap) : cap;
     const personal = s["crew.personalSettings"]?.value;
     if (typeof personal === "boolean") out.personalSettings = personal;
     const adv = s["advisor.model"];

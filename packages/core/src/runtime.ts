@@ -16,6 +16,8 @@ export interface AgentRequest {
   systemPrompt?: string;
   /** Hard spend cap for this one call, in USD. */
   budgetUsd?: number;
+  /** The most a profile that moves this call to a pricier model may lift budgetUsd to (what the run has left). Absent: no lift. */
+  ceilingUsd?: number;
   /** Plugin folders to load (your installed Claude Code plugins). */
   pluginDirs?: string[];
   /** Tools the agent may use. Empty or absent in the lean profile: none (the agent answers in text). `mcp__<server>` names allow that MCP server's tools. */
