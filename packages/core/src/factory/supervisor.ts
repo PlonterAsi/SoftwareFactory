@@ -1,5 +1,6 @@
 import type { EventLog } from "../events.js";
 import type { AutoWork } from "../tickets/shapes.js";
+import { isClosed } from "../tickets/model.js";
 import { keepAwake, lastSleep, type KeepAwake } from "./awake.js";
 
 /**
@@ -119,6 +120,8 @@ export class Supervisor {
       if (!this.factory.retryable(run).ok) continue;
       const life = this.life(run);
       const ticket = this.ticketOf(run);
+      // A run whose ticket was closed is finished business.
+      if (ticket != null && this.ticketClosed(ticket)) continue;
       const mine = leftToYou({ outcome: r.outcome, reason: r.reason ?? "", stoppedBy: life.stoppedBy, rejectedBy: life.rejectedBy });
       if (mine) continue;
       if (life.tries >= TRIES) {
@@ -135,16 +138,18 @@ export class Supervisor {
         continue;
       }
       const why = (r.reason ?? "it stopped").slice(0, 200);
+      // A try that could not start is not tried again every minute (24 Nov: run 8917, its ticket closed, was tried 9 times).
+      if (this.saidToday(run, "failed")) continue;
       try {
-        if (ticket != null) {
-          // Written as the dispatcher's start, so it counts toward today's auto-work limit like any other.
-          this.log.append("ticket.noted", { id: ticket, by: "dispatcher", auto: 1, capUsd: add, kind: "event", text: `The supervisor tries run #${run} again on its own (try ${life.tries + 1} of ${TRIES}) from the step it stopped at, with $${add.toFixed(2)} more. It had stopped: ${why}` });
-          this.tickets.retry(ticket, { addUsd: add, by: "supervisor", auto: true });
-        } else this.factory.retry(run, { addUsd: add, by: "supervisor", auto: true });
-        return this.act("retry", run, `Run #${run} tried again (try ${life.tries + 1} of ${TRIES}) with $${add.toFixed(2)} more. It had stopped: ${why}`, { ticket, addUsd: add, try: life.tries + 1 });
+        if (ticket != null) this.tickets.retry(ticket, { addUsd: add, by: "supervisor", auto: true });
+        else this.factory.retry(run, { addUsd: add, by: "supervisor", auto: true });
       } catch (e) {
         this.log.append("factory.supervisor", { action: "failed", run, ticket, text: (e as Error).message.slice(0, 300) });
+        continue;
       }
+      // Only a try that started is written down, and its money counts toward today's limit through this event.
+      if (ticket != null) this.log.append("ticket.noted", { id: ticket, by: "supervisor", kind: "event", text: `The supervisor tried run #${run} again on its own (try ${life.tries + 1} of ${TRIES}) from the step it stopped at, with $${add.toFixed(2)} more. It had stopped: ${why}` });
+      return this.act("retry", run, `Run #${run} tried again (try ${life.tries + 1} of ${TRIES}) with $${add.toFixed(2)} more. It had stopped: ${why}`, { ticket, addUsd: add, try: life.tries + 1 });
     }
     return null;
   }
@@ -175,6 +180,13 @@ export class Supervisor {
       const r = this.log.db.prepare("SELECT id FROM tickets WHERE run = ? ORDER BY id DESC LIMIT 1").get(run) as { id: number } | undefined;
       return r ? Number(r.id) : null;
     } catch { return null; }
+  }
+
+  private ticketClosed(id: number): boolean {
+    try {
+      const r = this.log.db.prepare("SELECT status FROM tickets WHERE id = ?").get(id) as { status: string } | undefined;
+      return !!r && isClosed(r.status as never);
+    } catch { return false; }
   }
 
   private saidToday(run: number, action: string): boolean {

@@ -66,6 +66,10 @@ describe("an agent call is judged by its progress, not a fixed clock", () => {
     r.push('er","message":{}}\n{"type":"result","subtype":"success","result":"done","total_cost_usd":0.01}\n');
     expect(beats).toBe(3);
     expect(JSON.parse(r.result())).toMatchObject({ result: "done", total_cost_usd: 0.01 });
+    // Keys in another order, and lines after the result (the installed app on 24 Nov 2026 missed it).
+    const odd = new StreamReader();
+    odd.push('{"type":"system","subtype":"init","x":1}\n{"duration_api_ms":996,"stop_reason":"end_turn","type":"result","result":"ok","total_cost_usd":0}\n{"type":"system","subtype":"post_turn_summary"}\n');
+    expect(JSON.parse(odd.result()).result).toBe("ok");
     // The one-object format still works.
     const old = new StreamReader();
     old.push('{"result":"pong",');
@@ -185,6 +189,14 @@ describe("the supervisor keeps the factory working", () => {
     w.active.clear();
     w.sup.tick();
     expect(w.retried.map((r) => r.run)).toContain(s1);
+  });
+
+  it("leaves a run whose ticket is closed alone, and does not retry a failed start every minute", () => {
+    const w = world();
+    const run = w.startRun("The run took longer than 30 minutes.");
+    w.log.db.prepare("INSERT INTO tickets (id, event_id, kind, title, status, source, opened_by, run, created_at, updated_at) VALUES (120, 1, 'task', 't', 'closed', 'test', 'you', ?, 'x', 'x')").run(run);
+    w.sup.tick(); w.sup.tick();
+    expect(w.retried).toEqual([]);
   });
 
   it("stays inside today's auto-work limit and does nothing with auto-work off", () => {

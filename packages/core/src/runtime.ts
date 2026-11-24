@@ -293,7 +293,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
           const r = parseClaudeJson(reader.result(), this.name, Date.now() - started);
           resolve(advisor ? { ...r, advisor } : r);
         } catch (e) {
-          reject(Object.assign(new Error(`claude exited ${code}: ${(e as Error).message}${err ? ` | ${err.slice(0, 300)}` : ""}`), { costUsd: (e as { costUsd?: number }).costUsd ?? 0 }));
+          const said = reader.head(300).replace(/\s+/g, " ");
+          reject(Object.assign(new Error(`claude exited ${code}: ${(e as Error).message}${err ? ` | ${err.slice(0, 300)}` : ""}${said && !/^\{"type":"result"/.test(said) && /JSON/.test((e as Error).message) ? ` | it printed: ${said}` : ""}`), { costUsd: (e as { costUsd?: number }).costUsd ?? 0 }));
         }
       });
     });
@@ -323,6 +324,12 @@ export function callVerdict(o: { elapsedMs: number; idleMs: number; limitMs: num
   return null;
 }
 
+/** A stream-json line carrying the answer: its type is "result", whatever order its keys come in. */
+function isResultLine(line: string): boolean {
+  if (!line.startsWith("{") || !/"type"\s*:\s*"result"/.test(line)) return false;
+  try { return (JSON.parse(line) as { type?: string }).type === "result"; } catch { return false; }
+}
+
 /**
  * Reads `claude -p` output as it arrives. A stream-json line is a sign of life; the line whose type is "result" is
  * the answer. Plain `json` output (one object, maybe over several chunks) is kept whole and parsed at the end.
@@ -344,14 +351,28 @@ export class StreamReader {
   }
   private line(line: string) {
     if (!line) return;
-    if (line.startsWith('{"type":"result"') || /^\{\s*"type"\s*:\s*"result"/.test(line)) { this.last = line; this.whole = ""; }
-    else if (line.startsWith('{"type":')) this.onLine();
+    if (isResultLine(line)) { this.last = line; this.whole = ""; }
+    else if (line.startsWith("{")) this.onLine();
   }
-  /** The result line, or else everything read (the one-object format). */
+  /**
+   * The result line, or else everything read (the one-object format). The installed app on 24 Nov 2026 failed
+   * every Reviewer call with "Unexpected non-whitespace character after JSON at position 253 (line 2 column 1)":
+   * a stream whose result line was not found by its first bytes. Every line is now read as JSON, from the end.
+   */
   result(): string {
-    if (this.buf.trim()) { const rest = this.buf.trim(); this.buf = ""; if (/^\{\s*"type"\s*:\s*"result"/.test(rest)) { this.last = rest; this.whole = ""; } }
-    return this.last ?? this.whole;
+    const rest = this.buf.trim();
+    this.buf = "";
+    if (rest && isResultLine(rest)) { this.last = rest; this.whole = ""; }
+    if (this.last) return this.last;
+    const lines = this.whole.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length <= 1) return this.whole;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try { const j = JSON.parse(lines[i]); if (j && typeof j === "object" && (j.type === "result" || ("result" in j && "total_cost_usd" in j))) return lines[i]; } catch { /* not one JSON line */ }
+    }
+    return this.whole;
   }
+  /** The start of what was read, for an error that has to say what the CLI printed. */
+  head(n = 400): string { return (this.last ?? this.whole).slice(0, n); }
 }
 
 /** Parse the JSON that `claude -p --output-format json` prints (or the result line of stream-json: the same object). */
