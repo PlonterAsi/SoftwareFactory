@@ -322,6 +322,35 @@ export function workspaceDirs(dir: string): string[] {
 }
 
 /**
+ * The backend a front end in a subfolder needs: its dev server proxies to a local port (vite's `proxy:
+ * { '/api': 'http://127.0.0.1:8787' }`), and a Go program in the repo names that port. RoadToMill's web/ is
+ * such a front end; started alone, every page said "RoadToMill did not answer (500)" to the product judge
+ * (run 10486). Null when the site does not proxy, or no program in the repo names the port.
+ */
+export function backendFor(home: string, site: Pick<RunProfile, "cwd">): { port: number; cwd: string; file: string; args: string[]; label: string } | null {
+  if (!site.cwd) return null;
+  const conf = ["vite.config.ts", "vite.config.js", "vite.config.mts", "vite.config.mjs"].map((f) => read(join(home, site.cwd!, f))).find(Boolean) ?? "";
+  const m = conf.match(/['"`]https?:\/\/(?:127\.0\.0\.1|localhost):(\d{2,5})/);
+  if (!m) return null;
+  const port = Number(m[1]);
+  const goRoots = [...(isFile(join(home, "go.mod")) ? [""] : []), ...subPackages(home).go];
+  for (const g of goRoots) {
+    let mains: string[] = [];
+    try { mains = readdirSync(join(home, g, "cmd")).sort(); } catch { continue; }
+    for (const name of mains) {
+      const src = (() => { try { return readdirSync(join(home, g, "cmd", name)).filter((f) => f.endsWith(".go") && !f.endsWith("_test.go")).map((f) => read(join(home, g, "cmd", name, f))).join("\n"); } catch { return ""; } })();
+      if (new RegExp(`[:"']${port}\\b`).test(src)) return { port, cwd: g, file: "go", args: ["run", `./cmd/${name}`], label: `go run ./cmd/${name}${g ? ` (in ${g})` : ""}` };
+    }
+  }
+  return null;
+}
+
+/** Whether something answers on a local port. */
+async function answers(port: number): Promise<boolean> {
+  try { await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) }); return true; } catch { return false; }
+}
+
+/**
  * Start the codebase's site the way the Run tab would, call `during` with its address, then stop it and
  * everything it started. Returns why it could not be started, or what `during` returned.
  */
@@ -337,6 +366,30 @@ export async function withSite<T>(dir: string, o: { pathFirst?: string[]; timeou
   }
   const port = await freePort();
   const home = dir;
+  // The site's own backend first, when its front end proxies to one (RoadToMill: web/ to backend/cmd/roadtomill).
+  const back = backendFor(home, profile);
+  let backChild: ReturnType<typeof spawn> | null = null;
+  if (back && !(await answers(back.port))) {
+    // A backend often serves or embeds the front end's build and refuses to start without it (RoadToMill:
+    // "web app not built"), so the front end is built first when it can be.
+    try {
+      const pkg = JSON.parse(read(join(home, profile.cwd!, "package.json")) || "{}");
+      if (pkg.scripts?.build) await sh("npm", ["run", "build"], { cwd: join(home, profile.cwd!), shell: true, timeoutMs: 300_000 });
+    } catch { /* no package.json to read: start the backend as it is */ }
+    backChild = spawn(back.file, back.args, { cwd: join(home, back.cwd), env: withPathFirst(projectEnv(home, process.execPath, null), o.pathFirst ?? []), stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
+    let backOut = "";
+    backChild.stdout!.on("data", (x) => { backOut += x; });
+    backChild.stderr!.on("data", (x) => { backOut += x; });
+    // A first `go run` compiles: give it time, and stop waiting as soon as it answers or exits.
+    let exited: number | null | undefined;
+    backChild.on("exit", (c) => { exited = c; });
+    const until = Date.now() + Math.max(o.timeoutMs ?? 40_000, 180_000);
+    while (Date.now() < until && exited === undefined && !(await answers(back.port))) await new Promise((r) => setTimeout(r, 1000));
+    if (exited !== undefined || !(await answers(back.port))) {
+      killTree(backChild, true);
+      return { skipped: `the site's backend "${back.label}" did not answer on port ${back.port}${exited !== undefined ? ` (exit ${exited})` : ""}: ${trim(backOut.trim(), 400)}` };
+    }
+  }
   dir = join(dir, profile.cwd ?? "");
   const env = { ...withPathFirst(projectEnv(home, process.execPath, port), [...(o.pathFirst ?? []), ...(profile.cwd ? [join(dir, "node_modules", ".bin")] : [])]), FLASK_RUN_PORT: String(port), FLASK_DEBUG: "0" };
   const exec = withDeclaredArgs(dir, profile.exec!);
@@ -361,6 +414,7 @@ export async function withSite<T>(dir: string, o: { pathFirst?: string[]; timeou
     return { skipped: `the site could not be started here: ${(e as Error).message}` };
   } finally {
     killTree(child, true);
+    if (backChild) killTree(backChild, true);
   }
 }
 

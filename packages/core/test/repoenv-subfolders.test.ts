@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseCases, prepareEnv, subPackages } from "../src/factory/repoenv.js";
+import { backendFor, parseCases, prepareEnv, subPackages } from "../src/factory/repoenv.js";
 import { modelPrice } from "../src/agents.js";
 
 // A repo shaped like RoadToMill: a Go module in backend/, a React app in web/, nothing at the root.
@@ -43,5 +43,18 @@ describe("model prices for cap lifts", () => {
     expect(modelPrice("fable")).toBeGreaterThan(modelPrice("claude-opus-5-5"));
     expect(modelPrice("opus")).toBeGreaterThan(modelPrice("sonnet"));
     expect(modelPrice("sonnet")).toBeGreaterThan(modelPrice("haiku"));
+  });
+});
+
+describe("a front end that proxies to its backend", () => {
+  it("finds the Go program that listens on the port the dev server proxies to", () => {
+    const dir = goAndWebRepo();
+    writeFileSync(join(dir, "web", "vite.config.ts"), "export default { server: { proxy: { '/api': 'http://127.0.0.1:8787' } } }");
+    mkdirSync(join(dir, "backend", "cmd", "hosted"), { recursive: true });
+    writeFileSync(join(dir, "backend", "cmd", "hosted", "main.go"), 'package main; const addr = ":8080"');
+    mkdirSync(join(dir, "backend", "cmd", "local"), { recursive: true });
+    writeFileSync(join(dir, "backend", "cmd", "local", "main.go"), 'package main; const addr = "127.0.0.1:8787"');
+    expect(backendFor(dir, { cwd: "web" })).toEqual({ port: 8787, cwd: "backend", file: "go", args: ["run", "./cmd/local"], label: "go run ./cmd/local (in backend)" });
+    expect(backendFor(dir, {})).toBeNull();
   });
 });
