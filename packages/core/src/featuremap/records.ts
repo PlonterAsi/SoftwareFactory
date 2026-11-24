@@ -63,22 +63,6 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}flows/`, `${B}Flows.tsx`, `${B}flowData.ts`], api: ["/api/flows"],
   },
   {
-    id: "check-before-money", name: "Check before money", group: "Work",
-    purpose: "Before a ticket costs anything, SF reads it for clarity, confidence and decisions only the person makes, and asks those questions in one batch instead of finding out half way through a paid run.",
-    spec: [
-      "Plain code over the ticket's words: free, instant, and each question says why it is asked.",
-      "Clarity: enough words to build from, the kind's first question answered, what right looks like for a bug.",
-      "Confidence: no open words left (maybe, something), and not more than one session's work on a session flow.",
-      "Your call: money, data that could be lost, secrets and accounts, going public, legal terms.",
-      "Work it and the crew's own pickups run the check first; the person can answer, or work it anyway. Answers go on the ticket's record and thread.",
-      "Every question across tickets is answered in one sitting on Home, and the clear tickets start from there.",
-    ],
-    flow: ["The person presses Work it, or the crew picks up a ready ticket", "The check reads the ticket", "Questions go to Needs you and the ticket's timeline", "The person answers them in one batch", "The tickets that are clear start"],
-    design: "A Before it costs money box on the ticket page, and Answer before money on Home with every question across tickets.",
-    screens: ["/", "/factory/tickets"], docs: ["docs/tickets.md"], stations: [],
-    files: [`${C}tickets/precheck.ts`], api: [],
-  },
-  {
     id: "git-manager", name: "Git manager", group: "Work",
     purpose: "SoftwareFactory runs git for every project: a new project stays on this computer until it is worth continuing, then gets a private repo; crew PRs are merged by a policy with a confidence review; work done outside SF joins tickets; merged tickets become versions with release notes.",
     spec: [
@@ -274,11 +258,12 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
       "Every look is plain code: the project's folder (long files, TODO piles, secrets and risky code, a .env git does not ignore, npm audit and unpinned Python packages) or its builds' test records (a test that passed and then failed again in one build, in two builds).",
       "A finding becomes an open ticket, once: each has a fingerprint, so the same finding is never filed twice. A look files at most five; the rest wait for the next look.",
       "A ticket a watcher opens is open, not ready, so the crew does not pick it up until the person makes it ready. A secret's value is never copied into a ticket.",
+      "Errors: a fault in the core or a screen opens one bug ticket, counted up on repeats; the Bug button files one with the screen attached.",
     ],
     flow: ["A watcher's time comes round", "It looks at the folder or the records", "Each new finding opens one ticket", "The person makes the ones worth doing ready"],
     design: "A Watchers tab on each project (Improve): one card per watcher with its switch, how often it looks, Look now, its last look and the tickets it opened.",
-    screens: ["/p/ID/watchers"], docs: ["docs/watchers.md"], stations: [],
-    files: [`${C}watch/watchers.ts`, `${C}watch/routes.ts`], api: ["/api/watchers"],
+    screens: ["/p/ID/watchers"], docs: ["docs/watchers.md", "docs/tickets.md", "docs/app.md"], stations: [],
+    files: [`${C}watch/watchers.ts`, `${C}watch/routes.ts`, `${C}tickets/capture.ts`, `${B}BugReport.tsx`, `${B}CoreDown.tsx`], api: ["/api/watchers"],
   },
   {
     id: "videos", name: "Videos (watch and learn)", group: "Agents",
@@ -297,20 +282,6 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}video/gemini.ts`, `${C}video/videos.ts`, `${C}video/routes.ts`, `${C}video/instagram.ts`, `${C}video/ig-worker.ts`, `${C}video/links.ts`, `${B}Videos.tsx`], api: ["/api/videos"],
   },
   {
-    id: "monthly-budgets", name: "Monthly budgets and burn rate", group: "Projects",
-    purpose: "A monthly budget for each project and one for everything, read from the agent calls actually paid, with the burn rate and where the month ends at that rate. The crew's queue fits them.",
-    spec: [
-      "Each paid agent call is charged to the project it was made for (its ticket's, its build's, or the one it names); the rest counts toward the overall month only.",
-      "The burn rate is the average spend per day over the last seven days; the month's end is projected from it, with the day the budget runs out when that is sooner.",
-      "On the real crew, a ready ticket waits in the queue while its month has less left than one start may spend, and says so; it starts by itself when money is there again (the new month, or a higher budget).",
-      "A start the person presses gets no more than the month has left, and is refused when nothing is left.",
-    ],
-    flow: ["Set a monthly budget", "Every paid call counts against it", "See the burn rate and where the month ends", "The queue waits when the month runs low"],
-    design: "This month at the top of each project's Money tab (budget, spent, burn per day, where the month ends, a bar per day) and, for all projects, a strip on Home.",
-    screens: ["/p/ID/money", "/"], docs: ["docs/watchers.md"], stations: [],
-    files: [`${C}watch/spend.ts`], api: ["/api/budget"],
-  },
-  {
     id: "brain", name: "Brain (principles)", group: "Agents",
     purpose: "SoftwareFactory's principles, written once and put in front of every agent's instructions on every call, so a rule about what the factory makes is said in one place and followed everywhere.",
     spec: [
@@ -327,25 +298,16 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     stations: ["council", "design", "critique", "plan", "tests", "build", "review", "evaluate", "fix", "overseer", "survey"],
     files: [`${C}brain/brain.ts`, `${C}brain/routes.ts`, `${C}brain/learn.ts`, `${B}Brain.tsx`], api: ["/api/brain"],
   },
-  {
-    id: "recall", name: "Recall of the person's words", group: "Agents",
-    purpose: "A full-text index over what the person already said, so the Council and the Planner build on past notes and decisions instead of rediscovering them.",
-    spec: ["Notes, filed fragments, tickets, plans, Council decisions and proposals are indexed from the event log.", "A new build recalls only the person's own words, so a new version never descends from old plans."],
-    flow: ["An event with text is logged", "It is added to the index", "A run starts", "The top matches for the idea are put in the Council's and the Planner's prompt"],
-    design: "No screen of its own; what was recalled is logged with the run.",
-    screens: [], docs: ["docs/engine.md", "docs/storage.md"], stations: ["council", "plan"],
-    files: [`${C}brain/recall.ts`], api: [],
-  },
 
   // ───────────────────────────── Order
   {
     id: "order-engine", name: "Order Engine (rules and ideas)", group: "Order",
     purpose: "Brings order to messy, parallel thinking: cuts what the person writes into fragments, files each under the right project, idea or thread, keeps the rules (the Canon) and finds conflicts between them.",
-    spec: ["A note is cut into fragments: rule, decision, idea, task, question, note or noise.", "Each fragment is filed on a node of the tree; unsure ones wait in the Unsorted tray.", "Rules and decisions on a node and its ancestors are its Canon.", "Conflicts are resolved by fixed precedence (the person's words, the more specific node, newer, important), or a conflict card asks.", "A sweep cleans old data, with undo."],
+    spec: ["A note is cut into fragments: rule, decision, idea, task, question, note or noise.", "Each fragment is filed on a node of the tree; unsure ones wait in the Unsorted tray.", "Rules and decisions on a node and its ancestors are its Canon.", "Conflicts are resolved by fixed precedence (the person's words, the more specific node, newer, important), or a conflict card asks.", "A sweep cleans old data, with undo.", "Recall: agents can look up the person's own words across notes, tickets and plans."],
     flow: ["The person captures a note", "The Archivist proposes how to cut and file it", "The engine files it and checks it against the Canon", "A conflict is resolved by precedence or shown as a card", "The briefing says what changed"],
     design: "Rules and ideas: the star map of projects, ideas and threads, and the Order deck with the Canon, the Unsorted tray, conflict cards and the briefing. Each project has the same view on its Ideas tab.",
-    screens: ["/factory/order", "/p/ID/ideas"], docs: ["docs/flows.md", "docs/history.md"], stations: ["order"],
-    files: [`${C}order/`, `${C}order-cli.ts`, `${C}signals.ts`, `${B}StarMap.tsx`, `${B}OrderDeck.tsx`],
+    screens: ["/factory/order", "/p/ID/ideas"], docs: ["docs/flows.md", "docs/history.md", "docs/engine.md", "docs/storage.md"], stations: ["order", "council", "plan"],
+    files: [`${C}order/`, `${C}order-cli.ts`, `${C}signals.ts`, `${B}StarMap.tsx`, `${B}OrderDeck.tsx`, `${C}brain/recall.ts`],
     api: ["/api/order", "/api/signals"],
   },
   {
@@ -390,11 +352,11 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
   {
     id: "money", name: "Money limits", group: "Projects",
     purpose: "Gives each project a limit in all, for its first version and for each later version, and shows where the money went.",
-    spec: ["A project has a total limit, a first-version limit and a later-version limit.", "A run may not start or continue past its project's limit.", "Spending is shown per version."],
+    spec: ["A project has a total limit, a first-version limit and a later-version limit.", "A run may not start or continue past its project's limit.", "Spending is shown per version.", "A monthly budget per project and overall, with the burn rate; the queue waits when the month runs low."],
     flow: ["Set the limits on the Money tab", "A run asks for its budget", "The limit is applied", "Spending is added up per version"],
     design: "The project's Money tab, and the budget bar on the Mission tab.",
-    screens: ["/p/ID/money"], docs: ["docs/projects.md", "docs/spec.md"], stations: [],
-    files: [`${C}projects/budget.ts`, `${B}projects/budgetPanel.tsx`], api: [],
+    screens: ["/p/ID/money", "/"], docs: ["docs/projects.md", "docs/spec.md", "docs/watchers.md"], stations: [],
+    files: [`${C}projects/budget.ts`, `${B}projects/budgetPanel.tsx`, `${C}watch/spend.ts`], api: ["/api/budget"],
   },
   {
     id: "needs-you", name: "Needs you and approvals", group: "Projects",
@@ -410,20 +372,11 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
   {
     id: "tickets", name: "Tickets", group: "Work",
     purpose: "One record for every unit of work on a project, opened by the person, an agent or an error, with a queue the crew picks up from.",
-    spec: ["A ticket has a kind, a state, a thread of notes, links and a key per project.", "Views: Waiting on you, Open, Crew working, Epics, Closed, All, and a Board.", "The crew picks up ready tickets when the switch is on, within caps per run and per day.", "A ticket can ask the person a question and wait."],
+    spec: ["A ticket has a kind, a state, a thread of notes, links and a key per project.", "Views: Waiting on you, Open, Crew working, Epics, Closed, All, and a Board.", "The crew picks up ready tickets when the switch is on, within caps per run and per day.", "A ticket can ask the person a question and wait.", "Intake: a line that reads like a change to an existing project is offered as a ticket there, and a repo ticket takes the light route or the engine by its kind, size and words.", "Before money is spent, a ticket is checked: one that needs the person's call waits for their answer instead."],
     flow: ["A ticket is opened", "It is made ready", "The crew or the person works it", "It waits on the person when built or when it has a question", "It is closed"],
     design: "The Tickets page (list or board, and a ticket page with its thread and actions) and the Tickets tab of every project.",
-    screens: ["/factory/tickets", "/p/ID/tickets"], docs: ["docs/tickets.md", "docs/flows.md"], stations: [],
-    files: [`${C}tickets/`, `${B}Tickets.tsx`, `${B}TicketVerify.tsx`, `${B}TicketsPanel.tsx`], api: ["/api/tickets"],
-  },
-  {
-    id: "intake", name: "Intake (not every idea is a project)", group: "Work",
-    purpose: "Work comes in through many doors and not all of it needs the whole pipeline. Intake checks whether a line is really a change to something that exists, and sends work in a repo down the route that fits it: one Builder session for a fix or a small ask, the whole engine for a feature.",
-    spec: ["A line that reads like a change to an existing project is offered as a ticket on that project.", "The person can still make a project of it.", "In a project that lives in a repo, a bug, a task, a question or anything sized S takes the light route (one session); a request sized M, anything sized L, or an unsized ask longer than a small job takes the engine.", "The route and its reason are shown before the work starts, and the person can choose the other one.", "A spending limit under what an engine run needs always gives the light route, so the crew's own pickups never start an engine run."],
-    flow: ["The person types a line or presses Work it", "Intake compares it with existing projects", "It offers a ticket on the match, or a new project", "In a repo project the ticket's kind, size and words pick the route", "The person picks, or lets the suggestion stand"],
-    design: "A card shown in place of Create project or Build it when a match is found; on a ticket of a repo project, the suggested route with its reason next to both buttons.",
-    screens: [], docs: ["docs/tickets.md", "docs/engine.md"], stations: [],
-    files: [`${C}tickets/intake.ts`, `${C}factory/route.ts`, `${B}Intake.tsx`], api: [],
+    screens: ["/factory/tickets", "/p/ID/tickets", "/"], docs: ["docs/tickets.md", "docs/flows.md", "docs/engine.md"], stations: [],
+    files: [`${C}tickets/`, `${B}Tickets.tsx`, `${B}TicketVerify.tsx`, `${B}TicketsPanel.tsx`, `${C}tickets/intake.ts`, `${C}factory/route.ts`, `${B}Intake.tsx`, `${C}tickets/precheck.ts`], api: ["/api/tickets"],
   },
   {
     id: "crew-prs", name: "Crew work in a repository", group: "Work",
@@ -433,15 +386,6 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     design: "The ticket page's Work it in the repo, the first tab of a project that lives in a repository, and Systems, Crew pull requests for the token.",
     screens: ["/factory/tickets"], docs: ["docs/tickets.md", "docs/dogfood.md"], stations: ["build", "review"],
     files: [`${C}tickets/repowork.ts`, `${C}tickets/github.ts`, `${B}CrewGitHub.tsx`, `${B}projects/mission/RepoWork.tsx`], api: [],
-  },
-  {
-    id: "error-capture", name: "Errors become bug tickets", group: "Work",
-    purpose: "Every fault in the app becomes a bug ticket by itself, with what was around it, and the person can report one with the screen attached.",
-    spec: ["A fault in the core or a screen that throws opens a bug ticket once, not once per repeat.", "The Bug button files a report with the screen attached.", "When the core does not answer, the window says why and offers a restart."],
-    flow: ["Something fails", "The fault is captured with its context", "A bug ticket is opened or the existing one is counted up", "The person sees it under Tickets"],
-    design: "The Bug button in the top strip, the error screen that replaces a broken page, and the Core down cover.",
-    screens: [], docs: ["docs/tickets.md", "docs/app.md"], stations: [],
-    files: [`${C}tickets/capture.ts`, `${B}BugReport.tsx`, `${B}CoreDown.tsx`], api: [],
   },
   {
     id: "imports", name: "Import a repository (code map)", group: "Work",
