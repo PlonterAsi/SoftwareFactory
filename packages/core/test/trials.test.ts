@@ -86,3 +86,33 @@ describe("trials", () => {
     }
   });
 });
+
+describe("the first real trial (24 Nov: Configuration is used, not shrunk)", () => {
+  it("is put on once, and every second ticket's crew works without the advisor", async () => {
+    const { log, ids } = world();
+    const { seedFirstTrial, FIRST_TRIAL_ID } = await import("../src/configs/trials.js");
+    expect(seedFirstTrial(log, (e) => saveEntry(log, e, "configuration"))).toBe(true);
+    expect(seedFirstTrial(log, (e) => saveEntry(log, e, "configuration"))).toBe(false);
+    const e = listCatalog(log).find((x) => x.id === FIRST_TRIAL_ID)!;
+    expect(e.state).toBe("trial");
+    expect(canTrial(e)).toBeNull();
+    const spy = new Spy();
+    const even = ids.find((i) => i % 2 === 0)!, odd = ids.find((i) => i % 2 === 1)!;
+    const ask = { prompt: "fix it", model: "sonnet", budgetUsd: 1, cwd: "/tmp", tools: ["Edit"] } as AgentRequest;
+    await runAgent(log, spy, "builder", ask, { ticket: even });
+    await runAgent(log, spy, "builder", ask, { ticket: odd });
+    const started = log.list({ type: "agent.run.started", limit: 10 }).map((x) => x.payload as Record<string, any>);
+    expect(started[0].trial).toMatchObject({ entry: FIRST_TRIAL_ID, arm: "with" });
+    expect(started[1].trial).toMatchObject({ entry: FIRST_TRIAL_ID, arm: "without" });
+    expect(spy.seen[0].advisor ?? null).toBeNull();
+  });
+
+  it("is never put back once you have dropped it", async () => {
+    const { log } = world();
+    const { seedFirstTrial, FIRST_TRIAL_ID } = await import("../src/configs/trials.js");
+    seedFirstTrial(log, (e) => saveEntry(log, e));
+    setEntryState(log, null, FIRST_TRIAL_ID, "dropped");
+    expect(seedFirstTrial(log, (e) => saveEntry(log, e))).toBe(false);
+    expect(listCatalog(log).find((x) => x.id === FIRST_TRIAL_ID)!.state).toBe("dropped");
+  });
+});

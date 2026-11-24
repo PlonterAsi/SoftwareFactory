@@ -130,3 +130,26 @@ export function decideTrials(log: EventLog, setState: (id: string, state: "promo
   }
   return out;
 }
+
+/**
+ * The first real trial, put on at start once (24 Nov 2026, Assaf: Configuration is finished by being used, not
+ * shrunk). The crew has run with the advisor since 19 Nov and nobody measured whether it helps. Every second
+ * ticket now runs without it; after 5 finished tickets on each side the trial decides: dropped means the advisor
+ * earns its cost and stays; promoted means the crew lands as much without it, for less.
+ * An entry that exists already, in any state, is left as it is: you may have dropped or decided it.
+ */
+export const FIRST_TRIAL_ID = "crew-without-advisor";
+export function seedFirstTrial(log: EventLog, save: (e: Partial<CatalogEntry>) => void): boolean {
+  if (getEntry(log, FIRST_TRIAL_ID)) return false;
+  save({
+    id: FIRST_TRIAL_ID,
+    title: "Crew without the advisor",
+    what: "The crew's Builder and Fixer work without the Opus advisor. Measures whether the advisor (on since 19 Nov) helps crew pull requests land, against what it costs.",
+    kind: "setting",
+    source: { kind: "you", label: "First trial, from the 24 Nov audit" },
+    touches: ["advisor"],
+    settings: [{ path: "advisor.model", value: "off", why: "Is the advisor worth it for the crew? Never measured." }],
+    state: "trial",
+  });
+  return true;
+}

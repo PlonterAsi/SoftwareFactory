@@ -15,8 +15,8 @@ import { configRoute } from "./configs/routes.js";
 import { liveConfig } from "./configs/source.js";
 import { setConfigSource } from "./configs/stamp.js";
 import { setProfileFlows } from "./configs/profiles.js";
-import { adoptScoutTickets, setEntryState } from "./configs/catalog.js";
-import { decideTrials } from "./configs/trials.js";
+import { adoptScoutTickets, saveEntry, setEntryState } from "./configs/catalog.js";
+import { decideTrials, seedFirstTrial } from "./configs/trials.js";
 import { applySwitches, noteStarted } from "./configs/switches.js";
 import { runtimeFromEnv, type AgentRuntime } from "./runtime.js";
 import { duplicateReply, Factory, type GateId } from "./factory/loop.js";
@@ -208,6 +208,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
     trialsAt = Date.now();
     try { decideTrials(log, (id, state, note) => setEntryState(log, tickets, id, state, "trial", note)); } catch { /* the next event tries again */ }
   });
+  try { seedFirstTrial(log, (e) => saveEntry(log, e, "configuration")); } catch (e) { console.warn(`configuration: could not put the first trial on: ${(e as Error).message}`); }
   try { adoptScoutTickets(log, tickets); } catch (e) { console.warn(`catalog: could not adopt Scout's tickets: ${(e as Error).message}`); }
   setConfigSource(log, liveConfig({ log, bay, flows: factory.flows, plugins, crewMode, autoWork, maxRunMinutes: () => factory.maxRunMinutes }));
   // The Improvement Council: your caps from the Bridge win over the start options. On its own it runs on the real crew only.
