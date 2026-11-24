@@ -80,8 +80,6 @@ export type EventType =
   | "agent.memory.noted"
   | "agent.memory.removed"
   | "agent.memory.dream"
-  | "flow.proposed"
-  | "flow.proposal"
   | "watcher.set"
   | "watcher.ran"
   | "budget.monthly"

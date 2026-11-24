@@ -451,9 +451,7 @@ export class Tickets extends TicketPrs {
     // The flow it follows (tickets/flowpick.ts): the one you picked, else its kind's.
     const first = pickFlow(this.flows, t, { repo: !!repo, routeChosen: !!o.route });
     const named = (f: FlowDef) => ({ id: f.id, name: f.name });
-    // A proposed flow change you chose to try once is what this ticket follows (flows/improver.ts).
-    const tried = (f: FlowDef) => this.flows.trial?.(f.id, t.id) ?? f;
-    if (routeOfFlow(first.flow) === "answer" && !o.route) { const f = tried(first.flow); return { ...this.workAnswer(t, repo, o, f), flow: named(f) }; }
+    if (routeOfFlow(first.flow) === "answer" && !o.route) { const f = first.flow; return { ...this.workAnswer(t, repo, o, f), flow: named(f) }; }
     if (repo) {
       const held = epicOfTickets(t);
       if (held) throw new Error(held);
@@ -465,7 +463,7 @@ export class Tickets extends TicketPrs {
         const started = this.workEngine(t, o, routed, pick.flow.id);
         if (started) return { ...started, flow: named(pick.flow) };
       }
-      const session = tried(runnerOf(pick.flow) === "session" ? pick.flow : pickFlow(this.flows, { kind: t.kind }, { repo: true, route: "light", routeChosen: true }).flow);
+      const session = runnerOf(pick.flow) === "session" ? pick.flow : pickFlow(this.flows, { kind: t.kind }, { repo: true, route: "light", routeChosen: true }).flow;
       return { ...this.workRepo(t, repo, o.maxUsd, session), route: routed.route === "light" ? routed : { route: "light", why: "the engine could not take it (see the ticket's thread)" }, flow: named(session) };
     }
     if (first.chosen && runnerOf(first.flow) !== "engine") throw new Error(`"${first.flow.name}" works in a repo, and this ticket's project has none. Pick New project, or import the repo first.`);

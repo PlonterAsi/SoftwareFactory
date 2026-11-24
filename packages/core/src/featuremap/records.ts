@@ -252,21 +252,6 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}bay/`, `${B}AgentBay.tsx`], api: ["/api/bay"],
   },
   {
-    id: "flow-improve", name: "Flows that improve themselves", group: "Engine",
-    purpose: "A change to a flow is first a proposal, from the person's words or from what SF reads in the flow's past runs. It is replayed on those runs before anyone uses it, tried once live, and becomes the flow only when the person accepts it.",
-    spec: [
-      "A change in words becomes operations on the flow: leave a step out, bring one back, a loop's round limit, who works a step, words for the crew. The practice crew reads the words with plain rules; the real crew with one capped haiku call ($0.05).",
-      "Every proposal is replayed on the flow's past runs from what they recorded: what each would have cost, and where it would have let a problem through or stopped before passing. What the past cannot price is said.",
-      "SF proposes on its own, free, every 5 minutes: one more round for a loop that keeps running out, and leaving out an optional step that cost money and never caught anything.",
-      "Try it once: the next run of the flow follows the proposal, within that run's own limit, and its outcome and cost are recorded. Trial runs never count as past runs of the flow.",
-      "Accepting saves the proposal as the flow's next version; a proposal whose flow changed since is refused.",
-    ],
-    flow: ["Say a change, or SF proposes one", "It is replayed on past runs", "Try it once on the next run", "Accept or reject it"],
-    design: "Improve this flow, under each flow on the Flows page: a words box, Ask SF for ideas, and a card per proposal with its changes, its replay run by run, the trial, and Accept or Reject.",
-    screens: ["/factory/flows"], docs: ["docs/flows-improve.md"], stations: [],
-    files: [`${C}flows/improve.ts`, `${C}flows/improver.ts`], api: [],
-  },
-  {
     id: "agent-memory", name: "Agent memory and cleaning", group: "Agents",
     purpose: "Each agent keeps its own memory of lessons from its past work and carries it into every project: the lessons go into its prompt on every call, and the memory is cleaned the way Claude Code's Auto Dream cleans its own, with the person accepting each cleaning before it is used.",
     spec: [
