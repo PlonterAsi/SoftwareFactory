@@ -26,7 +26,13 @@ import type { TestCase, TestRun } from "./workspace.js";
 /** SoftwareFactory's own folder inside a clone. */
 export const SF_DIR = ".sf";
 
-export interface TestCommand { label: string; file: string; args: string[]; shell?: boolean; kind: "pytest" | "unittest" | "npm" }
+export interface TestCommand {
+  label: string; file: string; args: string[]; shell?: boolean;
+  /** go: `go test`; check: a command whose exit code is the result (a build, `go vet`). */
+  kind: "pytest" | "unittest" | "npm" | "go" | "check";
+  /** The folder it runs in, relative to the repo (a Go module or a Node package in a subfolder). Absent: the repo. */
+  cwd?: string;
+}
 
 export interface RepoEnv {
   /** node, python, static... as the Run tab reads the folder. */
@@ -64,6 +70,31 @@ export function pythonTestFiles(dir: string, max = 200): string[] {
   };
   walk("", 0);
   return out;
+}
+
+/**
+ * Code that lives in a subfolder of its own: a Go module (go.mod) or a Node package (package.json) one level
+ * down, such as RoadToMill's backend/ (Go) and web/ (React). The repo root and npm workspaces are handled
+ * elsewhere, so they are left out. Before this, an import of such a repo found "no known stack" and ran
+ * Python's unittest on a stray script (RoadToMill, 24 Nov 2026).
+ */
+export function subPackages(dir: string): { go: string[]; node: string[] } {
+  const out = { go: [] as string[], node: [] as string[] };
+  const ws = new Set(workspaceDirs(dir));
+  let names: string[] = [];
+  try { names = readdirSync(dir).sort(); } catch { return out; }
+  for (const n of names) {
+    if (n.startsWith(".") || n === "node_modules" || n === SF_DIR || ws.has(n)) continue;
+    let st; try { st = statSync(join(dir, n)); } catch { continue; }
+    if (!st.isDirectory()) continue;
+    if (isFile(join(dir, n, "go.mod"))) out.go.push(n);
+    if (isFile(join(dir, n, "package.json"))) out.node.push(n);
+  }
+  return out;
+}
+
+function hasGo(): boolean {
+  try { return spawnSync("go", ["version"], { encoding: "utf8", windowsHide: true, timeout: 10_000 }).status === 0; } catch { return false; }
 }
 
 /** Run one command to its end without holding up the core (an install can take minutes; the app must stay alive meanwhile). */
@@ -154,7 +185,46 @@ export async function prepareEnv(dir: string, o: { install?: boolean; platform?:
       else if (!wantsPytest) env.tests.push({ label: "python -m unittest", file: py, args: ["-m", "unittest", "discover", "-v"], kind: "unittest" });
     }
   }
-  env.testHint = env.tests.map((t) => (t.kind === "npm" ? "npm test" : t.kind === "pytest" ? "python -m pytest -q" : "python -m unittest discover")).join(" and ");
+  // ---- Go modules and Node packages: at the root (Go) and one folder down (both) ----
+  const subs = subPackages(dir);
+  const goRoots = [...(isFile(join(dir, "go.mod")) ? [""] : []), ...subs.go];
+  if (goRoots.length) {
+    if (!env.stack.includes("go")) env.stack.push("go");
+    if (!hasGo()) env.notes.push("there is no Go on this computer, so its Go code cannot be built or tested here");
+    else {
+      env.commands.push("go", "gofmt");
+      for (const g of goRoots) {
+        const where = g ? ` (${g})` : "";
+        env.tests.push({ label: `go vet${where}`, file: "go", args: ["vet", "./..."], kind: "check", ...(g ? { cwd: g } : {}) });
+        env.tests.push({ label: `go test${where}`, file: "go", args: ["test", "./..."], kind: "go", ...(g ? { cwd: g } : {}) });
+      }
+    }
+  }
+  for (const n of subs.node) {
+    let pkg: Record<string, any> = {};
+    try { pkg = JSON.parse(read(join(dir, n, "package.json"))); } catch { env.notes.push(`${n}/package.json does not parse`); continue; }
+    if (!env.stack.includes("node")) env.stack.push("node");
+    const deps = Object.keys({ ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) });
+    if (deps.length && !existsSync(join(dir, n, "node_modules"))) {
+      if (!install) env.notes.push(`the Node packages of ${n}/ are not installed`);
+      else if (!existsSync(join(dir, n, "package-lock.json"))) env.notes.push(`the Node packages of ${n}/ are not installed and it has no package-lock.json`);
+      else {
+        const i = await sh("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: join(dir, n), shell: true, timeoutMs: 600_000 });
+        if (i.status !== 0) env.notes.push(`npm ci in ${n}/ failed: ${trim(i.out, 400)}`);
+      }
+    }
+    const test = String(pkg.scripts?.test ?? "");
+    // Its own tests when it has them; else its build, which type-checks a TypeScript app (RoadToMill's web/).
+    if (test && !/no test specified/.test(test)) env.tests.push({ label: `npm test (${n})`, file: "npm", args: ["test", "--silent"], shell: true, kind: "npm", cwd: n });
+    else if (pkg.scripts?.build) env.tests.push({ label: `npm run build (${n})`, file: "npm", args: ["run", "build"], shell: true, kind: "check", cwd: n });
+    if (!env.commands.includes("npm")) env.commands.push("npm");
+  }
+
+  const hint = (t: TestCommand) => {
+    const base = t.kind === "npm" ? "npm test" : t.kind === "pytest" ? "python -m pytest -q" : t.kind === "unittest" ? "python -m unittest discover" : `${t.file} ${t.args.join(" ")}`;
+    return t.cwd ? `${base} (in ${t.cwd}/)` : base;
+  };
+  env.testHint = env.tests.map(hint).join(" and ");
   return env;
 }
 
@@ -171,6 +241,14 @@ export function parseCases(output: string, kind: TestCommand["kind"]): TestCase[
   for (const raw of output.split(/\r?\n/)) {
     const line = raw.replace(/\u001b\[[0-9;]*m/g, "");
     let m: RegExpMatchArray | null;
+    if (kind === "check") continue;
+    if (kind === "go") {
+      // Without -v: "ok  	pkg	0.1s" per package that passed, "--- FAIL: TestX (0.00s)" per failing test, "FAIL	pkg" per package.
+      if ((m = line.match(/^ok\s+(\S+)/))) add(m[1], m[1], true);
+      else if ((m = line.match(/^\s*--- FAIL: (\S+)/))) add(m[1], "", false, "failed");
+      else if ((m = line.match(/^FAIL\s+(\S+)\s/))) add(`${m[1]} (package)`, m[1], false, "failed");
+      continue;
+    }
     if (kind === "pytest") {
       if ((m = line.match(/^(PASSED|FAILED|ERROR)\s+(\S+?)(?:::(\S.*?))?(?:\s+-\s+(.*))?$/))) add(m[3] ?? m[2], m[2], m[1] === "PASSED", m[1] === "PASSED" ? undefined : (m[4] ?? m[1].toLowerCase()).slice(0, 1200));
     } else if (kind === "unittest") {
@@ -191,7 +269,7 @@ export async function runRepoTests(dir: string, env: Pick<RepoEnv, "tests" | "pa
   const all: TestRun = { cases: [], passed: 0, failed: 0, exitCode: 0, timedOut: false, output: "" };
   for (const t of env.tests) {
     const r = await new Promise<{ code: number | null; out: string; timedOut: boolean }>((resolve) => {
-      const child = spawn(t.file, t.args, { cwd: dir, shell: !!t.shell, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: { ...withPathFirst(projectEnv(dir, process.execPath, null), env.pathFirst), CI: "1" } });
+      const child = spawn(t.file, t.args, { cwd: t.cwd ? join(dir, t.cwd) : dir, shell: !!t.shell, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: { ...withPathFirst(projectEnv(dir, process.execPath, null), env.pathFirst), CI: "1" } });
       let out = "";
       let timedOut = false;
       child.stdout.on("data", (x) => { out += x; });
@@ -222,7 +300,7 @@ export function siteProfile(dir: string): RunProfile | null {
   if (own?.kind === "web") return own;
   // A monorepo whose site is one of its workspaces (SoftwareFactory's own apps/bridge): run 9398's product judge
   // found "no site" at the top, so every screen criterion was left to code reading.
-  for (const ws of workspaceDirs(dir)) {
+  for (const ws of [...workspaceDirs(dir), ...subPackages(dir).node]) {
     const p = pick(join(dir, ws));
     if (p?.kind === "web") return { ...p, cwd: ws, command: `${p.command} (in ${ws})` };
   }

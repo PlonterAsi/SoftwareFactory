@@ -663,7 +663,8 @@ export class Run extends RunJudge {
     ].filter(Boolean).join("\n\n");
     // What each file held before this round, so the stop rules (SF-25) see a revert to the build's version.
     const beforeAll = this.fileHashes();
-    const text = await this.askBench(fixer, prompt, { round }, { model });
+    // A deeper model gets at least the money it needs to work (its floor), inside what the run has left.
+    const text = await this.askBench(fixer, prompt, { round }, model ? { model, capUsd: Math.max(fixer.budgetUsd, modelFloorUsd(model)), raiseCap: true } : {});
     const res = this.takeWork(text);
     this.lastFixBefore = Object.fromEntries(res.written.map((w) => [w.path, beforeAll[w.path]]).filter(([, h]) => h));
     this.lastFixSaid = answerSummary(text);
