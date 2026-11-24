@@ -35,6 +35,8 @@ export type EventType =
   | "factory.files"
   | "factory.tests"
   | "factory.tests.locked"
+  | "factory.tests.flaky"
+  | "factory.tests.reused"
   | "factory.gate"
   | "factory.visual"
   | "factory.fastgate"

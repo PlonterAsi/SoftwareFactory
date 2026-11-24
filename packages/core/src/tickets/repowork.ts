@@ -17,6 +17,7 @@ import { SMALL_CHANGE_FLOW, crewPick, roundsOf, stepsToRun, type FlowDef } from 
 import { noteLesson } from "../bay/memory.js";
 import { isClosed, type TicketView } from "./model.js";
 import { VERIFY_ASK } from "./verify.js";
+import { QUIET_ENV, quietTail, testsWithRecheck } from "./testrecheck.js";
 
 /**
  * Working a ticket inside an existing codebase (a project imported from a git
@@ -227,6 +228,8 @@ export interface LoopChecks {
 const PASS: CheckResult = { ok: true, output: "" };
 const MAX_FIX_ROUNDS = 2;
 const trim = (s: string, n = 3000) => (s.length > n ? `…${s.slice(-n)}` : s);
+/** Check output leads with what failed (tickets/testrecheck.ts), so its head is kept. */
+const head = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n…` : s);
 
 // Never spawnSync here: a test run takes minutes, and a blocked core answers nothing meanwhile (20 Nov).
 const sh = (cmd: string, args: string[], cwd: string, timeout = 300_000) => runAsync(cmd, args, { cwd, shell: true, timeout });
@@ -293,17 +296,23 @@ export async function defaultRunTests(dir: string, files: string[]): Promise<Che
   if (deps) return { ok: true, output: `${deps}, so the tests could not run`, skipped: true };
   let out = "";
   const ran: string[] = [];
+  const notes: string[] = [];
   for (const [r, changed] of withTests) {
     const cwd = join(dir, r);
     let usesVitest = false;
     try { const pj = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")); usesVitest = /vitest/.test(String(pj.scripts?.test)) || !!pj.devDependencies?.vitest; } catch { /* plain npm test */ }
-    const p = usesVitest
-      ? await sh("npx", ["vitest", "related", "--run", "--passWithNoTests", ...changed.map((f) => JSON.stringify(f))], cwd)
-      : await sh("npm", ["test", "--silent"], cwd);
-    if (p.status !== 0) out += `${usesVitest ? "vitest related" : "npm test"} in ${r} failed:\n${trim(`${p.stdout ?? ""}\n${p.stderr ?? ""}`)}\n`;
-    else ran.push(usesVitest ? `cd ${r} && npx vitest related --run ${changed.join(" ")}` : `cd ${r} && npm test`);
+    if (usesVitest) {
+      // Named failures, a second run for flaky ones, and the base for ones already broken (tickets/testrecheck.ts).
+      const t = await testsWithRecheck(dir, cwd, changed);
+      if (!t.ok) out += `vitest related in ${r} failed:\n${t.output}\n`;
+      else { ran.push(`cd ${r} && npx vitest related --run ${changed.join(" ")}`); if (t.output) notes.push(t.output); }
+      continue;
+    }
+    const p = await runAsync("npm", ["test", "--silent"], { cwd, shell: true, timeout: 300_000, env: { ...process.env, ...QUIET_ENV } });
+    if (p.status !== 0) out += `npm test in ${r} failed:\n${quietTail(`${p.stdout ?? ""}\n${p.stderr ?? ""}`)}\n`;
+    else ran.push(`cd ${r} && npm test`);
   }
-  return { ok: !out, output: out || ran.join("\n") };
+  return { ok: !out, output: out || [...ran, ...notes].join("\n") };
 }
 
 // The git helper trims its output, so the first status line can lose its leading space: parse by pattern, not by column.
@@ -459,11 +468,11 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
           if (bad.name === "secrets") break;
           const why = c.stopRule?.({ round, failures, costUsd: spent, maxUsd: o.maxUsd }) ?? (left() < o.maxUsd * 0.1 ? "the budget for this ticket is used up" : null);
           if (why) { step("fix", "skipped", why); break; }
-          const fixed = await build(`The ${bad.name} check failed on your change to the ticket "${o.title}". Fix the cause (not the check) and change nothing else.\n\n${trim(bad.output)}`, o.maxUsd * 0.15, `fix ${round}`);
+          const fixed = await build(`The ${bad.name} check failed on your change to the ticket "${o.title}". Fix the cause (not the check) and change nothing else.\n\n${head(bad.output, 4000)}`, o.maxUsd * 0.15, `fix ${round}`);
           if (fixed.error) break;
           bad = await check();
         }
-        if (bad) return fail(`Not committed: ${bad.name} still failing after ${failures.length} round(s).\n${trim(bad.output, 1500)}`, changedFiles(dir));
+        if (bad) return fail(`Not committed: ${bad.name} still failing after ${failures.length} round(s).\n${head(bad.output, 1500)}`, changedFiles(dir));
         break;
       }
       case "review": {
@@ -479,7 +488,7 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
           if (r === 0) for (const h of res.high.slice(0, 2)) noteLesson(log, b?.id ?? "builder", `A reviewer sent back my change for: ${h.slice(0, 240)}`, "review", `ticket:${o.id}`);
           const fixed = await build(`A reviewer found high-severity problems in your change to "${o.title}". Fix them and change nothing else.\n\n${res.high.map((h) => `- ${trim(h, 600)}`).join("\n")}`, o.maxUsd * 0.15, "review fix");
           const again = fixed.error ? { name: "review fix", output: fixed.error } : await check();
-          if (again) return fail(`Not committed: ${again.name} failed after the review fix.\n${trim(again.output, 1500)}`, changedFiles(dir));
+          if (again) return fail(`Not committed: ${again.name} failed after the review fix.\n${head(again.output, 1500)}`, changedFiles(dir));
           r++;
           if (r >= rounds || left() <= 0) { step("review", "passed", "high findings fixed"); passed.push("review"); break; }
           res = await review();
