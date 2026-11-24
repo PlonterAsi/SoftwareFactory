@@ -25,7 +25,6 @@ export * from "./bay/tables.js";
 export * from "./bay/memory.js";
 export * from "./setup.js";
 export * from "./bridge/tables.js";
-export * from "./bridge/drop.js";
 export * from "./bridge/status.js";
 export * from "./projects/model.js";
 export * from "./projects/tables.js";

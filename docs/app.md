@@ -77,7 +77,7 @@ Opened from the sidebar, the crew chip or the Helm (`Setup.tsx`).
 |---|---|
 | **Crew** | Switch between the practice crew and the real crew. Remembered in the database. |
 | **This computer** | Checks for Node.js, Claude Code and Git, each with the one thing to do if it is missing. *Check again*. |
-| **Where things land** | The built-apps folder, the drop folder (changeable) and the database, each with *Open* and *Copy path*. |
+| **Where things land** | The built-apps folder and the database, each with *Open* and *Copy path*. |
 | **Updates** | Current version, *Check for updates*, install now, and the GitHub read token used when the repository is private (`Updates.tsx`). |
 | **Crew pull requests** | The GitHub write token the crew uses to open draft pull requests for tickets (`CrewGitHub.tsx`). |
 

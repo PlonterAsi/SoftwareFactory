@@ -115,7 +115,7 @@ Runs started with `autoApprove` (headless runs, and tickets the crew picks up by
 
 ```mermaid
 flowchart LR
-  say["Capture in the Assistant,<br/>Enter in the Helm,<br/>or a file in the drop folder"] --> sig["Signal<br/>stored raw"]
+  say["Capture in the Assistant,<br/>or Enter in the Helm"] --> sig["Signal<br/>stored raw"]
   sig --> arch["Archivist<br/>split · classify · route"]
   arch --> frag["Fragments under<br/>project ▸ idea ▸ thread"]
   frag --> canon["Rules and decisions<br/>enter the Canon"]

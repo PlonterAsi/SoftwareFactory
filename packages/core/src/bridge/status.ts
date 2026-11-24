@@ -66,8 +66,6 @@ export function sinceReport(log: EventLog, order: OrderState, from?: number, now
     const top = [...where.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `${n} to ${t}`).join(", ");
     lines.push({ kind: "filed", text: `${filed.length} new note${filed.length > 1 ? "s" : ""} filed: ${top}.` });
   }
-  const drops = Number((log.db.prepare("SELECT count(*) AS n FROM drops WHERE id > ? AND status = 'filed'").get(fromEvent) as { n: number }).n);
-  if (drops) lines.push({ kind: "drop", text: `${drops} note${drops > 1 ? "s" : ""} came in through the drop folder.` });
   const spend = Number((log.db.prepare("SELECT coalesce(sum(cost_usd), 0) AS s, count(*) AS n FROM agent_runs WHERE id > ? AND status = 'done'").get(fromEvent) as { s: number }).s);
   if (spend > 0) lines.push({ kind: "spend", text: `Agents spent $${spend.toFixed(4)} meanwhile.` });
   return { fromEvent, toEvent, leftAt, awayMinutes, lines };

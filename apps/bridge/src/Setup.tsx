@@ -14,15 +14,13 @@ export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onCl
   const [s, setS] = useState<SetupView | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [dropDir, setDropDir] = useState("");
-  const [editDrop, setEditDrop] = useState(false);
 
   const load = async (fresh = false) => {
     setBusy(true);
-    try { const v = await setupApi.get(fresh); setS(v); setDropDir(v.paths.drop); setErr(null); } catch (e) { setErr("The core is not answering. " + (e as Error).message); } finally { setBusy(false); }
+    try { const v = await setupApi.get(fresh); setS(v); setErr(null); } catch (e) { setErr("The core is not answering. " + (e as Error).message); } finally { setBusy(false); }
   };
   useEffect(() => { if (open) load(true); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Keep the drop list fresh while open.
+  // Keep the report fresh while open.
   useEffect(() => { if (open && s) setupApi.get().then(setS).catch(() => {}); }, [dropsAt]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open) return;
@@ -36,8 +34,7 @@ export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onCl
     try { await f(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
   const pick = (mode: CrewMode) => act(async () => setS(await setupApi.mode(mode)));
-  const open_ = (t: "projects" | "drop" | "data") => act(() => setupApi.open(t));
-  const saveDrop = () => act(async () => { await setupApi.drop(dropDir.trim()); setEditDrop(false); await load(); });
+  const open_ = (t: "projects" | "data") => act(() => setupApi.open(t));
 
   if (!open) return null;
   return (
@@ -79,26 +76,6 @@ export function Setup({ open, onClose, dropsAt, updates }: { open: boolean; onCl
           <section className="setup-sec">
             <h3>Where things land</h3>
             <Place label="Built apps" hint="Every shipped app is a git repo here, one folder per run." path={s.paths.projects} onOpen={() => open_("projects")} />
-            <div className="place">
-              <div className="place-top">
-                <span className="place-label">Drop folder</span>
-                <span className="place-actions">
-                  <button className="ghost sm" onClick={() => open_("drop")}>Open</button>
-                  <button className="ghost sm" onClick={() => setEditDrop(!editDrop)}>{editDrop ? "Cancel" : "Change"}</button>
-                </span>
-              </div>
-              <div className="place-hint">Save a .txt or .md note here, even from your phone, and it becomes a note within seconds. Point it at a OneDrive or Google Drive folder to capture ideas away from the desk.</div>
-              {editDrop
-                ? <div className="place-edit"><input value={dropDir} onChange={(e) => setDropDir(e.target.value)} aria-label="Drop folder path" /><button className="sm" disabled={busy || !dropDir.trim()} onClick={saveDrop}>Use this folder</button></div>
-                : <code className="place-path">{s.paths.drop}</code>}
-              {s.drops.length > 0 && (
-                <ul className="drops">
-                  {s.drops.slice(0, 5).map((d) => (
-                    <li key={d.id} className={d.status}><span className="mono">{new Date(d.ts).toLocaleString()}</span> {d.file} <span className="muted">{d.status === "filed" ? "· captured" : `· ${d.note ?? "skipped"}`}</span></li>
-                  ))}
-                </ul>
-              )}
-            </div>
             <Place label="Database" hint="factory.db: the event log and every table. Open it in any SQLite browser." path={s.paths.data} onOpen={() => open_("data")} />
           </section>
           {updates && <UpdatesSection u={updates} />}

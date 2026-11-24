@@ -172,7 +172,7 @@ export function App() {
   const crewChip = <button className={`crew-chip ${f.mode ?? ""}`} onClick={() => setSetupOpen(true)} title={`Runtime: ${f.runtime}. Click for crew, checks and folders.`}>{f.mode === "real" ? "Real crew" : f.mode === "practice" ? "Practice crew · free" : "Crew …"}</button>;
   const setup = <>
     <Setup open={setupOpen} onClose={() => setSetupOpen(false)} updates={updates}
-    dropsAt={f.events.filter((e) => e.type.startsWith("drop.") || e.type === "settings.changed").at(-1)?.id ?? 0} />
+    dropsAt={f.events.filter((e) => e.type === "settings.changed").at(-1)?.id ?? 0} />
     <BugReport open={bugOpen} onClose={() => setBugOpen(false)} />
   </>;
 

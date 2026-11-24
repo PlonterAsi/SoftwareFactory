@@ -10,7 +10,7 @@ const tmp = () => mkdtempSync(join(tmpdir(), "sf-cli-"));
 describe("sf: the tickets from any terminal (gap 10, agent interfaces outside the app)", () => {
   it("opens, lists, shows, replies, marks asked and reads the inbox through the core's API", async () => {
     const log = new EventLog();
-    const server = createServer(createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp() }));
+    const server = createServer(createCore({ log, runtime: new MockRuntime(), projectsDir: tmp() }));
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
     const port = (server.address() as { port: number }).port;
     process.env.SF_URL = `http://127.0.0.1:${port}`;

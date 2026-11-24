@@ -19,8 +19,6 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/cost` | Spend summary |
 | `GET /api/setup` (`?fresh=1`) | Checks for Node.js, Claude Code, Git; crew mode; paths |
 | `POST /api/setup/mode` | `{ mode: "practice" \| "real" }` |
-| `POST /api/setup/drop` | Change the drop folder |
-| `POST /api/setup/drop/scan` | Read the drop folder now |
 | `POST /api/open` | Open a known folder (projects, drop, data, a run's folder) in the file manager |
 | `GET /api/since` | The "since you left" lines |
 | `POST /api/presence` | Mark how far the person has seen |
@@ -153,7 +151,7 @@ Every row of the log is `{ id, ts, type, payload }`. A run's id is the id of its
 | Launch | `launch.started`, `launch.url`, `launch.stopped`, `launch.exited` |
 | Finished apps | `integration.requested`, `integration.briefed`, `integration.decided`, `integration.installed`, `integration.failed`, `integration.removed`, `integration.used` |
 | Add-ons | `plugin.installed`, `plugin.enabled`, `plugin.disabled`, `plugin.failed`, `plugin.removed`, `plugin.data`, `plugin.log`, `plugin.emitted` |
-| App | `settings.changed`, `drop.filed`, `drop.skipped`, `bridge.seen`, `app.updated`, `store.migrated`, `store.rebuilt` |
+| App | `settings.changed`, `bridge.seen`, `app.updated`, `store.migrated`, `store.rebuilt` |
 
 ### Station states
 
@@ -203,7 +201,6 @@ The installed app sets what it needs itself. These matter in development, tests 
 | `SF_PORT` | `4317` | The core's port |
 | `SF_DB` | `.sf-data/factory.db` in development | The Main factory's database |
 | `SF_PROJECTS` | `projects/` next to the database | Where builds are written |
-| `SF_DROP` | `%USERPROFILE%\SoftwareFactory\Drop` | The drop folder of the Main factory |
 | `SF_AUTO_RESUME` | on | `0` stops unfinished runs from resuming at start |
 | `SF_SCREEN_CHECK` | on | `off` skips opening screens in a browser |
 | `SF_LINK_CHECK` | on | `off` skips opening links |

@@ -75,7 +75,6 @@ These hold for every feature. Each has a place in the code that enforces it.
 | Requirement | Status | Notes |
 |---|---|---|
 | File anything said, in any order | Built | Signals, Archivist, fragments |
-| Capture from outside the app | Built | Drop folder: a `.txt` or `.md` file becomes a Signal |
 | Rules and decisions kept as Canon with their source | Built | |
 | Conflict detection and resolution | Built | Precedence in code; a card when tied |
 | Unsure placements never block | Built | Unsorted tray |

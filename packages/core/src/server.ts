@@ -52,7 +52,6 @@ import { monthLeft } from "./watch/spend.js";
 import { Watchers } from "./watch/watchers.js";
 import { GitManager } from "./git/manager.js";
 import { gitRoute } from "./git/routes.js";
-import { DropFolder } from "./bridge/drop.js";
 import { askForApp } from "./factory/appagent.js";
 import { AUTO_WORK_DEFAULT, TICKET_FILE_MAX, Tickets, type AutoWork, type TicketFile } from "./tickets/tickets.js";
 import { GitHub, ghCliToken, parseGitHubRepo } from "./tickets/github.js";
@@ -77,8 +76,6 @@ export interface CoreOptions {
   projectsDir?: string;
   /** Order Engine options; by default the agent Archivist runs on any real runtime, heuristics on the mock. */
   order?: OrderOptions;
-  /** The drop folder: notes saved here become Signals. Off when absent. */
-  dropDir?: string;
   /** Where the database lives (shown in the setup panel). */
   dataDir?: string;
   /** GitHub write access for the crew's PRs (tests pass one pointed at a fake GitHub). */
@@ -88,7 +85,7 @@ export interface CoreOptions {
 }
 
 /** Build the core HTTP handler: a small JSON API plus a server-sent event stream. */
-export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dropDir, dataDir, appVersion, github: githubIn }: CoreOptions) {
+export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resolve(process.cwd(), ".sf-data/projects"), order: orderOpts, dataDir, appVersion, github: githubIn }: CoreOptions) {
   // GitHub write access for the crew's PRs; the token lives in the data folder, never in the log.
   // Each agent's own skills and MCP servers: the person's library and the built kits live in the data folder.
   if (dataDir) configureKits({ dataDir });
@@ -96,7 +93,6 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
   const crewMode = () => (runtime instanceof SwitchableRuntime ? runtime.mode : modeOf(runtime));
   const bay = new AgentBay(log, runtime);
   const settings = readSettings(log);
-  const drop = new DropFolder(log, settings.dropDir ?? dropDir ?? join(homedir(), "SoftwareFactory", "Drop"));
   // Git is needed to ship anything; checking costs a process spawn, so remember it for a minute.
   let gitOk: { ok: boolean; at: number } = { ok: true, at: 0 };
   const gitReady = () => {
@@ -276,7 +272,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       if (req.method === "GET" && url.pathname === "/api/setup") {
         const fresh = url.searchParams.get("fresh") === "1";
         if (fresh) gitOk.at = 0;
-        return json(res, 200, { ...setupReport(runtime, fresh), paths: { data: dataDir ?? dirname(projectsDir), projects: projectsDir, drop: drop.dir }, drops: drop.recent(10) });
+        return json(res, 200, { ...setupReport(runtime, fresh), paths: { data: dataDir ?? dirname(projectsDir), projects: projectsDir } });
       }
       if (req.method === "POST" && url.pathname === "/api/setup/mode") {
         const body = await readJson(req);
@@ -288,25 +284,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         // The Archivist follows the crew unless its mode was pinned (SF_ORDER_MODE).
         if (!orderOpts?.mode) order.opts.mode = mode === "real" ? "agent" : "heuristic";
         log.append("settings.changed", { key: "crewMode", value: mode });
-        return json(res, 200, { ...setupReport(runtime), paths: { data: dataDir ?? dirname(projectsDir), projects: projectsDir, drop: drop.dir }, drops: drop.recent(10) });
+        return json(res, 200, { ...setupReport(runtime), paths: { data: dataDir ?? dirname(projectsDir), projects: projectsDir } });
       }
-      if (req.method === "POST" && url.pathname === "/api/setup/drop") {
-        const body = await readJson(req);
-        const dir = String(body.dir ?? "").trim();
-        if (!dir || !isAbsolute(dir)) return json(res, 400, { error: "Give a full folder path, for example C:\\Users\\you\\OneDrive\\SoftwareFactory Drop" });
-        mkdirSync(dir, { recursive: true });
-        drop.dir = dir;
-        log.append("settings.changed", { key: "dropDir", value: dir });
-        drop.scan();
-        return json(res, 200, { dir });
-      }
-      if (req.method === "POST" && url.pathname === "/api/setup/drop/scan") return json(res, 200, { results: drop.scan(), drops: drop.recent(10) });
       if (req.method === "POST" && url.pathname === "/api/open") {
         const body = await readJson(req);
         const target = String(body.target ?? "");
         let dir: string | null = null;
         if (target === "projects") dir = projectsDir;
-        else if (target === "drop") dir = drop.dir;
         else if (target === "data") dir = dataDir ?? dirname(projectsDir);
         else if (target === "run") {
           const row = log.db.prepare("SELECT dir FROM factory_runs WHERE id = ?").get(Number(body.run)) as { dir: string | null } | undefined;
@@ -563,7 +547,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
       return json(res, 500, { error: (e as Error).message, ticket: r?.ticket ?? null });
     }
   };
-  return Object.assign(handler, { github, git: gitman, watchers, factory, order, bay, drop, tickets, explorer, reviewer, launcher, integrations, plugins, videos, errors, fault, ensureSelf });
+  return Object.assign(handler, { github, git: gitman, watchers, factory, order, bay, tickets, explorer, reviewer, launcher, integrations, plugins, videos, errors, fault, ensureSelf });
 }
 
 /**
@@ -620,7 +604,7 @@ function selfGitHub(log: EventLog) {
 
 /** Settings you changed in the Bridge, newest value per key, from the `settings` table. */
 export function readSettings(log: EventLog): {
-  crewMode?: CrewMode; dropDir?: string; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean; importsFollow?: boolean;
+  crewMode?: CrewMode; improveAuto?: boolean; improveMaxUsd?: number; improveEveryHours?: number; autoUpdate?: boolean; importsFollow?: boolean;
   importReviewMaxUsd?: number; importReviewAuto?: boolean; importHomeStack?: string;
   ticketsAutoWork?: boolean; ticketsAutoMaxUsd?: number; ticketsAskedMaxUsd?: number; ticketsAutoDailyUsd?: number; ticketsWip?: number;
   maxRunMinutes?: number;
@@ -862,7 +846,7 @@ export interface BootedBase {
   handler: (req: IncomingMessage, res: ServerResponse) => unknown;
   /** Factory runs working right now. */
   activeRuns: () => number;
-  /** Stop timers, plugins, launched apps and the drop folder, then close the database. */
+  /** Stop timers, plugins and launched apps, then close the database. */
   dispose: () => void;
 }
 
@@ -883,12 +867,10 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
   const runtime = new SwitchableRuntime(mode === "real" && process.env.SF_RUNTIME?.startsWith("claude-code") ? runtimeFromEnv() : runtimeFor(mode), mode);
   const dataDir = dbPath === ":memory:" ? process.cwd() : dirname(dbPath);
   const projectsDir = (isDefault ? process.env.SF_PROJECTS : undefined) ?? resolve(dataDir, "projects");
-  const dropDir = isDefault ? process.env.SF_DROP : join(dataDir, "Drop");
   const orderMode = process.env.SF_ORDER_MODE as "agent" | "heuristic" | undefined;
   const orderMax = process.env.SF_ORDER_MAX_USD ? Number(process.env.SF_ORDER_MAX_USD) : undefined;
   // The installed app may use the GitHub CLI's login for crew PRs; tests build a core without it, so they never reach the real GitHub.
-  const core = createCore({ log, runtime, projectsDir, dataDir, dropDir, github: new GitHub({ dataDir, cli: process.env.VITEST ? undefined : ghCliToken }), order: { mode: orderMode, maxUsd: orderMax }, appVersion: process.env.SF_APP_VERSION });
-  core.drop.start();
+  const core = createCore({ log, runtime, projectsDir, dataDir, github: new GitHub({ dataDir, cli: process.env.VITEST ? undefined : ghCliToken }), order: { mode: orderMode, maxUsd: orderMax }, appVersion: process.env.SF_APP_VERSION });
   const timers: NodeJS.Timeout[] = [];
   faultCore = core; // the open base hears what the process throws
   core.ensureSelf(); // SoftwareFactory has a project of its own from the first start
@@ -941,7 +923,6 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
     if (disposed) return;
     disposed = true;
     for (const t of timers) clearTimeout(t);
-    try { core.drop.stop(); } catch { /* not watching */ }
     try { core.plugins.stopAll(true); } catch (e) { console.error("stopping plugins failed:", e); }
     try { core.launcher.stopAll(); } catch (e) { console.error("stopping launched apps failed:", e); }
     log.removeAllListeners();

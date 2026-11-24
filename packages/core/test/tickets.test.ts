@@ -337,7 +337,7 @@ describe("tickets: the real runtime in a working copy", () => {
 describe("tickets: the API", () => {
   it("opens, reads, edits, talks and serves the work document over HTTP", async () => {
     const log = new EventLog();
-    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp() });
+    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp() });
     const server = createServer(core).listen(0);
     const port = (server.address() as { port: number }).port;
     const call = async (method: string, path: string, body?: unknown) => {
@@ -442,7 +442,7 @@ describe("tickets: errors become bugs", () => {
 
   it("a fault in a route answers 500 and is a bug; a sentence stays a 400; the Bridge posts its own", async () => {
     const log = new EventLog();
-    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp() });
+    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp() });
     const server = createServer(core).listen(0);
     const port = (server.address() as { port: number }).port;
     const call = async (method: string, path: string, body?: unknown) => {
@@ -527,7 +527,7 @@ describe("tickets: an ask is not a project", () => {
 
   it("over HTTP: the intake check, turning a project into a ticket, and errors filed under SoftwareFactory", async () => {
     const log = new EventLog();
-    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp(), dropDir: tmp() });
+    const core = createCore({ log, runtime: new MockRuntime(), projectsDir: tmp() });
     const server = createServer(core).listen(0);
     const port = (server.address() as { port: number }).port;
     const call = async (method: string, path: string, body?: unknown) => {

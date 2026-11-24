@@ -472,19 +472,17 @@ export function useBay(events: SfEvent[]) {
 
 export type CrewMode = "practice" | "real";
 export interface ToolCheck { found: boolean; path?: string; version?: string; hint: string }
-export interface DropView { id: number; ts: string; file: string; bytes: number; signalId: number | null; status: "filed" | "skipped"; note?: string }
+
 export interface SetupView {
   mode: CrewMode; runtime: string; node: { version: string; ok: boolean; path: string }; claude: ToolCheck; git: ToolCheck;
-  realReady: boolean; blocker?: string; paths: { data: string; projects: string; drop: string }; drops: DropView[];
+  realReady: boolean; blocker?: string; paths: { data: string; projects: string };
 }
 export interface SinceView { fromEvent: number; toEvent: number; leftAt: string | null; awayMinutes: number; lines: { kind: string; text: string; ref?: number }[] }
 
 export const setupApi = {
   get: async (fresh = false) => (await fetch(`${API}/api/setup${fresh ? "?fresh=1" : ""}`)).json() as Promise<SetupView>,
   mode: (mode: CrewMode) => post(`/api/setup/mode`, { mode }) as Promise<SetupView>,
-  drop: (dir: string) => post(`/api/setup/drop`, { dir }) as Promise<{ dir: string }>,
-  scanDrop: () => post(`/api/setup/drop/scan`) as Promise<{ drops: DropView[] }>,
-  open: (target: "projects" | "drop" | "data" | "run", run?: number) => post(`/api/open`, { target, run }) as Promise<{ dir: string }>,
+  open: (target: "projects" | "data" | "run", run?: number) => post(`/api/open`, { target, run }) as Promise<{ dir: string }>,
   since: async () => (await fetch(`${API}/api/since`)).json() as Promise<SinceView>,
   // keepalive: this is sent as the window hides or closes.
   seen: (eventId: number) => fetch(`${API}/api/presence`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ eventId }), keepalive: true }).catch(() => {}),

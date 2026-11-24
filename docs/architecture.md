@@ -71,7 +71,7 @@ All under `packages/core/src/`.
 | `launch/` | Finding how to run a finished project, starting and stopping it, its data files and tools | [run.md](run.md) |
 | `integrations/` | Installing a finished project into SF | [integrations.md](integrations.md) |
 | `plugins/` | Plugin manifest, host, sandboxed runner, page SDK | [plugins.md](plugins.md) |
-| `bridge/` | Things only the UI needs from the core: the drop folder, "since you left" | |
+| `bridge/` | Things only the UI needs from the core: settings, "since you left" | |
 
 Beside `src/`: `kit/` is the app kit copied into every built app; `agent-skills/` are the skills agents may load; `agent-mcp.json` lists the MCP servers offered to agents; `plugin-examples/` ship with the app.
 
