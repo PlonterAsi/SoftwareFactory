@@ -35,8 +35,15 @@ export abstract class TicketReads {
     const day = new Date().toISOString().slice(0, 10);
     const rows = this.log.db.prepare("SELECT json_extract(payload, '$.capUsd') AS cap FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND ts >= ?").all(day) as { cap: number | null }[];
     // Starts written before caps were recorded count at the bug-and-task cap.
-    return rows.reduce((a, r) => a + (typeof r.cap === "number" ? r.cap : this.autoWork().maxUsd), 0);
+    const starts = rows.reduce((a, r) => a + (typeof r.cap === "number" ? r.cap : this.autoWork().maxUsd), 0);
+    // The supervisor's tries of runs with no ticket (factory/supervisor.ts) come out of the same daily limit;
+    // a try of a ticket's run is written as a dispatcher note above, so it is not counted twice.
+    const sup = this.log.db.prepare("SELECT sum(json_extract(payload, '$.addUsd')) AS usd FROM events WHERE type = 'factory.supervisor' AND json_extract(payload, '$.action') = 'retry' AND json_extract(payload, '$.ticket') IS NULL AND ts >= ?").get(day) as { usd: number | null };
+    return starts + Number(sup?.usd ?? 0);
   }
+
+  /** How many tickets the Builder is working in a repo clone right now (the light route). */
+  repoWorkCount(): number { return this.inRepo.size; }
 
   /** What the Overseer's own reads of open tickets cost today. */
   protected triageUsdToday(): number {

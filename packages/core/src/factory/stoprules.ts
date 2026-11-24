@@ -24,6 +24,21 @@ export function runMinutes(maxUsd: number, setting?: number): number {
   return maxUsd <= FULL_TIME_USD ? base : Math.min(Math.max(base, MAX_RUN_MINUTES_CEILING), Math.round(base * (maxUsd / FULL_TIME_USD)));
 }
 
+/**
+ * Progress beats the clock (2026-11-24). When a run reaches its time limit while its last fix round made progress
+ * (fewer failing tests than the round before, all tests green with a review note left to fix, or its first round) and
+ * money is left, it gets the limit again instead of a stop, at most MAX_TIME_EXTENSIONS times. A run that is circling
+ * is stopped by the other rules long before; the money cap always holds.
+ */
+export const MAX_TIME_EXTENSIONS = 2;
+export function extendTime(h: { rounds: RoundRecord[]; extensions: number; moneyLeftUsd: number }): boolean {
+  if (h.extensions >= MAX_TIME_EXTENSIONS || h.moneyLeftUsd < 0.05) return false;
+  const r = h.rounds;
+  const last = r.at(-1);
+  if (!last || r.length < 2 || last.failing === 0) return true;
+  return last.failing < r[r.length - 2].failing;
+}
+
 export const SAME_TESTS_REASON = "The same tests failed twice in a row after a fix.";
 
 export function stopReason(h: { rounds: RoundRecord[]; startedAt: number; now: number; maxMinutes?: number }): string | null {

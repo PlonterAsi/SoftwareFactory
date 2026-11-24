@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { secretHookFile, secretHookSettings } from "./safety/secrets.js";
 import { killTree } from "./launch/launcher.js";
+import { AwakeClock } from "./factory/awake.js";
 
 /**
  * Agent runtime adapter. The factory talks to agents only through this
@@ -58,6 +59,13 @@ export interface AgentRequest {
   advisor?: string | null;
   /** SF-115: aborting it ends the call at once (the CLI is killed); a stopped run cuts its call in flight. */
   signal?: AbortSignal;
+  /**
+   * Called whenever the agent shows a sign of life (a streamed message, a tool call, a tool's result): the
+   * supervisor's heartbeat (factory/supervisor.ts). Never called for a runtime that cannot stream.
+   */
+  onProgress?: () => void;
+  /** Awake ms with no output after which the call counts as stuck and is cut (default SF_AGENT_IDLE_MS, 10 minutes). */
+  idleMs?: number;
 }
 
 export interface AgentResult {
@@ -186,7 +194,10 @@ export class ClaudeCodeRuntime implements AgentRuntime {
    */
   buildArgs(req: AgentRequest): string[] {
     const model = req.model ?? this.opts.defaultModel;
-    const args = ["-p", "--output-format", "json", "--model", model];
+    // stream-json (with --verbose, which it needs) prints a line per message and tool call as the agent works: the
+    // heartbeat that tells a stuck call from a busy one. Its last line is the same result object `json` prints.
+    // SF_AGENT_STREAM=0 goes back to one JSON at the end (and to a plain time limit).
+    const args = ["-p", "--output-format", ...(streams() ? ["stream-json", "--verbose"] : ["json"]), "--model", model];
     const advisor = advisorFor(req, model, this.opts.advisor);
     if (advisor && (this.opts.advisorSupported ?? cliHasAdvisor(this.opts.command, this.opts.commandArgs))) args.push("--advisor", advisor);
     if (req.resume) args.push("--resume", req.resume);
@@ -251,20 +262,35 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       // A CLI that dies before reading stdin closes the pipe; the exit code says what happened.
       child.stdin.on("error", () => {});
       child.stdin.end(this.stdinFor(req), "utf8");
-      let out = "";
       let err = "";
       const limit = req.timeoutMs ?? this.opts.timeoutMs;
-      const timer = setTimeout(() => { killTree(child, true); reject(new Error(`Agent timed out after ${limit} ms`)); }, limit);
-      const onAbort = () => { clearTimeout(timer); killTree(child, true); reject(new Error("The run was stopped, so this call was cut.")); };
+      const stream = streams();
+      // Lines are read as they come; only the result line is kept, so a long session's tool output is never held.
+      const reader = new StreamReader(() => req.onProgress?.());
+      // The limits count awake time only (factory/awake.ts): a PC that slept through a call does not kill it on waking
+      // (run 10486). With a stream, no output for `idle` means stuck: cut now, do not wait for the limit. A call that is
+      // still talking when its limit comes gets more time, up to three times the limit (its money cap still holds).
+      const idle = req.idleMs ?? Number(process.env.SF_AGENT_IDLE_MS ?? 600_000);
+      const clock = new AwakeClock();
+      let finished = false;
+      const fail = (e: Error) => { if (finished) return; finished = true; clearInterval(watch); killTree(child, true); reject(e); };
+      const watch = setInterval(() => {
+        const v = callVerdict({ elapsedMs: clock.elapsed(), idleMs: clock.idle(), limitMs: limit, idleLimitMs: idle, stream });
+        if (v) fail(new Error(v));
+      }, Math.min(5_000, Math.max(50, Math.floor(Math.min(limit, idle) / 4))));
+      watch.unref?.();
+      const onAbort = () => { req.signal?.removeEventListener("abort", onAbort); fail(new Error("The run was stopped, so this call was cut.")); };
       if (req.signal?.aborted) onAbort(); else req.signal?.addEventListener("abort", onAbort, { once: true });
-      child.stdout.on("data", (d) => (out += d));
-      child.stderr.on("data", (d) => (err += d));
-      child.on("error", (e) => { clearTimeout(timer); reject(e); });
+      child.stdout.on("data", (d) => { clock.beat(); reader.push(String(d)); });
+      child.stderr.on("data", (d) => { if (err.length < 20_000) err += d; });
+      child.on("error", (e) => fail(e));
       child.on("close", (code) => {
-        clearTimeout(timer);
+        clearInterval(watch);
         req.signal?.removeEventListener("abort", onAbort);
+        if (finished) return;
+        finished = true;
         try {
-          const r = parseClaudeJson(out, this.name, Date.now() - started);
+          const r = parseClaudeJson(reader.result(), this.name, Date.now() - started);
           resolve(advisor ? { ...r, advisor } : r);
         } catch (e) {
           reject(Object.assign(new Error(`claude exited ${code}: ${(e as Error).message}${err ? ` | ${err.slice(0, 300)}` : ""}`), { costUsd: (e as { costUsd?: number }).costUsd ?? 0 }));
@@ -280,7 +306,55 @@ export function withPathFirst(env: NodeJS.ProcessEnv, dirs: string[], platform =
   return { ...env, [key]: [...dirs, env[key] ?? ""].filter(Boolean).join(platform === "win32" ? ";" : ":") };
 }
 
-/** Parse the JSON that `claude -p --output-format json` prints. */
+/** Whether agent calls stream their progress (SF_AGENT_STREAM=0 turns it off). */
+export const streams = (env = process.env) => env.SF_AGENT_STREAM !== "0";
+
+/**
+ * Why an agent call should be cut now, or null. Pure. Times are awake time. With a stream: no output for the idle
+ * limit is stuck; past the time limit the call goes on while it keeps talking, up to three times the limit.
+ * Without one (an older CLI or SF_AGENT_STREAM=0) the plain limit holds.
+ */
+export const CALL_CEILING_TIMES = 3;
+export function callVerdict(o: { elapsedMs: number; idleMs: number; limitMs: number; idleLimitMs: number; stream: boolean }): string | null {
+  const min = (ms: number) => `${Math.round(ms / 60_000)} minute${Math.round(ms / 60_000) === 1 ? "" : "s"}`;
+  if (!o.stream) return o.elapsedMs > o.limitMs ? `Agent timed out after ${o.limitMs} ms` : null;
+  if (o.idleMs > o.idleLimitMs) return `Agent stuck: no output for ${min(o.idleMs)}, so the call was cut (it timed out without progress).`;
+  if (o.elapsedMs > o.limitMs * CALL_CEILING_TIMES) return `Agent timed out after ${o.limitMs * CALL_CEILING_TIMES} ms (still working at three times its limit).`;
+  return null;
+}
+
+/**
+ * Reads `claude -p` output as it arrives. A stream-json line is a sign of life; the line whose type is "result" is
+ * the answer. Plain `json` output (one object, maybe over several chunks) is kept whole and parsed at the end.
+ */
+export class StreamReader {
+  private buf = "";
+  private whole = "";
+  private last: string | null = null;
+  constructor(private onLine: () => void = () => {}) {}
+  push(chunk: string): void {
+    this.buf += chunk;
+    if (this.whole.length < 4_000_000 && this.last === null) this.whole += chunk;
+    let i: number;
+    while ((i = this.buf.indexOf("\n")) >= 0) {
+      const line = this.buf.slice(0, i).trim();
+      this.buf = this.buf.slice(i + 1);
+      this.line(line);
+    }
+  }
+  private line(line: string) {
+    if (!line) return;
+    if (line.startsWith('{"type":"result"') || /^\{\s*"type"\s*:\s*"result"/.test(line)) { this.last = line; this.whole = ""; }
+    else if (line.startsWith('{"type":')) this.onLine();
+  }
+  /** The result line, or else everything read (the one-object format). */
+  result(): string {
+    if (this.buf.trim()) { const rest = this.buf.trim(); this.buf = ""; if (/^\{\s*"type"\s*:\s*"result"/.test(rest)) { this.last = rest; this.whole = ""; } }
+    return this.last ?? this.whole;
+  }
+}
+
+/** Parse the JSON that `claude -p --output-format json` prints (or the result line of stream-json: the same object). */
 export function parseClaudeJson(raw: string, runtime: string, wallMs: number): AgentResult {
   const j = JSON.parse(raw.trim());
   // A call that failed still spent money (error_max_budget_usd spends the whole cap): say how much.

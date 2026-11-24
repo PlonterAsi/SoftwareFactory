@@ -353,6 +353,8 @@ export abstract class RunBase {
       ...(x.resume ? { resume: x.resume } : {}),
       ...(x.noTools ? { tools: [] } : {}),
       signal: this.f.signalOf(this.id),
+      // Each sign of life from the agent is this run's heartbeat: the supervisor cuts a run that has none (factory/supervisor.ts).
+      onProgress: () => this.f.beat(this.id),
     }, { factoryRun: this.id, station: m.station, agentVersion: m.version, ...meta, ...(bench ? { workbench: true } : {}) });
     this.lastSession = r.result?.sessionId;
     // A call that failed was still paid for (run 2366: two opus calls died at the cap and were never counted).

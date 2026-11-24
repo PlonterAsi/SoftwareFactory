@@ -12,6 +12,7 @@ import { checkLinks, type LinkCheck } from "./linkcheck.js";
 import { git, isLockedTest, readTree, testsHash } from "./workspace.js";
 import { type GateDecision, type GateId, MAX_AUTO_RESUMES, type Pending, type Plan, type RunMaker, type RunOptions, type ScreenRun, type StationId, StopRun, defaultUi, normIdea, restoreState, unfinishedRuns, waitingEscalation } from "./runkit.js";
 import { Run } from "./run.js";
+import { AwakeClock, watchSleep } from "./awake.js";
 import { brainHash, principles } from "../brain/brain.js";
 
 export { parseReview, StopRun, duplicateReply, normIdea, VERIFY_CONTRACT, modelFloorUsd, strongerModel, MAX_VIEWS, withDesignedScreens, journeyTestRule, kitName, reviewCapUsd, validatePlan, defaultUi, specMarkdown, NEXT_VERSION_ROUNDS, shippedDesign, MAX_AUTO_RESUMES, unfinishedRuns, reviewRepair, mergeRecheck, waitingEscalation, restoreState } from "./runkit.js";
@@ -73,6 +74,14 @@ export class Factory {
 
   constructor(private log: EventLog, private runtime: AgentRuntime, readonly projectsDir: string, readonly crew: CrewSource = builtinCrew) {
     this.flows = new FlowLibrary(log);
+    // Sleep is not work: clocks that measure a run leave out the time the PC slept (factory/awake.ts).
+    watchSleep();
+    // Every event a run writes is a heartbeat.
+    log.on("event", (e: { payload: unknown }) => {
+      const p = e.payload as { run?: unknown; factoryRun?: unknown } | null;
+      const id = typeof p?.run === "number" ? p.run : typeof p?.factoryRun === "number" ? p.factoryRun : null;
+      if (id != null) this.beat(id);
+    });
     // Agent calls cut off by the restart would otherwise pulse as "running" forever.
     const ended = new Set([...log.list({ type: "agent.run.completed", limit: 1e6 }), ...log.list({ type: "agent.run.failed", limit: 1e6 })].map((e) => (e.payload as { runId: number }).runId));
     for (const e of log.list({ type: "agent.run.started", limit: 1e6 })) {
@@ -235,6 +244,7 @@ export class Factory {
     const r = make ? make({ factory: this, log: this.log, runtime, id: run, idea: started.idea, o, started }) : new Run(this, this.log, runtime, run, started.idea, o, started.screen ?? null);
     const done = r.go(st).finally(() => this.ended(run));
     this.active.set(run, done);
+    this.beat(run);
     return run;
   }
 
@@ -249,6 +259,7 @@ export class Factory {
     const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
     const done = new Run(this, this.log, runtime, ev.id, text, o).go().finally(() => this.ended(ev.id));
     this.active.set(ev.id, done);
+    this.beat(ev.id);
     return ev.id;
   }
 
@@ -288,6 +299,7 @@ export class Factory {
     this.log.append("factory.station", { run: id, station: "tests", state: "skipped", note: `${files.length} locked test file${files.length === 1 ? "" : "s"} ${kept}`, spentUsd: 0, maxUsd: o.maxUsd });
     const done = new Run(this, this.log, runtime, id, idea, o, screen).go(restoreState(this.log, id)).finally(() => this.ended(id));
     this.active.set(id, done);
+    this.beat(id);
     return id;
   }
 
@@ -309,6 +321,7 @@ export class Factory {
     const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
     const done = new Run(this, this.log, runtime, ev.id, text, o, screen).go().finally(() => this.ended(ev.id));
     this.active.set(ev.id, done);
+    this.beat(ev.id);
     return ev.id;
   }
 
@@ -327,6 +340,7 @@ export class Factory {
     const ev = this.log.append("factory.run.started", started);
     const done = make({ factory: this, log: this.log, runtime, id: ev.id, idea: text, o, started }).go().finally(() => this.ended(ev.id));
     this.active.set(ev.id, done);
+    this.beat(ev.id);
     return ev.id;
   }
 
@@ -402,6 +416,18 @@ export class Factory {
     return { ok: true, run, state: "stopped" };
   }
 
+  /**
+   * The heartbeat (factory/supervisor.ts): when each run in flight last showed progress, as awake time. Any event of
+   * the run counts (a station, a file written, a test result, an agent call ending), and so does every line an agent
+   * streams while it works (runbase.ts passes onProgress). The supervisor cuts a run whose heart stopped.
+   */
+  private beats = new Map<number, AwakeClock>();
+  beat(run: number): void { if (this.active.has(run)) (this.beats.get(run) ?? this.beats.set(run, new AwakeClock()).get(run)!).beat(); }
+  /** Awake ms since run's last sign of progress, or null when it is not in flight. */
+  idleMs(run: number): number | null { if (!this.active.has(run)) return null; return this.beats.get(run)?.idle() ?? 0; }
+  /** The runs in flight. */
+  activeIds(): number[] { return [...this.active.keys()]; }
+
   /** Why this run was asked to stop, or null. The run checks it before each step, agent call and gate. */
   stopReason(run: number): string | null { return this.stopping.get(run) ?? null; }
 
@@ -414,6 +440,7 @@ export class Factory {
 
   private ended(run: number) {
     this.active.delete(run);
+    this.beats.delete(run);
     this.stopping.delete(run);
     this.aborters.delete(run);
   }

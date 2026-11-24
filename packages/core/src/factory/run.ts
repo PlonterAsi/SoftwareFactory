@@ -1,5 +1,6 @@
 import { failureLines } from "./trim.js";
-import { SAME_TESTS_REASON, runMinutes, stopReason, type RoundRecord } from "./stoprules.js";
+import { SAME_TESTS_REASON, extendTime, runMinutes, stopReason, type RoundRecord } from "./stoprules.js";
+import { sleptBetween } from "./awake.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { captureSignal } from "../signals.js";
@@ -19,6 +20,8 @@ import { RunJudge } from "./runjudge.js";
 
 
 export class Run extends RunJudge {
+  /** How often this run was given its time limit again for making progress at the limit (stoprules.ts extendTime). */
+  protected timeExtensions = 0;
   /**
    * Carry out the run's flow: each step in its order, by the engine action it names. A step whose milestone
    * the log already shows (a resume) is not done again. The built-in flows carry out exactly the fixed
@@ -569,7 +572,16 @@ export class Run extends RunJudge {
     while (run.failed > 0 || feedback) {
       const failing = run.cases.filter((c) => !c.pass).map((c) => c.name).sort().join("\n");
       history.push({ failing: run.failed, names: failing, files, before });
-      const stop = stopReason({ rounds: history, startedAt: this.startedAt + this.waitedMs + this.suiteMs, now: Date.now(), maxMinutes: runMinutes(this.o.maxUsd, this.f.maxRunMinutes) });
+      // The clock counts work only: gate waits, the repo's own suite and the time the PC slept are left out (run 10486
+      // was stopped after 4 hours of sleep). At the limit, a run still making progress gets the limit again (extendTime).
+      const clockStart = () => this.startedAt + this.waitedMs + this.suiteMs + sleptBetween(this.startedAt, Date.now());
+      const limit = runMinutes(this.o.maxUsd, this.f.maxRunMinutes);
+      let stop = stopReason({ rounds: history, startedAt: clockStart(), now: Date.now(), maxMinutes: limit * (1 + this.timeExtensions) });
+      if (stop && /longer than/.test(stop) && extendTime({ rounds: history, extensions: this.timeExtensions, moneyLeftUsd: this.o.maxUsd - this.spent })) {
+        this.timeExtensions++;
+        this.log.append("factory.run.extended", { run: this.id, minutes: limit, toMinutes: limit * (1 + this.timeExtensions), extension: this.timeExtensions, failing: run.failed, why: run.failed === 0 ? "the tests pass and a review note is being fixed" : "the last fix round made progress" });
+        stop = stopReason({ rounds: history, startedAt: clockStart(), now: Date.now(), maxMinutes: limit * (1 + this.timeExtensions) });
+      }
       const timeUp = !!stop && /longer than/.test(stop);
       // A stall climbs the ladder before anyone is asked (H6): a deeper fix on a stronger model, then the locked
       // test itself is questioned. Each step once per stall; the wall clock is never waived.

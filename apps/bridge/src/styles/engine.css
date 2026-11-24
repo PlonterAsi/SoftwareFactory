@@ -361,3 +361,21 @@ button.sm.gate { background: var(--gate); }
   .st-avatar, .st-scan::after, .yard-ring, .station.s-active, .station.s-waiting { animation: none !important; }
 }
 .msg.since.pinned { margin: 10px 14px 0; flex: none; max-height: 40%; overflow: auto; }
+
+/* The supervisor card on All builds (SupervisorCard.tsx). */
+.sup-card { border: 1px solid var(--line, rgba(127,127,127,.25)); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; display: grid; gap: 8px; }
+.sup-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sup-dot { width: 9px; height: 9px; border-radius: 50%; background: #9aa0a6; }
+.sup-dot.on { background: #34a853; box-shadow: 0 0 0 3px rgba(52,168,83,.18); }
+.sup-chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line, rgba(127,127,127,.3)); }
+.sup-chip.on { border-color: #34a853; color: #34a853; }
+.sup-runs, .sup-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.sup-runs li { display: grid; grid-template-columns: 64px minmax(80px, 1fr) auto; align-items: center; gap: 8px; }
+.sup-meter { height: 6px; border-radius: 3px; background: rgba(127,127,127,.18); overflow: hidden; }
+.sup-fill { display: block; height: 100%; background: #34a853; }
+.sup-fill.warn { background: #f29900; }
+.sup-log li { display: grid; grid-template-columns: 18px 44px 1fr; gap: 6px; font-size: 13px; }
+.sup-icon { text-align: center; font-weight: 700; }
+.sup-stuck .sup-icon, .sup-escalated .sup-icon { color: #d93025; }
+.sup-retry .sup-icon { color: #1a73e8; }
+.sup-empty { margin: 0; }

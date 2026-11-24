@@ -12,6 +12,7 @@ import { AgentBay } from "./AgentBay";
 import { RunDeck } from "./RunDeck";
 import { StarMap } from "./StarMap";
 import { FactoryFloor } from "./FactoryFloor";
+import { SupervisorCard } from "./SupervisorCard";
 import { Timeline } from "./Timeline";
 import { Overseer } from "./Overseer";
 import { OrderDeck } from "./OrderDeck";
@@ -128,6 +129,7 @@ export function App() {
       {view === "factory" ? (
         <section className="pane fpage fpage-builds" aria-label="All builds">
           <header className="page-head"><h1>All builds</h1><p>Every build, station by station. Each also lives in its project.</p></header>
+          <SupervisorCard onShowRun={showRun} />
           <FactoryFloor runs={f.runs} factoryRuns={f.factoryRuns} selected={selected} onSelect={setPicked} crew={crew} mode={f.mode} />
           <RunDeck run={selected} />
           <Timeline runs={f.runs} totalUsd={f.totalUsd} />
