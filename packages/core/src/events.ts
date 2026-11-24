@@ -79,7 +79,6 @@ export type EventType =
   | "agent.verdict"
   | "agent.memory.noted"
   | "agent.memory.removed"
-  | "agent.memory.dream"
   | "watcher.set"
   | "watcher.ran"
   | "budget.monthly"

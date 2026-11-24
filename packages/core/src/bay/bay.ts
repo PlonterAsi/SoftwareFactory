@@ -16,7 +16,7 @@ import { MODELS, SLOTS, normalizeAgent, parseAgentFile, serializeAgent, slugify,
 import { BUILTIN_AGENTS, DEFAULT_SLOTS, SLOT_SEATS, systemPromptFor } from "./builtin.js";
 import { principles } from "../brain/brain.js";
 import { library } from "./kits.js";
-import { DREAM_CONTRACT, DREAM_MAX_USD, DREAM_USD, acceptDream, allMemory, dreamPrompt, dreams, forget, freeDream, memoryBlock, memoryOf, noteLesson, parseDream, rejectDream, tidyMemory, type DreamView, type Lesson } from "./memory.js";
+import { allMemory, forget, memoryBlock, memoryOf, noteLesson, tidyMemory, type Lesson } from "./memory.js";
 
 /**
  * The Agent Bay: where workers are created, edited, tested and assigned.
@@ -67,7 +67,6 @@ export interface BayState {
   library: ReturnType<typeof library>;
   /** Each agent's own memory (bay/memory.ts), and the cleanings waiting on you or decided lately. */
   memory: Record<string, Lesson[]>;
-  dreams: DreamView[];
 }
 
 const DRAFT_CONTRACT = `Station contract: draft.
@@ -172,39 +171,6 @@ export class AgentBay implements CrewSource {
   /** The free tidy: repeats and near repeats go, then the oldest past the limit (never one you taught). */
   tidy(id: string): { removed: number } { return { removed: tidyMemory(this.log, this.must(id).def.id).length }; }
 
-  /**
-   * Clean a memory the way Claude Code's Auto Dream does: one capped call reads it and proposes a shorter one.
-   * Nothing changes until you accept it. On the practice crew (or when the answer is unusable) the proposal is
-   * the free tidy, so the screen works without spending anything.
-   */
-  async dream(id: string, maxUsd = DREAM_USD): Promise<DreamView> {
-    const a = this.must(id);
-    const cap = Number(maxUsd);
-    if (!Number.isFinite(cap) || cap <= 0 || cap > DREAM_MAX_USD) throw new Error(`A cleaning may spend above $0 and at most $${DREAM_MAX_USD.toFixed(2)}.`);
-    if (dreams(this.log, a.def.id).some((d) => d.state === "proposed")) throw new Error(`${a.def.name} already has a cleaning waiting on you: accept or reject it first.`);
-    const lessons = memoryOf(this.log, a.def.id);
-    if (lessons.length < 2) throw new Error(`${a.def.name} has ${lessons.length ? "one lesson" : "no lessons"}: nothing to clean yet.`);
-    let plan = freeDream(lessons);
-    let by: "free" | "agent" = "free";
-    let costUsd = 0;
-    let error: string | undefined;
-    if (this.runtime && this.runtime.name !== "mock") {
-      const r = await runAgent(this.log, this.runtime, a.def.id, {
-        prompt: dreamPrompt(a.def.name, lessons), model: "haiku", systemPrompt: `${a.def.prompt.trim()}\n\n${DREAM_CONTRACT}`, budgetUsd: cap,
-      }, { agentVersion: a.version, station: "dream" });
-      costUsd = r.result?.costUsd ?? r.costUsd ?? 0;
-      if (r.result) {
-        try { plan = parseDream(r.result.text, lessons); by = "agent"; }
-        catch (e) { error = `The cleaned memory was unusable (${(e as Error).message}); this is the free tidy instead.`; }
-      } else error = `${r.error ?? "The call failed"}; this is the free tidy instead.`;
-    }
-    const e = this.log.append("agent.memory.dream", { agent: a.def.id, state: "proposed", saw: lessons.map((l) => l.id), lessons: plan.lessons, dropped: plan.dropped, costUsd, by, ...(error ? { error } : {}) });
-    return dreams(this.log, a.def.id).find((d) => d.id === e.id)!;
-  }
-
-  acceptDream(dreamId: number): DreamView { return acceptDream(this.log, dreamId); }
-  rejectDream(dreamId: number): DreamView { return rejectDream(this.log, dreamId); }
-
   private must(id: string): AgentView {
     const a = this.get(id);
     if (!a) throw new Error(`No agent "${id}"`);
@@ -225,7 +191,7 @@ export class AgentBay implements CrewSource {
     return {
       agents: this.agents(), slots: this.slots(), seats: SLOT_SEATS, tests: this.tests().slice(-60), stats: this.stats(),
       visuals: this.events("bay.visual").slice(-40).map((e) => ({ id: e.id, ts: e.ts, ...(e.payload as any) })), models: MODELS, library: library(),
-      memory: allMemory(this.log), dreams: dreams(this.log),
+      memory: allMemory(this.log),
     };
   }
 

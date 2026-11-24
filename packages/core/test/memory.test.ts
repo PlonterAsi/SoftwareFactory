@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AgentBay, EventLog, Factory, FlowLibrary, MEMORY_LIMIT, MockRuntime, NEW_PROJECT_FLOW, SMALL_CHANGE_FLOW, crewPick, flowProblems, memoryBlock, memoryOf, noteLesson,
-  parseDream, rememberLines, runAgent, tidyPlan, type AgentRequest, type FlowDef, type Lesson,
+  rememberLines, runAgent, tidyPlan, type AgentRequest, type FlowDef, type Lesson,
 } from "../src/index.js";
 
 const tmp = (p: string) => mkdtempSync(join(tmpdir(), p));
@@ -94,61 +94,6 @@ describe("cleaning a memory", () => {
     expect(events(log, "agent.memory.removed").at(-1)).toMatchObject({ agent: "fixer", by: "auto" });
   });
 
-  it("on the practice crew a dream proposes the free tidy; nothing changes until you accept, and newer lessons stay", async () => {
-    const log = new EventLog();
-    const bay = new AgentBay(log, new MockRuntime());
-    await expect(bay.dream("builder")).rejects.toThrow(/nothing to clean/);
-    noteLesson(log, "builder", "Read the kit before building", "self");
-    noteLesson(log, "builder", "Write tests that touch the data layer", "self");
-    log.append("agent.memory.noted", { agent: "builder", text: "Read the kit before building.", source: "self" }); // a repeat that slipped in
-    const d = await bay.dream("builder");
-    expect(d).toMatchObject({ state: "proposed", by: "free", costUsd: 0 });
-    expect(d.dropped).toHaveLength(1);
-    expect(memoryOf(log, "builder")).toHaveLength(3);
-    await expect(bay.dream("builder")).rejects.toThrow(/waiting on you/);
-    await expect(bay.dream("planner", 2)).rejects.toThrow(/at most \$0.60/);
-    bay.teach("builder", "Ask before adding a dependency.");
-    const done = bay.acceptDream(d.id);
-    expect(done.state).toBe("accepted");
-    expect(memoryOf(log, "builder").map((l) => l.text)).toEqual(["Write tests that touch the data layer", "Read the kit before building.", "Ask before adding a dependency."]);
-    expect(() => bay.acceptDream(d.id)).toThrow(/already accepted/);
-    expect(bay.state().dreams[0]).toMatchObject({ id: d.id, state: "accepted" });
-  });
-
-  it("a real crew's dream is one capped call; a merged lesson replaces the ones it came from", async () => {
-    const log = new EventLog();
-    const answer = (ids: number[]) => "```json\n" + JSON.stringify({ lessons: [{ text: "Read the kit and its data layer before building.", from: [ids[0], ids[1]] }, { text: "made up", from: [999] }], dropped: [{ id: ids[2], why: "about one finished job" }] }) + "\n```";
-    let ids: number[] = [];
-    const rt = scripted((req) => (req.systemPrompt?.includes("Station contract: dream.") ? answer(ids) : undefined), "claude-code");
-    const bay = new AgentBay(log, rt);
-    for (const t of ["Read the kit first", "Look at the data layer before building", "The word app needed a goal field", "Never push to main"]) noteLesson(log, "builder", t, t.startsWith("Never") ? "person" : "self");
-    ids = memoryOf(log, "builder").map((l) => l.id);
-    const d = await bay.dream("builder", 0.05);
-    expect(d.by).toBe("agent");
-    expect(events(log, "agent.run.started").find((e) => e.station === "dream")).toMatchObject({ agent: "builder", model: "haiku", budgetUsd: 0.05 });
-    expect(d.lessons.map((l) => l.text)).toEqual(["Read the kit and its data layer before building.", "Never push to main"]);
-    bay.acceptDream(d.id);
-    expect(memoryOf(log, "builder").map((l) => [l.text, l.source])).toEqual([["Never push to main", "person"], ["Read the kit and its data layer before building.", "dream"]]);
-  });
-
-  it("reads a dream answer safely: yours word for word, what it forgot kept, what it made up left out", () => {
-    const mem = [L(1, "A"), L(2, "B lesson"), L(3, "Taught lesson", "person"), L(4, "D lesson")];
-    const r = parseDream("```json\n" + JSON.stringify({ lessons: [{ text: "AB merged", from: [1, 2, 3] }, { text: "ghost", from: [] }], dropped: [{ id: 3, why: "x" }] }) + "\n```", mem);
-    expect(r.lessons).toEqual([{ text: "AB merged", from: [1, 2] }, { text: "Taught lesson", from: [3] }, { text: "D lesson", from: [4] }]);
-    expect(r.dropped).toEqual([]);
-    expect(() => parseDream("no json", mem)).toThrow();
-  });
-
-  it("a rejected dream changes nothing", async () => {
-    const log = new EventLog();
-    const bay = new AgentBay(log, new MockRuntime());
-    noteLesson(log, "planner", "One", "self"); noteLesson(log, "planner", "Two lessons here", "self");
-    const d = await bay.dream("planner");
-    expect(bay.rejectDream(d.id).state).toBe("rejected");
-    expect(memoryOf(log, "planner")).toHaveLength(2);
-    expect(bay.forget("planner", [memoryOf(log, "planner")[0].id])).toBe(1);
-    expect(() => bay.forget("planner", [12345])).toThrow(/no such lesson/);
-  });
 });
 
 describe("flow steps name their agents", () => {

@@ -429,17 +429,11 @@ export interface AgentStats {
 }
 /** One lesson in an agent's own memory (core: bay/memory.ts). */
 export interface Lesson { id: number; agent: string; text: string; source: "person" | "self" | "review" | "dream"; ref: string | null; at: string }
-/** A proposed cleaning of a memory: nothing changes until you accept it. */
-export interface DreamView {
-  id: number; agent: string; at: string; state: "proposed" | "accepted" | "rejected"; by: "free" | "agent"; saw: number[];
-  lessons: { text: string; from: number[] }[]; dropped: { id: number; why: string }[]; costUsd: number; decidedAt: string | null; error?: string;
-}
 export interface BayState {
   agents: AgentView[]; slots: Record<Slot, string[]>; seats: Record<Slot, number>; tests: BayTest[]; stats: Record<string, AgentStats>;
   visuals: { id: number; ts: string; scope: string; pass: boolean; items: string[]; missing: string[] }[]; models: string[];
   library?: BayLibrary;
   memory?: Record<string, Lesson[]>;
-  dreams?: DreamView[];
 }
 const EMPTY_BAY: BayState = { agents: [], slots: {} as Record<Slot, string[]>, seats: {} as Record<Slot, number>, tests: [], stats: {}, visuals: [], models: ["haiku", "sonnet", "opus"] };
 
@@ -458,8 +452,6 @@ export const bayApi = {
   teach: (id: string, text: string) => post(`/api/bay/agents/${id}/memory`, { text }) as Promise<Lesson>,
   forget: (id: string, ids: number[]) => post(`/api/bay/agents/${id}/memory/forget`, { ids }),
   tidy: (id: string) => post(`/api/bay/agents/${id}/memory/tidy`) as Promise<{ removed: number }>,
-  dream: (id: string, maxUsd?: number) => post(`/api/bay/agents/${id}/memory/dream`, { maxUsd }) as Promise<DreamView>,
-  decideDream: (dreamId: number, accept: boolean) => post(`/api/bay/dreams/${dreamId}/${accept ? "accept" : "reject"}`) as Promise<DreamView>,
 };
 
 /** The Bay's state is folded by the core; refetch whenever a Bay event or an agent call lands, so crew cards stay live. */

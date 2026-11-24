@@ -87,7 +87,7 @@ const PROOF: Record<string, string[]> = {
   flows: ["factory.run.started"],
   "home-board": ["ticket.opened"],
   "git-manager": ["project.published", "ticket.mergecheck", "project.version", "repo.watched"],
-  "agent-memory": ["agent.memory.noted", "agent.memory.dream"],
+  "agent-memory": ["agent.memory.noted"],
   watchers: ["watcher.ran"],
 };
 

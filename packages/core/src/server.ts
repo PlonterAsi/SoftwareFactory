@@ -674,17 +674,14 @@ async function bayRoute(bay: AgentBay, req: IncomingMessage, url: URL): Promise<
     if (verb === "retire") { bay.retire(id, body.retired !== false); return [200, { ok: true }]; }
     if (verb === "test") return [200, await bay.test(id, body.task ? String(body.task) : undefined)];
   }
-  // Each agent's own memory (bay/memory.ts): teach, forget, the free tidy, and a capped cleaning you accept or reject.
-  m = path.match(/^\/api\/bay\/agents\/([a-z0-9-]+)\/memory(?:\/(forget|tidy|dream))?$/);
+  // Each agent's own memory (bay/memory.ts): teach, forget, and the free tidy.
+  m = path.match(/^\/api\/bay\/agents\/([a-z0-9-]+)\/memory(?:\/(forget|tidy))?$/);
   if (m) {
     const [, id, verb] = m;
     if (!verb) return [201, bay.teach(id, String(body.text ?? ""))];
     if (verb === "forget") return [200, { removed: bay.forget(id, (Array.isArray(body.ids) ? body.ids : [body.id]).map(Number)) }];
     if (verb === "tidy") return [200, bay.tidy(id)];
-    if (verb === "dream") return [200, await bay.dream(id, body.maxUsd == null ? undefined : Number(body.maxUsd))];
   }
-  m = path.match(/^\/api\/bay\/dreams\/(\d+)\/(accept|reject)$/);
-  if (m) return [200, m[2] === "accept" ? bay.acceptDream(Number(m[1])) : bay.rejectDream(Number(m[1]))];
   m = path.match(/^\/api\/bay\/slots\/([a-z]+)$/);
   if (m && SLOTS.includes(m[1] as Slot)) return [200, bay.assign(m[1] as Slot, (Array.isArray(body.agents) ? body.agents : []).map(String))];
   return null;
