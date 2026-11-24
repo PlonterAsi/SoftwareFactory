@@ -73,6 +73,11 @@ describe("tickets: the record", () => {
     expect(() => t.open({ kind: "task", title: "Too deep", parent: sub.id })).toThrow(/three levels/);
     expect(() => t.edit(l1.id, "parent", a.id)).toThrow(/has subtasks of its own/);
     expect(workDocument(t.get(plan.id)!, [], [], t.lines(plan.id))).toMatch(/1\. #\d+ JSON[\s\S]*2\. #\d+ CSV/);
+    // RTM-2: a reopen note with two failures to fix reaches the crew whole; an agent's long note stays short.
+    const long = `1. the first failure. ${"x".repeat(500)} 2. the second failure`;
+    const doc = workDocument(t.get(a.id)!, [{ by: "you", kind: "note", text: long }, { by: "builder", kind: "reply", text: `${"y".repeat(500)} tail` }] as never);
+    expect(doc).toContain("2. the second failure");
+    expect(doc).not.toContain("y tail");
     const s = t.spawn(a.id, { kind: "task", title: "Add a crash log" });
     expect(t.links(s.id)[0]).toMatchObject({ to: a.id, relation: "derived_from" });
   });

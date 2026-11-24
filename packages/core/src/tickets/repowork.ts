@@ -19,6 +19,7 @@ import { noteLesson } from "../bay/memory.js";
 import { isClosed, type TicketView } from "./model.js";
 import { VERIFY_ASK } from "./verify.js";
 import { QUIET_ENV, quietTail, testsWithRecheck } from "./testrecheck.js";
+import { parseCases, subPackages } from "../factory/repoenv.js";
 
 /**
  * Working a ticket inside an existing codebase (a project imported from a git
@@ -295,6 +296,58 @@ export function harnessChecks(o: { maxMinutes?: number; now?: () => number } = {
  * once (`npm ci --ignore-scripts`); when that is not possible the check is skipped, never passed.
  */
 export async function defaultRunTests(dir: string, files: string[]): Promise<CheckResult> {
+  const go = await goTests(dir, files);
+  const js = await nodeTests(dir, files);
+  if (!go) return js;
+  if (js.skipped) return go;
+  return { ok: go.ok && js.ok, output: [go.output, js.output].filter(Boolean).join("\n"), ...(go.skipped && js.skipped ? { skipped: true } : {}) };
+}
+
+/**
+ * Go: the packages holding a changed .go file, per Go module (root or one folder down), with go vet and go test -v.
+ * A test that skipped did not run, and says so: RTM-2's light session passed with "no package with a test script"
+ * while a Go test it should have run failed (415 where 409 was meant). Null when no Go file changed.
+ */
+/** Go's commands for an agent working in a repo with Go code. */
+const GO_COMMANDS = ["go test", "go vet", "go build", "gofmt"];
+
+async function goTests(dir: string, files: string[]): Promise<CheckResult | null> {
+  const mods = [...(existsSync(join(dir, "go.mod")) ? [""] : []), ...subPackages(dir).go];
+  const want = new Map<string, Set<string>>();
+  for (const f of files.filter((x) => x.endsWith(".go"))) {
+    const mod = mods.filter((m) => !m || f.startsWith(`${m}/`)).sort((a, b) => b.length - a.length)[0];
+    if (mod === undefined) continue;
+    const rel = mod ? f.slice(mod.length + 1) : f;
+    const pkg = rel.includes("/") ? `./${rel.slice(0, rel.lastIndexOf("/"))}` : ".";
+    want.set(mod, (want.get(mod) ?? new Set()).add(pkg));
+  }
+  if (!want.size) return null;
+  let out = "";
+  const ran: string[] = [];
+  const notRun: string[] = [];
+  for (const [mod, pkgs] of want) {
+    const cwd = join(dir, mod);
+    const where = mod ? `cd ${mod} && ` : "";
+    const vet = await runAsync("go", ["vet", ...pkgs], { cwd, timeout: 300_000 });
+    if (vet.status !== 0) { out += `go vet in ${mod || "."} failed:
+${quietTail(`${vet.stdout ?? ""}
+${vet.stderr ?? ""}`)}
+`; continue; }
+    const t = await runAsync("go", ["test", "-v", ...pkgs], { cwd, timeout: 600_000 });
+    const text = `${t.stdout ?? ""}
+${t.stderr ?? ""}`;
+    const cases = parseCases(text, "go");
+    notRun.push(...cases.filter((c) => c.skipped).map((c) => `${c.name} (${c.skipped})`));
+    if (t.status !== 0) out += `go test in ${mod || "."} failed:
+${cases.filter((c) => !c.pass).map((c) => `- ${c.name}`).join("\n") || quietTail(text)}
+`;
+    else ran.push(`${where}go test -v ${[...pkgs].join(" ")}`);
+  }
+  const skippedNote = notRun.length ? `Did not run here (they skipped), so they prove nothing: ${notRun.slice(0, 10).join("; ")}` : "";
+  return { ok: !out, output: [out, ...ran, skippedNote].filter(Boolean).join("\n") };
+}
+
+async function nodeTests(dir: string, files: string[]): Promise<CheckResult> {
   const roots = byPackage(files);
   const withTests = [...roots].filter(([r]) => {
     try { return !!JSON.parse(readFileSync(join(dir, r, "package.json"), "utf8")).scripts?.test; } catch { return false; }
@@ -387,17 +440,19 @@ export async function workInRepo(log: EventLog, runtime: AgentRuntime, bay: Agen
   // One Builder call (the first build, or a fix). `share` is the largest part of the budget it may use.
   const build = async (prompt: string, share: number, name: string) => {
     step(name, "running");
+    // A repo with Go code gets Go's own commands (RTM-2: the Builder could not run go test or go vet).
+    const goHere = existsSync(join(dir, "go.mod")) || subPackages(dir).go.length > 0;
     const run = await runAgent(log, runtime, b?.id ?? "builder", {
       prompt,
       model: b?.model ?? "sonnet",
-      systemPrompt: `${b?.role.split("Station contract:")[0].trim() ?? "You are the Builder: you write working code."}\n\n${REPO_CONTRACT}\n${flow.brief ? `${flow.brief}\n` : ""}${REPO_BENCH}`,
+      systemPrompt: `${b?.role.split("Station contract:")[0].trim() ?? "You are the Builder: you write working code."}\n\n${REPO_CONTRACT}\n${flow.brief ? `${flow.brief}\n` : ""}${REPO_BENCH}${goHere ? `\nGo is here too: ${GO_COMMANDS.join(", ")} (run them in the Go module's folder).` : ""}`,
       budgetUsd: Math.min(left(), share, b?.budgetUsd ?? share),
       pluginDirs: b?.pluginDirs.length ? b.pluginDirs : undefined,
       // The working-copy tools, plus the Builder's own skills and MCP servers.
       tools: [...new Set([...TOOLS, ...(b?.tools ?? [])])],
       mcpConfig: b?.mcpConfig,
       cwd: dir,
-      commands: WORKBENCH_COMMANDS,
+      commands: [...WORKBENCH_COMMANDS, ...(goHere ? GO_COMMANDS : [])],
       timeoutMs: 25 * 60_000,
     }, { agentVersion: b?.version, station: "repo", workbench: true, ticket: o.id });
     spent += run.result?.costUsd ?? 0;
