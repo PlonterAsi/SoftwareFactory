@@ -82,7 +82,7 @@ export { RUNNER_SOURCE, FRAME_SDK_SOURCE } from "./plugins/runner.js";
 export { DEFAULT_PRINCIPLES, brainBlock, principles, savePrinciple, resetPrinciple, type Principle, type PrincipleView } from "./brain/brain.js";
 export { installKit, checkApp, checkAppLive, probeStart, KIT_PATHS, type AppCheck } from "./factory/appkit.js";
 export { bootBase } from "./server.js";
-export { brainUse, brainSuggestions, acceptSuggestion, dismissSuggestion, type BrainUse, type BrainSuggestion } from "./brain/learn.js";
+export { brainUse, type BrainUse } from "./brain/learn.js";
 export { featureMap, featureRecords, saveFeature, resetFeature, recordProblems, type FeatureMap, type FeatureView, type FeatureLink } from "./featuremap/map.js";
 export { DEFAULT_FEATURES, type FeatureRecord } from "./featuremap/records.js";
 export * from "./git/manager.js";

@@ -132,7 +132,7 @@ export function App() {
           <RunDeck run={selected} />
           <Timeline runs={f.runs} totalUsd={f.totalUsd} />
         </section>
-      ) : view === "bay" ? <div className="fpage"><AgentBay bay={bay} /></div>
+      ) : view === "bay" ? <div className="fpage"><AgentBay bay={bay} /><BrainPage events={f.events} /></div>
         : view === "tickets" ? <div className="fpage"><Tickets events={f.events} onShowRun={showRun}
             crew={bay.agents.filter((a) => !a.retired).map((a) => ({ id: a.def.id, name: a.def.name, avatar: a.def.avatar }))} /></div>
         : view === "flows" ? <FlowsPage />
@@ -152,8 +152,6 @@ export function App() {
     ? <ConfigurationPage />
     : route.page === "kit"
     ? <KitPage />
-    : route.page === "brain"
-    ? <BrainPage events={f.events} />
     : route.page === "map"
     ? <FeatureMapPage events={f.events} id={route.id} go={(id) => go({ page: "map", id })} />
     : route.page === "plugins"

@@ -10,9 +10,7 @@ import { SLOTS, type Slot } from "../bay/agentfile.js";
  * systemPromptFor), so the calls in `agent_runs` are the Brain's reads. Counted per principle from
  * the moment its current version was saved.
  *
- * Change: the rules and decisions the person wrote (the Order Engine's Canon, their own words only)
- * are offered to the Brain. Adding one makes it a principle that keeps its source; "not for the
- * Brain" is remembered so it is not offered again. No agent call, no cost.
+ * (Offering the person's rules to the Brain was removed on 24 Nov 2026: none was ever added.)
  */
 export interface PrincipleUse { reads: number; lastReadAt: string | null }
 export interface BrainChange { id: number; ts: string; what: "saved" | "reset" | "dismissed"; principle: string | null; title: string; by: string; note?: string; fromRule: boolean }
@@ -52,56 +50,6 @@ export function brainUse(log: EventLog, list: PrincipleView[] = principles(log))
   return { reads: all.reads, lastReadAt: all.lastReadAt, changes: history.length, lastChangeAt: history[0]?.ts ?? null, byPrinciple, history: history.slice(0, 50) };
 }
 
-export interface BrainSuggestion { fragment: number; text: string; kind: "rule" | "decision"; node: string | null; important: boolean; ts: string; title: string }
 
 /** Agents that make or judge the product: where one of the person's rules goes unless they pick otherwise. */
 const RULE_STATIONS: Slot[] = ["council", "design", "critique", "plan", "build", "review", "evaluate", "fix"];
-
-/** The rule without the label the person typed in front of it ("Rule: ...", "Decision: ..."). */
-const bare = (text: string) => text.trim().replace(/^(rule|decision|important)\s*[:\-]\s*/i, "").trim();
-
-/**
- * Only what the person typed is "your rule". The Improvement Council, the factory and the error catcher
- * capture signals of their own, and the Order Engine files those as explicit too.
- */
-const NOT_YOURS = /^(improve|factory|error|agent)/;
-const yours = (source: string | undefined) => !NOT_YOURS.test(source ?? "");
-/** A whole sentence, not one cut off in the middle where it was split. */
-const whole = (text: string) => !/[,;:]$/.test(bare(text));
-
-function titleOf(text: string): string {
-  const words = bare(text).replace(/\s+/g, " ").trim().replace(/[.;:,]+$/, "").split(" ");
-  const t = words.slice(0, 9).join(" ").replace(/^./, (c) => c.toUpperCase());
-  return (words.length > 9 ? `${t}…` : t).slice(0, 110);
-}
-
-/** The person's own live rules and decisions that are not in the Brain yet and were not turned away. Important ones first. */
-export function brainSuggestions(log: EventLog, order: OrderState, list: PrincipleView[] = principles(log)): BrainSuggestion[] {
-  const taken = new Set<number>(list.map((p) => p.source?.fragment).filter((x): x is number => x != null));
-  for (const e of log.list({ type: "brain.principle.saved", limit: 1e6 })) { const f = (e.payload as { source?: { fragment?: number } }).source?.fragment; if (f != null) taken.add(f); }
-  for (const e of log.list({ type: "brain.suggestion.dismissed", limit: 1e6 })) taken.add(Number((e.payload as { fragment: number }).fragment));
-  const nodes = new Map(order.nodes.map((n) => [n.id, n.title]));
-  return order.fragments
-    .filter((f) => f.state === "live" && f.origin === "explicit" && isCanonKind(f.kind) && !taken.has(f.id) && f.text.trim().length >= 12)
-    .filter((f) => yours(order.signals[f.signalId]?.source) && whole(f.text))
-    .sort((a, b) => Number(b.important || b.pinned) - Number(a.important || a.pinned) || b.ts.localeCompare(a.ts))
-    .slice(0, 30)
-    .map((f) => ({ fragment: f.id, text: bare(f.text), kind: f.kind as "rule" | "decision", node: f.nodeId != null ? nodes.get(f.nodeId) ?? null : null, important: f.important || f.pinned, ts: f.ts, title: titleOf(f.text) }));
-}
-
-/** Make one of the person's rules a principle. The rule's own words are the text unless others are given. */
-export function acceptSuggestion(log: EventLog, order: OrderState, fragment: number, input: { title?: string; text?: string; stations?: string[] } = {}, by = "you"): string {
-  const s = brainSuggestions(log, order).find((x) => x.fragment === fragment);
-  if (!s) throw new Error("That rule is not waiting: it is already in the Brain, was turned away, or is no longer live.");
-  const stations = (input.stations ?? []).filter((x) => (SLOTS as readonly string[]).includes(x));
-  return savePrinciple(log, null, {
-    title: input.title?.trim() || s.title, text: input.text?.trim() || s.text, stations: stations.length ? stations : RULE_STATIONS, enabled: true,
-    note: `From your ${s.kind}${s.node ? ` on "${s.node}"` : ""}`, source: { kind: "rule", fragment, node: s.node ?? undefined },
-  }, by);
-}
-
-export function dismissSuggestion(log: EventLog, order: OrderState, fragment: number, by = "you") {
-  const s = brainSuggestions(log, order).find((x) => x.fragment === fragment);
-  if (!s) throw new Error("That rule is not waiting.");
-  log.append("brain.suggestion.dismissed", { fragment, text: s.text.slice(0, 200), by });
-}

@@ -33,7 +33,6 @@ flowchart TB
 
   lib --> feat["Finished apps<br/>#/features"]
   lib --> plug["Add-ons<br/>#/plugins"]
-  lib --> brain["Brain<br/>#/brain"]
   lib --> fmap["Feature map<br/>#/map"]
 
   proj --> t1["Mission · Product · Use · Ideas"]
@@ -65,7 +64,7 @@ Drawn by `App.tsx`. It is the same on every screen.
 | Ctrl K | Open the Helm |
 | Ctrl Enter (in the Helm) | Build what you typed |
 | Ctrl J | Show or hide the Assistant |
-| G then N / P / A / F / D / L / O / B / M | Go to Needs you / Projects / Agents / All builds / Factory Bridge / Finished apps / Add-ons / Brain / Feature map |
+| G then N / P / A / F / D / L / O / B / M | Go to Needs you / Projects / Agents / All builds / Factory Bridge / Finished apps / Add-ons / Agents and principles / Feature map |
 | ? | Show the shortcut list |
 | Esc | Close |
 
@@ -166,7 +165,7 @@ The engine's own record of one build (`RunDeck.tsx`), shown on the Builds tab an
 |---|---|---|
 | **Finished apps** (`#/features`) | Projects installed into SF. A tool gets an arguments box and its output; a panel opens its page inside SF. Approve waiting requests, update, remove. | `Features.tsx` |
 | **Add-ons** (`#/plugins`) | Installed plugins, bundled examples, what each may do, on/off, its log and its own pages. | `Plugins.tsx` |
-| **Brain** (`#/brain`) | The principles agents follow: edit, turn off, reset, add; a use strip (agent calls that read it, last read, changes) and reads per principle; the rules you wrote, offered to add with one press; a station × principle matrix; the exact instructions an agent on any station reads now; the history of changes. | `Brain.tsx` |
+| **Principles (the Brain)** (on the Agents page, below the crew; `#/brain` opens it) | The principles agents follow: edit, turn off, reset, add; a use strip (agent calls that read it, last read, changes) and reads per principle; who follows what; the exact instructions an agent reads now; the history of changes. | `Brain.tsx` |
 | **Feature map** (`#/map`) | One record per feature (purpose, spec, flow, design, screens, documents, agents), its connections read from the code, its proof of life from the log, and what is connected to nothing. Add a planned feature, edit a record, reset it. See [feature-map.md](feature-map.md). | `FeatureMap.tsx` |
 
 ## Not linked from the sidebar

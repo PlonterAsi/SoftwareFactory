@@ -71,7 +71,6 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/brain` | Principles, stations, who works each |
 | `GET /api/brain/prompt?station=` | The exact system prompt that station's agent runs with now |
 | `POST /api/brain`, `PUT /api/brain/:id`, `POST /api/brain/:id/reset` | Add, edit, reset a principle |
-| `POST /api/brain/suggestions/:fragment/accept`, `.../dismiss` | Make one of the person's rules a principle, or turn it away |
 | `GET /api/feature-map` | Every feature: its record, its wiring from the code, its proof of life, and what is connected to nothing |
 | `POST /api/feature-map`, `PUT /api/feature-map/:id`, `POST /api/feature-map/:id/reset` | Add a planned feature, edit a record, reset or remove it |
 

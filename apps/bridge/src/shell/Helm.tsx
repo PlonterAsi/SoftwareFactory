@@ -22,7 +22,7 @@ const PAGES: { label: string; to: Route; words: string }[] = [
   { label: "Rules and ideas", to: { page: "factory", view: "order" }, words: "order canon unsorted conflicts rules" },
   { label: "Finished apps", to: { page: "features" }, words: "features integrate" },
   { label: "Add-ons", to: { page: "plugins" }, words: "plugins extensions game" },
-  { label: "Brain", to: { page: "brain" }, words: "principles rules loops" },
+  { label: "Principles (Brain)", to: { page: "factory", view: "bay" }, words: "brain principles rules loops" },
   { label: "Feature map", to: { page: "map" }, words: "features registry wiring connected spec flow design records alive unused" },
 ];
 
