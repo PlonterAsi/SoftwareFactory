@@ -33,12 +33,12 @@ export abstract class TicketReads {
   /** What today's auto starts (by the dispatcher) may spend together: their caps added up, for the daily limit. */
   autoUsdToday(): number {
     const day = new Date().toISOString().slice(0, 10);
-    const rows = this.log.db.prepare("SELECT json_extract(payload, '$.capUsd') AS cap FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND ts >= ?").all(day) as { cap: number | null }[];
+    const rows = this.log.db.prepare("SELECT json_extract(payload, '$.capUsd') AS cap FROM events WHERE type = 'ticket.noted' AND json_extract(payload, '$.by') = 'dispatcher' AND json_extract(payload, '$.auto') = 1 AND coalesce(json_extract(payload, '$.text'), '') NOT LIKE 'The supervisor tries run%' AND ts >= ?").all(day) as { cap: number | null }[];
     // Starts written before caps were recorded count at the bug-and-task cap.
     const starts = rows.reduce((a, r) => a + (typeof r.cap === "number" ? r.cap : this.autoWork().maxUsd), 0);
-    // The supervisor's tries of runs with no ticket (factory/supervisor.ts) come out of the same daily limit;
-    // a try of a ticket's run is written as a dispatcher note above, so it is not counted twice.
-    const sup = this.log.db.prepare("SELECT sum(json_extract(payload, '$.addUsd')) AS usd FROM events WHERE type = 'factory.supervisor' AND json_extract(payload, '$.action') = 'retry' AND json_extract(payload, '$.ticket') IS NULL AND ts >= ?").get(day) as { usd: number | null };
+    // The supervisor's tries that started (factory/supervisor.ts) come out of the same daily limit. Its first build
+    // (24 Nov) wrote a dispatcher note before a try that then failed; those notes spent nothing and are left out above.
+    const sup = this.log.db.prepare("SELECT sum(json_extract(payload, '$.addUsd')) AS usd FROM events WHERE type = 'factory.supervisor' AND json_extract(payload, '$.action') = 'retry' AND ts >= ?").get(day) as { usd: number | null };
     return starts + Number(sup?.usd ?? 0);
   }
 
