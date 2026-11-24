@@ -282,7 +282,9 @@ export function workDocument(t: TicketView, notes: NoteView[] = [], links: LinkV
   if (lines.length) out.push("", t.kind === "plan" ? "## Tickets of this epic" : "## Subtasks", "", ...lines.map((l, i) => `${i + 1}. ${l.key} ${l.title} (${l.status.replace("_", " ")})`));
   if (links.length) out.push("", "## Links", "", ...links.map((l) => `- ${l.relation.replace("_", " ")} ${l.key ?? `#${l.to}`}${l.title ? ` ${l.title}` : ""}`));
   const said = notes.filter((n) => n.kind === "note" || n.kind === "reply").slice(-6);
-  if (said.length) out.push("", "## Recent thread", "", ...said.map((n) => `- ${n.by}: ${n.text.replace(/\s+/g, " ").slice(0, 400)}`));
+  // What the person wrote reaches the crew whole (up to 4,000 characters): RTM-2 was reopened with two failing tests to
+  // fix, the second was cut at 400 characters, and the Builder fixed one and asked for the other. Agents' notes stay short.
+  if (said.length) out.push("", "## Recent thread", "", ...said.map((n) => `- ${n.by}: ${n.text.replace(/\s+/g, " ").slice(0, n.by === "you" ? 4000 : 400)}`));
   return out.join("\n");
 }
 
