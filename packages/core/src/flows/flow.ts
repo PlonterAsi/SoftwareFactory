@@ -36,7 +36,6 @@ export const ACTIONS = {
   accept: { label: "Your OK on the build", needs: ["testFix"], required: true },
   ship: { label: "Ship", needs: ["accept"], required: true },
 } as const satisfies Record<string, { label: string; needs: string[]; required: boolean }>;
-export type ActionId = keyof typeof ACTIONS;
 
 /**
  * What one Builder session in a repo can do for a step (tickets/repowork.ts). A bug fix, a small change and

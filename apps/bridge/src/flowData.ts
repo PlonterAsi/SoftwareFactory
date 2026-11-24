@@ -9,7 +9,6 @@ export function loadFlow(id: string): Promise<FlowView> {
   return p;
 }
 /** Forget a flow after it was saved, so the next canvas reads the new version. */
-export function forgetFlow(id: string) { cache.delete(id); }
 
 /** The id of the built-in flow a run of this kind follows when it carries no copy of its own (runs from before flows). */
 export const defaultFlowId = (run?: FactoryRunView) => (run?.repo ? "repo-change" : "new-project");

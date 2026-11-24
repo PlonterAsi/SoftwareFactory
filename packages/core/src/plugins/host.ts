@@ -8,7 +8,7 @@ import type { EventLog, SfEvent } from "../events.js";
 import type { AgentBay } from "../bay/bay.js";
 import { parseAgentFile } from "../bay/agentfile.js";
 import { projectDetail } from "../projects/service.js";
-import { asksOf, matchesType, readManifest, PLUGIN_RECORDS, type PluginAction, type PluginManifest, type PluginPermission, type PluginRecordKind } from "./manifest.js";
+import { asksOf, matchesType, readManifest, PLUGIN_RECORDS, type PluginAction, type PluginManifest, type PluginRecordKind } from "./manifest.js";
 import type { PluginDoor } from "./door.js";
 import { RUNNER_SOURCE } from "./runner.js";
 import type { PluginStore } from "./store.js";

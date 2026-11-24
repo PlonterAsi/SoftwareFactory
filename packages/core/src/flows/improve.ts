@@ -1,5 +1,5 @@
 import type { EventLog, SfEvent } from "../events.js";
-import { BUILT_IN_FLOWS, MAX_ROUNDS_LIMIT, RUNNER_ACTIONS, flowProblems, runnerOf, type FlowDef, type FlowEdge, type FlowStep } from "./flow.js";
+import { BUILT_IN_FLOWS, MAX_ROUNDS_LIMIT, RUNNER_ACTIONS, runnerOf, type FlowDef, type FlowEdge, type FlowStep } from "./flow.js";
 
 /**
  * Flows that improve themselves (SF behavior brief, phase 5; docs/flows-improve.md).

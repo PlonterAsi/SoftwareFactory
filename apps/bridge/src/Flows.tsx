@@ -101,7 +101,7 @@ export function FlowsPage() {
             <table className="flows-steps">
               <thead><tr><th>#</th><th>Step</th><th>Kind</th><th>Who works it</th><th>Passes when</th><th>Stops anyway</th></tr></thead>
               <tbody>
-                {flow.steps.map((s, i) => (
+                {flow.steps.map((s) => (
                   <tr key={s.id} className={s.id === step ? "on" : ""} onClick={() => setStep(s.id)}>
                     <td className="mono muted">{s.within ? "" : flow.steps.filter((x) => !x.within).indexOf(s) + 1}</td>
                     <td><b>{s.label}</b>{s.within && <span className="muted small"> inside {flow.steps.find((x) => x.id === s.within)?.label}</span>}<div className="muted small">{s.sub}</div></td>
