@@ -325,6 +325,7 @@ async function goTests(dir: string, files: string[]): Promise<CheckResult | null
   let out = "";
   const ran: string[] = [];
   const notRun: string[] = [];
+  const preexisting: string[] = [];
   for (const [mod, pkgs] of want) {
     const cwd = join(dir, mod);
     const where = mod ? `cd ${mod} && ` : "";
@@ -338,13 +339,31 @@ ${vet.stderr ?? ""}`)}
 ${t.stderr ?? ""}`;
     const cases = parseCases(text, "go");
     notRun.push(...cases.filter((c) => c.skipped).map((c) => `${c.name} (${c.skipped})`));
-    if (t.status !== 0) out += `go test in ${mod || "."} failed:
-${cases.filter((c) => !c.pass).map((c) => `- ${c.name}`).join("\n") || quietTail(text)}
-`;
-    else ran.push(`${where}go test -v ${[...pkgs].join(" ")}`);
+    if (t.status === 0) { ran.push(`${where}go test -v ${[...pkgs].join(" ")}`); continue; }
+    const failing = cases.filter((c) => !c.pass && !c.name.endsWith(" (package)")).map((c) => c.name);
+    // A test that fails on the base too (the change stashed) was already broken: named, not held against the change.
+    // RTM-2: TestRealStatusFileRoundTrips fails on any Windows checkout (CRLF) and blocked a one-line fix twice.
+    const before = failing.length ? await goFailingOnBase(dir, cwd, [...pkgs], failing) : new Set<string>();
+    const mine = failing.filter((n) => !before.has(n));
+    if (before.size) preexisting.push(...before);
+    if (mine.length || !failing.length) out += `go test in ${mod || "."} failed:\n${mine.map((n) => `- ${n}`).join("\n") || quietTail(text)}\n`;
+    else ran.push(`${where}go test -v ${[...pkgs].join(" ")} (only tests that already failed before this change)`);
   }
   const skippedNote = notRun.length ? `Did not run here (they skipped), so they prove nothing: ${notRun.slice(0, 10).join("; ")}` : "";
-  return { ok: !out, output: [out, ...ran, skippedNote].filter(Boolean).join("\n") };
+  const preNote = preexisting.length ? `Already failing before this change, not held against it: ${preexisting.slice(0, 10).join("; ")}` : "";
+  return { ok: !out, output: [out, ...ran, preNote, skippedNote].filter(Boolean).join("\n") };
+}
+
+/** Which of these Go tests fail with the working change stashed away; empty when the base could not run. */
+async function goFailingOnBase(repoDir: string, cwd: string, pkgs: string[], names: string[]): Promise<Set<string>> {
+  let swapped = false;
+  try {
+    git(repoDir, "stash", "push", "--include-untracked", "-m", "sf-go-baseline-check");
+    swapped = true;
+    const run = await runAsync("go", ["test", "-v", "-run", `^(${names.map((n) => n.replace(/[^\w/]/g, "")).join("|")})$`, ...pkgs], { cwd, timeout: 600_000 });
+    return new Set(parseCases(`${run.stdout ?? ""}\n${run.stderr ?? ""}`, "go").filter((c) => !c.pass && names.includes(c.name)).map((c) => c.name));
+  } catch { return new Set(); }
+  finally { if (swapped) { try { git(repoDir, "stash", "pop"); } catch { /* keep the stash: nothing is lost */ } } }
 }
 
 async function nodeTests(dir: string, files: string[]): Promise<CheckResult> {
