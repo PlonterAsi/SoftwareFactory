@@ -61,8 +61,6 @@ import { ErrorCapture, isFault } from "./tickets/capture.js";
 import { classifyIntake, ensureSelfProject, filedAlready, projectToTicket } from "./tickets/intake.js";
 import { FORMS, KINDS, KIND_LABEL, PRIORITIES, PRIORITY_LABEL, RELATIONS, TICKET_SEVERITIES, STATUS_WORDS, type TicketKind, type TicketStatus, type Relation } from "./tickets/model.js";
 import { buildSuggestion, lastSeen, sinceReport, statusDigest } from "./bridge/status.js";
-import { BaseHost, type BootedBase } from "./bases/host.js";
-import { BaseRegistry } from "./bases/registry.js";
 import { SwitchableRuntime, checkGit, modeOf, runtimeFor, setupReport, type CrewMode } from "./setup.js";
 import { freeBytesAt, lastAgentCall, preflight, type PreflightReport } from "./safety/preflight.js";
 
@@ -891,10 +889,18 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   return raw ? JSON.parse(raw) : {};
 }
 
+/** The open factory: its HTTP handler, how busy it is, and how to shut it down cleanly. */
+export interface BootedBase {
+  handler: (req: IncomingMessage, res: ServerResponse) => unknown;
+  /** Factory runs working right now. */
+  activeRuns: () => number;
+  /** Stop timers, plugins, launched apps and the drop folder, then close the database. */
+  dispose: () => void;
+}
+
 /**
- * Open one base's factory: its database, crew, core and background timers.
- * The default base keeps the old env overrides (SF_PROJECTS, SF_DROP); other bases keep
- * everything inside their own folder.
+ * Open the factory: its database, crew, core and background timers. `isDefault: false` keeps
+ * everything inside the database's folder (no SF_PROJECTS / SF_DROP overrides); tests use it.
  */
 export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boolean } = {}): BootedBase & { core: ReturnType<typeof createCore>; log: EventLog } {
   if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
@@ -937,7 +943,6 @@ export function bootBase(dbPath: string, { isDefault = true }: { isDefault?: boo
   };
   sweepIfDue();
   timers.push(setInterval(sweepIfDue, 3_600_000).unref());
-  // The Improvement Council looks again on its own (real crew only, within its caps): first a few minutes after start, then every 15 minutes it checks if a look is due.
   // Imported repos are kept current: a free look at each source, and a capped exploration when it moved.
   // Watchers look when they are due (free; they only open tickets), then the queue gets a look: a new month's budget lets waiting tickets start.
   const watchTick = () => { core.watchers.runDue().then(() => core.tickets.dispatch()).catch((e) => console.error("watchers failed:", e)); };
@@ -985,17 +990,10 @@ const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(imp
 if (isMain) {
   const dbPath = process.env.SF_DB ?? resolve(process.cwd(), ".sf-data/factory.db");
   const port = Number(process.env.SF_PORT ?? 4317);
-  // Bases: the home folder (where factory.db has always been) keeps the list of factories this app hosts.
-  // The factory that was here before is "Main factory"; the others live in their own folders.
-  const home = dbPath === ":memory:" ? null : dirname(dbPath);
-  const host = home ? new BaseHost(new BaseRegistry(home), (b) => {
-    console.log(`${new Date().toISOString()} opening base #${b.id} "${b.name}" at ${b.folder}`);
-    return bootBase(b.isDefault ? dbPath : join(b.folder, "factory.db"), { isDefault: b.isDefault });
-  }, openFolder) : null;
-  const single = host ? null : bootBase(dbPath);
-  const inner = host ? host.handle : single!.handler;
-  const server = createServer((req, res) => inner(req, res));
-  process.on("exit", () => { if (host) host.dispose(); else single!.dispose(); });
+  // One factory per app (Bases, several factories in one app, were removed 24 Nov 2026: only the main one was ever used).
+  const open = bootBase(dbPath);
+  const server = createServer((req, res) => open.handler(req, res));
+  process.on("exit", () => open.dispose());
   // Nothing thrown is lost: it is a bug ticket on the open base before anything else happens.
   process.on("unhandledRejection", (e) => { console.error("unhandled rejection:", e); faultCore?.fault("the core (unhandled promise rejection)", e); });
   process.on("uncaughtException", (e) => {
@@ -1036,5 +1034,5 @@ if (isMain) {
     else if (stalled >= 2_000) console.error(`${new Date(now).toISOString()} the core was busy for ${(stalled / 1000).toFixed(1)} s and could not answer`);
     tick = now;
   }, 500).unref();
-  server.listen(port, "127.0.0.1", () => console.log(`${new Date().toISOString()} SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, base ${host ? `"${host.current.name}" at ${host.current.folder}` : dbPath})`));
+  server.listen(port, "127.0.0.1", () => console.log(`${new Date().toISOString()} SoftwareFactory core on http://127.0.0.1:${port} (runtime ${runtime.name}, data ${dbPath})`));
 }

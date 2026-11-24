@@ -12,7 +12,6 @@ import { useEffect, useState } from "react";
  *   #/brain                the Brain: the principles every loop follows
  *   #/map[/id]             the Feature map: every feature's record, wiring and proof of life (one feature)
  *   #/config               configuration: what SoftwareFactory runs with now, and where each piece came from
- *   #/bases                the factories this app hosts (open, create, rename, archive)
  *   #/factory[/view]       the whole factory (floor, bay, order, tickets, improve, flows), as before projects
  *   #/bridge[/mode]        the Factory Bridge dashboard (loom, score, quarter)
  *   #/needs                everything waiting on you (the new shell's first item)
@@ -32,7 +31,6 @@ export type Route =
   | { page: "addon"; id: string; panel?: string }
   | { page: "brain" }
   | { page: "map"; id?: string }
-  | { page: "bases" }
   | { page: "config" }
   | { page: "kit" }
   | { page: "needs" }
@@ -52,7 +50,6 @@ export function parse(hash: string): Route {
   if (parts[0] === "plugins") return { page: "plugins", id: parts[1] || undefined, panel: parts[2] || undefined };
   if (parts[0] === "brain") return { page: "brain" };
   if (parts[0] === "map") return { page: "map", id: parts[1] ? decodeURIComponent(parts[1]) : undefined };
-  if (parts[0] === "bases") return { page: "bases" };
   if (parts[0] === "projects") return { page: "projects" };
   if (parts[0] === "config") return { page: "config" };
   if (parts[0] === "_kit") return { page: "kit" };
@@ -69,7 +66,6 @@ export function href(r: Route): string {
   if (r.page === "plugins") return `#/plugins${r.id ? `/${r.id}${r.panel ? `/${r.panel}` : ""}` : ""}`;
   if (r.page === "brain") return "#/brain";
   if (r.page === "map") return r.id ? `#/map/${encodeURIComponent(r.id)}` : "#/map";
-  if (r.page === "bases") return "#/bases";
   if (r.page === "projects") return "#/projects";
   if (r.page === "config") return "#/config";
   if (r.page === "kit") return "#/_kit";

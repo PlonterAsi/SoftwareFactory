@@ -18,7 +18,7 @@ one line → Council → Design loop (Designer ⇄ Critic) → Plan → [you app
 - **Order from mess**: say anything in any order; it is filed under project ▸ idea ▸ thread, rules become Canon, conflicts are raised as cards.
 - **Tickets**: the crew works ready tickets by itself within caps, and SoftwareFactory's own tickets come back as draft pull requests. [docs/tickets.md](docs/tickets.md)
 - **Use what you built**: start a finished app from its project, or add it into SoftwareFactory as a tool, a panel or an add-on. [docs/run.md](docs/run.md), [docs/integrations.md](docs/integrations.md)
-- **Also**: repository import with a code map, add-ons, several factories in one app, in-app updates.
+- **Also**: repository import with a code map, add-ons, in-app updates.
 
 ## Documentation
 

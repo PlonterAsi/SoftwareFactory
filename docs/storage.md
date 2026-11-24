@@ -12,7 +12,6 @@ SoftwareFactory keeps its data in three tiers, each with one job. The Bridge's *
 
 In the desktop app the data folder is the Tauri app data directory (on Windows `%APPDATA%\dev.plonter.softwarefactory\`); in dev it is `.sf-data/`. `SF_DB` and `SF_PROJECTS` override both.
 
-Each **base** (see [bases.md](bases.md)) has all three tiers in its own folder; the data folder above holds Main factory and `bases.db`, the list of bases.
 
 ## The database
 
@@ -42,7 +41,7 @@ SELECT agent, count(*) AS calls, round(sum(cost_usd), 4) AS usd FROM agent_runs 
 
 **Upgrades never lose data.** Before an existing database is migrated, a full copy is written next to it (`factory.db.v<old>-<time>.bak`, newest 3 kept) and a `store.migrated` event records it. Databases made by milestones 1 to 3 (just `events` and `signal_fts`) are adopted as they are and their tables are backfilled from their history.
 
-**A broken table never loses an event.** If a projection throws, only its own change is rolled back, the event is still stored, the error is recorded and the Data vault shows that table red. **Rebuild from log** (or `POST /api/store/rebuild`) drops every organized table and the cache and refills them from the log.
+**A broken table never loses an event.** If a projection throws, only its own change is rolled back, the event is still stored, the error is recorded in `projections`, and the table is refilled from the log the next time its projection's version is bumped.
 
 ## Resuming runs
 
@@ -62,8 +61,3 @@ registerProjection({
 ```
 
 Register at module load (before the `EventLog` opens) or call `log.addProjection(p)` later; either way it is backfilled from history. For state too rich to update row by row, give it `flush(db, ctx, types)` and rewrite the tables from a folded `ctx.view(...)`, as the `order` projection does.
-
-## API
-
-- `GET /api/store`: the three tiers in one report (schema version, migrations, backups, events by type, table row counts, projection health, project folders checked against `artifacts`, orphan folders, cache hits and misses).
-- `POST /api/store/rebuild` with `{ "name"?: string }`: rebuild one projection or all of them from the log.

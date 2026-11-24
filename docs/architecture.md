@@ -55,7 +55,6 @@ All under `packages/core/src/`.
 | `events.ts` | The append-only event log (SQLite), full-text search, live listeners | [storage.md](storage.md) |
 | `store/` | Schema migrations, projections (tables folded from events), cache | [storage.md](storage.md) |
 | `server.ts` | The HTTP server, routing, the live event stream, start-up of one base | [reference.md](reference.md) |
-| `bases/` | The registry of bases and the host that switches between them | [bases.md](bases.md) |
 | `runtime.ts`, `agents.ts` | The `AgentRuntime` adapter: Claude Code (lean or full), the mock practice crew, a switchable wrapper; per-call caps, timeouts, cost recording | [spike-runtime.md](spike-runtime.md) |
 | `setup.ts` | Checks for Node.js, Claude Code and Git; crew mode | |
 | `signals.ts` | Capturing a Signal | |

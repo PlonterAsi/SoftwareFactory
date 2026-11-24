@@ -65,7 +65,6 @@ flowchart LR
 | [run.md](run.md) | Running a finished project from the app (the Use tab) | current |
 | [integrations.md](integrations.md) | Adding a finished project into SF (Finished apps) | current |
 | [plugins.md](plugins.md) | Add-ons: the plugin format, permissions, sandbox | current |
-| [bases.md](bases.md) | Several factories in one app | current |
 | [feature-map.md](feature-map.md) | One record per feature, the wiring map read from the code, proof of life, the check; the Brain as the first case | current |
 
 ### Technical

@@ -527,15 +527,6 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${B}App.tsx`, `${B}main.tsx`, `${B}shell/`, `${B}ui/`, `${B}styles.css`, `${B}styles/`, `${B}Kit.tsx`, `${B}projects/router.ts`], api: [],
   },
   {
-    id: "bases", name: "Bases", group: "App",
-    purpose: "Several factories hosted by one app, like save files in a game: each base has its own database and projects.",
-    spec: ["Open, create (with a folder picker), rename and archive a base.", "One base is open at a time, on the same port.", "Every base has its own event log."],
-    flow: ["Open Bases", "Create or pick a base", "The host closes the current one and opens the other", "The app reloads on it"],
-    design: "The Bases page, a card per base that peeks inside it.",
-    screens: ["/bases"], docs: ["docs/bases.md"], stations: [],
-    files: [`${C}bases/`, `${B}Bases.tsx`], api: ["/api/bases"],
-  },
-  {
     id: "updates", name: "In-app updates", group: "App",
     purpose: "The installed app checks for a newer signed build and installs it, by itself or on a button, without losing work in progress.",
     spec: ["The app checks GitHub for a newer signed build.", "An update waits for a running build to finish, or takes two presses to install over it.", "The log says who started an install.", "A read token is used when the repository is private."],

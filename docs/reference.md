@@ -25,18 +25,6 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/since` | The "since you left" lines |
 | `POST /api/presence` | Mark how far the person has seen |
 | `GET /api/updates`, `POST /api/updates` | Update status; record an update step reported by the shell |
-| `GET /api/store` | The three storage tiers in one report |
-| `POST /api/store/rebuild` | `{ name? }` rebuild one projection or all from the log |
-
-### Bases (answered by the host, before a base's own routes)
-
-| Method and path | Does |
-|---|---|
-| `GET /api/bases` | Every base and which is open |
-| `GET /api/bases/browse?path=`, `GET /api/bases/suggest?name=` | Folder picker; a suggested folder |
-| `POST /api/bases` | Create a base |
-| `POST /api/bases/:id` | Rename |
-| `POST /api/bases/:id/open` \| `archive` \| `reveal` | Switch to it; archive or restore; show its folder |
 
 ### Signals, chat and the Assistant
 
@@ -56,7 +44,6 @@ Routing is in `packages/core/src/server.ts` and the `routes.ts` file of each mod
 | `GET /api/factory/runs/:id` | The run's row and current station |
 | `POST /api/factory/runs/:id/gate` | `{ gate, approve, note? }` answer gate A, gate B or an escalation |
 | `POST /api/factory/runs/:id/resume` | Resume a stopped run |
-| `GET /api/factory/cycles` | Runs of the same prompt, compared |
 
 ### Projects
 
@@ -167,7 +154,6 @@ Every row of the log is `{ id, ts, type, payload }`. A run's id is the id of its
 | Launch | `launch.started`, `launch.url`, `launch.stopped`, `launch.exited` |
 | Finished apps | `integration.requested`, `integration.briefed`, `integration.decided`, `integration.installed`, `integration.failed`, `integration.removed`, `integration.used` |
 | Add-ons | `plugin.installed`, `plugin.enabled`, `plugin.disabled`, `plugin.failed`, `plugin.removed`, `plugin.data`, `plugin.log`, `plugin.emitted` |
-| Bases | `base.created`, `base.opened`, `base.renamed`, `base.archived` (in `bases.db`) |
 | App | `settings.changed`, `drop.filed`, `drop.skipped`, `bridge.seen`, `app.updated`, `store.migrated`, `store.rebuilt` |
 
 ### Station states

@@ -150,7 +150,6 @@ The engine's own record of one build (`RunDeck.tsx`), shown on the Builds tab an
 | **Factory Bridge** (`#/bridge`) | A dashboard in three views. *Signal Loom*: where every build is and which waits for you. *Partitura*: which agent worked when, on which build, at what cost. *Lantern Quarter*: how every project is doing. | `bridge/` |
 | **Agents** (`#/factory/bay`) | The Agent Bay. Every agent with name, avatar, model, cap per call, plugins, skills, tools, MCP servers and prompt. Create from one line, clone, import and download as a file, edit (every save is a version, with diff and rollback), test on a sample task, assign to station seats, see stats and live state. | `AgentBay.tsx` |
 | **Tickets** (`#/factory/tickets`) | Views: Waiting on you, Open, Crew working, Epics, Closed, All, and a Board; a ticket page with its questions, thread, links, *Work it with the crew*, *Work it in the repo*, *Ask an agent*; the "Crew picks up" switch. | `Tickets.tsx`, `Intake.tsx` |
-| **Base** (`#/bases`) | The factories this app hosts: open, create (with a folder picker), rename, archive. | `Bases.tsx` |
 | **All builds** (`#/factory`) | The factory floor (stations lit per run), the run deck and the timeline of every agent call with model, time and cost. | `FactoryFloor.tsx`, `RunDeck.tsx`, `Timeline.tsx` |
 | **Rules and ideas** (`#/factory/order`) | The star map of every project, idea and thread, and the Order deck: Canon, Unsorted tray, conflict cards, the briefing with undo. | `StarMap.tsx`, `OrderDeck.tsx` |
 

@@ -96,7 +96,6 @@ const PROOF: Record<string, string[]> = {
 
 /** Features whose events are kept outside a base's log, so the log cannot prove them either way. */
 const ELSEWHERE: Record<string, string> = {
-  bases: "Its events are kept in the app's own registry of bases, not in this base's log, so the map cannot show when it was last used.",
 };
 
 type Saved = Omit<FeatureRecord, "files" | "api"> & { by?: string };
