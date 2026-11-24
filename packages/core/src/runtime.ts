@@ -344,13 +344,30 @@ export class StreamReader {
   }
   private line(line: string) {
     if (!line) return;
-    if (line.startsWith('{"type":"result"') || /^\{\s*"type"\s*:\s*"result"/.test(line)) { this.last = line; this.whole = ""; }
-    else if (line.startsWith('{"type":')) this.onLine();
+    const type = lineType(line);
+    if (type === "result") { this.last = line; this.whole = ""; }
+    else if (type !== null) this.onLine();
   }
   /** The result line, or else everything read (the one-object format). */
   result(): string {
-    if (this.buf.trim()) { const rest = this.buf.trim(); this.buf = ""; if (/^\{\s*"type"\s*:\s*"result"/.test(rest)) { this.last = rest; this.whole = ""; } }
+    if (this.buf.trim()) { const rest = this.buf.trim(); this.buf = ""; if (lineType(rest) === "result") { this.last = rest; this.whole = ""; } }
     return this.last ?? this.whole;
+  }
+}
+
+/**
+ * The "type" of one stream-json line, or null when the line is not a whole JSON object with one. The key's place
+ * in the object is not fixed: Claude Code 2.1.328 prints the result line as {"duration_api_ms":…,"type":"result",…},
+ * so a check on how the line starts missed it and every call failed to parse (found 2026-11-24).
+ */
+export function lineType(line: string): string | null {
+  if (!line.startsWith("{")) return null;
+  if (line.startsWith('{"type":"')) return line.slice(9, line.indexOf('"', 9));
+  try {
+    const j = JSON.parse(line) as { type?: unknown };
+    return typeof j?.type === "string" ? j.type : null;
+  } catch {
+    return null;
   }
 }
 

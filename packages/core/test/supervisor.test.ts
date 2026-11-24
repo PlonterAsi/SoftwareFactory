@@ -73,6 +73,20 @@ describe("an agent call is judged by its progress, not a fixed clock", () => {
     expect(JSON.parse(old.result()).result).toBe("pong");
   });
 
+  it("finds the result line wherever its type key sits (Claude Code 2.1.328)", () => {
+    let beats = 0;
+    const r = new StreamReader(() => beats++);
+    r.push('{"type":"system","subtype":"init"}\n{"type":"assistant","message":{}}\n');
+    r.push('{"type":"system","subtype":"post_turn_summary","status_category":"blocked"}\n');
+    r.push('{"duration_api_ms":996,"stop_reason":"end_turn","total_cost_usd":0.0007,"result":"Hi","type":"result","subtype":"success","is_error":false}\n');
+    expect(beats).toBe(3);
+    expect(JSON.parse(r.result())).toMatchObject({ result: "Hi", type: "result" });
+    // The same line with no newline at the end.
+    const tail = new StreamReader();
+    tail.push('{"type":"assistant","message":{}}\n{"duration_api_ms":1,"result":"ok","type":"result"}');
+    expect(JSON.parse(tail.result()).result).toBe("ok");
+  });
+
   it("asks the CLI to stream, and runs a streaming CLI end to end", async () => {
     expect(new ClaudeCodeRuntime().buildArgs({ prompt: "p" }).slice(0, 4)).toEqual(["-p", "--output-format", "stream-json", "--verbose"]);
     const dir = mkdtempSync(join(tmpdir(), "sf-stream-"));
