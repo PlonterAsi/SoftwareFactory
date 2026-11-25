@@ -100,7 +100,11 @@ export const NEW_PROJECT_MAX_USD = 12;
  * A run on top of a project the factory already shipped: same folder, same data, same locked tests.
  * "screen" turns a script into an app; "feature" adds what the person asks to the shipped app.
  */
-export interface ScreenRun { kind: "screen" | "feature"; baseRun: number; baseSha: string; tag: string }
+export interface ScreenRun {
+  kind: "screen" | "feature"; baseRun: number; baseSha: string; tag: string;
+  /** The ask is what the shipped design already asks for (what a version left to do): nothing is designed again. */
+  keepDesign?: boolean;
+}
 
 export interface ReviewResult { verdict: "pass" | "fix"; findings: { severity: "high" | "low"; text: string }[]; criteria?: { text: string; pass: boolean; evidence: string }[] }
 

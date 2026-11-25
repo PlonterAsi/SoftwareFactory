@@ -105,7 +105,8 @@ describe("a project keeps going after its first version", () => {
       if (events(log, "factory.run.started").length < 2) expect((await post(`/api/tickets/${t.id}/work`, { autoApprove: true })).status).toBeLessThan(300);
       const next = events(log, "factory.run.started").length;
       const started = log.list({ type: "factory.run.started", limit: 10 }).at(-1)!;
-      expect((started.payload as any).screen).toMatchObject({ kind: "feature", baseRun: first });
+      expect((started.payload as any).screen).toMatchObject({ kind: "feature", baseRun: first, keepDesign: true });
+      expect((started.payload as any).council).toBe("never");
       expect(next).toBe(2);
       await core.factory.wait(started.id);
       const fin = events(log, "factory.run.finished").filter((p) => p.run === started.id).at(-1);
