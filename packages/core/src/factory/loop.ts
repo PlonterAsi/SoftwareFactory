@@ -46,10 +46,10 @@ export class Factory {
     if (!out && problems.length) return { pass: false, screens: [{ route: "", ok: false, problem: `the app did not start: ${problems[0].slice(0, 300)}` }] };
     return out;
   };
-  readScreens: (dir: string, o?: { tryOut?: boolean }) => Promise<ScreenText[] | null> = async (dir, o) => {
+  readScreens: (dir: string, o?: { tryOut?: boolean | string }) => Promise<ScreenText[] | null> = async (dir, o) => {
     if (process.env.SF_SCREEN_CHECK === "off") return null;
     let out: ScreenText[] | null = null;
-    await probeStart(dir, 15_000, async (url) => { out = await readScreens(url, { tryOut: !!o?.tryOut }); return []; });
+    await probeStart(dir, 15_000, async (url) => { out = await readScreens(url, { tryOut: o?.tryOut ?? false }); return []; });
     return out;
   };
 

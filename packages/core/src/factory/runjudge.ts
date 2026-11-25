@@ -170,9 +170,12 @@ export abstract class RunJudge extends RunBase {
     const docs = id && this.docs ? screenLookDocs(this.docs, id, f.title.replace(/^Screen: /, "")) : null;
     if (id && !docs) this.log.append("factory.screen.look", { run: this.id, feature: f.id, screen: id, attempt, skipped: "no designed screen matches this view" });
     if (!docs || this.o.maxUsd - this.spent < SCREEN_LOOK_USD * 2) return [];
-    const shots = await this.f.readScreens(this.dir).catch(() => null);
+    // The look tries this screen's controls too: run 12986's Builder was sent back twice for a delete that
+    // "does not ask first", which no look at the screen as it opens could have seen either way.
+    const route = id === "dashboard" ? "home" : `v/${id}`;
+    const shots = await this.f.readScreens(this.dir, { tryOut: route }).catch(() => null);
     if (!shots?.length) return [];
-    const mine = shots.filter((s) => s.route === id || s.route.startsWith(`${id}/`));
+    const mine = shots.filter((s) => s.route === `v/${id}` || s.route === id || s.route.startsWith(`${id}/`));
     try {
       const e = validateEvaluation(parseJsonBlock(await this.ask(this.one("evaluate"), screenLookPrompt(this.asked, docs, mine.length ? mine : shots), { round: 0 }, { capUsd: SCREEN_LOOK_USD })), docs);
       const req = (rid: string) => docs.requirements.find((r) => r.id === rid)?.text ?? rid;

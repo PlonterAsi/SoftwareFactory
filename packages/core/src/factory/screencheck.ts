@@ -145,7 +145,7 @@ export function pageText(dom: string, kit = false): { text: string; controls: st
  * What each of the app's screens shows, as the person would read it: the text of its main area and the
  * labels of its controls. For the product judge (evaluate.ts). null when no browser can be read.
  */
-export async function readScreens(baseUrl: string, o: { browser?: string | null; max?: number; tryOut?: boolean } = {}): Promise<{ route: string; text: string; controls: string[]; tried?: { did: string; shows: string }[] }[] | null> {
+export async function readScreens(baseUrl: string, o: { browser?: string | null; max?: number; /** true: across the app. A route ("v/money"): on that screen only. */ tryOut?: boolean | string } = {}): Promise<{ route: string; text: string; controls: string[]; tried?: { did: string; shows: string }[] }[] | null> {
   const browser = o.browser === undefined ? findBrowser() : o.browser;
   if (!browser) return null;
   const read = (dom: string) => pageText(dom, true);
@@ -160,7 +160,8 @@ export async function readScreens(baseUrl: string, o: { browser?: string | null;
     if (s.dom.trim()) { out.push({ route, ...read(s.dom) }); doms.set(route, s.dom); }
   }
   if (o.tryOut) {
-    for (const t of tryOuts(out.map((s) => ({ route: s.route, dom: doms.get(s.route) ?? "" })))) {
+    const only = typeof o.tryOut === "string" ? o.tryOut : null;
+    for (const t of tryOuts(out.filter((s) => !only || s.route === only).map((s) => ({ route: s.route, dom: doms.get(s.route) ?? "" }))).slice(0, only ? 6 : TRY_MAX)) {
       const s = await dumpScreen(browser, `${baseUrl}/?sf_do=${encodeURIComponent(t.act)}#/${t.route}`);
       const screen = out.find((x) => x.route === t.route)!;
       const shows = afterTry(screen.text, s.dom);
