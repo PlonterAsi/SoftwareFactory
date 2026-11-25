@@ -26,6 +26,9 @@ import type { Run } from "./run.js";
 export type StationId = "intake" | "council" | "discover" | "plan" | "gateA" | "tests" | "build" | "test" | "fix" | "review" | "evaluate" | "gateB" | "ship";
 export type GateId = "gateA" | "gateB" | "escalation";
 
+/** What one Tester call may spend: its own budget for a small plan, more per acceptance criterion, at most 15% of the run. */
+export const testsCapUsd = (own: number, criteria: number, maxUsd: number) => Math.max(own, Math.min(own + 0.06 * Math.max(0, criteria - 4), maxUsd * 0.15));
+
 export interface Plan {
   name: string;
   slug: string;

@@ -16,7 +16,7 @@ import { dryRunTests, lockedTestFaults } from "./testcheck.js";
 import { FIND_LINKS_MAX, FIND_LINKS_USD, findLinksPrompt, linkContext, linkFiles, validateFoundLinks } from "./linkcheck.js";
 import { answerSummary, changedFiles, restoreProtected, testDispute, writtenOnDisk } from "./workbench.js";
 import { commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, runTests, syntaxErrors, testsHash, writeFiles, type TestRun } from "./workspace.js";
-import { NEW_PROJECT_MAX_USD, NEXT_VERSION_ROUNDS, type Plan, type RestoredState, StopRun, journeyTestRule, modelFloorUsd, restoreState, shippedDesign, specMarkdown, strongerModel, validatePlan, withDesignedScreens } from "./runkit.js";
+import { NEW_PROJECT_MAX_USD, NEXT_VERSION_ROUNDS, type Plan, type RestoredState, StopRun, journeyTestRule, modelFloorUsd, restoreState, shippedDesign, specMarkdown, strongerModel, testsCapUsd, validatePlan, withDesignedScreens } from "./runkit.js";
 import { RunJudge } from "./runjudge.js";
 
 
@@ -353,7 +353,9 @@ export class Run extends RunJudge {
     let res!: ReturnType<typeof writeFiles>;
     for (let attempt = 1; ; attempt++) {
       const kept = this.basePlan ? this.testsText() : "";
-      const text = await this.ask(this.one("tests"), `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${journeys}${kept ? `\n\nThis is the next version of a shipped app. Its locked tests stay as they are (read only):\n${kept}\n\nWrite NEW test files, with new names under test/, for the acceptance criteria above only.` : ""}${feedback}`);
+      // Run 11279: an 8-feature plan with a journey per criterion, and the Tester's fixed $0.30 ran out inside
+      // the call twice. The Tester's cap follows the size of what it has to cover, inside the run's limit.
+      const text = await this.ask(this.one("tests"), `Approved spec:\n${JSON.stringify(this.plan, null, 2)}${journeys}${kept ? `\n\nThis is the next version of a shipped app. Its locked tests stay as they are (read only):\n${kept}\n\nWrite NEW test files, with new names under test/, for the acceptance criteria above only.` : ""}${feedback}`, {}, { capUsd: testsCapUsd(this.one("tests").budgetUsd, this.plan.acceptance?.length ?? 0, this.o.maxUsd), raiseCap: true });
       files = parseFileBlocks(text);
       // Fixtures (test/fixtures/*.csv and the like) belong to the locked suite too.
       // A feature run never rewrites a locked test: a new file with an old name gets the version in its name.
