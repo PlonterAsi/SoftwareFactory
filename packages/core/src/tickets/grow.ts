@@ -1,8 +1,7 @@
 import type { EventLog } from "../events.js";
 import type { TicketView } from "./model.js";
 import type { OpenTicket } from "./shapes.js";
-import { leftAtShip, nothingLeft, type LeftAtShip } from "../factory/leftover.js";
-import { restoreState, shippedDesign } from "../factory/runkit.js";
+import { leftOfRun, nothingLeft, type LeftAtShip } from "../factory/leftover.js";
 
 /**
  * A project keeps going after its first version. Until now a ticket in a project the factory built from an idea
@@ -101,22 +100,12 @@ export interface Standing extends LeftAtShip {
 
 const versionOf = (log: EventLog, run: number) => String((log.get(run)?.payload as { screen?: { tag?: string } } | undefined)?.screen?.tag ?? "v0.1.0");
 
-function leftOf(log: EventLog, run: number): LeftAtShip {
-  const st = restoreState(log, run);
-  let features: { id: string; title: string; state: string }[] = [];
-  const feats = log.list({ type: "factory.feature", sinceId: run - 1, limit: 1e6 }).map((e) => e.payload as { run?: number; id: string; title: string; state: string }).filter((p) => p.run === run);
-  const last = new Map<string, { id: string; title: string; state: string }>();
-  for (const f of feats) last.set(f.id, { id: f.id, title: f.title, state: f.state === "building" ? "todo" : f.state });
-  features = [...last.values()];
-  return leftAtShip(log, run, st.docs ?? shippedDesign(log, run).docs, features);
-}
-
 export function standingOf(log: EventLog, project: number): Standing | null {
   const runs = shippedApps(log, project);
   const run = runs.at(-1);
   if (run == null) return null;
   const fin = (r: number) => log.db.prepare("SELECT finished_at AS at, total_usd AS usd, plan_name AS plan FROM factory_runs WHERE id = ?").get(r) as { at: string | null; usd: number | null; plan: string | null } | undefined;
-  const left = leftOf(log, run);
+  const left = leftOfRun(log, run);
   let ticket: Standing["ticket"] = null;
   try {
     const t = log.db.prepare("SELECT id, title, status, run FROM tickets WHERE fingerprint = ? ORDER BY id DESC LIMIT 1").get(`left:${run}`) as { id: number; title: string; status: string; run: number | null } | undefined;

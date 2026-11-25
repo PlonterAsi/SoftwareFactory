@@ -1,4 +1,4 @@
-import { leftAtShip, nothingLeft } from "./leftover.js";
+import { leftAtShip, leftOfRun, nothingLeft } from "./leftover.js";
 import { failureLines } from "./trim.js";
 import { SAME_TESTS_REASON, extendTime, runMinutes, stopReason, type RoundRecord } from "./stoprules.js";
 import { sleptBetween } from "./awake.js";
@@ -94,7 +94,7 @@ export class Run extends RunJudge {
       if (this.plan?.app && this.screen?.kind !== "screen") {
         let features: { id: string; title: string; state: string }[] = [];
         try { features = JSON.parse(readFileSync(join(this.dir, "features.json"), "utf8")).features ?? []; } catch { /* built in one session: no list */ }
-        const left = leftAtShip(this.log, this.id, this.docs, features);
+        const left = leftAtShip(this.log, this.id, this.docs, features, this.screen?.kind === "feature" ? leftOfRun(this.log, this.screen.baseRun) : null);
         if (!nothingLeft(left)) this.log.append("factory.left", { run: this.id, plan: this.plan.name, version: this.screen?.tag ?? "v0.1.0", baseRun: this.screen?.baseRun ?? null, ...left });
       }
     } catch { /* the version ships either way */ }

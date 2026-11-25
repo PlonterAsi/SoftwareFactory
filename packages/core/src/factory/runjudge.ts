@@ -6,6 +6,7 @@ import { mustRequirements, newRequirements, type ProductDocs } from "./discovery
 import { FEATURE_LOOP_MIN_USD, type Feature } from "./features.js";
 import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, withScreenItems, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation } from "./evaluate.js";
 import { isKitFile } from "./appkit.js";
+import { leftOfRun } from "./leftover.js";
 import { lockedTestFaults } from "./testcheck.js";
 import { answerSummary, changedFiles, restoreFromHead } from "./workbench.js";
 import { commitAll, git, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, syntaxErrors, testsHash, writeFiles, type TestRun } from "./workspace.js";
@@ -144,8 +145,17 @@ export abstract class RunJudge extends RunBase {
   protected judgeDocs(): ProductDocs | null {
     if (!this.docs) return null;
     // A next version is judged on what it adds: the rest was judged when it shipped, and its tests are locked.
-    const docs = this.baseDocs ? { ...this.docs, requirements: newRequirements(this.baseDocs, this.docs) } : this.docs;
+    // ...and on what the version under it left: run 11986 never looked again at the 5 requirements v0.1.0 missed.
+    const docs = this.baseDocs ? { ...this.docs, requirements: this.owedAndNew(this.baseDocs, this.docs) } : this.docs;
     return withScreenItems(docs, [...this.screenOpen.values()].flat());
+  }
+  private owedIds: Set<string> | null = null;
+  private owedAndNew(base: ProductDocs, docs: ProductDocs): ProductDocs["requirements"] {
+    if (!this.owedIds) {
+      try { this.owedIds = new Set(this.screen?.kind === "feature" ? leftOfRun(this.log, this.screen.baseRun).unmet.map((r) => r.id) : []); } catch { this.owedIds = new Set(); }
+    }
+    const added = newRequirements(base, docs);
+    return docs.requirements.filter((r) => added.includes(r) || this.owedIds!.has(r.id));
   }
   /** The judge's look at one screen just built: what of its design a person would not find. [] when it all shows or the look cannot run. */
   protected async lookAtScreen(f: Feature, attempt = 1): Promise<string[]> {
