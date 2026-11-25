@@ -217,6 +217,13 @@ export function withDesignedScreens(plan: Plan, docs: ProductDocs): { plan: Plan
  * snake_case (band_min), the kit refuses those, the app could not start, and every feature still "built". The
  * plan is put right once, here, so the Tester and the Builder never see a name the kit will refuse.
  */
+/**
+ * Run 12986 (Idea Bank v0.6.0): a locked test asserted that test/idea-bank-fixes.test.js exists. Five Fixers
+ * wrote that file, the core removed it each time (test/ is the Tester's alone), and the Tester kept the test
+ * because "an allowed change can create it". $1.70 of fix rounds on a test nobody could pass.
+ */
+export const TEST_FOLDER_RULE = "The test/ folder is yours alone: the Builder and the Fixer cannot add, change or remove any file under test/, and a file they put there is taken out again. So every test file the spec names, you write, now. No test may require a file under test/ that you did not write in this answer or that is not already there.";
+
 /** What the Tester is told for an app: journeys through the kit's data layer, one per action criterion. */
 export function journeyTestRule(plan: Plan): string {
   const ents = (plan.entities ?? []).map((e) => e.name);

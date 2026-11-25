@@ -10,7 +10,7 @@ import { leftOfRun } from "./leftover.js";
 import { lockedTestFaults } from "./testcheck.js";
 import { answerSummary, changedFiles, restoreFromHead } from "./workbench.js";
 import { commitAll, git, isLockedTest, parseFileBlocks, parseJsonBlock, readTree, syntaxErrors, testsHash, writeFiles, type TestRun } from "./workspace.js";
-import { type Plan, type ReviewResult, StopRun, VERIFY_CONTRACT, mergeRecheck, parseReview, reviewCapUsd, reviewRepair } from "./runkit.js";
+import { type Plan, type ReviewResult, StopRun, TEST_FOLDER_RULE, VERIFY_CONTRACT, mergeRecheck, parseReview, reviewCapUsd, reviewRepair } from "./runkit.js";
 import { RunBase } from "./runbase.js";
 
 /** The judging half of a run: review, the screen looks, the product evaluation, the build gate and its send-backs. */
@@ -44,9 +44,9 @@ export abstract class RunJudge extends RunBase {
     ].filter(Boolean).join("\n\n");
     let text = "";
     try {
-      text = await this.ask(m, `Approved spec:\n${JSON.stringify(this.plan, null, 2)}\n\nThe locked acceptance tests:\n${this.testsText()}\n\n${evidence}\n\nJudge it. If a test file is truly broken or contradicts the spec, return the corrected file in full as a file block (keep every test that is right, same names; never weaken a correct assertion). If the tests are right and the code is wrong, answer only: KEEP: <why>.`);
+      text = await this.ask(m, `Approved spec:\n${JSON.stringify(this.plan, null, 2)}\n\nThe locked acceptance tests:\n${this.testsText()}\n\n${evidence}\n\nJudge it. If a test file is truly broken or contradicts the spec, return the corrected file in full as a file block (keep every test that is right, same names; never weaken a correct assertion). If the tests are right and the code is wrong, answer only: KEEP: <why>.\n\n${TEST_FOLDER_RULE} A test that needs another file under test/ is therefore wrong as it stands: write that file now as a file block, or correct the test.`);
     } catch (e) { if (e instanceof StopRun) throw e; return false; }
-    const fixed = parseFileBlocks(text).filter((f) => isLockedTest(f.path) && existsSync(join(this.dir, f.path)) && readFileSync(join(this.dir, f.path), "utf8") !== f.content);
+    const fixed = parseFileBlocks(text).filter((f) => isLockedTest(f.path) && (!existsSync(join(this.dir, f.path)) || readFileSync(join(this.dir, f.path), "utf8") !== f.content));
     this.lastDispute = null;
     if (!fixed.length) { this.keptReason = answerSummary(text, 3); this.log.append("factory.tests.disputed", { run: this.id, kept: true, evidence: evidence.slice(0, 1500), said: answerSummary(text) }); return false; }
     const res = writeFiles(this.dir, fixed, { lockTests: false });
