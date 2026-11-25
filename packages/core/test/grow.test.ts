@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { EventLog, Factory, MockRuntime, createCore, createProject, git, type AgentRuntime } from "../src/index.js";
-import { leftAtShip, nothingLeft } from "../src/factory/leftover.js";
+import { leftAtShip, leftOfRun, nothingLeft } from "../src/factory/leftover.js";
 import { finishLeft, shippedAppOf, standingOf } from "../src/tickets/grow.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-grow-"));
@@ -66,6 +66,25 @@ describe("what a shipped version left to do", () => {
     // Low notes alone do not start a next version.
     expect(nothingLeft({ unmet: [], judged: 3, features: [], notes: [{ severity: "low", text: "x" }] })).toBe(true);
     expect(nothingLeft(leftAtShip(log, run + 5000, null))).toBe(true);
+  });
+
+  it("keeps what the version before left until a judge sees it working (run 11986 read \"0 of 2\")", () => {
+    const log = new EventLog();
+    const v1 = log.append("factory.run.started", { idea: "x" }).id;
+    log.append("factory.evaluation", { run: v1, round: 1, pass: false, requirements: [
+      { id: "R1", met: false, evidence: "no type picker" }, { id: "R2", met: true, evidence: "seen" }, { id: "R3", met: false, evidence: "no history" },
+      { id: "SC1", met: false, evidence: "empty", text: "The Money screen shows totals" },
+    ] });
+    const v2 = log.append("factory.run.started", { idea: "x", screen: { kind: "feature", baseRun: v1 } }).id;
+    log.append("factory.evaluation", { run: v2, round: 1, pass: false, requirements: [
+      { id: "R1", met: true, evidence: "picker shown" }, { id: "SC1", met: false, evidence: "nothing pinned", text: "The board shows pinned ideas" },
+    ] });
+    const left = leftOfRun(log, v2);
+    expect(left.unmet.map((r) => r.id)).toEqual(["SC1", "R3", "SC1"]);
+    expect(left.unmet[1].evidence).toBe("Not checked again in this version. Before: no history");
+    // 4 judged in v1, one new screen item in v2: 5, of which R1 and R2 work.
+    expect(left.judged).toBe(5);
+    expect(left.judged - left.unmet.length).toBe(2);
   });
 });
 
