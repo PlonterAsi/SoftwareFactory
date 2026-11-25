@@ -173,3 +173,13 @@ describe("a project keeps going after its first version", () => {
     expect(events(log, "ticket.opened").filter((o) => /finish what/.test(o.title ?? "")).length).toBe(1);
   });
 });
+
+describe("the Tester's money follows the plan", () => {
+  it("a small plan keeps the Tester's own budget, a big one gets more, never past 15% of the run", async () => {
+    const { testsCapUsd } = await import("../src/factory/runkit.js");
+    expect(testsCapUsd(0.3, 3, 1.5)).toBe(0.3);
+    expect(testsCapUsd(0.3, 14, 6.89)).toBeCloseTo(0.9, 5);
+    expect(testsCapUsd(0.3, 40, 6.89)).toBeCloseTo(6.89 * 0.15, 5);
+    expect(testsCapUsd(0.3, 40, 1.5)).toBe(0.3);
+  });
+});
