@@ -83,7 +83,15 @@ export interface RunOptions {
   projectId?: number;
   /** The flow to follow, by id (flows/library.ts). Default: the built-in flow of the run's kind. */
   flow?: string;
+  /**
+   * A new project started with no limit of its own: the plan gate says what building the whole plan takes, and
+   * approving the plan sets the run's limit to that. $1.50 buys a script, not a product with six screens.
+   */
+  sizeFromPlan?: boolean;
 }
+
+/** The most a new project's run is raised to when its plan is approved. A plan that needs more is built in versions. */
+export const NEW_PROJECT_MAX_USD = 12;
 
 /**
  * A run on top of a project the factory already shipped: same folder, same data, same locked tests.
@@ -109,12 +117,12 @@ export function parseReview(text: string): ReviewResult {
 export interface GateDecision { approve: boolean; note?: string; by?: string }
 
 /** What a waiting gate tells the Bridge besides its question: the button's word, and for a failed step, which one and how often. */
-export interface GateOpts { neverAuto?: boolean; action?: string; kind?: "retry" | "council" | "rounds" | "budget"; station?: StationId; attempt?: number; error?: string; same?: boolean; /** SF-64: the plan gate of a plan sliced to fit the money. */ fit?: Record<string, unknown>; /** SF-65: what a Retry changes so it does not fail the same way. */ retryWith?: Record<string, unknown> }
+export interface GateOpts { neverAuto?: boolean; action?: string; kind?: "retry" | "council" | "rounds" | "budget"; station?: StationId; attempt?: number; error?: string; same?: boolean; /** SF-64: the plan gate of a plan sliced to fit the money. */ fit?: Record<string, unknown>; /** The plan gate of a new project sized from its plan. */ size?: Record<string, unknown>; /** SF-65: what a Retry changes so it does not fail the same way. */ retryWith?: Record<string, unknown> }
 
 export class StopRun extends Error {}
 
 /** The options a run works with, once the defaults are filled in. */
-export type RunSettings = Required<Omit<RunOptions, "models" | "projectId" | "flow">> & { models: Record<string, string> };
+export type RunSettings = Required<Omit<RunOptions, "models" | "projectId" | "flow" | "sizeFromPlan">> & { models: Record<string, string>; sizeFromPlan?: boolean };
 /** How a run of another kind is made: from its started event's payload, for a start and for a resume. */
 export type RunMaker = (x: { factory: Factory; log: EventLog; runtime: AgentRuntime; id: number; idea: string; o: RunSettings; started: Record<string, unknown> }) => Run;
 

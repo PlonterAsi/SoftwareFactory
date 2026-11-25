@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
 import { serveWebUi } from "./webui.js";
+import { shippedAppOf } from "./tickets/grow.js";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -359,6 +360,14 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
             const r = repoAsk(body.projectId, String(body.idea).trim(), { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, route: body.route === "light" || body.route === "engine" ? body.route : undefined, autoApprove: body.autoApprove === true });
             if (r) return json(res, 202, { projectId: body.projectId, inRepo: true, ...r });
           } catch (e) { return json(res, 409, { error: (e as Error).message, inRepo: true }); }
+        }
+        // Said inside a project that already shipped its app: it is that app's next version, on a ticket, not a new app.
+        if (typeof body.projectId === "number" && !body.newApp && String(body.idea ?? "").trim() && shippedAppOf(log, body.projectId) != null) {
+          try {
+            const t = tickets.open({ kind: "request", body: String(body.idea).trim(), project: body.projectId, by: "you", source: "project", asked: true });
+            const w = tickets.work(t.id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true });
+            return json(res, 202, { projectId: body.projectId, onTop: true, run: w.run ?? null, ticket: { id: t.id, key: w.ticket.key, title: w.ticket.title } });
+          } catch (e) { return json(res, 409, { error: (e as Error).message, onTop: true }); }
         }
         const dup = duplicateReply(factory, String(body.idea ?? ""), body.again);
         if (dup) return json(res, dup[0], dup[1]);

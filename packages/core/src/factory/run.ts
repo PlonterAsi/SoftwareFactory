@@ -1,3 +1,4 @@
+import { leftAtShip, nothingLeft } from "./leftover.js";
 import { failureLines } from "./trim.js";
 import { SAME_TESTS_REASON, extendTime, runMinutes, stopReason, type RoundRecord } from "./stoprules.js";
 import { sleptBetween } from "./awake.js";
@@ -15,7 +16,7 @@ import { dryRunTests, lockedTestFaults } from "./testcheck.js";
 import { FIND_LINKS_MAX, FIND_LINKS_USD, findLinksPrompt, linkContext, linkFiles, validateFoundLinks } from "./linkcheck.js";
 import { answerSummary, changedFiles, restoreProtected, testDispute, writtenOnDisk } from "./workbench.js";
 import { commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, runTests, syntaxErrors, testsHash, writeFiles, type TestRun } from "./workspace.js";
-import { NEXT_VERSION_ROUNDS, type Plan, type RestoredState, StopRun, journeyTestRule, modelFloorUsd, restoreState, shippedDesign, specMarkdown, strongerModel, validatePlan, withDesignedScreens } from "./runkit.js";
+import { NEW_PROJECT_MAX_USD, NEXT_VERSION_ROUNDS, type Plan, type RestoredState, StopRun, journeyTestRule, modelFloorUsd, restoreState, shippedDesign, specMarkdown, strongerModel, validatePlan, withDesignedScreens } from "./runkit.js";
 import { RunJudge } from "./runjudge.js";
 
 
@@ -87,7 +88,18 @@ export class Run extends RunJudge {
   protected async testsStep() { await this.station("tests", () => this.writeTests()); }
 
   /** The flow reached its end. */
-  protected shipped(sha: string) { this.finish("shipped", `Shipped ${this.plan.name} to ${this.dir}`, sha); }
+  protected shipped(sha: string) {
+    // What this version left to do is written down as it ships, so the project goes on from it (factory/leftover.ts).
+    try {
+      if (this.plan?.app && this.screen?.kind !== "screen") {
+        let features: { id: string; title: string; state: string }[] = [];
+        try { features = JSON.parse(readFileSync(join(this.dir, "features.json"), "utf8")).features ?? []; } catch { /* built in one session: no list */ }
+        const left = leftAtShip(this.log, this.id, this.docs, features);
+        if (!nothingLeft(left)) this.log.append("factory.left", { run: this.id, plan: this.plan.name, version: this.screen?.tag ?? "v0.1.0", baseRun: this.screen?.baseRun ?? null, ...left });
+      }
+    } catch { /* the version ships either way */ }
+    this.finish("shipped", `Shipped ${this.plan.name} to ${this.dir}`, sha);
+  }
 
   /** Put back what the log says this run already had. */
   protected restore(st: RestoredState) {
@@ -276,6 +288,21 @@ export class Run extends RunJudge {
         this.log.append("factory.plan", { run: this.id, plan, dir: this.dir, sha, written: spec.written });
       });
       // SF-64: the plan is checked against the money before it is approved, and the gate says when it does not fit.
+      // A new project with no limit of its own is sized from its plan: the gate names the price, approving sets it.
+      const size = this.planSize();
+      if (size) {
+        const d = await this.gate("gateA", `Approve the spec and plan. It has ${size.features} features, and building them takes about $${size.needUsd.toFixed(2)}; this run started with $${size.fromUsd.toFixed(2)}. Approving sets this run's limit to $${size.toUsd.toFixed(2)}${size.toUsd < size.needUsd - 0.01 ? `, which builds the first features whole; the rest become the next version` : ""}.`, { size: { ...size } });
+        this.verdict(this.one("plan"), "plan", d.approve, undefined, d.note);
+        if (d.approve) {
+          this.o.maxUsd = size.toUsd;
+          this.log.append("factory.budget", { run: this.id, maxUsd: this.o.maxUsd, sized: true, features: size.features, needUsd: size.needUsd });
+          this.planFit();
+          return;
+        }
+        if (!d.note) throw new StopRun("You rejected the plan.");
+        feedback = d.note;
+        continue;
+      }
       const fit = this.planFit();
       const d = await this.gate("gateA", fit && !fit.ok
         ? `Approve the spec and plan. Note: it has ${fit.features} features and this run's $${this.o.maxUsd.toFixed(2)} builds about ${fit.fits} of them whole; the rest stay to do and can be added as the next version. All in one run would need about $${fit.needUsd.toFixed(2)}.`
@@ -285,6 +312,21 @@ export class Run extends RunJudge {
       if (!d.note) throw new StopRun("You rejected the plan.");
       feedback = d.note;
     }
+  }
+
+  /**
+   * What building this new project's whole plan takes, when that is more than the run has and the run was
+   * started with no limit of its own. Free. Null when the run keeps the limit it has.
+   */
+  protected planSize(): { features: number; needUsd: number; fromUsd: number; toUsd: number } | null {
+    if (!this.o.sizeFromPlan || this.o.autoApprove || !this.bench || !this.plan?.app || this.basePlan || this.screen) return null;
+    const features = featuresOf(this.plan, this.docs).length;
+    const needUsd = buildFit(features, Math.max(this.o.maxUsd, FEATURE_LOOP_MIN_USD), this.spent).needUsd;
+    if (needUsd <= this.o.maxUsd + 0.01) return null;
+    const allowed = this.o.maxUsd + Math.max(0, this.f.extraBudget(this.id, needUsd - this.o.maxUsd));
+    const toUsd = Number(Math.min(needUsd, allowed, NEW_PROJECT_MAX_USD).toFixed(2));
+    if (toUsd < FEATURE_LOOP_MIN_USD || toUsd <= this.o.maxUsd + 0.01) return null;
+    return { features, needUsd, fromUsd: this.o.maxUsd, toUsd };
   }
 
   /** SF-64: does the plan fit the run's money? Free; logged once per plan. Null when the run builds in one session. */
