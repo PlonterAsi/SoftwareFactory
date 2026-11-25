@@ -22,6 +22,7 @@ import { SPLIT_CAP_USD, splitRefusal, splitRollUp, splitTicket, splitTried } fro
 import { pri, type Row } from "./rows.js";
 import { recoverInterrupted as putBackCutOff } from "./recover.js";
 import { engineRefusal } from "./rebuild.js";
+import { fileLeft, shippedAppOf } from "./grow.js";
 import { AUTO_TRIES, AUTO_WORK_DEFAULT, RELOOP_BRIEF, TICKET_CONTRACT, WAITING_ON_YOU, reloopFindings, epicOfTickets, type AutoWork, type OpenTicket, type QueueSpot, type TicketDetail, type TicketsOptions } from "./shapes.js";
 
 export * from "./shapes.js";
@@ -471,6 +472,14 @@ export class Tickets extends TicketPrs {
     if (!factory) throw new Error("The factory is not running in this core.");
     if (t.run != null && factory.isActive(t.run)) throw new Error(`Run #${t.run} is already working this ticket.`);
     const idea = ideaFromTicket(t, this.document(id));
+    // A project that shipped its app grows that app: the ask is its next version, in the same folder (tickets/grow.ts).
+    const base = o.where === "new" || first.chosen ? null : shippedAppOf(this.log, t.project);
+    if (base != null) {
+      const run = factory.addFeature(base, idea, { maxUsd: o.maxUsd, autoApprove: o.autoApprove, projectId: t.project! });
+      this.log.append("ticket.run", { id, run, by: o.by ?? "you" });
+      this.log.append("ticket.noted", { id, by: "factory", ...(t.status !== "in_progress" ? { status: "in_progress" } : { kind: "event" }), text: `The crew took it: run #${run} builds it into the app this project shipped, as its next version (on top of run #${base}).` });
+      return { ticket: this.get(id)!, run, flow: named(first.flow) };
+    }
     // The factory's duplicate check (one idea, one build a day): reworking this ticket's own shipped run is fine, anything else needs "again".
     const d = o.again ? null : factory.duplicateOf(idea);
     if (d && (d.run !== t.run || d.state === "stopped")) {
@@ -866,6 +875,8 @@ export class Tickets extends TicketPrs {
       }
     } else if (e.type === "factory.plan.sliced") {
       this.sliced(Number(p.run), p);
+    } else if (e.type === "factory.left") {
+      fileLeft({ log: this.log, open: (o) => this.open(o), say: (id, text, o) => this.say(id, text, o), edit: (id, f, v, by) => this.edit(id, f, v, by) }, Number(p.run), this.byRun(Number(p.run))?.project ?? this.projectOfRun(Number(p.run)), p);
     } else if (e.type === "factory.features.left") {
       this.sliced(Number(p.run), { ...p, later: p.left, kept: p.built }, "left");
     } else if (e.type === "factory.gate" && p.state === "waiting" && !p.auto) {

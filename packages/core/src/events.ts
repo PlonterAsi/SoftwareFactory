@@ -53,6 +53,7 @@ export type EventType =
   | "factory.supervisor"
   | "factory.run.stop"
   | "factory.features.left"
+  | "factory.left"
   | "factory.build.stopped"
   | "factory.discovery"
   | "factory.research"

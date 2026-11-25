@@ -150,7 +150,7 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     flow: ["The plan becomes a feature list", "The Builder builds one feature", "Tests, schema, links and the screen are checked", "A commit is made", "The next feature starts from the progress note"],
     design: "The Build tab of the run deck shows one row per feature with its state and the tests passing after it.",
     screens: ["/factory"], docs: ["docs/engine.md", "docs/loop-engineering.md"], stations: ["build"],
-    files: [`${C}factory/features.ts`], api: [],
+    files: [`${C}factory/features.ts`, `${C}factory/leftover.ts`], api: [],
   },
   {
     id: "checks", name: "Checks and harness steps", group: "Engine",
@@ -495,6 +495,6 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     flow: ["The Bridge calls an API area", "The server hands it to the feature's routes", "The feature reads or appends events", "The stream carries the events back to every open screen"],
     design: "No screen of its own; the Online dot in the sidebar shows it answers.",
     screens: [], docs: ["docs/architecture.md", "docs/reference.md"], stations: [],
-    files: [`${C}server.ts`, `${C}index.ts`, `${B}api.ts`], api: ["/api/events", "/api/health"],
+    files: [`${C}server.ts`, `${C}webui.ts`, `${C}index.ts`, `${B}api.ts`], api: ["/api/events", "/api/health"],
   },
 ];

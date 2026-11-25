@@ -2,6 +2,8 @@ import { Supervisor } from "./factory/supervisor.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
+import { serveWebUi } from "./webui.js";
+import { finishLeft, shippedAppOf, standingOf } from "./tickets/grow.js";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -359,6 +361,14 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
             if (r) return json(res, 202, { projectId: body.projectId, inRepo: true, ...r });
           } catch (e) { return json(res, 409, { error: (e as Error).message, inRepo: true }); }
         }
+        // Said inside a project that already shipped its app: it is that app's next version, on a ticket, not a new app.
+        if (typeof body.projectId === "number" && !body.newApp && String(body.idea ?? "").trim() && shippedAppOf(log, body.projectId) != null) {
+          try {
+            const t = tickets.open({ kind: "request", body: String(body.idea).trim(), project: body.projectId, by: "you", source: "project", asked: true });
+            const w = tickets.work(t.id, { maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined, autoApprove: body.autoApprove === true });
+            return json(res, 202, { projectId: body.projectId, onTop: true, run: w.run ?? null, ticket: { id: t.id, key: w.ticket.key, title: w.ticket.title } });
+          } catch (e) { return json(res, 409, { error: (e as Error).message, onTop: true }); }
+        }
         const dup = duplicateReply(factory, String(body.idea ?? ""), body.again);
         if (dup) return json(res, dup[0], dup[1]);
         const run = factory.start(String(body.idea ?? ""), {
@@ -418,6 +428,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const body = await readJson(req);
         log.rebuild(body.name ? String(body.name) : undefined);
         return json(res, 200, storeReport(log, projectsDir));
+      }
+      const standing = url.pathname.match(/^\/api\/projects\/(\d+)\/standing$/);
+      if (standing) {
+        // Where the project stands (tickets/grow.ts). POST: have the crew finish what its newest version left.
+        const id = Number(standing[1]);
+        if (req.method === "POST") { const why = finishLeft(log, id); if (why) return json(res, 409, { error: why }); tickets.dispatch(); }
+        return json(res, 200, { standing: standingOf(log, id) });
       }
       if (url.pathname === "/api/projects" || url.pathname.startsWith("/api/projects/")) {
         const canBuild = () => gitReady() ? null : "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again.";
@@ -552,6 +569,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         });
         return;
       }
+      if (serveWebUi(req, res, url)) return;
       return json(res, 404, { error: "not found" });
     } catch (e) {
       // A sentence for the person ("A ticket needs a title") is a 400; a fault in the code is a 500 and a bug ticket.

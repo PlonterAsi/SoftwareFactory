@@ -521,6 +521,18 @@ export interface ProjectDetail extends ProjectSummary {
   artifacts: { files: number; bytes: number }; facets: Record<string, unknown>;
 }
 
+/** Where a project stands: its version, what the judge saw working, what is left and who has it. */
+export interface ProjectStanding {
+  run: number; version: string; plan: string; shippedAt: string | null; versions: { run: number; version: string; at: string | null; usd: number | null }[];
+  judged: number; working: number; done: boolean;
+  unmet: { id: string; text: string; evidence: string }[]; notes: { severity: "high" | "low"; text: string }[]; features: { id: string; title: string; why: string }[];
+  ticket: { id: number; title: string; status: string; run: number | null; asked: boolean } | null;
+}
+export const standingApi = {
+  get: async (id: number) => { const r = await fetch(`${API}/api/projects/${id}/standing`); return r.ok ? ((await r.json()).standing as ProjectStanding | null) : null; },
+  finish: async (id: number) => { const r = await fetch(`${API}/api/projects/${id}/standing`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }); const j = await r.json(); if (!r.ok) throw new Error(j.error ?? "could not file it"); return j.standing as ProjectStanding | null; },
+};
+
 export const projectsApi = {
   list: async () => { const r = await fetch(`${API}/api/projects`); if (!r.ok) throw new Error("could not list projects"); return (await r.json()) as ProjectSummary[]; },
   get: async (id: number) => { const r = await fetch(`${API}/api/projects/${id}`); const j = await r.json(); if (!r.ok) throw new Error(j.error ?? "no such project"); return j as ProjectDetail; },

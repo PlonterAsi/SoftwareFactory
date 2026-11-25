@@ -226,7 +226,7 @@ export class Factory {
   }
 
   private pickUp(run: number, opts: { auto?: boolean } = {}): number {
-    const started = this.log.get(run)!.payload as { idea: string; maxUsd?: number; maxFixRounds?: number; autoApprove?: boolean; autoRetries?: number; runtime?: string; council?: "auto" | "always" | "never"; review?: boolean; models?: Record<string, string>; screen?: ScreenRun; kind?: string };
+    const started = this.log.get(run)!.payload as { idea: string; maxUsd?: number; maxFixRounds?: number; autoApprove?: boolean; autoRetries?: number; runtime?: string; council?: "auto" | "always" | "never"; review?: boolean; models?: Record<string, string>; screen?: ScreenRun; kind?: string; sizeFromPlan?: boolean };
     // A run of a kind this core does not know is refused before anything about it is touched.
     const make = started.kind ? this.kinds.get(started.kind) : undefined;
     if (started.kind && !make) throw new Error(`Run #${run} is a "${started.kind}" run, which this core cannot continue.`);
@@ -234,7 +234,9 @@ export class Factory {
     // A run keeps the crew it started with: a practice run stays on the free mock crew.
     const current = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
     const runtime = started.runtime === "mock" && current.name !== "mock" ? new MockRuntime({ delayMs: Number(process.env.SF_MOCK_DELAY_MS ?? 700) }) : current;
-    const o = { maxUsd: started.maxUsd ?? 1.5, maxFixRounds: started.maxFixRounds ?? 5, autoApprove: !!started.autoApprove, autoRetries: started.autoRetries ?? 1, models: started.models ?? {}, council: started.council ?? "auto", review: started.review !== false };
+    const o = { maxUsd: started.maxUsd ?? 1.5, maxFixRounds: started.maxFixRounds ?? 5, autoApprove: !!started.autoApprove, autoRetries: started.autoRetries ?? 1, models: started.models ?? {}, council: started.council ?? "auto", review: started.review !== false,
+      // A new project started at the plain default before sizing existed is sized at its plan gate too.
+      sizeFromPlan: started.sizeFromPlan ?? (!started.autoApprove && !started.screen && !started.kind && (started.maxUsd ?? 1.5) === 1.5) };
     if (st.maxUsd) o.maxUsd = st.maxUsd;
     // Partial writes from the station that was cut off are thrown away: back to its last commit.
     if (st.dir && existsSync(join(st.dir, ".git"))) {
@@ -252,11 +254,13 @@ export class Factory {
   start(idea: string, opts: RunOptions = {}): number {
     const text = idea.trim();
     if (!text) throw new Error("An idea needs some text");
-    const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: opts.review !== false };
+    // No limit given and a person at the gates: the plan gate sizes the run from its plan (runkit.ts sizeFromPlan).
+    const sizeFromPlan = opts.sizeFromPlan ?? (opts.maxUsd == null && !opts.autoApprove);
+    const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: opts.maxFixRounds ?? 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: opts.review !== false, sizeFromPlan };
     // A run keeps the crew it started with, even if you switch Practice/Real meanwhile.
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
     const flow = this.flows.forRun(undefined, opts.flow);
-    const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
+    const ev = this.log.append("factory.run.started", { idea: text, ...(sizeFromPlan ? { sizeFromPlan } : {}), maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
     const done = new Run(this, this.log, runtime, ev.id, text, o).go().finally(() => this.ended(ev.id));
     this.active.set(ev.id, done);
     this.beat(ev.id);

@@ -39,7 +39,8 @@
       "../packages/core/plugin-examples/": "plugin-examples/",
       "../packages/core/agent-skills/": "core/agent-skills/",
       "../packages/core/agent-mcp.json": "core/agent-mcp.json",
-      "../packages/core/reference/": "core/reference/"
+      "../packages/core/reference/": "core/reference/",
+      "../apps/bridge/dist/": "core/webui/"
     },
     "windows": {
       "nsis": {
