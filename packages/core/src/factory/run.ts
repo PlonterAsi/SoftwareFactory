@@ -8,7 +8,7 @@ import { captureSignal } from "../signals.js";
 import { type CrewMember } from "./crew.js";
 import { crewPick, roundsOf, stepsToRun, type FlowStep } from "../flows/flow.js";
 import { DISCOVERY_BUDGET_SHARE, MAX_DISCOVERY_ROUNDS, PASS_SCORE, critiquePasses, critiqueTotal, docsFiles, docsForPlanner, mergeNextDocs, newRequirements, nextVersionPrompt, withAsk, researchForDesigner, researchPrompt, revisePrompt, validateCritique, validateFindings, type Critique, type Finding, type ProductDocs } from "./discovery.js";
-import { FEATURE_LOOP_MIN_USD, buildFit, buildPoolUsd, featurePrompt, featureSessionCap, type BuildFit, featuresFile, featuresOf, nextFeaturesOf, progressEntry, type Feature } from "./features.js";
+import { FEATURE_FIT_USD, FEATURE_LOOP_MIN_USD, buildFit, buildPoolUsd, featurePrompt, featureSessionCap, type BuildFit, featuresFile, featuresOf, nextFeaturesOf, progressEntry, type Feature } from "./features.js";
 import { REPAIR_FEATURE_MIN_USD } from "./evaluate.js";
 import { MAX_COUNCIL_ROUNDS, briefText, isSmallJob, majority, othersText, parseSeatTake, synthesize, type CouncilBrief, type SeatResult } from "./council.js";
 import { checkApp, installKit, isKitFile } from "./appkit.js";
@@ -456,6 +456,17 @@ export class Run extends RunJudge {
         if (room < REPAIR_FEATURE_MIN_USD) {
           const skipped = features.slice(i).filter((x) => x.state !== "built").map((x) => x.id);
           this.log.append("factory.repair.stopped", { run: this.id, reason: `$${Math.max(0, room).toFixed(2)} left for repairs, under the $${REPAIR_FEATURE_MIN_USD.toFixed(2)} one needs`, skipped, spentUsd: Number(this.spent.toFixed(4)) });
+          break;
+        }
+      }
+      // Run 11784 (Idea Bank's next version, $3.00): the first feature was built with 104 tests passing, the
+      // second started with $0.06, died at it, and the whole version was thrown away. A build that has
+      // something stops when the money left cannot pay another feature and the checks after it; what is not
+      // built stays to do and is the project's next version.
+      if (!more.includes(f) && features.some((x) => x.state === "built")) {
+        const reserve = Math.min(0.8, this.o.maxUsd * 0.2);
+        if (this.o.maxUsd - this.spent - reserve < FEATURE_FIT_USD) {
+          this.log.append("factory.build.stopped", { run: this.id, reason: `$${Math.max(0, this.o.maxUsd - this.spent).toFixed(2)} left, under the $${(FEATURE_FIT_USD + reserve).toFixed(2)} another feature and the checks after it need`, left: features.slice(i).filter((x) => x.state !== "built").map((x) => x.id), spentUsd: Number(this.spent.toFixed(4)) });
           break;
         }
       }
