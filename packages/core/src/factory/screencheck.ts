@@ -145,20 +145,66 @@ export function pageText(dom: string, kit = false): { text: string; controls: st
  * What each of the app's screens shows, as the person would read it: the text of its main area and the
  * labels of its controls. For the product judge (evaluate.ts). null when no browser can be read.
  */
-export async function readScreens(baseUrl: string, o: { browser?: string | null; max?: number } = {}): Promise<{ route: string; text: string; controls: string[] }[] | null> {
+export async function readScreens(baseUrl: string, o: { browser?: string | null; max?: number; tryOut?: boolean } = {}): Promise<{ route: string; text: string; controls: string[]; tried?: { did: string; shows: string }[] }[] | null> {
   const browser = o.browser === undefined ? findBrowser() : o.browser;
   if (!browser) return null;
   const read = (dom: string) => pageText(dom, true);
   const home = await dumpScreen(browser, `${baseUrl}/#/home`);
   if (!home.dom.trim() || !/class="kit-app"/.test(home.dom)) return null;
-  const out = [{ route: "home", ...read(home.dom) }];
+  const doms = new Map<string, string>([["home", home.dom]]);
+  const out: { route: string; text: string; controls: string[]; tried?: { did: string; shows: string }[] }[] = [{ route: "home", ...read(home.dom) }];
   // The app's own views first (they are the product), then the data lists; the System view is the kit's.
   const routes = routesOf(home.dom).filter((r) => r !== "home" && r !== "system");
   for (const route of [...routes.filter((r) => r.startsWith("v/")), ...routes.filter((r) => !r.startsWith("v/"))].slice(0, (o.max ?? 10) - 1)) {
     const s = await dumpScreen(browser, `${baseUrl}/#/${route}`);
-    if (s.dom.trim()) out.push({ route, ...read(s.dom) });
+    if (s.dom.trim()) { out.push({ route, ...read(s.dom) }); doms.set(route, s.dom); }
+  }
+  if (o.tryOut) {
+    for (const t of tryOuts(out.map((s) => ({ route: s.route, dom: doms.get(s.route) ?? "" })))) {
+      const s = await dumpScreen(browser, `${baseUrl}/?sf_do=${encodeURIComponent(t.act)}#/${t.route}`);
+      const screen = out.find((x) => x.route === t.route)!;
+      const shows = afterTry(screen.text, s.dom);
+      if (shows) (screen.tried ??= []).push({ did: t.did, shows });
+    }
   }
   return out;
+}
+
+/** The most TRY_MAX things worth trying on the app's own views: presses that end or change something first, then one edit of a number per screen. */
+export const TRY_MAX = 12;
+const HEAVY = /delete|remove|discard|archive|reset|clear|confirm|close|cancel|stop|drop/i;
+export function tryOuts(screens: { route: string; dom: string }[]): { route: string; act: string; did: string }[] {
+  const presses: { route: string; act: string; did: string; heavy: boolean }[] = [];
+  const nudges: { route: string; act: string; did: string }[] = [];
+  const seen = new Set<string>();
+  for (const s of screens) {
+    if (!s.route.startsWith("v/") && s.route !== "home") continue;
+    const main = s.dom.match(/<main[^>]*class="kit-main"[^>]*>([\s\S]*?)<\/main>/)?.[1] ?? "";
+    for (const m of main.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
+      const label = strip(m[2]).slice(0, 40);
+      if (!label || /\bdisabled\b/.test(m[1]) || seen.has(label)) continue;
+      seen.add(label);
+      presses.push({ route: s.route, act: `press:${label}`, did: `pressing "${label}"`, heavy: HEAVY.test(label) });
+    }
+    if (/<input\b[^>]*type="number"/.test(main)) nudges.push({ route: s.route, act: "nudge:0", did: "raising the first number field by 1" });
+  }
+  const ordered = [...presses.filter((p) => p.heavy), ...nudges.slice(0, 3), ...presses.filter((p) => !p.heavy)];
+  return ordered.slice(0, TRY_MAX).map(({ route, act, did }) => ({ route, act, did }));
+}
+
+/** What a screen shows after a try that it did not show before: the changed stretch of its text, or "" when nothing ran or nothing changed. */
+export function afterTry(before: string, dom: string): string {
+  const did = dom.match(/<div data-sf-did="1">([\s\S]*?)<\/div>/)?.[1];
+  if (!did || /^SF_DID (nothing|failed)/.test(strip(did))) return "";
+  const boxes = strip(did).replace(/^SF_DID done\.?\s*/, "");
+  const after = pageText(dom.replace(/<div data-sf-did="1">[\s\S]*?<\/div>/, ""), true).text;
+  let a = 0;
+  while (a < before.length && a < after.length && before[a] === after[a]) a++;
+  let b = 0;
+  while (b < before.length - a && b < after.length - a && before[before.length - 1 - b] === after[after.length - 1 - b]) b++;
+  const changed = after.slice(Math.max(0, a - 30), after.length - b + 30).trim().slice(0, 500);
+  const same = after === before || after.length - b <= a;
+  return [boxes, same ? "" : changed].filter(Boolean).join(" ") || "nothing changed on the screen";
 }
 
 /** The check as one cell in the test grid, fixed like a failing test. */

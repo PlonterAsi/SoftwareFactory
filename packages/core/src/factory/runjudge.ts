@@ -191,7 +191,7 @@ export abstract class RunJudge extends RunBase {
     if (!this.judgeDocs()!.requirements.some((r) => r.must)) return skip("This version adds no requirement of its own to judge");
     const looks = roundsOf(this.flow, "evaluate", MAX_EVALUATION_ROUNDS);
     for (let round = 1; round <= looks; round++) {
-      const screens = await this.f.readScreens(this.dir).catch(() => null);
+      const screens = await this.f.readScreens(this.dir, { tryOut: true }).catch(() => null);
       if (!screens?.length) {
         this.log.append("factory.evaluation", { run: this.id, round, pass: false, skipped: "the app's screens could not be read in a browser on this computer" });
         return skip("The app's screens could not be read in a browser here, so the product was not judged");
