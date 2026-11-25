@@ -2,6 +2,7 @@ import { Supervisor } from "./factory/supervisor.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
+import { serveWebUi } from "./webui.js";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -552,6 +553,7 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         });
         return;
       }
+      if (serveWebUi(req, res, url)) return;
       return json(res, 404, { error: "not found" });
     } catch (e) {
       // A sentence for the person ("A ticket needs a title") is a 400; a fault in the code is a 500 and a bug ticket.

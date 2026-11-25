@@ -495,6 +495,6 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     flow: ["The Bridge calls an API area", "The server hands it to the feature's routes", "The feature reads or appends events", "The stream carries the events back to every open screen"],
     design: "No screen of its own; the Online dot in the sidebar shows it answers.",
     screens: [], docs: ["docs/architecture.md", "docs/reference.md"], stations: [],
-    files: [`${C}server.ts`, `${C}index.ts`, `${B}api.ts`], api: ["/api/events", "/api/health"],
+    files: [`${C}server.ts`, `${C}webui.ts`, `${C}index.ts`, `${B}api.ts`], api: ["/api/events", "/api/health"],
   },
 ];
