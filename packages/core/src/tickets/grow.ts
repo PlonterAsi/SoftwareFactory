@@ -53,9 +53,10 @@ export function fileLeft(host: GrowHost, run: number, project: number | null, p:
   const unmet = p.unmet ?? [], notes = p.notes ?? [], features = p.features ?? [];
   if (project == null || count(p) === 0) return null;
   const name = p.plan ?? "the app", version = p.version ?? "the first version";
-  const before = p.baseRun != null
-    ? host.log.list({ type: "factory.left", limit: 1e6 }).map((e) => e.payload as Left & { run?: number }).filter((x) => x.run === p.baseRun).at(-1)
-    : undefined;
+  // Counted the same way for both versions: the list v0.3.0 wrote down when it shipped had dropped what v0.1.0
+  // left, so v0.4.0 (15 down to 9) read as "did not shorten the list".
+  let before: Left | undefined;
+  try { before = p.baseRun != null ? leftOfRun(host.log, p.baseRun) : undefined; } catch { before = undefined; }
   const converging = p.by === "you" || !before || count(p) < count(before);
   const parts = [unmet.length ? `${unmet.length} requirement${unmet.length === 1 ? "" : "s"}` : "", features.length ? `${features.length} feature${features.length === 1 ? "" : "s"}` : "", notes.length ? `${notes.length} note${notes.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
   const body = [
