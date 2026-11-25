@@ -365,7 +365,38 @@ export async function startApp({ schema, views, root, store }) {
   // Typing in a form must not be wiped by a redraw; lists and views redraw on every change.
   st.subscribe(() => { if (!main.querySelector("form.kit-form")) draw(); else drawNav(route()); });
   draw();
+  tryOut(main);
   return ctx;
+}
+
+// The factory's product judge reads each screen as it opens, so it never saw what a press leads to (a confirm
+// step, a count that shows after an edit). Opened with ?sf_do=press:<label> or ?sf_do=nudge:<n>, the page does
+// that one thing to itself after it has drawn, and says what it did; the factory reads the screen again.
+// It only runs on the factory's own scratch copy of the app. A confirm box is shown as text and answered "Cancel".
+function tryOut(main) {
+  let act = "";
+  try { act = new URLSearchParams(location.search).get("sf_do") || ""; } catch { return; }
+  if (!act) return;
+  const said = [];
+  const box = (kind) => (msg) => { said.push(kind + " box: " + String(msg === undefined ? "" : msg).slice(0, 300) + (kind === "Confirm" ? " [OK] [Cancel]" : "")); return kind === "Prompt" ? null : false; };
+  window.confirm = box("Confirm"); window.alert = box("Alert"); window.prompt = box("Prompt");
+  const note = (text) => { const d = document.createElement("div"); d.setAttribute("data-sf-did", "1"); d.textContent = text; main.appendChild(d); };
+  setTimeout(() => {
+    try {
+      if (act.startsWith("press:")) {
+        const label = act.slice(6);
+        const b = [...main.querySelectorAll("button, input[type=button], input[type=submit]")].find((x) => !x.disabled && (x.textContent || x.value || "").replace(/\s+/g, " ").trim().slice(0, 40) === label);
+        if (!b) return note("SF_DID nothing: no control with that label");
+        b.click();
+      } else if (act.startsWith("nudge:")) {
+        const el = [...main.querySelectorAll("input[type=number]")].filter((x) => !x.disabled && !x.readOnly)[Number(act.slice(6)) || 0];
+        if (!el) return note("SF_DID nothing: no number field");
+        el.value = String((Number(el.value) || 0) + 1);
+        el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setTimeout(() => note("SF_DID done" + (said.length ? ". " + said.join(" ") : "")), 700);
+    } catch (e) { note("SF_DID failed: " + String(e && e.message || e).slice(0, 200)); }
+  }, 600);
 }
 
 function fmt(v) {

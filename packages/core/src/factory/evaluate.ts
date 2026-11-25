@@ -16,7 +16,7 @@ import type { ProductDocs } from "./discovery.js";
  * once more. What is still open after that is shown to the person at the build gate.
  */
 
-export interface ScreenText { route: string; text: string; controls: string[] }
+export interface ScreenText { route: string; text: string; controls: string[]; /** What the screen showed after the core pressed a control or changed a field on it. */ tried?: { did: string; shows: string }[] }
 
 export const PRODUCT_RUBRIC = ["function", "design", "content"] as const;
 export type ProductKey = (typeof PRODUCT_RUBRIC)[number];
@@ -90,12 +90,15 @@ export function evaluationPrompt(idea: string, docs: ProductDocs, screens: Scree
     `What the person asked for, in their words:\n${idea}`,
     `The product as designed:\nPromise: ${docs.brief.promise}\nJourneys:\n${docs.journeys.map((j) => `- ${j.moment}: ${j.steps.join(" → ")}`).join("\n")}\nScreens:\n${docs.screens.map((s) => `- ${s.name}: ${s.purpose} Shows: ${s.shows.join("; ")}. Actions: ${s.actions.join("; ")}.`).join("\n")}`,
     `The must-have requirements:\n${docs.requirements.filter((r) => r.must).map((r) => `- ${r.id}: ${r.text}`).join("\n")}`,
-    `The app as built (round ${round}). The core started it and read every screen in a real browser. This is all of it: what a screen does not show here, the person does not see.\n${screens.map((s) => `=== Screen #/${s.route} ===\n${s.text || "(nothing on this screen)"}\nControls: ${s.controls.length ? s.controls.join(" | ") : "(none)"}`).join("\n\n")}`,
+    `The app as built (round ${round}). The core started it and read every screen in a real browser. This is all of it: what a screen does not show here, the person does not see.\n${screens.map((s) => `=== Screen #/${s.route} ===\n${s.text || "(nothing on this screen)"}\nControls: ${s.controls.length ? s.controls.join(" | ") : "(none)"}${(s.tried ?? []).map((t) => `\nAfter ${t.did}, the screen newly showed: ${t.shows}`).join("")}`).join("\n\n")}`,
+    // A confirm step or a count that shows after an edit is not on the screen as it opens (Idea Bank v0.5.0: two
+    // requirements no judge could ever see). The core tried some controls itself and wrote down what followed.
+    screens.some((s) => s.tried?.length) ? "The core also pressed some controls and changed some number fields, on a scratch copy of the app, and wrote after each screen what it newly showed. That counts as seen: a requirement about what happens after a press or an edit is met when one of those lines shows it. A control the core did not try is not evidence either way: judge it from the screen as it opens." : "",
     // The judge reads text and controls. A change of colour or size is real work it cannot see, and failing it
     // would send a finished change back to be "fixed" (a next version's ask is often exactly that).
     "You read each screen's text and controls, not its looks. A requirement that is only about looks (colour, size, spacing, animation) is not yours to fail: mark it met, with the evidence \"looks only: not judged from text\".",
     `Score from 1 (fails) to 5 (clearly true). Be hard to please.\n${PRODUCT_RUBRIC.map((k) => `- ${k}: ${PRODUCT_RUBRIC_TEXT[k]}`).join("\n")}`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 /** What the fix loop is told: the failures as work, most important first. */
