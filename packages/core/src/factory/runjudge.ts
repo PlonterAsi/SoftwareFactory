@@ -4,7 +4,7 @@ import { noteLesson } from "../bay/memory.js";
 import { crewPick, roundsOf } from "../flows/flow.js";
 import { mustRequirements, newRequirements, type ProductDocs } from "./discovery.js";
 import { FEATURE_LOOP_MIN_USD, type Feature } from "./features.js";
-import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, withScreenItems, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation } from "./evaluate.js";
+import { SCREEN_LOOK_USD, screenLookDocs, screenLookPrompt, MAX_EVALUATION_ROUNDS, PRODUCT_PASS_SCORE, evaluationFeedback, repairFeatures, REPAIR_BUDGET_SHARE, REPAIR_FEATURE_USD, REPAIR_FEATURE_MIN_USD, SCREEN_ITEM_ID, withScreenItems, evaluationPasses, evaluationPrompt, validateEvaluation, type Evaluation } from "./evaluate.js";
 import { isKitFile } from "./appkit.js";
 import { leftOfRun } from "./leftover.js";
 import { lockedTestFaults } from "./testcheck.js";
@@ -147,12 +147,19 @@ export abstract class RunJudge extends RunBase {
     // A next version is judged on what it adds: the rest was judged when it shipped, and its tests are locked.
     // ...and on what the version under it left: run 11986 never looked again at the 5 requirements v0.1.0 missed.
     const docs = this.baseDocs ? { ...this.docs, requirements: this.owedAndNew(this.baseDocs, this.docs) } : this.docs;
-    return withScreenItems(docs, [...this.screenOpen.values()].flat());
+    // Screen items are numbered again in every run, so the ones the version under it left come back by their text
+    // (Idea Bank v0.5.0: four of them sat on the list as "not checked again" for three versions).
+    return withScreenItems(docs, [...this.screenOpen.values()].flat().concat(this.baseDocs ? this.owedScreens : []));
   }
   private owedIds: Set<string> | null = null;
+  private owedScreens: string[] = [];
   private owedAndNew(base: ProductDocs, docs: ProductDocs): ProductDocs["requirements"] {
     if (!this.owedIds) {
-      try { this.owedIds = new Set(this.screen?.kind === "feature" ? leftOfRun(this.log, this.screen.baseRun).unmet.map((r) => r.id) : []); } catch { this.owedIds = new Set(); }
+      try {
+        const owed = this.screen?.kind === "feature" ? leftOfRun(this.log, this.screen.baseRun).unmet : [];
+        this.owedIds = new Set(owed.filter((r) => !SCREEN_ITEM_ID.test(r.id)).map((r) => r.id));
+        this.owedScreens = owed.filter((r) => SCREEN_ITEM_ID.test(r.id) && r.text).map((r) => r.text);
+      } catch { this.owedIds = new Set(); }
     }
     const added = newRequirements(base, docs);
     return docs.requirements.filter((r) => added.includes(r) || this.owedIds!.has(r.id));
