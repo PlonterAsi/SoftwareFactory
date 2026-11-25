@@ -16,7 +16,7 @@ import { dryRunTests, lockedTestFaults } from "./testcheck.js";
 import { FIND_LINKS_MAX, FIND_LINKS_USD, findLinksPrompt, linkContext, linkFiles, validateFoundLinks } from "./linkcheck.js";
 import { answerSummary, changedFiles, restoreProtected, testDispute, writtenOnDisk } from "./workbench.js";
 import { commitAll, git, initRepo, isLockedTest, parseFileBlocks, parseJsonBlock, runTests, syntaxErrors, testsHash, writeFiles, type TestRun } from "./workspace.js";
-import { NEW_PROJECT_MAX_USD, NEXT_VERSION_ROUNDS, type Plan, type RestoredState, StopRun, journeyTestRule, modelFloorUsd, restoreState, shippedDesign, specMarkdown, strongerModel, testsCapUsd, validatePlan, withDesignedScreens } from "./runkit.js";
+import { NEW_PROJECT_MAX_USD, NEXT_VERSION_ROUNDS, type Plan, type RestoredState, StopRun, journeyTestRule, modelFloorUsd, restoreState, shippedDesign, specMarkdown, strongerModel, TEST_FOLDER_RULE, testsCapUsd, validatePlan, withDesignedScreens } from "./runkit.js";
 import { RunJudge } from "./runjudge.js";
 
 
@@ -353,7 +353,7 @@ export class Run extends RunJudge {
     // So the kit goes in first and the Tester also writes journeys through the kit's own data layer, the
     // same create and update the app's server runs, with the app's real schema and sample records.
     if (this.plan.app) { installKit(this.dir); commitAll(this.dir, "App kit"); }
-    const journeys = this.plan.app ? `\n\n${journeyTestRule(this.plan)}` : "";
+    const journeys = `${this.plan.app ? `\n\n${journeyTestRule(this.plan)}` : ""}\n\n${TEST_FOLDER_RULE}`;
     let files: ReturnType<typeof parseFileBlocks> = [];
     let tests: typeof files = [];
     let res!: ReturnType<typeof writeFiles>;
