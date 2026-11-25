@@ -176,6 +176,12 @@ export class Run extends RunJudge {
     if (this.screen && !base) { this.mark("discover", "skipped", undefined, "The next version of a shipped app keeps its design"); return; }
     // A next version starts from the design the app shipped with. A small one (or the practice crew) keeps it
     // and adds the ask as one more requirement; a product-sized one has the Designer design the ask in.
+    if (base && this.screen!.keepDesign) {
+      this.docs = base;
+      this.log.append("factory.discovery", { run: this.id, round: 1, docs: this.docs, critique: null, pass: true, bar: PASS_SCORE, kept: this.screen!.baseRun });
+      this.mark("discover", "skipped", undefined, "What is left is already in the shipped design: nothing is designed again");
+      return;
+    }
     if (base && !(this.bench && this.o.maxUsd >= FEATURE_LOOP_MIN_USD)) {
       this.docs = withAsk(base, this.idea);
       this.log.append("factory.discovery", { run: this.id, round: 1, docs: this.docs, critique: null, pass: true, bar: PASS_SCORE, kept: this.screen!.baseRun });

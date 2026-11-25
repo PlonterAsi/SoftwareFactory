@@ -475,7 +475,7 @@ export class Tickets extends TicketPrs {
     // A project that shipped its app grows that app: the ask is its next version, in the same folder (tickets/grow.ts).
     const base = o.where === "new" || first.chosen ? null : shippedAppOf(this.log, t.project);
     if (base != null) {
-      const run = factory.addFeature(base, idea, { maxUsd: o.maxUsd, autoApprove: o.autoApprove, projectId: t.project! });
+      const run = factory.addFeature(base, idea, { maxUsd: o.maxUsd, autoApprove: o.autoApprove, projectId: t.project!, keepDesign: !!t.fingerprint?.startsWith("left:") });
       this.log.append("ticket.run", { id, run, by: o.by ?? "you" });
       this.log.append("ticket.noted", { id, by: "factory", ...(t.status !== "in_progress" ? { status: "in_progress" } : { kind: "event" }), text: `The crew took it: run #${run} builds it into the app this project shipped, as its next version (on top of run #${base}).` });
       return { ticket: this.get(id)!, run, flow: named(first.flow) };

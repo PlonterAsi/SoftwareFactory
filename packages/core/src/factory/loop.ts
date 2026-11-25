@@ -315,11 +315,13 @@ export class Factory {
    * looks, you accept, and it ships as the next version. Your data in the folder stays. A run
    * that does not ship puts the folder back the way it was.
    */
-  addFeature(baseRun: number, ask: string, opts: Pick<RunOptions, "maxUsd" | "autoApprove" | "autoRetries" | "models" | "projectId" | "council"> = {}): number {
+  addFeature(baseRun: number, ask: string, opts: Pick<RunOptions, "maxUsd" | "autoApprove" | "autoRetries" | "models" | "projectId" | "council"> & { keepDesign?: boolean } = {}): number {
     const text = ask.trim();
     if (!text) throw new Error("Say what to add.");
-    const screen = this.onTopOf(baseRun, "feature", "add a feature to");
-    const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.council ?? "auto", review: true };
+    // Runs 11701 and 11784 (Idea Bank, what v0.1.0 left): the Council and two design rounds took $1.60 of the
+    // $3.00 before a line was built, to design requirements the shipped design already holds.
+    const screen: ScreenRun = { ...this.onTopOf(baseRun, "feature", "add a feature to"), ...(opts.keepDesign ? { keepDesign: true } : {}) };
+    const o = { maxUsd: opts.maxUsd ?? 1.5, maxFixRounds: 5, autoApprove: !!opts.autoApprove, autoRetries: opts.autoRetries ?? 1, models: opts.models ?? {}, council: opts.keepDesign ? "never" as const : opts.council ?? "auto", review: true };
     const runtime = (this.runtime as { current?: AgentRuntime }).current ?? this.runtime;
     const flow = this.flows.forRun();
     const ev = this.log.append("factory.run.started", { idea: text, maxUsd: o.maxUsd, maxFixRounds: o.maxFixRounds, autoApprove: o.autoApprove, autoRetries: o.autoRetries, runtime: runtime.name, council: o.council, review: o.review, models: o.models, brain: brainHash(principles(this.log)), screen, ...(opts.projectId != null ? { projectId: opts.projectId } : {}), flow });
