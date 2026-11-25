@@ -264,3 +264,17 @@
 .rw-run-word { font-size: 13.5px; color: var(--ink-2); }
 .rw-run.tone-gate .rw-run-word { color: var(--gate); font-weight: 600; }
 .rw-run-branch { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* where the project stands: version, requirements seen working, what is left and who has it */
+.ms-standing { display: flex; flex-direction: column; gap: 10px; }
+.ms-standing.done { border-color: rgba(79, 209, 193, 0.45); }
+.ms-st-head { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.ms-st-line { margin: 4px 0 0; font: 500 16px/1.4 var(--body); color: var(--ink); }
+.ms-st-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.ms-st-bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.ms-st-bar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.ms-st-versions { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px 18px; flex-wrap: wrap; font-size: 13.5px; }
+.ms-st-versions li.on .mono { color: var(--accent); }
+.ms-st-versions li.next { color: var(--ink-2); }
+.ms-st-who { margin: 0; color: var(--ink-2); font-size: 13.5px; }
+.ms-st-left ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; color: var(--ink-2); max-height: 320px; overflow: auto; }

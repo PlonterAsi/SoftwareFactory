@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { kitArgs } from "./factory/crew.js";
 import { configureKits } from "./bay/kits.js";
 import { serveWebUi } from "./webui.js";
-import { shippedAppOf } from "./tickets/grow.js";
+import { finishLeft, shippedAppOf, standingOf } from "./tickets/grow.js";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -428,6 +428,13 @@ export function createCore({ log, runtime, budgetUsd = 0.25, projectsDir = resol
         const body = await readJson(req);
         log.rebuild(body.name ? String(body.name) : undefined);
         return json(res, 200, storeReport(log, projectsDir));
+      }
+      const standing = url.pathname.match(/^\/api\/projects\/(\d+)\/standing$/);
+      if (standing) {
+        // Where the project stands (tickets/grow.ts). POST: have the crew finish what its newest version left.
+        const id = Number(standing[1]);
+        if (req.method === "POST") { const why = finishLeft(log, id); if (why) return json(res, 409, { error: why }); tickets.dispatch(); }
+        return json(res, 200, { standing: standingOf(log, id) });
       }
       if (url.pathname === "/api/projects" || url.pathname.startsWith("/api/projects/")) {
         const canBuild = () => gitReady() ? null : "Git is not installed, so the factory has nowhere to keep the app it builds. Install Git for Windows (git-scm.com/download/win), then press Build it again.";

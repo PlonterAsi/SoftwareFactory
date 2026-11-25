@@ -12,6 +12,7 @@ import { currentStop, designRounds, headline, stopsFor, type StopId } from "./mo
 import { useRunFlow } from "../../flowData";
 import { ProductDocs, StageView } from "./stages";
 import { RepoWork, workedRepo } from "./RepoWork";
+import { Standing } from "./Standing";
 import "./mission.css";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
@@ -75,6 +76,7 @@ function BuildMission(ctx: PanelContext) {
           <button className="ghost sm" onClick={() => ctx.go("overview")}>Back to the repo's work</button>
         </div>
       )}
+      {p.rollup.shipped > 0 && <Standing ctx={ctx} />}
       <MissionTrack stops={stops} selected={sel} onSelect={setPicked} />
       <section className="ms-stage">
         <div className="ms-card ms-main" key={`${run?.run}:${sel}`}><StageView id={sel} run={run} /></div>

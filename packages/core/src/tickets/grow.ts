@@ -1,6 +1,8 @@
 import type { EventLog } from "../events.js";
 import type { TicketView } from "./model.js";
 import type { OpenTicket } from "./shapes.js";
+import { leftAtShip, nothingLeft, type LeftAtShip } from "../factory/leftover.js";
+import { restoreState, shippedDesign } from "../factory/runkit.js";
 
 /**
  * A project keeps going after its first version. Until now a ticket in a project the factory built from an idea
@@ -26,6 +28,8 @@ export function shippedAppOf(log: EventLog, project: number | null | undefined):
 }
 
 interface Left {
+  /** "you": the person pressed for it, so it is asked for even when the last version did not shorten the list. */
+  by?: string;
   plan?: string; version?: string; baseRun?: number | null; judged?: number;
   unmet?: { id: string; text: string; evidence: string }[];
   notes?: { severity: string; text: string }[];
@@ -53,7 +57,7 @@ export function fileLeft(host: GrowHost, run: number, project: number | null, p:
   const before = p.baseRun != null
     ? host.log.list({ type: "factory.left", limit: 1e6 }).map((e) => e.payload as Left & { run?: number }).filter((x) => x.run === p.baseRun).at(-1)
     : undefined;
-  const converging = !before || count(p) < count(before);
+  const converging = p.by === "you" || !before || count(p) < count(before);
   const parts = [unmet.length ? `${unmet.length} requirement${unmet.length === 1 ? "" : "s"}` : "", features.length ? `${features.length} feature${features.length === 1 ? "" : "s"}` : "", notes.length ? `${notes.length} note${notes.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
   const body = [
     `Run #${run} shipped ${version} of "${name}". This is what was not working or not built when it shipped. Build it into the same app as its next version.`,
@@ -74,4 +78,72 @@ export function fileLeft(host: GrowHost, run: number, project: number | null, p:
     { status: "ready", by: "factory", kind: "event" });
   } catch { /* stays open */ }
   return t;
+}
+
+/** Every build of this project that shipped an app of the factory's own, oldest first. */
+function shippedApps(log: EventLog, project: number): number[] {
+  let rows: { id: number }[] = [];
+  try { rows = log.db.prepare("SELECT r.id AS id FROM factory_runs r JOIN project_links l ON l.kind = 'factory_run' AND l.ref = CAST(r.id AS TEXT) WHERE l.project_id = ? AND r.outcome = 'shipped' ORDER BY r.id").all(project) as { id: number }[]; } catch { /* projects not loaded */ }
+  return rows.map((r) => Number(r.id)).filter((id) => (log.get(id)?.payload as { kind?: string } | undefined)?.kind !== "repo");
+}
+
+/**
+ * Where a project stands, in one look: the version it is on, how much of what was designed the product judge
+ * saw working, what is left, and who has it (the project's own ticket, and the run building it).
+ */
+export interface Standing extends LeftAtShip {
+  run: number; version: string; plan: string; shippedAt: string | null; versions: { run: number; version: string; at: string | null; usd: number | null }[];
+  working: number;
+  /** Nothing the judge missed, no feature unbuilt, no high note. */
+  done: boolean;
+  ticket: { id: number; title: string; status: string; run: number | null; asked: boolean } | null;
+}
+
+const versionOf = (log: EventLog, run: number) => String((log.get(run)?.payload as { screen?: { tag?: string } } | undefined)?.screen?.tag ?? "v0.1.0");
+
+function leftOf(log: EventLog, run: number): LeftAtShip {
+  const st = restoreState(log, run);
+  let features: { id: string; title: string; state: string }[] = [];
+  const feats = log.list({ type: "factory.feature", sinceId: run - 1, limit: 1e6 }).map((e) => e.payload as { run?: number; id: string; title: string; state: string }).filter((p) => p.run === run);
+  const last = new Map<string, { id: string; title: string; state: string }>();
+  for (const f of feats) last.set(f.id, { id: f.id, title: f.title, state: f.state === "building" ? "todo" : f.state });
+  features = [...last.values()];
+  return leftAtShip(log, run, st.docs ?? shippedDesign(log, run).docs, features);
+}
+
+export function standingOf(log: EventLog, project: number): Standing | null {
+  const runs = shippedApps(log, project);
+  const run = runs.at(-1);
+  if (run == null) return null;
+  const fin = (r: number) => log.db.prepare("SELECT finished_at AS at, total_usd AS usd, plan_name AS plan FROM factory_runs WHERE id = ?").get(r) as { at: string | null; usd: number | null; plan: string | null } | undefined;
+  const left = leftOf(log, run);
+  let ticket: Standing["ticket"] = null;
+  try {
+    const t = log.db.prepare("SELECT id, title, status, run FROM tickets WHERE fingerprint = ? ORDER BY id DESC LIMIT 1").get(`left:${run}`) as { id: number; title: string; status: string; run: number | null } | undefined;
+    if (t) {
+      const asked = log.list({ type: "ticket.asked", limit: 1e6 }).map((e) => e.payload as { id: number; on: boolean }).filter((a) => a.id === Number(t.id)).at(-1)?.on
+        ?? !!(log.list({ type: "ticket.opened", limit: 1e6 }).map((e) => ({ id: e.id, ...(e.payload as { asked?: boolean; fingerprint?: string }) })).find((o) => o.fingerprint === `left:${run}`)?.asked);
+      ticket = { id: Number(t.id), title: String(t.title), status: String(t.status), run: t.run != null ? Number(t.run) : null, asked: !!asked };
+    }
+  } catch { /* tickets not loaded */ }
+  return {
+    run, version: versionOf(log, run), plan: String(fin(run)?.plan ?? ""), shippedAt: fin(run)?.at ?? null,
+    versions: runs.map((r) => ({ run: r, version: versionOf(log, r), at: fin(r)?.at ?? null, usd: fin(r)?.usd ?? null })),
+    ...left, working: left.judged - left.unmet.length, done: nothingLeft(left), ticket,
+  };
+}
+
+/**
+ * Have the crew finish what the project's newest version left: writes the list down (factory.left), which files
+ * the project's ticket for it. For versions that shipped before the list was kept, and for a list the crew
+ * stopped working by itself. Returns why not, or null when it is filed.
+ */
+export function finishLeft(log: EventLog, project: number): string | null {
+  const s = standingOf(log, project);
+  if (!s) return "This project has no shipped app yet.";
+  if (s.done) return "Nothing is left: the judge saw every requirement working and no high note is open.";
+  if (s.ticket) return null;
+  const baseRun = (log.get(s.run)?.payload as { screen?: { baseRun?: number } } | undefined)?.screen?.baseRun ?? null;
+  log.append("factory.left", { run: s.run, plan: s.plan, version: s.version, baseRun, unmet: s.unmet, judged: s.judged, notes: s.notes, features: s.features, by: "you" });
+  return null;
 }

@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { EventLog, Factory, MockRuntime, createCore, createProject, git, type AgentRuntime } from "../src/index.js";
 import { leftAtShip, nothingLeft } from "../src/factory/leftover.js";
-import { shippedAppOf } from "../src/tickets/grow.js";
+import { finishLeft, shippedAppOf, standingOf } from "../src/tickets/grow.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sf-grow-"));
 const events = (log: EventLog, type: string) => log.list({ limit: 1e6 }).filter((e) => e.type === type).map((e) => e.payload as any);
@@ -147,5 +147,29 @@ describe("a project keeps going after its first version", () => {
     expect(opened[0].asked ?? asked.some((x) => x.on)).toBeTruthy();
     const notes = events(log, "ticket.noted").map((n) => String(n.text));
     expect(notes.some((n) => /not getting shorter/.test(n))).toBe(true);
+  });
+
+  it("where a project stands: what the judge saw, what is left, and one press hands the list to the crew", () => {
+    const log = new EventLog(":memory:");
+    createCore({ log, runtime: new MockRuntime({ delayMs: 0 }), projectsDir: join(tmp(), "projects"), order: { mode: "heuristic" } });
+    const project = createProject(log, { name: "Old App" });
+    expect(standingOf(log, project)).toBeNull();
+    expect(finishLeft(log, project)).toMatch(/no shipped app/);
+    const run = log.append("factory.run.started", { idea: "v1", projectId: project }).id;
+    log.append("project.linked", { projectId: project, kind: "factory_run", ref: String(run) });
+    log.append("factory.evaluation", { run, round: 1, pass: false, requirements: [{ id: "R1", met: true }, { id: "R2", met: true }, { id: "R3", met: false, evidence: "No export button" }] });
+    log.append("factory.review", { run, round: 1, verdict: "pass", findings: [{ severity: "high", text: "Saves can be lost." }, { severity: "low", text: "Naming." }] });
+    log.append("factory.run.finished", { run, outcome: "shipped", planName: "Old App", totalUsd: 1.2 });
+    // It shipped before the list was kept: no ticket has it.
+    let s = standingOf(log, project)!;
+    expect(s).toMatchObject({ run, version: "v0.1.0", judged: 3, working: 2, done: false, ticket: null });
+    expect(s.versions.map((v) => v.run)).toEqual([run]);
+    expect(finishLeft(log, project)).toBeNull();
+    s = standingOf(log, project)!;
+    expect(s.ticket).toMatchObject({ asked: true });
+    expect(s.ticket!.title).toMatch(/finish what v0\.1\.0 left \(1 requirement, 2 notes\)/);
+    // Pressing again files nothing new.
+    expect(finishLeft(log, project)).toBeNull();
+    expect(events(log, "ticket.opened").filter((o) => /finish what/.test(o.title ?? "")).length).toBe(1);
   });
 });
