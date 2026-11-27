@@ -45,6 +45,17 @@ All in `FenceSettings` (`packages/core/src/fence/room.ts`), passed as JSON in `S
 6. The result comes back as one file of data. On Windows it is looked at, never opened as files and never run. It is held, and stays on this computer, when it touches `.github/`, `.gitmodules` or `.gitattributes`, when a secret is found in it, or when a file the project keeps changed while the checks ran.
 7. Otherwise it leaves as a branch and a draft pull request. The base branch is never written.
 
+## The home screen (slice 3)
+
+Double-click `SoftwareFactory-Step1.cmd`, or run `npm run step1 -- home`. One page opens at `http://127.0.0.1:4517/`, on this computer only.
+
+- You type a sentence and press Start. One run at a time for now.
+- While it works you see its latest line, and Stop ends everything the run started inside the room.
+- Each ticket shows where it stands, what it cost, and its story line by line. All of it is drawn from the record.
+- Accept puts the proposal into the project: exactly the commit SoftwareFactory checked. If the proposal changed on GitHub since, or was closed, accept refuses and says so.
+- Settings (project, starting branch, model, turns, time limit, prepare commands, checks) are changed on the page, kept in `settings.json` beside the record, and each change is a line in the record. The fence's own settings are not changed from the page.
+- The page answers only to its own address, and its buttons work only with a key that the page itself carries, so another site open in your browser cannot press them.
+
 ## Known limits, said plainly
 
 - Seen on the laptop (27 Nov 2026): inside its own sandbox the agent could not use what its own `npm ci` had just installed (`tsc: not found`), while SoftwareFactory's check seconds later found it and built. Not understood yet. Until it is, a run cannot test a web build itself; SoftwareFactory's checks still do.

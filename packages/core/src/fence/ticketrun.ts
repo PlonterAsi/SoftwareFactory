@@ -6,7 +6,7 @@ import type { GitHub, GitHubRepo } from "../tickets/github.js";
 import { type RunResult, runInRoom } from "./door.js";
 import type { FenceReport, RoomExec, RoomFiles } from "./fencetest.js";
 import type { FenceSettings } from "./room.js";
-import { type TheRecord, cleanText } from "./record.js";
+import { type RecordLine, type TheRecord, cleanText } from "./record.js";
 
 /**
  * One ticket, from the person's sentence to a proposal on GitHub (build step 1, slice 2). This is the
@@ -164,10 +164,8 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
   }
 }
 
-/** The story of a ticket, as lines a person reads. */
-export function storyText(record: TheRecord, ticket: string): string {
-  return record.story(ticket).map((l) => {
-    const t = l.ts.slice(11, 19);
+/** One line of the record as words a person reads. Nothing in it can move a cursor or recolour a console. */
+export function storyLine(l: RecordLine): string {
     const d = l.data as any;
     const what =
       l.kind === "ticket.opened" ? `you asked: ${d.sentence}` :
@@ -176,8 +174,15 @@ export function storyText(record: TheRecord, ticket: string): string {
       l.kind === "run.step" ? (d.did ?? d.says?.split("\n")[0]?.slice(0, 140) ?? (d.tools ? `used ${d.tools.map((x: any) => x.tool).join(", ")}` : d.toolErrors ? `a command or tool ended with an error: ${String(d.toolErrors[0]).split("\n")[0]!.slice(0, 100)}` : "finished")) :
       l.kind === "run.checked" ? `check ${d.ok ? "passed" : "FAILED"}: ${d.command}` :
       l.kind === "run.ended" ? `the run ended: ${d.end} (${d.reason})` :
-      l.kind === "result.proposed" ? (d.held ? `the result is held: ${d.reason}` : `proposed on GitHub: ${d.url}`) : l.kind;
-    // A run's words reach the screen as words: nothing in them may move the cursor or recolour the console.
-    return `${t}  ${l.who.padEnd(9)} ${String(what).replace(/[\u0000-\u0008\u000b-\u001f\u007f\u009b]/g, "")}`;
-  }).join("\n");
+      l.kind === "result.proposed" ? (d.held ? `the result is held: ${d.reason}` : `proposed on GitHub: ${d.url}`) :
+      l.kind === "result.accepted" ? "you accepted it: it is in the project now" :
+      l.kind === "result.undone" ? "the change was undone" :
+      l.kind === "stop.pressed" ? "you pressed stop" :
+      l.kind === "setting.changed" ? `settings changed: ${Object.keys(d.changed ?? {}).join(", ")}` : l.kind;
+    return String(what).replace(/[\u0000-\u0008\u000b-\u001f\u007f\u009b]/g, "");
+}
+
+/** The story of a ticket, as lines a person reads. */
+export function storyText(record: TheRecord, ticket: string): string {
+  return record.story(ticket).map((l) => `${l.ts.slice(11, 19)}  ${l.who.padEnd(9)} ${storyLine(l)}`).join("\n");
 }
