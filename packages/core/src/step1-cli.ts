@@ -71,27 +71,39 @@ async function main(): Promise<void> {
       // A run of this start waits until the room was cleared of an earlier start's leftovers.
       work: async (st, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: () => runFenceTest(exec, fence, windowsProbe()) }, { ...st, workDir }, sentence)),
     });
-    // A fresh start owns no run. Whatever an earlier SoftwareFactory left working in the room is ended now, and when
-    // that earlier one went away in the middle of a ticket and nobody said so yet, it is said.
-    const before = readAlive(workDir);
-    cleared = exec("root", `pkill -KILL -u ${fence.worker} >/dev/null 2>&1; true`, 30_000).then(() => undefined, () => undefined);
-    if (before?.running && !before.closed && before.pid !== process.pid) {
-      const t = before.running.ticket;
-      const said = t ? record.story(t).some((l) => l.kind === "watchdog.spoke" && (l.data as Record<string, unknown>).why === "gone") : false;
-      if (!said) void speak({ record, settings: () => cleanWatch(home.state().settings) }, { line: `SoftwareFactory went away while ${t ?? "a ticket"} was being worked. The run was ended; nothing left the computer.`, ticket: t, why: "gone" });
-    }
-    // A sign of life for the watchdog, and the two things SoftwareFactory itself says out loud.
-    const beat = setInterval(() => { try { writeAlive(workDir, home.alive()); } catch { /* the next beat tries again */ } }, 5000);
-    beat.unref();
-    writeAlive(workDir, home.alive());
+    // The two things SoftwareFactory itself says out loud.
+    let beat: ReturnType<typeof setInterval> | null = null, ours = false;
     const say = (line: string, ticket: string | null, why: string) => void speak({ record, settings: () => cleanWatch(home.state().settings) }, { line, ticket, why });
     record.onLine((l) => {
       const d = l.data as Record<string, any>;
       if (l.kind === "fence.tested" && d.ok === false) say(`The fence did not hold, so ${l.ticket ?? "the ticket"} was not started.`, l.ticket, "fence");
       if (l.kind === "run.ended" && d.end === "parked" && /limit/i.test(String(d.reason ?? ""))) say(`${l.ticket ?? "A ticket"} is parked: ${/plan limit/i.test(String(d.reason)) ? "the plan limit was reached" : "a limit of the run was reached"}.`, l.ticket, "limit");
     });
+    // Another SoftwareFactory that is open right now keeps its room, its run and its sign of life: this start
+    // touches none of them and steps back.
+    const before = readAlive(workDir);
+    const otherIsOpen = !!before && !before.closed && before.pid !== process.pid && Date.now() - new Date(before.at).getTime() < 15_000;
+    if (otherIsOpen) { console.error("SoftwareFactory is open already. Use its window, or close it first."); process.exit(1); }
     const server = createServer((req, res) => { void home.handler(req, res); });
+    server.once("error", (e) => { console.error((e as NodeJS.ErrnoException).code === "EADDRINUSE" ? `Port ${port} is taken, so SoftwareFactory did not start. Nothing was touched.` : `SoftwareFactory did not start: ${(e as Error).message}`); process.exit(1); });
     server.listen(port, "127.0.0.1", () => {
+      // Only now is this start the one: the port is ours.
+      ours = true;
+      // A fresh start owns no run. Whatever an earlier SoftwareFactory left working in the room is ended, and when
+      // that earlier one went away in the middle of a ticket and nobody said so yet, it is said: after the clearing,
+      // and truthfully when the room could not be reached.
+      let reached = true;
+      cleared = exec("root", `pkill -KILL -u ${fence.worker} >/dev/null 2>&1; echo cleared`, 30_000).then((r) => { reached = /cleared/.test(r.stdout); }, () => { reached = false; });
+      if (before?.running && !before.closed) {
+        const t = before.running.ticket;
+        void cleared.then(() => {
+          const said = t ? record.story(t).some((l) => l.kind === "watchdog.spoke" && (l.data as Record<string, unknown>).why === "gone") : false;
+          if (!said || !reached) say(reached ? `SoftwareFactory went away while ${t ?? "a ticket"} was being worked. The run was ended; nothing left the computer.` : `SoftwareFactory went away while ${t ?? "a ticket"} was being worked, and the room could not be reached to end the run. Restart the computer's WSL, or look into the room.`, t, reached ? "gone" : "room unreachable");
+        });
+      }
+      beat = setInterval(() => { try { writeAlive(workDir, home.alive()); } catch { /* the next beat tries again */ } }, 5000);
+      beat.unref();
+      writeAlive(workDir, home.alive());
       const url = `http://127.0.0.1:${port}/?pass=${home.pass}`;
       console.log(`SoftwareFactory home screen: ${url}\nClose this window to close SoftwareFactory.`);
       if (process.platform === "win32" && !args.includes("--no-open")) spawn("cmd.exe", ["/c", "start", "", url], { stdio: "ignore", windowsHide: true, detached: true }).unref();
@@ -100,7 +112,7 @@ async function main(): Promise<void> {
     // (Windows sends SIGHUP when the console window is closed, and gives a few seconds.)
     // Said first, before anything slow: Windows gives a closing window only a few seconds.
     const closed = () => { try { writeAlive(workDir, { ...home.alive(), closed: true }); } catch { /* the watchdog then speaks, which is the safe side */ } };
-    const bye = () => { clearInterval(beat); closed(); if (home.isRunning()) { home.stop(); setTimeout(() => process.exit(0), 4000); } else process.exit(0); };
+    const bye = () => { if (!ours) process.exit(0); if (beat) clearInterval(beat); closed(); if (home.isRunning()) { home.stop(); setTimeout(() => process.exit(0), 4000); } else process.exit(0); };
     for (const sig of ["SIGINT", "SIGHUP", "SIGBREAK", "SIGTERM"] as const) process.once(sig, bye);
     return;
   }
