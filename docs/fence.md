@@ -48,7 +48,7 @@ All in `FenceSettings` (`packages/core/src/fence/room.ts`), passed as JSON in `S
 ## Known limits, said plainly
 
 - The checks prove what the project's own scripts prove. An agent writes those scripts too, so the checks are a help for your review and not a replacement for it.
-- Go and Node are downloaded from go.dev and nodejs.org over HTTPS when the room is set up. Node's download is compared with its maker's published checksum (`nodeSha256`). Go's is compared once `goSha256` is set; it is empty for now.
+- Go and Node are downloaded from go.dev and nodejs.org over HTTPS when the room is set up. Both downloads are compared with their makers' published checksums (`goSha256`, `nodeSha256`). Change a version and its checksum together.
 - The record refuses rewriting through SoftwareFactory itself. A program on Windows that opens the file directly could still change it; nothing in the room can reach it.
 
 - Microsoft does not call WSL2 a security boundary. Claude Code's sandbox covers commands only; its file tools are held by permission rules. That is why the fence is tested every time instead of trusted.

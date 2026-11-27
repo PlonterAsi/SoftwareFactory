@@ -47,7 +47,7 @@ export const FENCE_DEFAULTS: FenceSettings = {
   stepTimeoutMs: 120_000,
   goVersion: "1.26.0",
   nodeVersion: "22.12.0",
-  goSha256: "",
+  goSha256: "aac1b08a0fb0c4e0a7c1555beb7b59180b05dfc5a3d62e40e9de90cd42f88235",
   nodeSha256: "22982235e1b71fa8850f82edd09cdae7e3f32df1764a9ec298c72d25ef2c164f",
 };
 

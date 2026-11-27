@@ -69,6 +69,7 @@ export function runPrompt(r: Pick<RunRequest, "sentence" | "checks">): string {
     "How to work:",
     "- Read the project's own instructions (CLAUDE.md, README) first and follow them.",
     "- Make the change with the project's own style and tests. Do not commit; your files are collected when you finish.",
+    "- Your shell commands run in a sandbox and nobody is there to approve anything. If a shell command is refused, do not give up on the shell: run it again as plain single commands, one per call (for example first `npm ci --prefix web`, then the next), without pipes, `;`, redirects or `cd ... &&`. Use the Read, Grep and Glob tools for looking at files.",
     "- You can reach only a short list of network addresses (the package registries and GitHub). If something is refused, do not look for a way around it; say so in your final answer.",
     ...(r.checks.length ? [
       "- When you are done, these checks will be run on your work WITHOUT any network, so install whatever they need now (for example `npm ci`) and make sure each one passes:",
@@ -117,7 +118,7 @@ export function stepOf(line: string): { data: Record<string, unknown>; end?: Age
     return { data: { ...(says ? { says: cut(says, 2000) } : {}), ...(tools.length ? { tools } : {}) } };
   }
   if (j.type === "user" && Array.isArray(j.message?.content)) {
-    const errors = j.message.content.filter((c: any) => c.type === "tool_result" && c.is_error).map((c: any) => cut(c.content, 400));
+    const errors = j.message.content.filter((c: any) => c.type === "tool_result" && c.is_error).map((c: any) => cut(c.content, 1500));
     return errors.length ? { data: { toolErrors: errors } } : null;
   }
   if (j.type === "result") {
