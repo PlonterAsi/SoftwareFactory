@@ -51,7 +51,7 @@
         {
           "id": "window",
           "title": "One real window: the safe path inside the installed app",
-          "status": "built",
+          "status": "proven",
           "from": "step 1 plan",
           "done": "The installed app opens the home screen; no black window, no starter file."
         },
