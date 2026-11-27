@@ -128,7 +128,7 @@
         {
           "id": "stop-list",
           "title": "The stop list: actions that always wait for you",
-          "status": "built",
+          "status": "proven",
           "from": "leg 4",
           "done": "A run that tries one is blocked and the factory goes on."
         },

@@ -288,7 +288,7 @@ describe("the page and its door", () => {
   it("lets a held result go only by the owner's own press, and only a stop-list hold", async () => {
     const r = new TheRecord();
     proposed(r, "T1", { held: true, reason: "a secret was found", url: undefined, number: undefined });
-    proposed(r, "T2", { held: true, reason: "it waits for your look", stop: [{ family: "security", file: ".env.example", why: "a file of keys and passwords" }], url: undefined, number: undefined });
+    proposed(r, "T2", { held: true, reason: "it waits for your look", stop: [{ family: "security", file: ".env.example", why: "a file that usually holds keys and passwords" }], url: undefined, number: undefined });
     const asked: string[] = [];
     const { url, h } = await serve(r, { release: async (ticket) => { asked.push(ticket); r.append({ kind: "result.proposed", who: "you", ticket, project: "o/p", data: { url: "https://github.com/o/p/pull/9", number: 9, released: true } }); return { ok: true, url: "https://github.com/o/p/pull/9", number: 9 }; } });
     const post = (path: string, body: unknown, key = h.key) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(key), body: JSON.stringify(body) });

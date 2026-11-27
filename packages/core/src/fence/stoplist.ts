@@ -20,7 +20,7 @@ interface PathRule { family: StopFamily; re: RegExp; why: string }
 export const STOP_PATHS: PathRule[] = [
   { family: "security", re: /(^|\/)(\.claude|\.cursor|\.windsurf|\.vscode|\.devcontainer|\.idea)(\/|$)/i, why: "the project's own settings for AI agents and editors" },
   { family: "security", re: /(^|\/)((CLAUDE|AGENTS|GEMINI)(\.[^/]*)?\.md|\.mcp\.json|\.cursorrules|\.windsurfrules)$/i, why: "the rules and tools every later agent in this project gets" },
-  { family: "security", re: /(^|\/)\.env(\.[^/]*)?$/i, why: "a file of keys and passwords" },
+  { family: "security", re: /(^|\/)\.env(\.[^/]*)?$/i, why: "a file that usually holds keys and passwords" },
   { family: "security", re: /(^|\/)(id_(rsa|dsa|ecdsa|ed25519)|[^/]*\.(pem|key|p12|pfx|keystore|jks))$/i, why: "a key file" },
   { family: "security", re: /(^|\/)(\.npmrc|\.pypirc|\.netrc|\.yarnrc(\.yml)?|bunfig\.toml|pip\.conf)$/i, why: "where packages come from and with which sign-in" },
   { family: "security", re: /(^|\/)CODEOWNERS$/i, why: "who must approve changes" },

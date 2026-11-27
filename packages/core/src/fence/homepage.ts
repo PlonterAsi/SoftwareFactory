@@ -289,7 +289,7 @@ ol.story li.flag .x { color: var(--bad); }
           var rno = el("button", "", "Not now"); rno.type = "button"; rno.onclick = function () { confirming = null; render(last); };
           row.appendChild(rno); row.appendChild(ryes);
         } else {
-          var rel = el("button", "good", "I looked: let it go to GitHub"); rel.type = "button";
+          var rel = el("button", "", "I looked: let it go to GitHub"); rel.type = "button";
           rel.onclick = function () { confirming = "release " + t.ticket; render(last); };
           row.appendChild(rel);
         }
