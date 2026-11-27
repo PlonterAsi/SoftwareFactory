@@ -72,7 +72,7 @@ async function main(): Promise<void> {
       // The reader at the gate sees the sentence and the project's file names, and works in the room like every agent.
       gate: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askGate(exec, fence, { sentence: q.sentence, files, asked: q.asked ?? undefined, model: q.model }); },
       // A run of this start waits until the room was cleared of an earlier start's leftovers.
-      work: async (st, ticket, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: () => runFenceTest(exec, fence, windowsProbe()) }, { ...st, workDir }, sentence, ticket)),
+      work: async (st, ticket, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: (o) => runFenceTest(exec, fence, { ...windowsProbe(), ...(o?.others ? { others: true } : {}) }) }, { ...st, workDir }, sentence, ticket)),
     });
     home.watchIssues();
     // The two things SoftwareFactory itself says out loud.

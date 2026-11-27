@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { ExecResult, RoomExec, RoomFiles } from "./fencetest.js";
+import { type Cell, ownCell, wholeRoom } from "./cell.js";
 import { AGENT_ENV, AGENT_FLAGS, AGENT_TOOLS, type FenceSettings, fenceSettings, looksLikeLimit } from "./room.js";
 export { AGENT_FLAGS, looksLikeLimit } from "./room.js";
 import type { RunEnd, TheRecord } from "./record.js";
@@ -45,6 +46,8 @@ export interface RunRequest {
   checksFound?: string[];
   /** The test of done, written at the ready gate before the run. The run is told it and cannot change it. */
   done?: string[];
+  /** More than one run may work at once: this run gets a cell of its own, and ending it touches no other run. */
+  ownCell?: boolean;
   signal?: AbortSignal;
 }
 
@@ -81,7 +84,7 @@ export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare" 
     ] : []),
     "- Read the project's own instructions (CLAUDE.md, README) first and follow them.",
     "- Make the change with the project's own style and tests. Do not commit; your files are collected when you finish.",
-    "- Your shell commands run in a sandbox and nobody is there to approve anything. If a shell command is refused, do not give up on the shell: run it again as plain single commands, one per call (for example first `npm ci --prefix web`, then the next), without pipes, `;`, redirects or `cd ... &&`. Use the Read tool for looking at a file, and plain `ls` and `grep -rn` commands to find files and search inside them.",
+    "- Your shell commands run in a sandbox and nobody is there to approve anything. If a shell command is refused, do not give up on the shell: run it again as plain single commands, one per call (for example first `npm ci --prefix web`, then the next), without pipes, `;`, redirects or `cd ... &&`. Use the Read tool for looking at a file, the Edit tool to change one, and plain `ls` and `grep -rn` commands to find files and search inside them. There is no tool for writing a new file: make one with a shell command.",
     "- You can reach only a short list of network addresses (the package registries and GitHub). If something is refused, do not look for a way around it; say so in your final answer.",
     ...(r.checks.length ? [
       "- When you are done, these checks will be run on your work WITHOUT any network, so install whatever they need now (for example `npm ci`) and make sure each one passes:",
@@ -177,10 +180,9 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
   let costUsd = 0, summary = "", baseSha: string | null = null, headSha: string | null = null;
 
   // Stop always works: whatever the run is doing, everything of the worker's is killed inside the room.
-  const killAll = async (): Promise<boolean> => {
-    const r = await exec("root", `pkill -KILL -u ${s.worker} >/dev/null 2>&1; sleep 0.2; pgrep -u ${s.worker} >/dev/null 2>&1 && echo still-running || echo nothing-running`, 30_000).catch(() => null);
-    return !!r && /nothing-running/.test(r.stdout);
-  };
+  // With one run at a time that is the whole room; with more, the run's own cell, and no other run is touched.
+  const cell: Cell = req.ownCell ? ownCell(exec, s, req.run) : wholeRoom(exec, s);
+  const killAll = (): Promise<boolean> => cell.kill();
   const stopped = () => !!req.signal?.aborted;
   const onAbort = () => { void killAll(); };
   req.signal?.addEventListener("abort", onAbort, { once: true });
@@ -191,12 +193,13 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
     // The copy does not stay: a later run must not find an earlier one's files, and the disk must not fill.
     // Go writes its package folders read-only, so they are made writable first or they would stay behind.
     await exec("worker", `chmod -R u+rwX ${copyDir} ${scratchDir} 2>/dev/null; rm -rf ${copyDir} ${scratchDir}`, s.stepTimeoutMs).catch(() => undefined);
+    await cell.close();
     record.append({ kind: "run.ended", who: "SF itself", ...stamp, costUsd: null, data: { end, reason, costUsd, nothingLeftRunning: clear, ...(end === "parked" && /^the plan limit was reached/.test(reason) ? { parkedFor: "limit" } : {}) } });
     return { end, reason, bundle, baseSha, headSha, costUsd, summary, checks };
   };
-  const step = async (user: "worker" | "root", script: string, timeoutMs = s.stepTimeoutMs, onLine?: (l: string) => void): Promise<ExecResult> => exec(user, script, timeoutMs, onLine);
+  const step = async (user: "worker" | "root", script: string, timeoutMs = s.stepTimeoutMs, onLine?: (l: string) => void): Promise<ExecResult> => (user === "worker" ? cell.run(script, timeoutMs, onLine) : exec(user, script, timeoutMs, onLine));
 
-  record.append({ kind: "run.started", who: "SF itself", ...stamp, data: { branch: req.branch, base: req.base, model: req.model, timeLimitMinutes: Math.round(req.timeLimitMs / 60_000), checks: req.checks, prepare: req.prepare ?? [], ...(req.checksFound ? { checksFound: req.checksFound } : {}), ...(req.done?.length ? { done: req.done } : {}) } });
+  record.append({ kind: "run.started", who: "SF itself", ...stamp, data: { branch: req.branch, base: req.base, model: req.model, ...(req.ownCell ? { cell: `sf-run-${req.run}` } : {}), timeLimitMinutes: Math.round(req.timeLimitMs / 60_000), checks: req.checks, prepare: req.prepare ?? [], ...(req.checksFound ? { checksFound: req.checksFound } : {}), ...(req.done?.length ? { done: req.done } : {}) } });
   // Tools from outside the room seen in this run. Once any is seen, that is how the run ends, whatever else happened.
   let outside: string[] = [];
   const OUTSIDE = (names: string[]) => `the run was ended: it had tools from outside the room (${names.slice(0, 5).join(", ")}), which must never be there`;
@@ -204,6 +207,7 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
     if (stopped()) return await finish("stopped", "you pressed stop");
     // 1. The copy goes in as data and is unpacked by git inside the no-network box.
     await killAll();
+    if (!(await cell.open())) return await finish("crashed", "the run's own cell could not be made in the room, so no step ran");
     const clear = await step("worker", `chmod -R u+rwX ${copyDir} ${scratchDir} 2>/dev/null; rm -rf ${copyDir} ${scratchDir} && mkdir -p ${copyDir} ${scratchDir} && chmod 0700 ${scratchDir} && echo cleared`);
     if (!/cleared/.test(clear.stdout)) return await finish("crashed", `the room could not be prepared: ${clear.stderr.slice(0, 200)}`);
     await files.put(inFile, req.bundle, s.stepTimeoutMs);

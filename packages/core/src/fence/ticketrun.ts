@@ -32,6 +32,8 @@ export interface TicketSettings {
   done?: string[];
   /** The GitHub issue this ticket is linked to, when there is one: the proposal closes it when it is accepted. */
   issue?: number;
+  /** More than one run may work at once (Settings, slots): this run gets its own cell in the room. */
+  ownCell?: boolean;
   model: string;
   maxTurns: number;
   timeLimitMinutes: number;
@@ -45,7 +47,8 @@ export interface TicketDeps {
   record: TheRecord;
   github: GitHub;
   /** The nine lines. Injected so the caller decides how the test reaches the room. */
-  fenceTest: () => Promise<FenceReport>;
+  /** `others`: another run is working in the room, so the test must not end everything of the worker's. */
+  fenceTest: (o?: { others: boolean }) => Promise<FenceReport>;
   fence?: Partial<FenceSettings>;
   signal?: AbortSignal;
 }
@@ -122,7 +125,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
 
   // Nothing starts before the fence proved itself. Not one line may be off.
   let fence: FenceReport;
-  try { fence = await deps.fenceTest(); }
+  try { fence = await deps.fenceTest({ others: !!st.ownCell }); }
   catch (e) { fence = { ok: false, lines: [], startedAt: new Date().toISOString(), ms: 0, room: "" }; record.append({ kind: "fence.tested", who: "SF itself", ticket, project, data: { ok: false, error: (e as Error).message } }); }
   if (fence.lines.length) record.append({ kind: "fence.tested", who: "SF itself", ticket, project, data: { ok: fence.ok, ms: fence.ms, lines: fence.lines.map((l) => ({ n: l.n, what: l.what, verdict: l.verdict, ok: l.ok, detail: l.detail })) } });
   // The plan limit met by the test's own agent is not a hole in the fence: the ticket is parked and comes back.
@@ -153,7 +156,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     }
     const result = await runInRoom(deps.exec, deps.files, record, {
       run, ticket, project, sentence, bundle: readFileSync(inFile), base: h.base, branch,
-      model: st.model, maxTurns: st.maxTurns, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, signal: deps.signal,
+      model: st.model, maxTurns: st.maxTurns, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, ownCell: !!st.ownCell, signal: deps.signal,
     }, deps.fence);
     if (result.end !== "passed" || !result.bundle || !result.baseSha || !result.headSha) return out({ run, end: result.end, reason: result.reason, costUsd: result.costUsd });
 

@@ -166,6 +166,7 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-gate-model">Model that reads the ticket</label><input id="s-gate-model" autocomplete="off" spellcheck="false"></div>
       <div><label for="s-park-wait">Rest after the plan limit, minutes</label><input id="s-park-wait" type="number" min="1" max="1440"></div>
       <div><label for="s-park-returns">A parked ticket comes back by itself, times <span class="hint">0: it waits for you</span></label><input id="s-park-returns" type="number" min="0" max="20"></div>
+      <div><label for="s-slots">Runs at once <span class="hint">1 is the proven way; with 2 each run gets its own cell in the room</span></label><input id="s-slots" type="number" min="1" max="4"></div>
       <div><label for="s-cut-returns">A cut-off ticket comes back by itself, times <span class="hint">cut off: SoftwareFactory closed or the computer restarted mid-run</span></label><input id="s-cut-returns" type="number" min="0" max="20"></div>
       <div><label for="s-cut-hours">Only when cut off within, hours</label><input id="s-cut-hours" type="number" min="1" max="720"></div>
       <div><label for="s-issues">GitHub issues</label><select id="s-issues"><option value="off">Off</option><option value="in">Your labelled issues become tickets</option><option value="both">Both ways: tickets also get an issue</option></select></div>
@@ -245,6 +246,13 @@ ol.story li.flag .x { color: var(--bad); }
       var dl = el("ul", "done");
       t.done.forEach(function (x) { dl.appendChild(el("li", "", x)); });
       box.appendChild(el("p", "says", "Done when:")); box.appendChild(dl);
+    }
+    if (t.state === "working" && last && last.runs && last.runs.length > 1) {
+      var srow = el("div", "row"), sb = el("button", "stop", "Stop " + t.ticket);
+      sb.type = "button";
+      sb.onclick = function () { sb.disabled = true; post("/api/step1/stop", { ticket: t.ticket }).then(function () { load(); }); };
+      srow.appendChild(sb); srow.appendChild(el("span", "hint", "Ends this run only. The other goes on."));
+      box.appendChild(srow);
     }
     if (t.url || t.canAccept || t.canUndo || t.canEdit || t.canAgain || t.canRemove || t.removed) {
       var row = el("div", "row");
@@ -394,7 +402,9 @@ ol.story li.flag .x { color: var(--bad); }
     var shown = s.tickets.filter(function (x) { return showRemoved || !x.removed; });
     if (run) {
       var t = null; s.tickets.forEach(function (x) { if (x.ticket === run.ticket) t = x; });
-      $("now-title").textContent = "Working on " + (run.ticket || "a new ticket");
+      var names = (s.runs || []).map(function (x) { return x.ticket; });
+      $("now-title").textContent = "Working on " + (names.length > 1 ? names.join(" and ") : (run.ticket || "a new ticket"));
+      $("stop").textContent = names.length > 1 ? "Stop all " + names.length : "Stop";
       $("now-line").textContent = t && t.story.length ? t.story[t.story.length - 1].what : "Testing the fence first.";
       var secs = Math.max(0, Math.round((Date.now() - new Date(run.startedAt).getTime()) / 1000));
       $("now-time").textContent = Math.floor(secs / 60) + " min " + (secs % 60) + " s";
@@ -429,7 +439,7 @@ ol.story li.flag .x { color: var(--bad); }
       settingsLoaded = true;
       $("s-repo").value = s.settings.repo; $("s-base").value = s.settings.base; $("s-model").value = s.settings.model;
       $("s-turns").value = s.settings.maxTurns; $("s-minutes").value = s.settings.timeLimitMinutes;
-      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
+      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-slots").value = s.settings.slots; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
       $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n");
     }
     // Settings stay folded when everything a run needs is set; they open by themselves only when the project is missing.
@@ -457,7 +467,7 @@ ol.story li.flag .x { color: var(--bad); }
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
-    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value) })
+    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value) })
       .then(function (r) { if (r.ok) { $("save-hint").textContent = "Saved."; settingsLoaded = false; load(); } else { $("set-msg").textContent = r.why; } });
   };
 

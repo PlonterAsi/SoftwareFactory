@@ -174,7 +174,7 @@ them and cannot change them; they are in the story and in the proposal on GitHub
 
 ## What the agent is started with
 
-Every agent in the room (the run, the fence test's, the gate's reader) is started with the same line from `room.ts`: `--tools "Bash,Read,Edit,Write" --disable-slash-commands --setting-sources user --strict-mcp-config`, and with `ENABLE_CLAUDEAI_MCP_SERVERS=false`. Four tools and no more: no sub-agents, no scheduling, no messages, no skills.
+Every agent in the room (the run, the fence test's, the gate's reader) is started with the same line from `room.ts`: `--tools "Bash,Read,Edit" --disable-slash-commands --setting-sources user --strict-mcp-config`, and with `ENABLE_CLAUDEAI_MCP_SERVERS=false`. Three tools and no more (the room's managed rules do not allow Write, so a new file is made with the shell): no sub-agents, no scheduling, no messages, no skills.
 
 - The project's own Claude settings (`.claude/settings.json` in the copy) do not count inside the room. They could deny reads (which hid `node_modules` from the run) and name hooks and plugins; only the room's managed rules and the worker's sign-in apply.
 - The room is signed in with the owner's account, so that account's connectors (mail, files, documents) would otherwise be offered to the run as tools, and those do not pass the room's network list. They are switched off, and SF reads the first line of the agent's stream: if any `mcp__` tool or server is listed, or one is used later, the run is ended and nothing of it is kept. A run whose first line never lists its tools is not kept either. The flags are the wall; this is the alarm.
@@ -216,3 +216,14 @@ Not yet: words changed on one side after the link do not travel to the other, an
 A ticket whose go was cut off in the middle (SoftwareFactory was closed, the computer restarted, the watchdog ended the run) comes back to the queue by itself, `cutOffReturns` times (default 1), and only when it was cut off within `cutOffWithinHours` (default 24): an old cut-off ticket waits for you. The run starts again from the project as it is: nothing of a cut-off run is kept.
 
 The plan limit can also be met before a run, by the gate's reader or by the fence test's own agent. Both park the ticket for the limit, the same as a run that met it: the queue rests and the ticket comes back. Neither is written down as a hole in the fence.
+
+## Two runs at once
+
+`slots` in Settings (default 1, up to 4) says how many runs may work at once. With 1 nothing changes: ending a run ends everything of the worker's in the room, the way that is proven.
+
+With more, each run gets a cell of its own (`fence/cell.ts`): a cgroup made by root in the room, named after the run. Every step of the run says its process number and waits; root moves it into the cell; only then does it go on, so whatever it starts is born in the cell. Tried on the real room (27 Nov 2026): the worker cannot move a process out or make a cell of its own, a child started with `setsid`, `nohup` or a double fork stays in, bubblewrap with `--unshare-all` stays in, and `cgroup.kill` leaves nothing. Stop, the time limit and the end of a run end the cell and nothing else; "nothing left running" is the cell's empty list.
+
+- The fence test before a run does not end the worker's processes while another run works.
+- Two copies do not see each other: the agent's shell sees only its own copy, and the Read and Edit tools refuse the other (tried the same day).
+- What two runs still share: the one worker account, its home and `/tmp`, and the one sign-in. SoftwareFactory's own steps run as that account too.
+- The home screen shows every run that works, with a Stop for each. The watchdog still ends the whole room when SoftwareFactory itself goes away.

@@ -227,7 +227,7 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     expect(a.reason).toMatch(/tools from outside the room.*mcp__claude_ai_Gmail__send_message/);
     expect(a.pr ?? null).toBeNull();
     const args = readFileSync(join(shim, "args"), "utf8");
-    expect(args).toMatch(/--tools Bash,Read,Edit,Write --disable-slash-commands --setting-sources user --strict-mcp-config/);
+    expect(args).toMatch(/--tools Bash,Read,Edit --disable-slash-commands --setting-sources user --strict-mcp-config/);
     expect(args).toMatch(/connectors=false/);
     // A tool from outside that was not listed at the start but is used later ends the run the same way.
     mode("late");

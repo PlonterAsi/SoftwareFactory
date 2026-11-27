@@ -151,7 +151,7 @@ function parseLines(stdout: string): Map<string, { verdict: string; detail: stri
  * Run the nine tries. `token` is the Claude sign-in for the one call the test makes; it goes in on stdin with
  * the script, is never written to the room's disk by SoftwareFactory, and never appears in the report.
  */
-export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> = {}, opts: { token?: string; nonce?: string; windowsProgram?: Buffer; windowsMark?: WindowsMark } = {}): Promise<FenceReport> {
+export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> = {}, opts: { token?: string; nonce?: string; windowsProgram?: Buffer; windowsMark?: WindowsMark; /** Another run is working: the test ends nothing of the worker's. */ others?: boolean } = {}): Promise<FenceReport> {
   const s = fenceSettings(over);
   const started = Date.now();
   const nonce = opts.nonce ?? randomBytes(8).toString("hex");
@@ -199,7 +199,7 @@ export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> 
     // Root never writes into a folder the worker owns (a planted link there would be a way to root's rights),
     // and nothing of the worker's is left running that could tidy the evidence away.
     const prep = await exec("root", `
-pkill -KILL -u ${s.worker} >/dev/null 2>&1
+${opts.others ? "true" : `pkill -KILL -u ${s.worker} >/dev/null 2>&1`}
 install -d -m 0755 -o root -g root /srv/sf-fence || exit 1
 printf '%s\\n' '${secret}' > ${canary} && chmod 0644 ${canary} && echo prepared
 `, s.stepTimeoutMs);

@@ -357,6 +357,39 @@ describe("the page and its door", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("works two tickets at once when Settings give two slots, and stops one without touching the other", async () => {
+    const r = new TheRecord();
+    const live = new Map<string, boolean | undefined>();
+    const { url, h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, slots: 2 }), work: async (st, ticket, _t, signal) => {
+      live.set(ticket, st.ownCell);
+      r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-a`, ticket, project: "o/p", data: {} });
+      await new Promise<void>((ok) => signal.addEventListener("abort", () => ok()));
+      r.append({ kind: "run.ended", who: "SF itself", run: `${ticket}-a`, ticket, project: "o/p", data: { end: "stopped", reason: "you pressed stop" } });
+      live.delete(ticket);
+      return {} as any;
+    } });
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    const tick = () => new Promise((ok) => setTimeout(ok, 30));
+    await post("work", { sentence: "One." }); await post("work", { sentence: "Two." }); await post("work", { sentence: "Three." });
+    await tick();
+    // Two work, each told it has a cell of its own; the third waits.
+    expect([...live]).toEqual([["T1", true], ["T2", true]]);
+    expect(h.state().runs.map((x) => x.ticket)).toEqual(["T1", "T2"]);
+    expect(h.state().tickets.map((t) => [t.ticket, t.state])).toEqual([["T3", "waiting"], ["T2", "working"], ["T1", "working"]]);
+    expect((await post("stop", { ticket: "T9" })).status).toBe(409);
+    // Stop reaches one run. The other goes on, and the freed slot takes the third.
+    expect((await post("stop", { ticket: "T1" })).status).toBe(200);
+    await tick();
+    expect([...live.keys()]).toEqual(["T2", "T3"]);
+    expect(h.state().tickets.find((t) => t.ticket === "T1")).toMatchObject({ state: "stopped" });
+    expect(r.all().filter((l) => l.kind === "stop.pressed").map((l) => l.ticket)).toEqual(["T1"]);
+    // Stop with no name ends every run.
+    h.close();
+    expect((await post("stop", {})).status).toBe(200);
+    await tick();
+    expect(live.size).toBe(0);
+  });
+
   it("brings a ticket that was cut off in the middle back by itself, once", async () => {
     const r = new TheRecord();
     r.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "Add a footer.", kind: "request" } });
