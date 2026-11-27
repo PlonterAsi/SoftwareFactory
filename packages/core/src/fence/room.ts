@@ -29,6 +29,9 @@ export interface FenceSettings {
   /** Tools the projects' own checks need, installed by root from the makers' own sites. Empty: not installed. */
   goVersion: string;
   nodeVersion: string;
+  /** The makers' published SHA-256 of those two downloads. Set: the download must match or nothing is unpacked. Empty: not compared. */
+  goSha256: string;
+  nodeSha256: string;
 }
 
 /** Safe starting values. Every one of them is a setting (Assaf, 27 Nov 2026: everything configurable). */
@@ -44,6 +47,8 @@ export const FENCE_DEFAULTS: FenceSettings = {
   stepTimeoutMs: 120_000,
   goVersion: "1.26.0",
   nodeVersion: "22.12.0",
+  goSha256: "",
+  nodeSha256: "22982235e1b71fa8850f82edd09cdae7e3f32df1764a9ec298c72d25ef2c164f",
 };
 
 export function fenceSettings(over: Partial<FenceSettings> = {}): FenceSettings {
@@ -56,6 +61,7 @@ export function fenceSettings(over: Partial<FenceSettings> = {}): FenceSettings 
   if (!/^[a-z0-9][a-z0-9.-]{0,60}$/.test(s.testModel)) throw new Error(`fence: "${s.testModel}" is not a model name`);
   if (!Number.isInteger(s.stepTimeoutMs) || s.stepTimeoutMs < 1000 || s.stepTimeoutMs > 3_600_000) throw new Error(`fence: stepTimeoutMs must be between a second and an hour`);
   for (const [k, v] of [["goVersion", s.goVersion], ["nodeVersion", s.nodeVersion]] as const) if (v && !/^\d+\.\d+(\.\d+)?$/.test(v)) throw new Error(`fence: ${k} must look like 1.2.3, got "${v}"`);
+  for (const [k, v] of [["goSha256", s.goSha256], ["nodeSha256", s.nodeSha256]] as const) if (v && !/^[0-9a-f]{64}$/.test(v)) throw new Error(`fence: ${k} must be 64 hex characters`);
   for (const p of s.hostPorts) if (!Number.isInteger(p) || p < 1 || p > 65535) throw new Error(`fence: "${p}" is not a port`);
   return s;
 }
@@ -148,11 +154,13 @@ if [ -n "$need" ]; then export DEBIAN_FRONTEND=noninteractive; apt-get update -q
 # The projects' own tools, from their makers, into root's folders. A run can use them and cannot change them.
 ${s.goVersion ? `if [ "$(/usr/local/go/bin/go version 2>/dev/null | awk '{print $3}')" != "go${s.goVersion}" ]; then
   curl -fsSL -o /tmp/go.tgz "https://go.dev/dl/go${s.goVersion}.linux-amd64.tar.gz" </dev/null
-  rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tgz && rm -f /tmp/go.tgz
+${s.goSha256 ? `  echo "${s.goSha256}  /tmp/go.tgz" | sha256sum -c --status || { echo "the Go download is not the one its maker published"; rm -f /tmp/go.tgz; exit 1; }
+` : ""}  rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tgz && rm -f /tmp/go.tgz
 fi` : "# (no Go asked for)"}
 ${s.nodeVersion ? `if [ "$(/usr/local/node/bin/node --version 2>/dev/null)" != "v${s.nodeVersion}" ]; then
   curl -fsSL -o /tmp/node.txz "https://nodejs.org/dist/v${s.nodeVersion}/node-v${s.nodeVersion}-linux-x64.tar.xz" </dev/null
-  rm -rf /usr/local/node && mkdir -p /usr/local/node && tar -C /usr/local/node --strip-components=1 -xJf /tmp/node.txz && rm -f /tmp/node.txz
+${s.nodeSha256 ? `  echo "${s.nodeSha256}  /tmp/node.txz" | sha256sum -c --status || { echo "the Node download is not the one its maker published"; rm -f /tmp/node.txz; exit 1; }
+` : ""}  rm -rf /usr/local/node && mkdir -p /usr/local/node && tar -C /usr/local/node --strip-components=1 -xJf /tmp/node.txz && rm -f /tmp/node.txz
   for b in node npm npx; do ln -sf /usr/local/node/bin/$b /usr/local/bin/$b; done
 fi` : "# (no Node asked for)"}
 
