@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fenceSettings, setupScript, type FenceSettings } from "./fence/room.js";
 import { fenceReportText, runFenceTest, wslExec } from "./fence/fencetest.js";
 
@@ -40,7 +42,12 @@ async function main(): Promise<void> {
     spawnSync("wsl.exe", ["--terminate", s.room]);
     return;
   }
-  const report = await runFenceTest(exec, s, process.env.CLAUDE_CODE_OAUTH_TOKEN ? { token: process.env.CLAUDE_CODE_OAUTH_TOKEN } : {});
+  // A harmless Windows program for line 3 to really try: it only prints who is signed in.
+  const whoami = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe");
+  const report = await runFenceTest(exec, s, {
+    ...(process.env.CLAUDE_CODE_OAUTH_TOKEN ? { token: process.env.CLAUDE_CODE_OAUTH_TOKEN } : {}),
+    ...(existsSync(whoami) ? { windowsProgram: readFileSync(whoami) } : {}),
+  });
   console.log(fenceReportText(report));
   process.exit(report.ok ? 0 : 1);
 }

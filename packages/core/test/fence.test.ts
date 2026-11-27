@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { FENCE_DEFAULTS, fenceSettings, managedSettings, setupScript, wslConf } from "../src/fence/room.js";
 import { type ExecResult, type RoomExec, TRIES, fenceReportText, runFenceTest, wallOneScript, wallTwoProbe } from "../src/fence/fencetest.js";
 import { roomExists } from "../src/fence-cli.js";
@@ -13,6 +16,7 @@ function fakeRoom(state: { wallOne?: string; ran?: boolean; unlisted?: boolean; 
   const exec: RoomExec = async (user, script) => {
     scripts.push({ user, script });
     if (script.includes("SFLINE")) return ok(s.wallOne ?? "SFLINE attach-drive REFUSED no-drive\nSFLINE become-root REFUSED no-way\nSFLINE windows-program REFUSED interop-off\nSFLINE windows-side REFUSED 172.20.0.1\n");
+    if (script.includes("SF_EXE_EOF")) return ok("handed-in\n");
     if (script.includes("echo prepared")) return ok("prepared\n");
     if (script.includes("echo copied")) return ok("copied\n");
     if (script.includes("claude -p")) {
@@ -152,6 +156,26 @@ describe("the fence test", () => {
     const last = room.scripts.at(-1)!;
     expect(last.user).toBe("root");
     expect(last.script).toMatch(/^rm -rf \/home\/worker\/copies\/fencetest-n0nce \/srv\/sf-fence\/canary-n0nce /);
+  });
+
+  it("line 3 really tries a Windows program when one is handed in, and root puts it in root's folder", async () => {
+    const room = fakeRoom();
+    await runFenceTest(room.exec, {}, { nonce: "n0nce", windowsProgram: Buffer.from("MZ-not-a-real-program") });
+    const put = room.scripts.find((x) => x.script.includes("SF_EXE_EOF"))!;
+    expect(put.user).toBe("root");
+    expect(put.script).toContain("/srv/sf-fence/probe-n0nce.exe");
+    expect(room.scripts.find((x) => x.script.includes("SFLINE"))!.script).toContain('probe="/srv/sf-fence/probe-n0nce.exe"');
+    expect(room.scripts.at(-1)!.script).toContain("/srv/sf-fence/probe-n0nce.exe");
+  });
+
+  it("line 3, for real on plain Linux: a file that cannot run as a Windows program is refused", () => {
+    const f = join(mkdtempSync(join(tmpdir(), "sf-fence-")), "probe.exe");
+    writeFileSync(f, "MZ-not-a-real-program", { mode: 0o755 });
+    const out = spawnSync("bash", ["-s"], { input: wallOneScript(fenceSettings({ hostPorts: [9] }), f), encoding: "utf8" }).stdout;
+    expect(out).toMatch(/^SFLINE windows-program REFUSED tried-for-real/m);
+    writeFileSync(f, "#!/bin/sh\necho someone\n", { mode: 0o755 });
+    const ran = spawnSync("bash", ["-s"], { input: wallOneScript(fenceSettings({ hostPorts: [9] }), f), encoding: "utf8" }).stdout;
+    expect(ran).toMatch(/^SFLINE windows-program THROUGH a-Windows-program-ran/m);
   });
 
   it("wall 1 script, run for real on a machine with no fence, reports four lines", () => {

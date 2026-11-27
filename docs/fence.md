@@ -40,5 +40,6 @@ All in `FenceSettings` (`packages/core/src/fence/room.ts`), passed as JSON in `S
 - The setting names in the rules file were read on code.claude.com/docs on 27 Nov 2026. The test, not the reading, decides whether they hold.
 - A run's commands can read the room's own system files, and can write in the room's temp folder. The room holds nothing of yours, which is the point of wall 1.
 - Line 1 also fails when WSL's window and clipboard sharing is on, because the clipboard is a door to what you copy on Windows. Turning it off is a setting for all of WSL on the computer.
-- Line 3 reads a switch that all WSL distributions on one computer share. Whether it can show "on" for a room whose own interop is off is settled on the laptop.
+- The switch that lets WSL start Windows programs is shared by every WSL distribution on the computer, so it can read "on" inside the room although the room's own setting is off (seen on the laptop, 27 Nov 2026). Line 3 therefore does not read the switch: SoftwareFactory hands in a harmless Windows program (`whoami.exe`) and the worker really tries to start it, through every door WSL has.
+- `npm run fence -- test` through the root script can end with exit code 0 even when the test fails. Read the last line, or call `runFenceTest` in code; never gate on that exit code.
 - Not tried yet on a real laptop: creating the room itself. `fence setup` expects the room to exist.

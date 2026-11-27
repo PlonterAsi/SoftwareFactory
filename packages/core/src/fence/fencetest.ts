@@ -54,7 +54,7 @@ export const TRIES: Try[] = [
 ];
 
 /** Wall 1 is tried straight as the worker, without the sandbox in the way: the room must hold on its own. */
-export function wallOneScript(s: FenceSettings): string {
+export function wallOneScript(s: FenceSettings, probe?: string): string {
   return `
 out() { echo "SFLINE $1 $2 $3"; }
 # 1. Windows drives: already there, attachable by hand, or any other shared folder from the Windows side.
@@ -75,9 +75,22 @@ elif sudo -n true >/dev/null 2>&1; then out become-root THROUGH sudo
 elif su -c true root </dev/null >/dev/null 2>&1; then out become-root THROUGH su
 elif [ "$(id -nG)" != "$(id -un)" ]; then out become-root THROUGH "groups:$(id -nG | tr ' ' ',')"
 else out become-root REFUSED no-way; fi
-# 3. Windows programs: the room must not know how to start one.
-if grep -qs '^enabled' /proc/sys/fs/binfmt_misc/WSLInterop /proc/sys/fs/binfmt_misc/WSLInterop-late; then out windows-program THROUGH interop-on
-elif command -v cmd.exe powershell.exe wsl.exe explorer.exe >/dev/null 2>&1; then out windows-program THROUGH on-path
+# 3. Windows programs. When SoftwareFactory handed in a harmless one, really try to start it, with every
+#    door WSL has for that (the switch for Windows programs is shared by all of WSL on the computer, so
+#    reading the switch says nothing about this room: seen on the laptop, 27 Nov 2026). Without one to try,
+#    the switch being on counts as through.
+probe="${probe ?? ""}"
+switch=off; grep -qs '^enabled' /proc/sys/fs/binfmt_misc/WSLInterop /proc/sys/fs/binfmt_misc/WSLInterop-late && switch=on
+if command -v cmd.exe powershell.exe wsl.exe explorer.exe >/dev/null 2>&1; then out windows-program THROUGH on-path
+elif [ -n "$probe" ] && [ -x "$probe" ]; then
+  ran=""
+  for door in "" /run/WSL/*_interop; do
+    [ -n "$door" ] && [ ! -S "$door" ] && continue
+    o=$(WSL_INTEROP="$door" timeout 20 "$probe" </dev/null 2>/dev/null); rc=$?
+    if [ $rc -eq 0 ] && [ -n "$o" ]; then ran="$\{door:-plain}"; break; fi
+  done
+  if [ -n "$ran" ]; then out windows-program THROUGH "a-Windows-program-ran-via-$ran"; else out windows-program REFUSED "tried-for-real,switch-$switch"; fi
+elif [ "$switch" = on ]; then out windows-program THROUGH interop-on
 else out windows-program REFUSED interop-off; fi
 # 4. Programs listening on the Windows side.
 gw=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
@@ -129,7 +142,7 @@ function parseLines(stdout: string): Map<string, { verdict: string; detail: stri
  * Run the nine tries. `token` is the Claude sign-in for the one call the test makes; it goes in on stdin with
  * the script, is never written to the room's disk by SoftwareFactory, and never appears in the report.
  */
-export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> = {}, opts: { token?: string; nonce?: string } = {}): Promise<FenceReport> {
+export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> = {}, opts: { token?: string; nonce?: string; windowsProgram?: Buffer } = {}): Promise<FenceReport> {
   const s = fenceSettings(over);
   const started = Date.now();
   const nonce = opts.nonce ?? randomBytes(8).toString("hex");
@@ -145,8 +158,15 @@ export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> 
   const set = (id: string, verdict: Verdict, detail: string) => seen.set(id, { verdict, detail: detail.slice(0, 200) });
 
   // Wall 1, straight as the worker.
+  const exe = `/srv/sf-fence/probe-${nonce}.exe`;
   try {
-    const r = await exec("worker", wallOneScript(s), s.stepTimeoutMs);
+    // A harmless Windows program, handed in by root into root's own folder, for the worker to try to start.
+    let probe: string | undefined;
+    if (opts.windowsProgram?.length) {
+      const put = await exec("root", `install -d -m 0755 -o root -g root /srv/sf-fence && base64 -d > ${exe} <<'SF_EXE_EOF' && chmod 0755 ${exe} && echo handed-in\n${opts.windowsProgram.toString("base64").replace(/(.{76})/g, "$1\n")}\nSF_EXE_EOF\n`, s.stepTimeoutMs);
+      if (/handed-in/.test(put.stdout)) probe = exe;
+    }
+    const r = await exec("worker", wallOneScript(s, probe), s.stepTimeoutMs);
     const got = parseLines(r.stdout);
     for (const id of ["attach-drive", "become-root", "windows-program", "windows-side"]) {
       const g = got.get(id);
@@ -214,7 +234,7 @@ echo "SFLOOK outside $( { [ -e ${home}/sf-escaped-${nonce} ] || [ -e ${s.copies}
   } catch (e) {
     for (const id of wallTwo) if (!seen.has(id)) set(id, "could-not-judge", (e as Error).message);
   } finally {
-    await exec("root", `rm -rf ${dir} ${canary} ${home}/sf-escaped-${nonce} ${s.copies}/sf-escaped-${nonce}`, s.stepTimeoutMs).catch(() => undefined);
+    await exec("root", `rm -rf ${dir} ${canary} ${exe} ${home}/sf-escaped-${nonce} ${s.copies}/sf-escaped-${nonce}`, s.stepTimeoutMs).catch(() => undefined);
   }
 
   const lines: FenceLine[] = TRIES.map((t, i) => {
