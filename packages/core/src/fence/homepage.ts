@@ -152,6 +152,7 @@ ol.story li.flag .x { color: var(--bad); }
   </section>
 
   <h2 id="tickets-title">Tickets</h2>
+  <p class="hint" id="limits-line"></p>
   <div class="row" id="queue-row"><button id="hold" type="button">Hold the queue</button><span class="hint" id="queue-hint"></span><button id="show-removed" type="button" hidden></button><button id="issues-now" type="button" hidden>Look at GitHub now</button><span class="hint" id="issues-hint"></span></div>
   <section class="card" aria-labelledby="tickets-title"><div id="tickets"><p class="empty">No tickets yet. Your first sentence starts one.</p></div></section>
 
@@ -168,6 +169,11 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-gate-model">Model that reads the ticket</label><input id="s-gate-model" autocomplete="off" spellcheck="false"></div>
       <div><label for="s-park-wait">Rest after the plan limit, minutes</label><input id="s-park-wait" type="number" min="1" max="1440"></div>
       <div><label for="s-park-returns">A parked ticket comes back by itself, times <span class="hint">0: it waits for you</span></label><input id="s-park-returns" type="number" min="0" max="20"></div>
+      <div><label for="s-limit-period">The limits are counted per</label><select id="s-limit-period"><option value="day">day</option><option value="week">week</option><option value="month">month</option></select></div>
+      <div><label for="s-limit-you">Limit 1: work you sent <span class="hint">dollars per period, as Claude Code counts each run</span></label><input id="s-limit-you" type="number" min="0" step="1"></div>
+      <div><label for="s-limit-alone">Limit 2: what SoftwareFactory does by itself <span class="hint">tickets it brings back, and its own work</span></label><input id="s-limit-alone" type="number" min="0" step="1"></div>
+      <div><label for="s-own-share">SoftwareFactory's own share of limit 2 <span class="hint">percent</span></label><input id="s-own-share" type="number" min="0" max="100"></div>
+      <div><label for="s-run-limit">The most one run may use <span class="hint">dollars; at it the run is parked and its work is kept</span></label><input id="s-run-limit" type="number" min="0" step="0.5"></div>
       <div><label for="s-slots">Runs at once <span class="hint">1 is the proven way; with 2 each run gets its own cell in the room</span></label><input id="s-slots" type="number" min="1" max="4"></div>
       <div><label for="s-cut-returns">A cut-off ticket comes back by itself, times <span class="hint">cut off: SoftwareFactory closed or the computer restarted mid-run</span></label><input id="s-cut-returns" type="number" min="0" max="20"></div>
       <div><label for="s-cut-hours">Only when cut off within, hours</label><input id="s-cut-hours" type="number" min="1" max="720"></div>
@@ -194,6 +200,8 @@ ol.story li.flag .x { color: var(--bad); }
   var open = {}, askedOpen = false, nodes = {}, drawn = null, confirming = null, settingsLoaded = false, last = null, busy = false;
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  function day(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); }
+  function money(n) { return "$" + (Math.round(n * 100) / 100).toFixed(2); }
   function clock(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }); }
   function day(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString([], { day: "numeric", month: "short" }) + ", " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); }
   function money(n) { return "$" + Number(n || 0).toFixed(2); }
@@ -241,6 +249,7 @@ ol.story li.flag .x { color: var(--bad); }
       t.stops.forEach(function (x) { var li = el("li"); li.appendChild(el("b", "", x.family + ": ")); li.appendChild(el("code", "", x.file)); li.appendChild(document.createTextNode(" " + x.why)); sl.appendChild(li); });
       box.appendChild(sl);
     }
+    if (t.limitUntil) box.appendChild(el("p", "says", (t.bucket === "you" ? "Limit 1 (work you sent)" : "Limit 2 (what SoftwareFactory does by itself)") + " is used up, so this waits until " + day(t.limitUntil) + ". Other work goes on. The limits are in Settings."));
     if (t.returnsAt) box.appendChild(el("p", "says", "It comes back to the queue by itself at " + clock(t.returnsAt) + "."));
     else if (t.state === "parked" && t.parkedFor === "limit") box.appendChild(el("p", "says", "It came back by itself " + t.returns + (t.returns === 1 ? " time" : " times") + " already. Now it waits for you: Work it again sends it."));
     if (t.state === "asked" && !t.removed) {
@@ -417,6 +426,7 @@ ol.story li.flag .x { color: var(--bad); }
     $("issues-now").hidden = s.settings.issues === "off";
     $("issues-hint").textContent = s.settings.issues === "off" || !s.issuesSeen ? "" : s.issuesSeen.ok ? "GitHub issues looked at " + clock(s.issuesSeen.at) + "." : "GitHub issues could not be read: " + s.issuesSeen.why;
     $("hold").textContent = s.settings.hold ? "Let the queue go" : "Hold the queue";
+    if (s.limits) $("limits-line").textContent = "This " + s.limits.period + ": you sent " + money(s.limits.used.you) + " of " + money(s.limits.limit.you) + "; by itself " + money(s.limits.used.alone + s.limits.used.own) + " of " + money(s.limits.limit.alone) + ". New on " + day(s.limits.until) + ".";
     $("queue-hint").textContent = s.settings.hold ? "The queue is held. " + waiting + " waiting; nothing new starts until you let it go." : s.resting ? "The queue rests until " + clock(s.resting.until) + ": " + s.resting.why + ". Work it again on a ticket starts sooner." : (waiting ? waiting + " waiting for a turn." : "");
     $("show-removed").hidden = !gone;
     $("show-removed").textContent = showRemoved ? "Hide removed" : "Show removed (" + gone + ")";
@@ -460,7 +470,7 @@ ol.story li.flag .x { color: var(--bad); }
       settingsLoaded = true;
       $("s-repo").value = s.settings.repo; $("s-base").value = s.settings.base; $("s-model").value = s.settings.model;
       $("s-turns").value = s.settings.maxTurns; $("s-minutes").value = s.settings.timeLimitMinutes;
-      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-slots").value = s.settings.slots; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
+      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-slots").value = s.settings.slots; $("s-limit-period").value = s.settings.limitPeriod; $("s-limit-you").value = s.settings.limitYou; $("s-limit-alone").value = s.settings.limitAlone; $("s-own-share").value = s.settings.ownSharePercent; $("s-run-limit").value = s.settings.runLimit; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
       $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n"); $("s-stop-paths").value = (s.settings.stopPaths || []).join("\\n");
     }
     // Settings stay folded when everything a run needs is set; they open by themselves only when the project is missing.
@@ -488,7 +498,7 @@ ol.story li.flag .x { color: var(--bad); }
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
-    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value), stopPaths: lines($("s-stop-paths").value) })
+    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), limitPeriod: $("s-limit-period").value, limitYou: Number($("s-limit-you").value), limitAlone: Number($("s-limit-alone").value), ownSharePercent: Number($("s-own-share").value), runLimit: Number($("s-run-limit").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value), stopPaths: lines($("s-stop-paths").value) })
       .then(function (r) { if (r.ok) { $("save-hint").textContent = "Saved."; settingsLoaded = false; load(); } else { $("set-msg").textContent = r.why; } });
   };
 

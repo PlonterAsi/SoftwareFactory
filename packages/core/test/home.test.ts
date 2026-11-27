@@ -257,6 +257,34 @@ describe("the page and its door", () => {
     expect((await post("ticket/edit", { ticket: "T9", sentence: "x" })).status).toBe(409);
   });
 
+  it("starts nothing of a kind whose limit is used up, says until when, and hands each run its own ceiling", async () => {
+    const r = new TheRecord();
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "Old.", kind: "request" } });
+    r.append({ kind: "run.step", who: "worker", ticket: "T1", project: "o/p", costUsd: 3, data: { finished: true } });
+    r.append({ kind: "run.ended", who: "SF itself", ticket: "T1", project: "o/p", data: { end: "failed its checks", reason: "x" } });
+    const seen: { ticket: string; budget: number | undefined }[] = [];
+    const { url, h } = await serve(r, { work: async (st, ticket) => { seen.push({ ticket, budget: st.budgetUsd }); r.append({ kind: "run.ended", who: "SF itself", ticket, project: "o/p", data: { end: "parked", reason: "x" } }); return {} as any; } });
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    expect((await post("settings", { gate: false, limitYou: 2, limitAlone: 4, runLimit: 5 })).status).toBe(200);
+    await post("work", { sentence: "New." });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual([]);
+    const st = h.state();
+    expect(st.tickets.find((t) => t.ticket === "T2")).toMatchObject({ state: "waiting", bucket: "you" });
+    expect(st.tickets.find((t) => t.ticket === "T2")!.limitUntil).toBe(st.limits.until);
+    expect(st.limits).toMatchObject({ used: { you: 3, alone: 0 }, room: { you: 0, alone: 4 } });
+    // What SoftwareFactory brings back by itself counts under limit 2, which has room: it goes on.
+    r.append({ kind: "ticket.queued", who: "SF itself", ticket: "T1", project: "o/p", data: { returned: true } });
+    h.pump();
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual([{ ticket: "T1", budget: 4 }]);
+    expect((await post("settings", { limitYou: 10 })).status).toBe(200);
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen[1]).toEqual({ ticket: "T2", budget: 5 });
+    expect((await post("settings", { limitYou: -3 })).status).toBe(400);
+    h.close();
+  });
+
   it("lets a held result go only by the owner's own press, and only a stop-list hold", async () => {
     const r = new TheRecord();
     proposed(r, "T1", { held: true, reason: "a secret was found", url: undefined, number: undefined });

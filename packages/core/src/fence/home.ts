@@ -6,6 +6,7 @@ import { type GitHub, type GitHubRepo, parseGitHubRepo } from "../tickets/github
 import type { GateResult } from "./gate.js";
 import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
+import { type Bucket, type LimitPeriod, type LimitSettings, LIMIT_DEFAULTS, bucketOfSend, checkLimits, periodEnd, periodStart, roomLeft, runBudget, spendOf } from "./limits.js";
 import { type Sender, type WatchSettings, WATCH_DEFAULTS, cleanWatch, speak } from "./watchdog.js";
 import { type IssueSync, type IssuesMode, syncIssues } from "./issues.js";
 import { type StoryStep, stepsOf } from "./story.js";
@@ -21,7 +22,7 @@ import { type TicketKind, type TicketOutcome, type TicketSettings, TICKET_KINDS,
  */
 
 /** What you can change on the screen. The project is written "owner/name". */
-export interface HomeSettings extends WatchSettings {
+export interface HomeSettings extends WatchSettings, LimitSettings {
   repo: string;
   base: string;
   checks: string[];
@@ -57,16 +58,17 @@ export interface HomeSettings extends WatchSettings {
   stopPaths: string[];
 }
 
-export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, slots: 1, cutOffReturns: 1, cutOffWithinHours: 24, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5, stopPaths: [] };
+export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, ...LIMIT_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, slots: 1, cutOffReturns: 1, cutOffWithinHours: 24, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5, stopPaths: [] };
 
 /** Check what came from the screen. Returns clean settings or says, in a sentence, what is wrong. */
 export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS): HomeSettings {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const text = (k: keyof HomeSettings) => (typeof r[k] === "string" ? (r[k] as string).trim() : (from[k] as string));
   const list = (k: "checks" | "prepare" | "stopPaths") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
-  const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "slots" | "cutOffReturns" | "cutOffWithinHours" | "issuesEveryMinutes") => (r[k] === undefined ? from[k] : Number(r[k]));
+  const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "slots" | "cutOffReturns" | "cutOffWithinHours" | "issuesEveryMinutes" | "limitYou" | "limitAlone" | "ownSharePercent" | "runLimit") => (r[k] === undefined ? from[k] : Number(r[k]));
   const watch = cleanWatch(r, from);
-  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths") };
+  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths"), limitPeriod: (r.limitPeriod === undefined ? from.limitPeriod : r.limitPeriod) as LimitPeriod, limitYou: num("limitYou"), limitAlone: num("limitAlone"), ownSharePercent: num("ownSharePercent"), runLimit: num("runLimit") };
+  checkLimits(s);
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
   if (/^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)$/.test(s.base)) throw new Error(`"${s.base}" is not a branch name.`);
   if (s.base && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(s.base) || s.base.includes(".."))) throw new Error(`"${s.base}" is not a branch name.`);
@@ -164,6 +166,10 @@ export interface TicketView {
   lastWorkAt: string | null;
   /** When it comes back by itself, if it will. Filled by the home screen from the settings. */
   returnsAt: string | null;
+  /** Whose work its latest go is: yours (limit 1), or SoftwareFactory's by itself (limit 2). */
+  bucket: Bucket;
+  /** It waits because its limit is used up, and until when. Filled by the home screen. */
+  limitUntil: string | null;
   /** Where it stands on the fixed road, each step with what proves it. */
   steps: StoryStep[];
   story: { id: number; at: string; who: string; what: string; flagged: boolean }[];
@@ -231,6 +237,7 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
       issue: null,
       parkedFor: state === "parked" && typeof d(ended).parkedFor === "string" ? d(ended).parkedFor : null, endedAt: ended?.ts ?? null,
       returns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after !== "cut off").length, returnsAt: null,
+      bucket: bucketOfSend(sent), limitUntil: null,
       everWorked: ls.some((l) => l.kind === "fence.tested" || l.kind === "run.started"),
       lastWorkAt: go.at(-1)?.ts ?? null,
       cutOff: state === "interrupted" && go.length > 0, cutOffReturns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after === "cut off").length,
@@ -296,7 +303,7 @@ export function createHome(deps: HomeDeps) {
   // The pass opens the page once. The address travels through a command line and the browser's history; after
   // the first use it is worth nothing.
   let passUsed = false;
-  type Run = { ticket: string; stop: AbortController; startedAt: string; lastLineAt: string };
+  type Run = { ticket: string; stop: AbortController; startedAt: string; lastLineAt: string; bucket: Bucket; budget: number };
   /** The runs that work right now, by ticket, in the order they started. */
   const runs = new Map<string, Run>();
   const working = (): ReadonlySet<string> => new Set(runs.keys());
@@ -308,11 +315,20 @@ export function createHome(deps: HomeDeps) {
 
   let all: RecordLine[] = [];
   const returnTime = (t: TicketView, s: HomeSettings) => (t.state === "parked" && t.parkedFor === "limit" && !t.removed && t.endedAt && t.returns < s.parkedReturns ? Date.parse(t.endedAt) + s.parkedWaitMinutes * 60_000 : null);
+  /** The two limits as they stand: what the record says was used this period, less what the runs at work may still use. */
+  const limitsNow = (s: HomeSettings, lines: RecordLine[], now = new Date()) => {
+    const used = spendOf(lines, periodStart(s.limitPeriod, now));
+    const held = { you: 0, alone: 0, own: 0 };
+    for (const r of runs.values()) held[r.bucket] += r.budget;
+    const room = roomLeft(s, { you: used.you + held.you, alone: used.alone + held.alone, own: used.own + held.own });
+    return { period: s.limitPeriod, until: periodEnd(s.limitPeriod, now).toISOString(), used, room, limit: { you: s.limitYou, alone: s.limitAlone, own: Math.round(s.limitAlone * s.ownSharePercent) / 100 } };
+  };
   const state = () => {
     const settings = deps.settings.read();
     const tickets = ticketsFrom(all = record.all(), working());
-    for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); }
-    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes) };
+    const limits = limitsNow(settings, all);
+    for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, limits.room, t.bucket) <= 0) t.limitUntil = limits.until; }
+    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits };
   };
   const stateOf = (settings: HomeSettings, tickets: TicketView[]) => ({
     settings,
@@ -369,12 +385,20 @@ export function createHome(deps: HomeDeps) {
     if (s.hold || rest) return;
     // Settings speak for one project. A ticket of another project waits until Settings point at it again.
     const here = parseGitHubRepo(s.repo);
-    const next = queueOf(ticketsFrom(record.all(), working())).find((t) => !here || t.project === `${here.owner}/${here.name}`);
-    if (!next) return;
+    // The two limits: work of a kind whose limit is used up does not start, and the other kind goes on. Nothing is asked for.
+    const limits = limitsNow(s, record.all());
+    const inLine = queueOf(ticketsFrom(record.all(), working())).filter((t) => !here || t.project === `${here.owner}/${here.name}`);
+    const next = inLine.find((t) => runBudget(s, limits.room, t.bucket) > 0);
+    if (!next) {
+      // When the period turns the limits are whole again: the queue wakes by itself then.
+      if (inLine.length && !wakeTimer) { wakeTimer = setTimeout(() => { wakeTimer = null; try { pump(); tell(); } catch { /* the next thing that happens wakes the queue */ } }, Math.min(Math.max(Date.parse(limits.until) - now, 1000), 2 ** 31 - 1)); wakeTimer.unref?.(); }
+      return;
+    }
+    const budget = runBudget(s, limits.room, next.bucket);
     const repo = parseGitHubRepo(next.project ?? "");
     if (!repo) { record.append({ kind: "run.ended", who: "SF itself", ticket: next.ticket, project: next.project, data: { end: "crashed", reason: "the record does not say which project this ticket is for", where: "before the run" } }); return pump(); }
     const stop = new AbortController();
-    const mine = { ticket: next.ticket, stop, startedAt: new Date().toISOString(), lastLineAt: new Date().toISOString() };
+    const mine: Run = { ticket: next.ticket, stop, startedAt: new Date().toISOString(), lastLineAt: new Date().toISOString(), bucket: next.bucket, budget };
     runs.set(mine.ticket, mine);
     const before = record.all().at(-1)?.id ?? 0;
     const stamp = { ticket: next.ticket, project: next.project };
@@ -396,7 +420,7 @@ export function createHome(deps: HomeDeps) {
       record.append({ kind: "gate.passed", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { kind: a.kind, done: a.done, guesses: a.guesses } });
       return a.done;
     };
-    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, stopPaths: s.stopPaths, done, ...(next.issue ? { issue: next.issue.number } : {}), ...(s.slots > 1 ? { ownCell: true } : {}) }, next.ticket, next.sentence, stop.signal)))
+    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, stopPaths: s.stopPaths, budgetUsd: budget, done, ...(next.issue ? { issue: next.issue.number } : {}), ...(s.slots > 1 ? { ownCell: true } : {}) }, next.ticket, next.sentence, stop.signal)))
       .catch((e) => { record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, project: next.project, data: { end: "crashed", reason: String((e as Error)?.message ?? e).slice(0, 300), where: "before the run" } }); })
       .catch(() => undefined)
       .finally(() => {

@@ -128,14 +128,14 @@
         {
           "id": "stop-list",
           "title": "The stop list: actions that always wait for you",
-          "status": "now",
+          "status": "built",
           "from": "leg 4",
           "done": "A run that tries one is blocked and the factory goes on."
         },
         {
           "id": "limits",
           "title": "Two limits and SoftwareFactory's own share",
-          "status": "later",
+          "status": "now",
           "from": "leg 1",
           "done": "A run parks at the limit and keeps its work."
         },

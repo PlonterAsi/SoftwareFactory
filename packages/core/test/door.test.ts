@@ -60,7 +60,7 @@ describe("the door's small parts", () => {
     expect(stepOf(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Reading the code." }, { type: "tool_use", name: "Bash", input: { command: "ls" } }] } }))!.data).toEqual({ says: "Reading the code.", tools: [{ tool: "Bash", input: '{"command":"ls"}' }] });
     expect(stepOf(JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", is_error: true, content: "denied" }] } }))!.data).toEqual({ toolErrors: ["denied"] });
     const end = stepOf(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "All done.", total_cost_usd: 0.42, num_turns: 7 }))!.end!;
-    expect(end).toEqual({ isError: false, outOfTurns: false, text: "All done.", costUsd: 0.42, turns: 7 });
+    expect(end).toEqual({ isError: false, outOfTurns: false, outOfBudget: false, text: "All done.", costUsd: 0.42, turns: 7 });
     expect(stepOf(JSON.stringify({ type: "result", subtype: "error_max_turns" }))!.end!).toMatchObject({ isError: true, outOfTurns: true });
   });
 
@@ -141,6 +141,8 @@ case "$m" in
   hook) echo "hello from the room" > hello.txt; echo "you see me" > kept-out.txt; mkdir -p .git/hooks .git/info; printf '#!/bin/sh\\necho pwned > hello.txt\\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit; echo kept-out.txt > .git/info/exclude;;
   late) echo hi > hello.txt; say '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__claude_ai_Google_Drive__search_files","input":{}}]}}';;
   docker) echo "FROM node:22" > Dockerfile; echo hi > hello.txt;;
+  budget) echo half > wip.txt; say '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"total_cost_usd":0.5,"num_turns":3}'; exit 1;;
+  resume) [ -f wip.txt ] && echo done > hello.txt;;
   link) mkdir -p tools/cfg && echo '{}' > tools/cfg/settings.json && ln -s tools/cfg .claude; echo hi > hello.txt;;
   secret) echo "token = ghp_abcdefghijklmnopqrstuvwxyz0123456789" > hello.txt;;
   *) echo "hello from the room" > hello.txt;;
@@ -328,5 +330,29 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     await workTicket(d3, settings(), "Add a hello file.");
     expect(await releaseHeld({ record: r3, github: d3.github, workDir: st.workDir }, "T1")).toMatchObject({ ok: false });
     expect(g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean)).toHaveLength(before + 1);
+  });
+
+  it("parks a run at its limit with the work kept, and the next run of the ticket goes on from it", async () => {
+    const before = g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean).length;
+    mode("budget");
+    const r = new TheRecord(), d = deps(r), st = settings({ budgetUsd: 0.5 });
+    const a = await workTicket(d, st, "Add a hello file.");
+    expect(a.end).toBe("parked");
+    expect(a.reason).toMatch(/reached its limit of \$0\.50\. Its unfinished work is kept/);
+    expect(readFileSync(join(shim, "args"), "utf8")).toContain("--max-budget-usd 0.50");
+    const ended = r.all().filter((l) => l.kind === "run.ended").at(-1)!;
+    expect(ended.data).toMatchObject({ end: "parked", parkedFor: "budget", kept: { branch: expect.stringMatching(/^sf\/t1-/) } });
+    expect(r.all().some((l) => l.kind === "result.proposed")).toBe(false);
+    expect(g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean)).toHaveLength(before);
+    // Sent again: the half-done file is there, so the work can be finished.
+    mode("resume");
+    r.append({ kind: "ticket.queued", who: "you", ticket: "T1", project: "o/p", data: {} });
+    const b = await workTicket(d, settings(), "Add a hello file.", "T1");
+    expect(b.end).toBe("passed");
+    expect(r.all().some((l) => l.kind === "run.step" && /goes on from it/.test(String((l.data as any).did)))).toBe(true);
+    expect(g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean)).toHaveLength(before + 1);
+    // A fresh ticket has nothing to go on from, and in this mode makes nothing.
+    const c = await workTicket(deps(new TheRecord()), settings(), "Add a hello file.");
+    expect(c.end).toBe("parked");
   });
 });

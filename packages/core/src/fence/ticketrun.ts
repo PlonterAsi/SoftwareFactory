@@ -37,6 +37,8 @@ export interface TicketSettings {
   ownCell?: boolean;
   /** More paths on the stop list (Settings). They add to the fixed list and never take from it. */
   stopPaths?: string[];
+  /** The most this run may use, in dollars (the two limits). Left out: no ceiling of its own. */
+  budgetUsd?: number;
   model: string;
   maxTurns: number;
   timeLimitMinutes: number;
@@ -190,7 +192,16 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
   try {
     mkdirSync(tmp, { recursive: true });
     const h = history(deps, st);
-    plainGit(h.dir, "bundle", "create", inFile, `refs/heads/${h.base}`);
+    // Unfinished work of this ticket, kept when an earlier run met a limit: the new run goes on from it. It is in
+    // SoftwareFactory's own history as a branch that was never sent anywhere.
+    let resume: string | null = null;
+    const story = record.story(ticket), lastOut = [...story].reverse().find((l) => l.kind === "result.proposed")?.id ?? 0;
+    const keptLine = [...story].reverse().find((l) => l.kind === "run.ended" && l.id > lastOut && (l.data as any)?.kept);
+    const k = ((keptLine?.data as any)?.kept ?? {}) as Record<string, unknown>;
+    if (typeof k.branch === "string" && /^sf\/[a-z0-9-]+$/.test(k.branch) && typeof k.headSha === "string") {
+      try { if (plainGit(h.dir, "rev-parse", "--verify", "-q", `refs/heads/${k.branch}`) === k.headSha) resume = k.branch; } catch { /* not here any more: the run starts clean */ }
+    }
+    plainGit(h.dir, "bundle", "create", inFile, `refs/heads/${h.base}`, ...(resume ? [`refs/heads/${resume}`] : []));
     // Checks written in Settings win. With none written, the project tells its own, read from the starting point
     // before the run touched anything.
     let checks = st.checks, prepare = st.prepare ?? [], checksFound: string[] | undefined, watch: FoundChecks["watch"] = [], covers: string[] | null = null, workspaces = false;
@@ -202,8 +213,17 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     }
     const result = await runInRoom(deps.exec, deps.files, record, {
       run, ticket, project, sentence, bundle: readFileSync(inFile), base: h.base, branch,
-      model: st.model, maxTurns: st.maxTurns, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, ownCell: !!st.ownCell, signal: deps.signal,
+      model: st.model, maxTurns: st.maxTurns, budgetUsd: st.budgetUsd, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, ownCell: !!st.ownCell, ...(resume ? { resume } : {}), signal: deps.signal,
     }, deps.fence);
+    // Parked at a limit with work done: the work comes in as data and stays here, unchecked, for the next run of this ticket.
+    if (result.end === "parked" && result.kept && result.bundle && result.headSha) {
+      try {
+        writeFileSync(outFile, result.bundle);
+        plainGit(h.dir, "bundle", "verify", "-q", outFile);
+        plainGit(h.dir, "-c", "fetch.fsckObjects=true", "fetch", "-q", "--no-tags", outFile, `+refs/heads/${branch}:refs/heads/${branch}`);
+        if (plainGit(h.dir, "rev-parse", `refs/heads/${branch}`) !== result.headSha) plainGit(h.dir, "update-ref", "-d", `refs/heads/${branch}`);
+      } catch { /* what cannot be kept is not kept; the next run starts clean */ }
+    }
     if (result.end !== "passed" || !result.bundle || !result.baseSha || !result.headSha) return out({ run, end: result.end, reason: result.reason, costUsd: result.costUsd });
 
     // The result comes in as data. It is fetched into the bare history: no file of it is written out, no hook of it can run.

@@ -261,3 +261,33 @@ How it behaves:
   from the screen. Work it again instead.
 - The list is closed. Settings can add paths (**More on the stop list**, `stopPaths`, plain text matched anywhere
   in a file's path) and can never take one away. Nothing of the result is run to decide any of this.
+
+## Two limits
+
+SoftwareFactory counts what runs use, in the dollars Claude Code reports for each run, from the record alone
+(`packages/core/src/fence/limits.ts`). With a plan sign-in these are not a bill; they are the measure.
+
+| Limit | What counts under it | Setting |
+| --- | --- | --- |
+| Limit 1 | work you sent: a ticket you opened, answered or sent again | `limitYou`, 100 a month |
+| Limit 2 | what SoftwareFactory does by itself: a ticket it brought back, and its own work | `limitAlone`, 50 a month |
+| Own share | the most of limit 2 SoftwareFactory's own work may use | `ownSharePercent`, 20 |
+| One run | the most a single run may use | `runLimit`, 5 |
+
+The period is a day, a week (from Sunday) or a month (`limitPeriod`), by this computer's calendar.
+
+At a limit nothing is asked for:
+
+- Work of a kind whose limit is used up does not start. The ticket stays waiting and says until when. The other
+  kind goes on.
+- Each run is started with its own ceiling (`--max-budget-usd`): the run limit, or what is left of its limit if
+  that is less. A run at work holds its ceiling back from the limit, so two runs cannot spend the same room.
+- A run that meets its ceiling, its turns or its time limit is parked and **its work is kept**: committed in the
+  room, brought out as data, and held as a branch in SoftwareFactory's own history. It was not checked and is
+  sent nowhere. The next run of that ticket starts with those changes already in its files, and the result is
+  checked whole as always. If the kept work no longer fits the project, the run starts clean and says so.
+- Claude Code counts the ceiling by its own estimate and may pass it a little.
+
+Nothing uses the own share yet: no work of SoftwareFactory's own exists before step 5. The share is counted so
+that work has its ceiling from its first day.
+
