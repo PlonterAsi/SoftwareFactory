@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { RoomExec } from "./fencetest.js";
-import type { FenceSettings } from "./room.js";
+import { AGENT_ENV, type FenceSettings } from "./room.js";
 import { looksLikeLimit, stepOf } from "./door.js";
 
 /**
@@ -54,7 +54,7 @@ export function gatePrompt(q: Pick<GateQuestion, "sentence" | "files" | "asked">
     MARK, ...shown.map((f) => f.split(MARK).join("=")), MARK,
     "",
     "Decide:",
-    "1. Could a careful developer start now without asking the owner anything? Almost always yes. Say no only when the request can be read in two clearly different ways that lead to different work, or when it names something that is plainly not in this project. Small open details are not a reason to ask: make a sensible assumption and list it as a guess.",
+    "1. Could a careful developer start now without asking the owner anything? Almost always yes. Say no only in three cases: the request can be read in two clearly different ways that lead to different work; it names something that is plainly not in this project; or it asks to improve something without saying what should be different (for example 'make the dashboard better', 'clean this up', 'improve the app'), so that any test of done would be your invention and not the owner's wish. In the third case ask what should be different when it is done. Small open details are not a reason to ask: make a sensible assumption and list it as a guess.",
     "2. The test of done: one to four short statements, each something a person could look at and see to be true when the work is finished. Stay inside what the owner asked.",
     "3. The kind: bug (something is broken), task (a chore with no visible change for users), or request (anything else).",
     "",
@@ -91,8 +91,8 @@ export async function askGate(exec: RoomExec, s: FenceSettings, q: GateQuestion)
 d=$(mktemp -d ${s.copies}/gate-XXXXXXXX) || exit 97
 cd "$d" || exit 97
 unset ANTHROPIC_API_KEY
-export ENABLE_CLAUDEAI_MCP_SERVERS=false
-claude -p --output-format stream-json --verbose --model ${q.model} --max-turns 1 --tools "" --setting-sources user --strict-mcp-config --permission-mode dontAsk <<'SF_GATE_${tag}'
+${AGENT_ENV}
+claude -p --output-format stream-json --verbose --model ${q.model} --max-turns 1 --tools "" --disable-slash-commands --setting-sources user --strict-mcp-config --permission-mode dontAsk <<'SF_GATE_${tag}'
 ${gatePrompt(q).split(`SF_GATE_${tag}`).join("")}
 SF_GATE_${tag}
 code=$?

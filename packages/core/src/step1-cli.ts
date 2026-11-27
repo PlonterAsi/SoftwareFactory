@@ -74,6 +74,7 @@ async function main(): Promise<void> {
       // A run of this start waits until the room was cleared of an earlier start's leftovers.
       work: async (st, ticket, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: () => runFenceTest(exec, fence, windowsProbe()) }, { ...st, workDir }, sentence, ticket)),
     });
+    home.watchIssues();
     // The two things SoftwareFactory itself says out loud.
     let beat: ReturnType<typeof setInterval> | null = null, ours = false;
     const say = (line: string, ticket: string | null, why: string) => void speak({ record, settings: () => cleanWatch(home.state().settings) }, { line, ticket, why });

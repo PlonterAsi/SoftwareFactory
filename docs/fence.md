@@ -174,10 +174,10 @@ them and cannot change them; they are in the story and in the proposal on GitHub
 
 ## What the agent is started with
 
-The agent is started with `--setting-sources user --strict-mcp-config` and with `ENABLE_CLAUDEAI_MCP_SERVERS=false`.
+Every agent in the room (the run, the fence test's, the gate's reader) is started with the same line from `room.ts`: `--tools "Bash,Read,Edit,Write" --disable-slash-commands --setting-sources user --strict-mcp-config`, and with `ENABLE_CLAUDEAI_MCP_SERVERS=false`. Four tools and no more: no sub-agents, no scheduling, no messages, no skills.
 
 - The project's own Claude settings (`.claude/settings.json` in the copy) do not count inside the room. They could deny reads (which hid `node_modules` from the run) and name hooks and plugins; only the room's managed rules and the worker's sign-in apply.
-- The room is signed in with the owner's account, so that account's connectors (mail, files, documents) would otherwise be offered to the run as tools, and those do not pass the room's network list. They are switched off, and SF reads the first line of the agent's stream: if any `mcp__` tool or connected server is listed, the run is ended at once and nothing of it is kept.
+- The room is signed in with the owner's account, so that account's connectors (mail, files, documents) would otherwise be offered to the run as tools, and those do not pass the room's network list. They are switched off, and SF reads the first line of the agent's stream: if any `mcp__` tool or server is listed, or one is used later, the run is ended and nothing of it is kept. A run whose first line never lists its tools is not kept either. The flags are the wall; this is the alarm.
 - The ready gate's reader is started the same way, with no tools at all.
 
 ## The story in steps
@@ -197,3 +197,14 @@ A run that meets the plan limit is parked with `parkedFor: "limit"` in its end l
 - **The ticket comes back.** After the wait SoftwareFactory writes `ticket.queued` in its own name and the ticket waits its turn again, behind tickets that waited longer. Its test of done stays as it was written. One ticket comes back at most `parkedReturns` times (default 2; 0 means it waits for you); after that it stays parked and says so.
 
 Parked for another reason (the time limit, all its turns, nothing changed) does not come back by itself: the same run would end the same way. Those wait for Work it again. The work of a parked run is not kept yet; that comes with the two limits in step 3.
+
+## GitHub issues
+
+Off by default (`issues: "off"`). Settings turn it to `in` or `both`; `issuesLabel` (default `sf`) and `issuesEveryMinutes` (default 5) go with it, and "Look at GitHub now" on the screen looks at once.
+
+- **In.** An open issue of the project with the label becomes a ticket, once. Only the owner's own issues: written by the sign-in in use, or marked by GitHub as the owner's. An issue is text from outside and a ticket is worked by a run, so anyone else's issue is counted and left alone. A `bug` label makes the ticket a bug.
+- **Out** (`both`). A ticket that still waits gets an issue (never an old, already worked one) with the label and a hidden mark. If the link was lost before it was written, the mark finds the issue again; it is never made twice.
+- **The link** is one line in the record (`issue.linked`). The ticket shows it, and the proposal says `Closes #N`, so accepting closes the issue on GitHub by GitHub's own rule.
+- **Closed on GitHub** while the ticket still waits: the ticket leaves the list (it can be put back). A ticket that was already worked keeps its place.
+
+Not yet: words changed on one side after the link do not travel to the other, and nothing is written on an issue beyond opening it.

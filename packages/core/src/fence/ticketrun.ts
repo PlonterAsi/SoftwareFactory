@@ -30,6 +30,8 @@ export interface TicketSettings {
   prepare?: string[];
   /** The test of done from the ready gate, when there is one. */
   done?: string[];
+  /** The GitHub issue this ticket is linked to, when there is one: the proposal closes it when it is accepted. */
+  issue?: number;
   model: string;
   maxTurns: number;
   timeLimitMinutes: number;
@@ -99,12 +101,12 @@ export const TICKET_KINDS = ["request", "bug", "task", "idea", "plan", "question
 export type TicketKind = (typeof TICKET_KINDS)[number];
 
 /** Open a ticket: it gets its name and its first line in the record. Nothing runs yet. */
-export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request"): string {
+export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | null = null): string {
   // Counting and writing happen under one lock, so two SoftwareFactory windows cannot give two tickets one name.
   record.db.exec("BEGIN IMMEDIATE");
   try {
     const ticket = `T${record.all().filter((l) => l.kind === "ticket.opened").length + 1}`;
-    record.append({ kind: "ticket.opened", who: "you", ticket, project, data: { sentence: sentence.trim(), kind } });
+    record.append({ kind: "ticket.opened", who: "you", ticket, project, data: { sentence: sentence.trim(), kind, ...(from ?? {}) } });
     record.db.exec("COMMIT");
     return ticket;
   } catch (e) { record.db.exec("ROLLBACK"); throw e; }
@@ -183,7 +185,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     // Out: the branch, and a draft pull request. Never the base branch.
     const title = `${ticket}: ${quiet(sentence.trim().split("\n")[0]!).slice(0, 120)}`;
     if (deps.signal?.aborted) return hold("you pressed stop before the result left this computer");
-    const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", ...(st.done?.length ? ["Done when (written by SoftwareFactory before the run, from the request):", "", ...st.done.map((x) => `- ${quiet(x)}`), ""] : []), "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.${checksFound ? " It found them in the project as it was before the run." : ""}${unchecked.length ? ` These changed files lie outside what those checks look at, so nothing checked them: ${unchecked.slice(0, 10).map((f) => `\`${quiet(f)}\``).join(", ")}${unchecked.length > 10 ? " and more" : ""}.` : ""}` : checksFound ? "SoftwareFactory found no build or type check in this project, so nothing was checked." : "No checks were set for this project."].join("\n");
+    const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", ...(Number.isInteger(st.issue) && st.issue! > 0 ? [`Closes #${st.issue}`, ""] : []), `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", ...(st.done?.length ? ["Done when (written by SoftwareFactory before the run, from the request):", "", ...st.done.map((x) => `- ${quiet(x)}`), ""] : []), "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.${checksFound ? " It found them in the project as it was before the run." : ""}${unchecked.length ? ` These changed files lie outside what those checks look at, so nothing checked them: ${unchecked.slice(0, 10).map((f) => `\`${quiet(f)}\``).join(", ")}${unchecked.length > 10 ? " and more" : ""}.` : ""}` : checksFound ? "SoftwareFactory found no build or type check in this project, so nothing was checked." : "No checks were set for this project."].join("\n");
     let url: string, number: number | null = null;
     if (deps.github.hasToken()) {
       // openPr pushes HEAD, so HEAD of the bare history points at the ticket's branch for the length of the call.
@@ -209,10 +211,11 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
 export function storyLine(l: RecordLine): string {
     const d = l.data as any;
     const what =
-      l.kind === "ticket.opened" ? `you asked: ${d.sentence}` :
+      l.kind === "ticket.opened" ? `you asked${d.from === "github" ? ` (issue #${d.issue} on GitHub)` : ""}: ${d.sentence}` :
+      l.kind === "issue.linked" ? (d.direction === "in" ? `taken from issue #${d.number} on GitHub` : `issue #${d.number} opened on GitHub for it`) :
       l.kind === "ticket.edited" ? `you changed it${d.sentence ? ` to: ${d.sentence}` : ""}${d.kind ? ` (kind: ${d.kind})` : ""}` :
       l.kind === "ticket.queued" ? (d.returned ? `it came back to the queue by itself: ${d.why ?? "the wait is over"}` : "you sent it to be worked again") :
-      l.kind === "ticket.removed" ? "you removed it from the list" :
+      l.kind === "ticket.removed" ? (d.from === "github" ? `it left the list: ${d.why}` : "you removed it from the list") :
       l.kind === "ticket.restored" ? "you put it back on the list" :
       l.kind === "gate.asked" ? `before starting, SoftwareFactory asks: ${d.question}` :
       l.kind === "gate.answered" ? `you answered: ${d.answer}` :

@@ -180,3 +180,13 @@ install -d -m 0750 -o ${s.worker} -g ${s.worker} ${s.copies}
 echo "room ready"
 `;
 }
+
+/**
+ * How every agent in the room is started, the fence test's and the gate's reader included: four tools and no more,
+ * no skills or commands, only the room's own rules and the worker's sign-in (never the project's own Claude
+ * settings), and no servers of tools from anywhere.
+ */
+export const AGENT_TOOLS = ["Bash", "Read", "Edit", "Write"] as const;
+export const AGENT_FLAGS = `--tools "${AGENT_TOOLS.join(",")}" --disable-slash-commands --setting-sources user --strict-mcp-config`;
+/** The switch that keeps the signed-in account's connectors (mail, files, documents) out of an agent. */
+export const AGENT_ENV = "export ENABLE_CLAUDEAI_MCP_SERVERS=false";

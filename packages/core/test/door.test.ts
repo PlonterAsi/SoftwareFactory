@@ -36,7 +36,7 @@ describe("the record", () => {
     const r = new TheRecord();
     expect(() => r.append({ kind: "made.up" as any, who: "you" })).toThrow();
     expect(() => r.append({ kind: "run.step", who: " " })).toThrow();
-    expect(RECORD_KINDS.length).toBeLessThan(20);
+    expect(RECORD_KINDS.length).toBeLessThan(25);
   });
 
   it("takes secrets out before storing, keeps the line and flags it", () => {
@@ -55,6 +55,7 @@ describe("the door's small parts", () => {
     expect(stepOf(JSON.stringify({ type: "system", subtype: "init", tools: ["Bash", "Read"] }))).toEqual({ data: { did: "agent started", toolCount: 2 }, started: true });
     expect(stepOf(JSON.stringify({ type: "system", subtype: "init", tools: ["Bash", "mcp__claude_ai_Gmail__send_message"], mcp_servers: [{ name: "claude.ai Gmail", status: "connected" }, { name: "late", status: "pending" }] }))!.outside).toEqual(["mcp__claude_ai_Gmail__send_message", "server claude.ai Gmail", "server late"]);
     expect(stepOf(JSON.stringify({ type: "system", subtype: "init" }))).toBeNull();
+    expect(stepOf(JSON.stringify({ type: "system", subtype: "init", tools: ["Bash", "RemoteTrigger"] }))!.data).toEqual({ did: "agent started", toolCount: 2, otherTools: ["RemoteTrigger"] });
     expect(stepOf(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__x__y", input: {} }] } }))!.outside).toEqual(["mcp__x__y"]);
     expect(stepOf(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Reading the code." }, { type: "tool_use", name: "Bash", input: { command: "ls" } }] } }))!.data).toEqual({ says: "Reading the code.", tools: [{ tool: "Bash", input: '{"command":"ls"}' }] });
     expect(stepOf(JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", is_error: true, content: "denied" }] } }))!.data).toEqual({ toolErrors: ["denied"] });
@@ -221,7 +222,7 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     expect(a.reason).toMatch(/tools from outside the room.*mcp__claude_ai_Gmail__send_message/);
     expect(a.pr ?? null).toBeNull();
     const args = readFileSync(join(shim, "args"), "utf8");
-    expect(args).toMatch(/--setting-sources user --strict-mcp-config/);
+    expect(args).toMatch(/--tools Bash,Read,Edit,Write --disable-slash-commands --setting-sources user --strict-mcp-config/);
     expect(args).toMatch(/connectors=false/);
     // A tool from outside that was not listed at the start but is used later ends the run the same way.
     mode("late");

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { ExecResult, RoomExec, RoomFiles } from "./fencetest.js";
-import { type FenceSettings, fenceSettings } from "./room.js";
+import { AGENT_ENV, AGENT_FLAGS, AGENT_TOOLS, type FenceSettings, fenceSettings } from "./room.js";
+export { AGENT_FLAGS } from "./room.js";
 import type { RunEnd, TheRecord } from "./record.js";
 
 /**
@@ -111,12 +112,10 @@ fenced() {
 # git as ours: our name, no hooks, no signing, whatever the copy's own settings say.
 ourgit() { fenced git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false -c user.name="SoftwareFactory worker" -c user.email=worker@softwarefactory.invalid "$@"; }
 # The agent sees no tools from the owner's own account (mail, files, documents): the switch is off here, and the run is ended if any shows anyway.
-agent_env() { export ${env}; export PATH=/usr/local/go/bin:$PATH; export ENABLE_CLAUDEAI_MCP_SERVERS=false; }
+agent_env() { export ${env}; export PATH=/usr/local/go/bin:$PATH; ${AGENT_ENV}; }
 `;
 }
 
-/** How the agent is started: only the room's own rules and the worker's sign-in count, never the project's own Claude settings, and no outside tools. */
-export const AGENT_FLAGS = "--setting-sources user --strict-mcp-config";
 
 interface AgentEnd { isError: boolean; outOfTurns: boolean; text: string; costUsd: number; turns: number }
 
@@ -146,7 +145,8 @@ export function stepOf(line: string): { data: Record<string, unknown>; end?: Age
     // Every listed server counts, whatever its state: one that connects late brings its tools after this line.
     const servers: string[] = Array.isArray(j.mcp_servers) ? j.mcp_servers.map((m: any) => String(m?.name ?? m)) : [];
     const outside = [...new Set([...tools.filter((n) => n.startsWith("mcp__")), ...servers.map((n) => `server ${n}`)])];
-    return { data: { did: "agent started", toolCount: tools.length, ...(outside.length ? { outsideTools: outside.slice(0, 20) } : {}) }, started: true, ...(outside.length ? { outside } : {}) };
+    const extra = tools.filter((n) => !n.startsWith("mcp__") && !(AGENT_TOOLS as readonly string[]).includes(n));
+    return { data: { did: "agent started", toolCount: tools.length, ...(extra.length ? { otherTools: extra.slice(0, 30) } : {}), ...(outside.length ? { outsideTools: outside.slice(0, 20) } : {}) }, started: true, ...(outside.length ? { outside } : {}) };
   }
   if (j.type === "result") {
     const sub = typeof j.subtype === "string" ? j.subtype : "";

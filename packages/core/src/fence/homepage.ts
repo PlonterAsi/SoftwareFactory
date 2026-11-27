@@ -150,7 +150,7 @@ ol.story li.flag .x { color: var(--bad); }
   </section>
 
   <h2 id="tickets-title">Tickets</h2>
-  <div class="row" id="queue-row"><button id="hold" type="button">Hold the queue</button><span class="hint" id="queue-hint"></span><button id="show-removed" type="button" hidden></button></div>
+  <div class="row" id="queue-row"><button id="hold" type="button">Hold the queue</button><span class="hint" id="queue-hint"></span><button id="show-removed" type="button" hidden></button><button id="issues-now" type="button" hidden>Look at GitHub now</button><span class="hint" id="issues-hint"></span></div>
   <section class="card" aria-labelledby="tickets-title"><div id="tickets"><p class="empty">No tickets yet. Your first sentence starts one.</p></div></section>
 
   <details class="card settings" id="settings">
@@ -166,6 +166,9 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-gate-model">Model that reads the ticket</label><input id="s-gate-model" autocomplete="off" spellcheck="false"></div>
       <div><label for="s-park-wait">Rest after the plan limit, minutes</label><input id="s-park-wait" type="number" min="1" max="1440"></div>
       <div><label for="s-park-returns">A parked ticket comes back by itself, times <span class="hint">0: it waits for you</span></label><input id="s-park-returns" type="number" min="0" max="20"></div>
+      <div><label for="s-issues">GitHub issues</label><select id="s-issues"><option value="off">Off</option><option value="in">Your labelled issues become tickets</option><option value="both">Both ways: tickets also get an issue</option></select></div>
+      <div><label for="s-issues-label">Issue label <span class="hint">only your own issues with this label come in</span></label><input id="s-issues-label" autocomplete="off" spellcheck="false"></div>
+      <div><label for="s-issues-every">Look at GitHub every, minutes</label><input id="s-issues-every" type="number" min="1" max="1440"></div>
       <div><label for="s-update">Updates</label><select id="s-update"><option value="yes">Install by themselves at start</option><option value="no">Never by themselves</option></select></div>
       <div><label for="s-phone">Lines to your phone</label><select id="s-phone"><option value="none">None, the home screen only</option><option value="ntfy">The ntfy app</option></select></div>
       <div class="wide"><label for="s-topic">ntfy channel name <span class="hint">16 or more letters and digits; whoever knows it can read the lines</span></label><input id="s-topic" autocomplete="off" spellcheck="false"></div>
@@ -225,6 +228,7 @@ ol.story li.flag .x { color: var(--bad); }
       box.appendChild(ta); box.appendChild(erow);
     } else box.appendChild(el("p", "sentence", t.sentence));
     box.appendChild(el("p", t.state === "asked" ? "sentence" : "says", (t.state === "asked" ? "SoftwareFactory asks before it starts: " : "") + t.says));
+    if (t.issue) { var ip = el("p", "says"); if (t.issue.url) { var ia = el("a", "", "Issue #" + t.issue.number + " on GitHub"); ia.href = t.issue.url; ia.target = "_blank"; ia.rel = "noopener noreferrer"; ip.appendChild(ia); } else ip.textContent = "Issue #" + t.issue.number + " on GitHub"; box.appendChild(ip); }
     if (t.returnsAt) box.appendChild(el("p", "says", "It comes back to the queue by itself at " + clock(t.returnsAt) + "."));
     else if (t.state === "parked" && t.parkedFor === "limit") box.appendChild(el("p", "says", "It came back by itself " + t.returns + (t.returns === 1 ? " time" : " times") + " already. Now it waits for you: Work it again sends it."));
     if (t.state === "asked" && !t.removed) {
@@ -379,6 +383,8 @@ ol.story li.flag .x { color: var(--bad); }
     $("start").disabled = !s.settings.repo;
     var waiting = 0, gone = 0; s.tickets.forEach(function (x) { if (x.removed) gone++; else if (x.state === "waiting") waiting++; });
     $("start-hint").textContent = !s.settings.repo ? "Choose the project in Settings first." : (run || waiting ? "It will wait for its turn." : "");
+    $("issues-now").hidden = s.settings.issues === "off";
+    $("issues-hint").textContent = s.settings.issues === "off" || !s.issuesSeen ? "" : s.issuesSeen.ok ? "GitHub issues looked at " + clock(s.issuesSeen.at) + "." : "GitHub issues could not be read: " + s.issuesSeen.why;
     $("hold").textContent = s.settings.hold ? "Let the queue go" : "Hold the queue";
     $("queue-hint").textContent = s.settings.hold ? "The queue is held. " + waiting + " waiting; nothing new starts until you let it go." : s.resting ? "The queue rests until " + clock(s.resting.until) + ": " + s.resting.why + ". Work it again on a ticket starts sooner." : (waiting ? waiting + " waiting for a turn." : "");
     $("show-removed").hidden = !gone;
@@ -421,7 +427,7 @@ ol.story li.flag .x { color: var(--bad); }
       settingsLoaded = true;
       $("s-repo").value = s.settings.repo; $("s-base").value = s.settings.base; $("s-model").value = s.settings.model;
       $("s-turns").value = s.settings.maxTurns; $("s-minutes").value = s.settings.timeLimitMinutes;
-      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
+      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
       $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n");
     }
     // Settings stay folded when everything a run needs is set; they open by themselves only when the project is missing.
@@ -443,12 +449,13 @@ ol.story li.flag .x { color: var(--bad); }
     $("start").disabled = true;
     post("/api/step1/work", { sentence: text, kind: $("kind").value }).then(function (r) { if (r.ok) { $("sentence").value = ""; } else { $("ask-msg").textContent = r.why; $("start").disabled = false; } load(); });
   };
+  $("issues-now").onclick = function () { $("issues-now").disabled = true; post("/api/step1/issues", {}).then(function () { $("issues-now").disabled = false; load(); }); };
   $("hold").onclick = function () { $("hold").disabled = true; post("/api/step1/settings", { hold: !(last && last.settings.hold) }).then(function () { $("hold").disabled = false; load(); }); };
   $("show-removed").onclick = function () { showRemoved = !showRemoved; drawn = null; render(last); };
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
-    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value) })
+    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value) })
       .then(function (r) { if (r.ok) { $("save-hint").textContent = "Saved."; settingsLoaded = false; load(); } else { $("set-msg").textContent = r.why; } });
   };
 

@@ -7,6 +7,7 @@ import type { GateResult } from "./gate.js";
 import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
 import { type Sender, type WatchSettings, WATCH_DEFAULTS, cleanWatch, speak } from "./watchdog.js";
+import { type IssueSync, type IssuesMode, syncIssues } from "./issues.js";
 import { type StoryStep, stepsOf } from "./story.js";
 import { type TicketKind, type TicketOutcome, type TicketSettings, TICKET_KINDS, openTicket, storyLine } from "./ticketrun.js";
 
@@ -40,18 +41,24 @@ export interface HomeSettings extends WatchSettings {
   parkedWaitMinutes: number;
   /** How many times one ticket may come back by itself. 0: a parked ticket waits for you. */
   parkedReturns: number;
+  /** GitHub issues: "off", "in" (your labelled issues become tickets), or "both" (tickets also get an issue). */
+  issues: IssuesMode;
+  /** Only issues with this label come in, and issues opened from here carry it. */
+  issuesLabel: string;
+  /** How often GitHub is looked at, in minutes. */
+  issuesEveryMinutes: number;
 }
 
-export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2 };
+export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5 };
 
 /** Check what came from the screen. Returns clean settings or says, in a sentence, what is wrong. */
 export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS): HomeSettings {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const text = (k: keyof HomeSettings) => (typeof r[k] === "string" ? (r[k] as string).trim() : (from[k] as string));
   const list = (k: "checks" | "prepare") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
-  const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns") => (r[k] === undefined ? from[k] : Number(r[k]));
+  const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "issuesEveryMinutes") => (r[k] === undefined ? from[k] : Number(r[k]));
   const watch = cleanWatch(r, from);
-  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns") };
+  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes") };
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
   if (/^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)$/.test(s.base)) throw new Error(`"${s.base}" is not a branch name.`);
   if (s.base && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(s.base) || s.base.includes(".."))) throw new Error(`"${s.base}" is not a branch name.`);
@@ -61,6 +68,9 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   if (!Number.isInteger(s.timeLimitMinutes) || s.timeLimitMinutes < 1 || s.timeLimitMinutes > 600) throw new Error("The time limit must be from 1 to 600 minutes.");
   if (!Number.isInteger(s.parkedWaitMinutes) || s.parkedWaitMinutes < 1 || s.parkedWaitMinutes > 1440) throw new Error("The wait after the plan limit must be from 1 to 1440 minutes.");
   if (!Number.isInteger(s.parkedReturns) || s.parkedReturns < 0 || s.parkedReturns > 20) throw new Error("A ticket may come back by itself 0 to 20 times.");
+  if (!["off", "in", "both"].includes(s.issues)) throw new Error("GitHub issues are off, in, or both.");
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,48}$/.test(s.issuesLabel)) throw new Error("The issue label is 1 to 49 letters, digits, spaces, dots, dashes or underscores.");
+  if (!Number.isInteger(s.issuesEveryMinutes) || s.issuesEveryMinutes < 1 || s.issuesEveryMinutes > 1440) throw new Error("GitHub is looked at every 1 to 1440 minutes.");
   for (const c of [...s.checks, ...s.prepare]) if (c.length > 500 || /[\r\n\0]/.test(c)) throw new Error("A check or a prepare command is one line of at most 500 characters.");
   if (s.checks.length > 20 || s.prepare.length > 20) throw new Error("At most 20 checks and 20 prepare commands.");
   return s;
@@ -119,6 +129,8 @@ export interface TicketView {
   asked: { question: string; answer: string } | null;
   /** The record line that made it wait (the order of the queue). */
   waitingSince: number;
+  /** The GitHub issue it is linked to, when there is one. */
+  issue: { number: number; url: string } | null;
   /** Why it is parked, when the record says: "limit" is the plan limit, which passes by itself. */
   parkedFor: string | null;
   /** When its latest go ended. */
@@ -137,6 +149,8 @@ const WORKED = ["request", "bug", "task"];
 
 /** Every ticket, newest first, drawn from the record alone. `running` is the ticket being worked right now, if any. */
 export function ticketsFrom(lines: RecordLine[], running: string | null): TicketView[] {
+  const links = new Map<string, { number: number; url: string }>();
+  for (const l of lines) if (l.kind === "issue.linked" && l.ticket && l.project) links.set(`${l.project}\n${l.ticket}`, { number: Number((l.data as any).number), url: String((l.data as any).url ?? "") });
   const by = new Map<string, RecordLine[]>();
   for (const l of lines) if (l.ticket) (by.get(l.ticket) ?? by.set(l.ticket, []).get(l.ticket)!).push(l);
   const out: TicketView[] = [];
@@ -147,7 +161,7 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
     const lastOf = <K extends RecordLine["kind"]>(from: RecordLine[], ...k: K[]) => [...from].reverse().find((l) => (k as string[]).includes(l.kind));
     // The latest go: what happened since the ticket was opened or last sent to be worked again.
     const sent = lastOf(ls, "ticket.opened", "ticket.queued")!;
-    const go = ls.filter((l) => l.id > sent.id && !l.kind.startsWith("ticket.") && !l.kind.startsWith("gate.") && l.kind !== "watchdog.spoke" && l.kind !== "setting.changed");
+    const go = ls.filter((l) => l.id > sent.id && !l.kind.startsWith("ticket.") && !l.kind.startsWith("gate.") && l.kind !== "issue.linked" && l.kind !== "watchdog.spoke" && l.kind !== "setting.changed");
     // The gate. A question belongs to the words it was asked about: changed words start the gate afresh.
     const wordsAt = lastOf(ls.filter((l) => l.kind === "ticket.opened" || typeof d(l).sentence === "string"), "ticket.opened", "ticket.edited")!.id;
     const gate = ls.filter((l) => l.id > wordsAt && l.kind.startsWith("gate."));
@@ -185,12 +199,14 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
       canAgain: !removed && ["proposed", "failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held"].includes(state),
       removed, place: null, question: state === "asked" ? question : null, done: Array.isArray(d(gPassed).done) ? (d(gPassed).done as unknown[]).map(String) : [],
       asked: gAsked && gAnswered ? { question: String(d(gAsked).question ?? ""), answer: String(d(gAnswered).answer ?? "") } : null, gatePassed: !!gPassed && !d(gPassed).skipped, waitingSince: Math.max(sent.id, lastOf(ls, "ticket.restored")?.id ?? 0),
+      issue: null,
       parkedFor: state === "parked" && typeof d(ended).parkedFor === "string" ? d(ended).parkedFor : null, endedAt: ended?.ts ?? null,
       returns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned).length, returnsAt: null,
       steps: WORKED.includes(kindNow) ? stepsOf(ls, running === ticket) : [],
       story: ls.map((l) => ({ id: l.id, at: l.ts, who: l.who, what: storyLine(l), flagged: l.flagged })),
     });
   }
+  for (const t of out) { const l = t.project ? links.get(`${t.project}\n${t.ticket}`) : undefined; if (l && l.number > 0) t.issue = { number: l.number, url: /^https:\/\//.test(l.url) ? l.url : "" }; }
   queueOf(out).forEach((t, i) => { t.place = i + 1; });
   return out.sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1));
 }
@@ -257,7 +273,7 @@ export function createHome(deps: HomeDeps) {
     const settings = deps.settings.read();
     const tickets = ticketsFrom(all = record.all(), running?.ticket ?? null);
     for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); }
-    return { ...stateOf(settings, tickets), resting: running ? null : restOf(all, settings.parkedWaitMinutes) };
+    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: running ? null : restOf(all, settings.parkedWaitMinutes) };
   };
   const stateOf = (settings: HomeSettings, tickets: TicketView[]) => ({
     settings,
@@ -333,14 +349,14 @@ export function createHome(deps: HomeDeps) {
       record.append({ kind: "gate.passed", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { kind: a.kind, done: a.done, guesses: a.guesses } });
       return a.done;
     };
-    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, done }, next.ticket, next.sentence, stop.signal)))
+    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, done, ...(next.issue ? { issue: next.issue.number } : {}) }, next.ticket, next.sentence, stop.signal)))
       .catch((e) => { record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, project: next.project, data: { end: "crashed", reason: String((e as Error)?.message ?? e).slice(0, 300), where: "before the run" } }); })
       .catch(() => undefined)
       .finally(() => {
         let again = true;
         try {
           // A go that left no line of work would wait again and start again without end: it is given an end.
-          const trace = record.since(before).some((l) => l.ticket === mine.ticket && !l.kind.startsWith("ticket.") && l.kind !== "gate.passed" && l.kind !== "gate.answered" && l.kind !== "watchdog.spoke");
+          const trace = record.since(before).some((l) => l.ticket === mine.ticket && !l.kind.startsWith("ticket.") && l.kind !== "gate.passed" && l.kind !== "gate.answered" && l.kind !== "issue.linked" && l.kind !== "watchdog.spoke");
           if (!trace) record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, project: next.project, data: { end: "crashed", reason: "the run left no trace", where: "before the run" } });
         } catch { again = false; /* the record could not be written: the queue rests until something wakes it */ }
         if (running === mine) running = null;
@@ -349,8 +365,30 @@ export function createHome(deps: HomeDeps) {
     tell();
   }
 
+  /** One look at GitHub's issues, as Settings say. One at a time; never throws. */
+  let syncing: Promise<IssueSync> | null = null, lastSync: { at: string; ok: boolean; why: string | null } | null = null;
+  function issues(): Promise<IssueSync> {
+    if (syncing) return syncing;
+    const s = deps.settings.read(), repo = parseGitHubRepo(s.repo);
+    if (!repo || s.issues === "off" || closing) return Promise.resolve({ ok: true, in: [], out: [], closed: [], skipped: 0 });
+    const tickets = ticketsFrom(record.all(), running?.ticket ?? null).map((t) => ({ ticket: t.ticket, project: t.project, sentence: t.sentence, kind: t.kind, removed: t.removed, untouched: ["waiting", "asked", "kept"].includes(t.state) }));
+    syncing = syncIssues({ record, github }, repo, { mode: s.issues, label: s.issuesLabel, tickets })
+      .then((r) => { lastSync = { at: new Date().toISOString(), ok: r.ok, why: r.why ?? null }; return r; })
+      .finally(() => { syncing = null; try { tell(); pump(); } catch { /* the next thing that happens wakes the queue */ } });
+    return syncing;
+  }
+  /** Look at GitHub now and then, as often as Settings say. The caller starts it; closing ends it. */
+  let issueTimer: ReturnType<typeof setInterval> | null = null;
+  function watchIssues(): void {
+    if (issueTimer) return;
+    let last = 0;
+    const tick = () => { const s = deps.settings.read(); if (s.issues !== "off" && Date.now() - last >= s.issuesEveryMinutes * 60_000) { last = Date.now(); void issues(); } };
+    issueTimer = setInterval(tick, 30_000); issueTimer.unref?.();
+    tick();
+  }
+
   /** SoftwareFactory is closing: the run that works is stopped by the caller, and nothing new starts. */
-  function close(): void { closing = true; if (wakeTimer) clearTimeout(wakeTimer); wakeTimer = null; }
+  function close(): void { closing = true; if (wakeTimer) clearTimeout(wakeTimer); wakeTimer = null; if (issueTimer) clearInterval(issueTimer); issueTimer = null; }
 
   function stopNow(): { ok: boolean; why?: string } {
     if (!running) return { ok: false, why: "Nothing is running." };
@@ -523,6 +561,7 @@ export function createHome(deps: HomeDeps) {
         if (url.pathname === "/api/step1/ticket/remove") { const r = remove(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/restore") { const r = restore(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/answer") { const r = answer(String(b.ticket ?? ""), b.answer); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/issues") { const r = await issues(); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/again") { const r = again(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/stop") { const r = stopNow(); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/look") { const r = await look(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
@@ -545,5 +584,5 @@ export function createHome(deps: HomeDeps) {
     }
   }
 
-  return { handler, state, start, pump, close, answer, edit, remove, restore, again, stop: stopNow, accept, saveSettings, key, pass, cookie, cookieName, look, alive, isRunning: () => !!running };
+  return { handler, state, start, pump, close, issues, watchIssues, answer, edit, remove, restore, again, stop: stopNow, accept, saveSettings, key, pass, cookie, cookieName, look, alive, isRunning: () => !!running };
 }

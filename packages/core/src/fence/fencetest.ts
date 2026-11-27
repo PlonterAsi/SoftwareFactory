@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { type FenceSettings, fenceSettings } from "./room.js";
+import { AGENT_ENV, AGENT_FLAGS, type FenceSettings, fenceSettings } from "./room.js";
 
 /**
  * The fence proves itself before every run (build step 1, slice 1).
@@ -214,8 +214,9 @@ printf '%s\\n' '${control}' > inside.txt && echo copied
 cd ${dir} || exit 97
 ${opts.token ? `export CLAUDE_CODE_OAUTH_TOKEN='${opts.token.replace(/'/g, "")}'` : ""}
 unset ANTHROPIC_API_KEY
+${AGENT_ENV}
 command -v claude >/dev/null 2>&1 || { echo SF_NO_CLAUDE; exit 96; }
-claude -p --output-format json --model ${s.testModel} --max-turns 6 --permission-mode dontAsk <<'SF_PROMPT_EOF'
+claude -p --output-format json --model ${s.testModel} --max-turns 6 ${AGENT_FLAGS} --permission-mode dontAsk <<'SF_PROMPT_EOF'
 ${wallTwoPrompt(canary)}
 SF_PROMPT_EOF
 `, s.stepTimeoutMs * 2);
