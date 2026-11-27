@@ -40,9 +40,9 @@ h2 { font-size: 15px; margin: 34px 0 10px; color: var(--soft); font-weight: 600;
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
 label { display: block; font-weight: 600; margin-bottom: 6px; }
 .hint { color: var(--soft); font-size: 14px; font-weight: 400; }
-textarea, input { width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+textarea, input, select { width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 textarea { min-height: 92px; resize: vertical; }
-textarea:focus, input:focus, button:focus-visible, summary:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+textarea:focus, input:focus, select:focus, button:focus-visible, summary:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
 button, a.btn { font: inherit; font-weight: 600; border-radius: 8px; padding: 9px 16px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; display: inline-block; }
 button.main { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
@@ -50,6 +50,11 @@ button.good { background: var(--good); color: var(--card); border-color: var(--g
 button.stop { background: var(--bad); color: var(--card); border-color: var(--bad); }
 button:disabled { opacity: 0.55; cursor: default; }
 .msg { font-size: 15px; color: var(--bad); min-height: 1.4em; margin: 8px 0 0; overflow-wrap: anywhere; }
+.spoke { display: none; border-color: var(--wait); background: var(--wait-bg); margin-bottom: 14px; }
+.spoke.on { display: block; }
+.spoke p { margin: 0; overflow-wrap: anywhere; }
+.spoke p + p { margin-top: 6px; }
+.spoke small { color: var(--soft); }
 .now { display: none; border-color: var(--accent); margin-top: 14px; }
 .now.on { display: block; }
 .now b { font-size: 17px; }
@@ -88,6 +93,8 @@ ol.story li.flag .x { color: var(--bad); }
     <span class="where" id="where"></span>
   </header>
 
+  <section class="card spoke" id="spoke" aria-live="polite"></section>
+
   <section class="card" aria-labelledby="ask-label">
     <label id="ask-label" for="sentence">What should be done? <span class="hint">One ticket, in your own words.</span></label>
     <textarea id="sentence" maxlength="4000"></textarea>
@@ -118,10 +125,13 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-model">Model</label><input id="s-model" autocomplete="off" spellcheck="false"></div>
       <div><label for="s-turns">Most turns in a run</label><input id="s-turns" type="number" min="1" max="500"></div>
       <div><label for="s-minutes">Time limit, minutes</label><input id="s-minutes" type="number" min="1" max="600"></div>
+      <div><label for="s-stuck">Call a run silent after, minutes</label><input id="s-stuck" type="number" min="1" max="240"></div>
+      <div><label for="s-phone">Lines to your phone</label><select id="s-phone"><option value="none">None, the home screen only</option><option value="ntfy">The ntfy app</option></select></div>
+      <div class="wide"><label for="s-topic">ntfy channel name <span class="hint">16 or more letters and digits; whoever knows it can read the lines</span></label><input id="s-topic" autocomplete="off" spellcheck="false"></div>
       <div class="wide"><label for="s-prepare">The run does these first <span class="hint">one per line; they fetch what the checks need</span></label><textarea id="s-prepare" spellcheck="false"></textarea></div>
       <div class="wide"><label for="s-checks">Checks SoftwareFactory runs on the result <span class="hint">one per line, in this order, without network</span></label><textarea id="s-checks" spellcheck="false"></textarea></div>
     </div>
-    <div class="row"><button id="save" type="button">Save settings</button><span class="hint" id="save-hint"></span></div>
+    <div class="row"><button id="save" type="button">Save settings</button><button id="phone-test" type="button">Send a test line to the phone</button><span class="hint" id="save-hint"></span></div>
     <p class="msg" id="set-msg" role="alert"></p>
     <p class="fence" id="fence"></p>
   </section>
@@ -239,6 +249,10 @@ ol.story li.flag .x { color: var(--bad); }
       var secs = Math.max(0, Math.round((Date.now() - new Date(run.startedAt).getTime()) / 1000));
       $("now-time").textContent = Math.floor(secs / 60) + " min " + (secs % 60) + " s";
     }
+    var sp = $("spoke");
+    while (sp.firstChild) sp.removeChild(sp.firstChild);
+    sp.className = "card spoke" + (s.spoke && s.spoke.length ? " on" : "");
+    (s.spoke || []).forEach(function (w) { var p = el("p", "", w.line + " "); p.appendChild(el("small", "", day(w.at) + (w.phone === "sent" ? ", also sent to your phone" : ""))); sp.appendChild(p); });
     var list = $("tickets");
     if (!busy) {
       // Only a ticket that changed is drawn again, so an open story keeps its place and a focused button stays focused.
@@ -265,6 +279,7 @@ ol.story li.flag .x { color: var(--bad); }
       settingsLoaded = true;
       $("s-repo").value = s.settings.repo; $("s-base").value = s.settings.base; $("s-model").value = s.settings.model;
       $("s-turns").value = s.settings.maxTurns; $("s-minutes").value = s.settings.timeLimitMinutes;
+      $("s-stuck").value = s.settings.stuckMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
       $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n");
     }
     $("fence").textContent = s.fence ? "The room is " + s.fence.room + ". A run may reach only: " + s.fence.netList.join(", ") + ". The fence is tested before every run." : "";
@@ -286,8 +301,13 @@ ol.story li.flag .x { color: var(--bad); }
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
-    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), prepare: lines($("s-prepare").value), checks: lines($("s-checks").value) })
+    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value) })
       .then(function (r) { if (r.ok) { $("save-hint").textContent = "Saved."; settingsLoaded = false; load(); } else { $("set-msg").textContent = r.why; } });
+  };
+
+  $("phone-test").onclick = function () {
+    $("set-msg").textContent = ""; $("save-hint").textContent = "";
+    post("/api/step1/phone-test").then(function (r) { if (r.ok) { $("save-hint").textContent = "Sent. Look at your phone."; } else { $("set-msg").textContent = r.why; } });
   };
 
   load();

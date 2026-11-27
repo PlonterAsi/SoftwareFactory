@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { type GitHub, parseGitHubRepo } from "../tickets/github.js";
 import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
+import { type Sender, type WatchSettings, WATCH_DEFAULTS, cleanWatch, speak } from "./watchdog.js";
 import { type TicketOutcome, type TicketSettings, storyLine } from "./ticketrun.js";
 
 /**
@@ -17,7 +18,7 @@ import { type TicketOutcome, type TicketSettings, storyLine } from "./ticketrun.
  */
 
 /** What you can change on the screen. The project is written "owner/name". */
-export interface HomeSettings {
+export interface HomeSettings extends WatchSettings {
   repo: string;
   base: string;
   checks: string[];
@@ -27,7 +28,7 @@ export interface HomeSettings {
   timeLimitMinutes: number;
 }
 
-export const HOME_DEFAULTS: HomeSettings = { repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45 };
+export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45 };
 
 /** Check what came from the screen. Returns clean settings or says, in a sentence, what is wrong. */
 export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS): HomeSettings {
@@ -35,7 +36,8 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   const text = (k: keyof HomeSettings) => (typeof r[k] === "string" ? (r[k] as string).trim() : (from[k] as string));
   const list = (k: "checks" | "prepare") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
   const num = (k: "maxTurns" | "timeLimitMinutes") => (r[k] === undefined ? from[k] : Number(r[k]));
-  const s: HomeSettings = { repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes") };
+  const watch = cleanWatch(r, from);
+  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes") };
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
   if (s.base && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(s.base) || s.base.includes(".."))) throw new Error(`"${s.base}" is not a branch name.`);
   if (!/^[a-z0-9][a-z0-9.-]{0,60}$/.test(s.model)) throw new Error(`"${s.model}" is not a model name.`);
@@ -129,6 +131,8 @@ export interface HomeDeps {
   pass?: string;
   /** Takes an accepted change back. Left out: the page offers no undo. */
   undo?: (ticket: string) => Promise<{ ok: true; sha: string | null; url: string } | { ok: false; why: string }>;
+  /** How a line reaches the phone. Left out: the real sender. */
+  send?: Sender;
   /** Shown on the page: which room, and what a run may reach. Read-only here; the fence is changed by hand. */
   fence?: { room: string; netList: string[] };
 }
@@ -140,19 +144,23 @@ export function createHome(deps: HomeDeps) {
   // The pass opens the page once. The address travels through a command line and the browser's history; after
   // the first use it is worth nothing.
   let passUsed = false;
-  let running: { ticket: string | null; stop: AbortController; startedAt: string; before: number } | null = null;
+  let running: { ticket: string | null; stop: AbortController; startedAt: string; lastLineAt: string; before: number } | null = null;
   // The ticket's name is known from its first line in the record.
   const nameIt = () => { if (running && !running.ticket) running.ticket = record.since(running.before).find((l) => l.kind === "ticket.opened")?.ticket ?? null; };
   let accepting = false, undoing = false;
   const streams = new Set<ServerResponse>();
-  record.onLine((l) => { nameIt(); for (const s of streams) s.write(`data: ${JSON.stringify({ id: l.id })}\n\n`); });
+  record.onLine((l) => { nameIt(); if (running && l.kind !== "watchdog.spoke") running.lastLineAt = l.ts; for (const s of streams) s.write(`data: ${JSON.stringify({ id: l.id })}\n\n`); });
 
+  let all: RecordLine[] = [];
   const state = () => ({
     settings: deps.settings.read(),
     fence: deps.fence ?? null,
     running: running ? { ticket: running.ticket, startedAt: running.startedAt } : null,
-    tickets: ticketsFrom(record.all(), running?.ticket ?? null),
+    tickets: ticketsFrom(all = record.all(), running?.ticket ?? null),
+    spoke: all.filter((l) => l.kind === "watchdog.spoke" && (l.data as any).why !== "test").slice(-3).map((l) => ({ id: l.id, at: l.ts, line: String((l.data as any).line ?? ""), phone: String((l.data as any).phone ?? "") })),
   });
+  /** The sign of life the watchdog reads. */
+  const alive = () => ({ pid: process.pid, at: new Date().toISOString(), running: running ? { ticket: running.ticket, startedAt: running.startedAt, lastLineAt: running.lastLineAt } : null });
 
   /** Start one run. One at a time in step 1. */
   function start(sentence: string): { ok: true } | { ok: false; why: string } {
@@ -163,7 +171,7 @@ export function createHome(deps: HomeDeps) {
     const repo = parseGitHubRepo(s.repo);
     if (!repo) return { ok: false, why: "Choose the project first, in Settings." };
     const stop = new AbortController();
-    const mine = { ticket: null as string | null, stop, startedAt: new Date().toISOString(), before: record.all().at(-1)?.id ?? 0 };
+    const mine = { ticket: null as string | null, stop, startedAt: new Date().toISOString(), lastLineAt: new Date().toISOString(), before: record.all().at(-1)?.id ?? 0 };
     running = mine;
     void deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes }, sentence, stop.signal)
       .catch((e) => { nameIt(); if (mine.ticket) record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, data: { end: "crashed", reason: String((e as Error)?.message ?? e).slice(0, 300), where: "before the run" } }); })
@@ -232,7 +240,7 @@ export function createHome(deps: HomeDeps) {
     const changed = (Object.keys(now) as (keyof HomeSettings)[]).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(was[k]));
     if (changed.length) {
       deps.settings.write(now);
-      record.append({ kind: "setting.changed", who: "you", data: { changed: Object.fromEntries(changed.map((k) => [k, { from: was[k], to: now[k] }])) } });
+      record.append({ kind: "setting.changed", who: "you", data: { changed: Object.fromEntries(changed.map((k) => [k, k === "ntfyTopic" ? { changed: true } : { from: was[k], to: now[k] }])) } });
     }
     return { ok: true, settings: now };
   }
@@ -291,6 +299,10 @@ export function createHome(deps: HomeDeps) {
           undoing = true;
           try { const r = await deps.undo(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); } finally { undoing = false; }
         }
+        if (url.pathname === "/api/step1/phone-test") {
+          const r = await speak({ record, settings: () => deps.settings.read(), send: deps.send }, { line: "This is SoftwareFactory. Your phone line works.", why: "test" });
+          return send(res, r.phone === "sent" ? 200 : 409, r.phone === "sent" ? { ok: true } : { ok: false, why: r.phone === "not set" ? "No phone is set yet. Choose ntfy and a channel name, and save first." : "The line did not reach the phone service. Check the server address and your network." });
+        }
         if (url.pathname === "/api/step1/settings") { const r = saveSettings(b); return send(res, r.ok ? 200 : 400, r); }
       }
       send(res, 404, { ok: false, why: "no such thing here" });
@@ -300,5 +312,5 @@ export function createHome(deps: HomeDeps) {
     }
   }
 
-  return { handler, state, start, stop: stopNow, accept, saveSettings, key, pass, cookie, cookieName, look, isRunning: () => !!running };
+  return { handler, state, start, stop: stopNow, accept, saveSettings, key, pass, cookie, cookieName, look, alive, isRunning: () => !!running };
 }
