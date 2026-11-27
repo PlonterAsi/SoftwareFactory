@@ -417,6 +417,10 @@ console.log("seeded", db);
   // core is not started, and closing the window is a goodbye the watchdog can read.
   {
     moveAside(HOME_DATA);
+    // This part is about the window. The app's own look for a newer build would reach the real update address
+    // and could install over the build under test, so it is switched off by its setting.
+    mkdirSync(HOME_DATA, { recursive: true });
+    writeFileSync(join(HOME_DATA, "settings.json"), JSON.stringify({ autoUpdate: false }));
     const HOME = "http://127.0.0.1:4517";
     const homeEnv = { ...process.env, SF_WINDOW: "" };
     const readAlive = () => { try { return JSON.parse(readFileSync(join(HOME_DATA, "alive.json"), "utf8")); } catch { return null; } };
@@ -535,6 +539,9 @@ async function updatePhase() {
     exeName = basename(exe);
     // The read token, as Systems > Updates saves it (the repo may be private).
     writeFileSync(join(DATA, "updater-token"), TOKEN);
+    // The installer restarts the app after the update, and may not hand this test's environment on: the same
+    // word in a file keeps the restarted app on the older Bridge, which the checks below ask.
+    writeFileSync(join(DATA, "window-mode"), "bridge");
     launch(exe, "old-version");
     const h = await until("the old version's core", health, 120_000, 1000);
     must("the old version runs", h?.appVersion === "0.0.1", h ? `appVersion ${h.appVersion}` : readTail(join(DATA, "core.log")));

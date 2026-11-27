@@ -127,14 +127,23 @@ fn out_to(path: &PathBuf) -> Stdio {
     append(path).map(Stdio::from).unwrap_or_else(Stdio::null)
 }
 
-/// Start the watchdog (when none of ours is watching) and the home screen.
+/// Start after a stop (an update that could not be installed): closing is over.
+pub fn reopen(app: &tauri::AppHandle) {
+    app.state::<Home>().0.lock().unwrap().closing = false;
+    start(app);
+}
+
+/// Start the watchdog (when none of ours is watching) and the home screen. Does nothing once the app is closing:
+/// the look and the start happen under one lock, so a restart cannot slip in after a stop.
 pub fn start(app: &tauri::AppHandle) {
     let dir = crate::data_dir(app);
     let _ = std::fs::create_dir_all(&dir);
     let log = dir.join("home.log");
     let state = app.state::<Home>();
     let mut st = state.0.lock().unwrap();
-    st.closing = false;
+    if st.closing {
+        return;
+    }
     // The watchdog keeps to one at a time by itself, and goes home by itself when SoftwareFactory is closed.
     let watching = st.watchdog.as_mut().map(|c| matches!(c.try_wait(), Ok(None))).unwrap_or(false);
     if !watching {
@@ -185,8 +194,7 @@ fn follow(app: tauri::AppHandle, out: ChildStdout, log: PathBuf) {
     if st.closing {
         return;
     }
-    let ended = st.child.as_mut().and_then(|c| c.wait().ok()).map(|s| s.to_string()).unwrap_or_else(|| "no exit code".into());
-    st.child = None;
+    let gone = st.child.take();
     st.stdin = None;
     // A start that held for five minutes was a good start: the next stop gets its own restart.
     if st.started.map(|t| t.elapsed() > Duration::from_secs(300)).unwrap_or(false) {
@@ -197,11 +205,11 @@ fn follow(app: tauri::AppHandle, out: ChildStdout, log: PathBuf) {
         st.restarts += 1;
     }
     drop(st);
+    // Waited for without the lock, so the window and a stop are never held up by it.
+    let ended = gone.and_then(|mut c| c.wait().ok()).map(|s| s.to_string()).unwrap_or_else(|| "no exit code".into());
     if again {
         std::thread::sleep(Duration::from_millis(1500));
-        if !app.state::<Home>().0.lock().unwrap().closing {
-            start(&app);
-        }
+        start(&app);
     } else {
         let tail = crate::log_tail(&log);
         show(&app, &format!("SoftwareFactory's home screen stopped ({ended}) and stopped again after one restart.\n\n{}\n\nClose this window and open SoftwareFactory again. The details are in {}", tail.trim(), log.display()));

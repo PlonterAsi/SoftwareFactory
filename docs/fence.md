@@ -116,7 +116,8 @@ starter file (`SoftwareFactory-Step1.cmd` stays for a checkout without an instal
   where they were (`%LOCALAPPDATA%\SoftwareFactoryStep1`).
 - Updates: the home screen has no update page. At start the app looks once and installs a newer signed build by
   itself, never while a ticket is being worked. The setting `autoUpdate` (Settings, Updates) turns that off.
-- `SF_WINDOW=bridge` starts the older Bridge and its core instead. Nothing starts the older core beside the home
+- `SF_WINDOW=bridge` (or the word `bridge` in the file `window-mode` in the app's data folder, when the variable
+  is not set) starts the older Bridge and its core instead. Nothing starts the older core beside the home
   screen.
 
 The Windows smoke test (part 7c of `scripts/smoke/windows-smoke.mjs`) proves this path on every build: the home
@@ -132,3 +133,22 @@ looks at the top folder and the folders right under it. A `package.json` with a 
 Node comes before Go. Tests are not taken: they often need a database or a key, and come in when a project is
 brought in and proven in the room. Folder names that are not plain letters, digits, dot, dash or underscore are
 never put into a command. The story of the ticket says what was found; checks written in Settings always win.
+
+## Tickets and the queue
+
+A sentence opens a ticket; it does not have to wait for the run before it. Tickets are worked one at a time, the one
+that waited longest first, and a queue that still held tickets when SoftwareFactory was closed goes on at the next
+start. Everything is drawn from the record, so the queue is not a second list that could disagree with it.
+
+- **Kinds:** request, bug, task, idea, plan, question. A run works requests, bugs and tasks. An idea, a plan and a
+  question are kept on the list (the idea bank and plans give them their road later).
+- **Create:** `POST /api/step1/work` `{ sentence, kind? }`. **See:** the list with each ticket's state, place in the
+  queue and story. **Edit:** `ticket/edit` changes the words or the kind while the ticket still waits; after a run
+  its words are frozen. **Delete:** `ticket/remove` takes it off the list; the record keeps its story and
+  `ticket/restore` puts it back. A ticket that is being worked cannot be removed: stop it first.
+- **Again:** `ticket/again` sends a ticket that ended with nothing to accept (failed its checks, parked, stopped,
+  crashed, not started, interrupted, held) back to the queue under the same name.
+- **Stop** ends the run that is working; the next ticket takes its turn. **Hold the queue** (the setting `hold`)
+  keeps waiting tickets waiting until it is let go; a run that is working goes on.
+- New lines in the record: `ticket.edited`, `ticket.queued`, `ticket.removed`, `ticket.restored`. A go that left no
+  line at all is given the end `crashed`, so the queue can never start the same ticket without end.

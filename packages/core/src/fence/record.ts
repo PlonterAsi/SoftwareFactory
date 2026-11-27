@@ -13,6 +13,10 @@ import { SECRET_PATTERNS } from "../safety/secrets.js";
 /** The short, fixed list of kinds. A new kind is added here, on purpose, never made up by a caller. */
 export const RECORD_KINDS = [
   "ticket.opened",
+  "ticket.edited",
+  "ticket.queued",
+  "ticket.removed",
+  "ticket.restored",
   "fence.tested",
   "run.started",
   "run.step",

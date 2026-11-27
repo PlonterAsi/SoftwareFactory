@@ -164,8 +164,18 @@ fn stop_core(app: &tauri::AppHandle) {
 
 /// Which window this start shows: the home screen of the fenced path, unless SF_WINDOW=bridge asks for the
 /// older Bridge and its core (kept for the smoke test and for looking back).
+///
+/// An update restarts the app through the installer, which may not hand the environment on. So the same word in
+/// the file `window-mode` in the data folder also counts when SF_WINDOW is not set at all.
 pub(crate) fn bridge_mode() -> bool {
-    std::env::var("SF_WINDOW").map(|v| v == "bridge").unwrap_or(false)
+    match std::env::var("SF_WINDOW") {
+        Ok(v) => v == "bridge",
+        Err(_) => std::env::var_os("APPDATA")
+            .map(|d| PathBuf::from(d).join("dev.plonter.softwarefactory").join("window-mode"))
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|t| t.trim() == "bridge")
+            .unwrap_or(false),
+    }
 }
 
 /// Start what this window needs.
@@ -173,7 +183,7 @@ pub(crate) fn start_all(app: &tauri::AppHandle) {
     if bridge_mode() {
         start_core(app);
     } else {
-        home::start(app);
+        home::reopen(app);
     }
 }
 

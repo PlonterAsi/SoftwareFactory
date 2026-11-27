@@ -70,7 +70,7 @@ describe("tickets, drawn from the record alone", () => {
     expect(t.T1).toMatchObject({ state: "proposed", canAccept: true, number: 7, costUsd: 0.18, url: "https://github.com/o/p/pull/7" });
     expect(t.T1!.story.map((s) => s.what).join("\n")).toMatch(/you asked: Add a footer\.[\s\S]*proposed on GitHub/);
     expect(t.T2).toMatchObject({ state: "failed its checks", says: "a check failed: npm test", canAccept: false });
-    expect(t.T3).toMatchObject({ state: "interrupted" });
+    expect(t.T3).toMatchObject({ state: "waiting", place: 1, canEdit: true });
     r.append({ kind: "stop.pressed", who: "you", ticket: "T3", data: {} });
     expect(ticketsFrom(r.all(), null).find((x) => x.ticket === "T3")).toMatchObject({ state: "stopped" });
     expect(t.T4).toMatchObject({ state: "working" });
@@ -170,29 +170,70 @@ describe("the page and its door", () => {
     expect(r.all()).toHaveLength(0);
   });
 
-  it("starts one run at a time, shows it working, and stop reaches the run", async () => {
+  it("is a queue: tickets wait their turn, one is worked at a time, and stop reaches only the run", async () => {
     const r = new TheRecord();
+    const seen: string[] = [];
     let stopped = false, release!: () => void;
-    const work: HomeDeps["work"] = async (st, sentence, signal) => {
-      r.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: `${st.repo.owner}/${st.repo.name}`, data: { sentence } });
+    const work: HomeDeps["work"] = async (_st, ticket, sentence, signal) => {
+      seen.push(`${ticket}: ${sentence}`);
+      stopped = false;
+      r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-x`, ticket, project: "o/p", data: { model: "sonnet" } });
       await new Promise<void>((ok) => { release = ok; signal.addEventListener("abort", () => { stopped = true; ok(); }); });
-      r.append({ kind: "run.ended", who: "SF itself", run: "T1-x", ticket: "T1", project: "o/p", data: { end: stopped ? "stopped" : "passed", reason: stopped ? "you pressed stop" : "ok" } });
-      return { ticket: "T1", run: "T1-x", end: stopped ? "stopped" : "passed", reason: "", url: null, branch: null, costUsd: 0 };
+      r.append({ kind: "run.ended", who: "SF itself", run: `${ticket}-x`, ticket, project: "o/p", data: { end: stopped ? "stopped" : "failed its checks", reason: stopped ? "you pressed stop" : "a check failed" } });
+      return { ticket, run: `${ticket}-x`, end: "stopped", reason: "", url: null, branch: null, costUsd: 0 };
     };
     const { url, h } = await serve(r, { work });
-    expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: json(h.key), body: JSON.stringify({ sentence: "  " }) })).status).toBe(409);
-    expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: json(h.key), body: JSON.stringify({ sentence: "Add a footer." }) })).status).toBe(200);
-    expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: json(h.key), body: JSON.stringify({ sentence: "Another." }) })).status).toBe(409);
-    const s = await (await get(`${url}/api/step1/state`)).json() as any;
-    expect(s.running).toMatchObject({ ticket: "T1" });
-    expect(s.tickets[0]).toMatchObject({ ticket: "T1", state: "working", sentence: "Add a footer." });
-    expect((await fetch(`${url}/api/step1/stop`, { method: "POST", headers: json(h.key), body: "{}" })).status).toBe(200);
-    await new Promise((ok) => setTimeout(ok, 20));
-    expect(stopped).toBe(true);
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    const tick = () => new Promise((ok) => setTimeout(ok, 20));
+    const of = async (ticket: string) => ((await (await get(`${url}/api/step1/state`)).json()) as any).tickets.find((t: any) => t.ticket === ticket);
+    expect((await post("work", { sentence: "  " })).status).toBe(409);
+    expect((await post("work", { sentence: "x", kind: "poem" })).status).toBe(409);
+    expect(await (await post("work", { sentence: "Add a footer." })).json()).toEqual({ ok: true, ticket: "T1" });
+    expect((await post("work", { sentence: "Another.", kind: "bug" })).status).toBe(200);
+    expect((await post("work", { sentence: "A third." })).status).toBe(200);
+    expect(await of("T1")).toMatchObject({ state: "working", sentence: "Add a footer.", kind: "request", canEdit: false, canRemove: false });
+    expect(await of("T2")).toMatchObject({ state: "waiting", place: 1, kind: "bug" });
+    expect(await of("T3")).toMatchObject({ state: "waiting", place: 2 });
+    // A waiting ticket can be changed and taken off the list; a working one cannot.
+    expect((await post("ticket/edit", { ticket: "T1", sentence: "No." })).status).toBe(409);
+    expect((await post("ticket/remove", { ticket: "T1" })).status).toBe(409);
+    expect((await post("ticket/edit", { ticket: "T3", sentence: "A third, better.", kind: "task" })).status).toBe(200);
+    expect((await post("ticket/remove", { ticket: "T2" })).status).toBe(200);
+    expect(await of("T2")).toMatchObject({ removed: true, place: null });
+    expect(await of("T3")).toMatchObject({ sentence: "A third, better.", kind: "task", place: 1 });
+    // Stop ends the run, and the next one that waits takes its turn with its changed words.
+    expect((await post("stop", {})).status).toBe(200);
+    await tick();
+    expect(seen).toEqual(["T1: Add a footer.", "T3: A third, better."]);
+    expect(await of("T1")).toMatchObject({ state: "stopped", canAgain: true });
+    expect(r.story("T1").map((l) => l.kind)).toEqual(["ticket.opened", "run.started", "stop.pressed", "run.ended"]);
+    // Sent again, it waits behind nothing and runs after the third.
+    expect((await post("ticket/again", { ticket: "T1" })).status).toBe(200);
+    expect(await of("T1")).toMatchObject({ state: "waiting", place: 1 });
+    release(); await tick();
+    expect(seen.at(-1)).toBe("T1: Add a footer.");
+    expect(await of("T3")).toMatchObject({ state: "failed its checks" });
+    // Put back on the list while the queue is held: it waits until the hold is let go.
+    expect((await post("settings", { hold: true })).status).toBe(200);
+    expect((await post("ticket/restore", { ticket: "T2" })).status).toBe(200);
+    release(); await tick();
     expect(h.isRunning()).toBe(false);
-    expect(r.all().map((l) => l.kind)).toEqual(["ticket.opened", "stop.pressed", "run.ended"]);
-    expect(r.all()[1]).toMatchObject({ who: "you", ticket: "T1" });
-    void release;
+    expect(await of("T2")).toMatchObject({ state: "waiting", removed: false });
+    expect((await post("settings", { hold: false })).status).toBe(200);
+    await tick();
+    expect(seen.at(-1)).toBe("T2: Another.");
+    release(); await tick();
+    expect((await post("ticket/edit", { ticket: "T9", sentence: "x" })).status).toBe(409);
+  });
+
+  it("gives an end to a go that left no trace, so the queue never spins", async () => {
+    const r = new TheRecord();
+    let calls = 0;
+    const { url, h } = await serve(r, { work: async () => { calls++; throw new Error("the room is gone"); } });
+    await fetch(`${url}/api/step1/work`, { method: "POST", headers: json(h.key), body: JSON.stringify({ sentence: "Add a footer." }) });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(calls).toBe(1);
+    expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ state: "crashed", says: "the room is gone" });
   });
 
   it("refuses a key that is not plain", () => {

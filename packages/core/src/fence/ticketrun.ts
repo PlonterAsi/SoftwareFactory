@@ -91,17 +91,27 @@ export function history(deps: Pick<TicketDeps, "github">, st: Pick<TicketSetting
   return { dir, base };
 }
 
-export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence: string): Promise<TicketOutcome> {
-  const { record } = deps;
-  const project = `${st.repo.owner}/${st.repo.name}`;
+/** The kinds of ticket (leg 2). The door takes one sentence; the kind is "request" until someone says otherwise. */
+export const TICKET_KINDS = ["request", "bug", "task", "idea", "plan", "question"] as const;
+export type TicketKind = (typeof TICKET_KINDS)[number];
+
+/** Open a ticket: it gets its name and its first line in the record. Nothing runs yet. */
+export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request"): string {
   // Counting and writing happen under one lock, so two SoftwareFactory windows cannot give two tickets one name.
   record.db.exec("BEGIN IMMEDIATE");
-  let ticket: string;
   try {
-    ticket = `T${record.all().filter((l) => l.kind === "ticket.opened").length + 1}`;
-    record.append({ kind: "ticket.opened", who: "you", ticket, project, data: { sentence: sentence.trim() } });
+    const ticket = `T${record.all().filter((l) => l.kind === "ticket.opened").length + 1}`;
+    record.append({ kind: "ticket.opened", who: "you", ticket, project, data: { sentence: sentence.trim(), kind } });
     record.db.exec("COMMIT");
+    return ticket;
   } catch (e) { record.db.exec("ROLLBACK"); throw e; }
+}
+
+/** Work one ticket to a written end. With `open` the ticket is already in the record (it waited in the queue). */
+export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence: string, open?: string): Promise<TicketOutcome> {
+  const { record } = deps;
+  const project = `${st.repo.owner}/${st.repo.name}`;
+  const ticket = open ?? openTicket(record, project, sentence);
   const out = (o: Partial<TicketOutcome> & Pick<TicketOutcome, "end" | "reason">): TicketOutcome => ({ ticket, run: null, url: null, branch: null, costUsd: 0, ...o });
   if (deps.signal?.aborted) return out({ end: "stopped", reason: "you pressed stop" });
 
@@ -183,6 +193,10 @@ export function storyLine(l: RecordLine): string {
     const d = l.data as any;
     const what =
       l.kind === "ticket.opened" ? `you asked: ${d.sentence}` :
+      l.kind === "ticket.edited" ? `you changed it${d.sentence ? ` to: ${d.sentence}` : ""}${d.kind ? ` (kind: ${d.kind})` : ""}` :
+      l.kind === "ticket.queued" ? "you sent it to be worked again" :
+      l.kind === "ticket.removed" ? "you removed it from the list" :
+      l.kind === "ticket.restored" ? "you put it back on the list" :
       l.kind === "fence.tested" ? (d.ok ? "the fence held: nine lines as they should be" : `the fence did not hold${d.error ? `: ${d.error}` : ""}`) :
       l.kind === "run.started" ? `a run started on ${d.model}${Array.isArray(d.checksFound) ? (d.checks?.length ? `; checks found in the project (${d.checksFound.join(", ")})` : "; no build or type check was found in the project, so nothing will be checked") : ""}` :
       l.kind === "run.step" ? (d.did ?? d.says?.split("\n")[0]?.slice(0, 140) ?? (d.tools ? `used ${d.tools.map((x: any) => x.tool).join(", ")}` : d.toolErrors ? `a command or tool ended with an error: ${String(d.toolErrors[0]).split("\n")[0]!.slice(0, 100)}` : "finished")) :

@@ -69,7 +69,7 @@ async function main(): Promise<void> {
       hosts: [`127.0.0.1:${port}`, `localhost:${port}`], fence: { room: fence.room, netList: fence.netList },
       undo: (ticket) => undoTicket({ record, github, workDir }, ticket),
       // A run of this start waits until the room was cleared of an earlier start's leftovers.
-      work: async (st, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: () => runFenceTest(exec, fence, windowsProbe()) }, { ...st, workDir }, sentence)),
+      work: async (st, ticket, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: () => runFenceTest(exec, fence, windowsProbe()) }, { ...st, workDir }, sentence, ticket)),
     });
     // The two things SoftwareFactory itself says out loud.
     let beat: ReturnType<typeof setInterval> | null = null, ours = false;
@@ -82,7 +82,9 @@ async function main(): Promise<void> {
     // Another SoftwareFactory that is open right now keeps its room, its run and its sign of life: this start
     // touches none of them and steps back.
     const before = readAlive(workDir);
-    const otherIsOpen = !!before && !before.closed && before.pid !== process.pid && Date.now() - new Date(before.at).getTime() < 15_000;
+    // A sign of life whose process is gone (a crash a moment ago) is nobody's: this start goes on and takes over.
+    const lives = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; } };
+    const otherIsOpen = !!before && !before.closed && before.pid !== process.pid && Date.now() - new Date(before.at).getTime() < 15_000 && lives(before.pid);
     if (otherIsOpen) { console.error("SoftwareFactory is open already. Use its window, or close it first."); process.exit(1); }
     const server = createServer((req, res) => { void home.handler(req, res); });
     server.once("error", (e) => { console.error((e as NodeJS.ErrnoException).code === "EADDRINUSE" ? `Port ${port} is taken, so SoftwareFactory did not start. Nothing was touched.` : `SoftwareFactory did not start: ${(e as Error).message}`); process.exit(1); });
@@ -104,8 +106,10 @@ async function main(): Promise<void> {
       beat = setInterval(() => { try { writeAlive(workDir, home.alive()); } catch { /* the next beat tries again */ } }, 5000);
       beat.unref();
       writeAlive(workDir, home.alive());
+      // Tickets that still waited when SoftwareFactory was closed take their turn again.
+      void cleared.then(() => home.pump());
       const url = `http://127.0.0.1:${port}/?pass=${home.pass}`;
-      console.log(`SoftwareFactory home screen: ${url}\nClose this window to close SoftwareFactory.`);
+      console.log(`SoftwareFactory home screen: ${url}${process.env.SF_SHELL === "1" ? "" : "\nClose this window to close SoftwareFactory."}`);
       if (process.platform === "win32" && !args.includes("--no-open")) spawn("cmd.exe", ["/c", "start", "", url], { stdio: "ignore", windowsHide: true, detached: true }).unref();
     });
     // Closing the window while a run works is a stop: nothing is left running in the room.

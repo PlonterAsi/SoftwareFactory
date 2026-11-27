@@ -44,6 +44,8 @@ textarea, input, select { width: 100%; font: inherit; color: var(--ink); backgro
 textarea { min-height: 92px; resize: vertical; }
 textarea:focus, input:focus, select:focus, button:focus-visible, summary:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+.row select { width: auto; min-height: 44px; }
+.ticket textarea { margin-top: 8px; }
 button, a.btn { font: inherit; font-weight: 600; border-radius: 8px; padding: 9px 16px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; display: inline-block; }
 button.main { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button.good { background: var(--good); color: var(--card); border-color: var(--good); }
@@ -99,10 +101,11 @@ ol.story li.flag .x { color: var(--bad); }
   <section class="card spoke" id="spoke" aria-live="polite"></section>
 
   <section class="card" aria-labelledby="ask-label">
-    <label id="ask-label" for="sentence">What should be done? <span class="hint">One ticket, in your own words.</span></label>
+    <label id="ask-label" for="sentence">What should be done? <span class="hint">One ticket, in your own words. Add as many as you like: they are worked one after another.</span></label>
     <textarea id="sentence" maxlength="4000"></textarea>
     <div class="row">
-      <button class="main" id="start" type="button">Start the run</button>
+      <button class="main" id="start" type="button">Add the ticket</button>
+      <select id="kind" aria-label="Kind of ticket"><option value="request">Request</option><option value="bug">Bug</option><option value="task">Task</option><option value="idea">Idea</option><option value="plan">Plan</option><option value="question">Question</option></select>
       <span class="hint" id="start-hint"></span>
     </div>
     <p class="msg" id="ask-msg" role="alert"></p>
@@ -118,6 +121,7 @@ ol.story li.flag .x { color: var(--bad); }
   </section>
 
   <h2 id="tickets-title">Tickets</h2>
+  <div class="row" id="queue-row"><button id="hold" type="button">Hold the queue</button><span class="hint" id="queue-hint"></span><button id="show-removed" type="button" hidden></button></div>
   <section class="card" aria-labelledby="tickets-title"><div id="tickets"><p class="empty">No tickets yet. Your first sentence starts one.</p></div></section>
 
   <details class="card settings" id="settings">
@@ -152,7 +156,9 @@ ol.story li.flag .x { color: var(--bad); }
   function day(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString([], { day: "numeric", month: "short" }) + ", " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); }
   function money(n) { return "$" + Number(n || 0).toFixed(2); }
   function lines(v) { return String(v || "").split(/\\r?\\n/).map(function (x) { return x.trim(); }).filter(Boolean); }
-  var CHIP = { working: ["Working", "working"], proposed: ["Waiting for you", "proposed"], accepted: ["Accepted", "accepted"], undone: ["Undone", ""], held: ["Held here", "proposed"], passed: ["Passed", ""], "failed its checks": ["Failed its checks", "bad"], parked: ["Parked", ""], stopped: ["Stopped", ""], crashed: ["Crashed", "bad"], "not started": ["Not started", "bad"], interrupted: ["Interrupted", ""] };
+  var KINDS = { request: "Request", bug: "Bug", task: "Task", idea: "Idea", plan: "Plan", question: "Question" };
+  var editing = null, draft = {}, showRemoved = false;
+  var CHIP = { waiting: ["Waiting", ""], kept: ["Kept", ""], working: ["Working", "working"], proposed: ["Waiting for you", "proposed"], accepted: ["Accepted", "accepted"], undone: ["Undone", ""], held: ["Held here", "proposed"], passed: ["Passed", ""], "failed its checks": ["Failed its checks", "bad"], parked: ["Parked", ""], stopped: ["Stopped", ""], crashed: ["Crashed", "bad"], "not started": ["Not started", "bad"], interrupted: ["Interrupted", ""] };
 
   function post(path, body) {
     return fetch(path, { method: "POST", headers: { "content-type": "application/json", "x-sf-key": KEY }, body: JSON.stringify(body || {}) })
@@ -165,13 +171,36 @@ ol.story li.flag .x { color: var(--bad); }
     var top = el("div", "top");
     var chip = CHIP[t.state] || [t.state, ""];
     top.appendChild(el("span", "name", t.ticket));
-    top.appendChild(el("span", "chip " + chip[1], chip[0]));
+    top.appendChild(el("span", "chip " + chip[1], t.removed ? "Removed" : chip[0] + (t.place ? ", place " + t.place : "")));
+    if (t.kind && t.kind !== "request") top.appendChild(el("span", "meta", KINDS[t.kind] || t.kind));
     top.appendChild(el("span", "meta", day(t.openedAt) + (t.costUsd ? "  ·  " + money(t.costUsd) : "")));
     box.appendChild(top);
-    box.appendChild(el("p", "sentence", t.sentence));
+    if (editing === t.ticket && t.canEdit) {
+      var d0 = draft[t.ticket] || (draft[t.ticket] = { sentence: t.sentence, kind: t.kind });
+      var ta = el("textarea"); ta.maxLength = 4000; ta.value = d0.sentence; ta.setAttribute("aria-label", "The ticket in your words");
+      ta.oninput = function () { d0.sentence = ta.value; };
+      var ks = el("select"); ks.setAttribute("aria-label", "Kind of ticket");
+      Object.keys(KINDS).forEach(function (k) { var o = el("option", "", KINDS[k]); o.value = k; ks.appendChild(o); });
+      ks.value = d0.kind; ks.onchange = function () { d0.kind = ks.value; };
+      var erow = el("div", "row");
+      var save = el("button", "main", "Save"); save.type = "button";
+      save.onclick = function () { save.disabled = true; post("/api/step1/ticket/edit", { ticket: t.ticket, sentence: d0.sentence, kind: d0.kind }).then(function (r) { if (r.ok) { editing = null; delete draft[t.ticket]; delete acceptError[t.ticket]; } else { acceptError[t.ticket] = r.why; } load(); render(last); }); };
+      var cancel = el("button", "", "Cancel"); cancel.type = "button";
+      cancel.onclick = function () { editing = null; delete draft[t.ticket]; render(last); };
+      erow.appendChild(save); erow.appendChild(ks); erow.appendChild(cancel);
+      box.appendChild(ta); box.appendChild(erow);
+    } else box.appendChild(el("p", "sentence", t.sentence));
     box.appendChild(el("p", "says", t.says));
-    if (t.url || t.canAccept || t.canUndo) {
+    if (t.url || t.canAccept || t.canUndo || t.canEdit || t.canAgain || t.canRemove || t.removed) {
       var row = el("div", "row");
+      var act = function (path, label, cls) {
+        var b = el("button", cls || "", label); b.type = "button";
+        b.onclick = function () { b.disabled = true; post("/api/step1/ticket/" + path, { ticket: t.ticket }).then(function (r) { confirming = null; if (!r.ok) { acceptError[t.ticket] = r.why; } else { delete acceptError[t.ticket]; } load(); render(last); }); };
+        return b;
+      };
+      if (t.canAgain) row.appendChild(act("again", "Work it again"));
+      if (t.canEdit && editing !== t.ticket) { var ch = el("button", "", "Change"); ch.type = "button"; ch.onclick = function () { editing = t.ticket; render(last); }; row.appendChild(ch); }
+      if (t.removed) row.appendChild(act("restore", "Put it back"));
       if (t.canAccept) {
         if (confirming === t.ticket) {
           var yes = el("button", "good", "Yes, put it in the project");
@@ -216,6 +245,14 @@ ol.story li.flag .x { color: var(--bad); }
           row.appendChild(und);
         }
       }
+      if (t.canRemove) {
+        if (confirming === "remove " + t.ticket) {
+          var rno = el("button", "", "Keep it"); rno.type = "button"; rno.onclick = function () { confirming = null; render(last); };
+          row.appendChild(rno); row.appendChild(act("remove", "Yes, remove it", "stop"));
+          setTimeout(function () { rno.focus(); }, 0);
+          box.appendChild(el("p", "says", "It leaves the list. The record keeps its story, and you can put it back."));
+        } else { var rm = el("button", "", "Remove"); rm.type = "button"; rm.onclick = function () { confirming = "remove " + t.ticket; render(last); }; row.appendChild(rm); }
+      }
       if (t.url && /^https:\\/\\/github\\.com\\//.test(t.url)) { var a = el("a", "btn", "Open the proposal on GitHub"); a.href = t.url; a.target = "_blank"; a.rel = "noopener noreferrer"; row.appendChild(a); }
       box.appendChild(row);
     }
@@ -225,7 +262,7 @@ ol.story li.flag .x { color: var(--bad); }
     var det = el("details");
     det.open = !!open[t.ticket];
     det.ontoggle = function () { open[t.ticket] = det.open; };
-    det.appendChild(el("summary", "", "The story, " + t.story.length + " lines"));
+    det.appendChild(el("summary", "", "The story, " + t.story.length + (t.story.length === 1 ? " line" : " lines")));
     var ol = el("ol", "story");
     t.story.forEach(function (s) {
       var li = el("li", s.flagged ? "flag" : "");
@@ -244,8 +281,14 @@ ol.story li.flag .x { color: var(--bad); }
     $("where").textContent = s.settings.repo ? s.settings.repo : "No project chosen yet";
     var run = s.running;
     $("now").className = "card now" + (run ? " on" : "");
-    $("start").disabled = !!run || !s.settings.repo;
-    $("start-hint").textContent = run ? "One run at a time for now." : (s.settings.repo ? "" : "Choose the project in Settings first.");
+    $("start").disabled = !s.settings.repo;
+    var waiting = 0, gone = 0; s.tickets.forEach(function (x) { if (x.removed) gone++; else if (x.state === "waiting") waiting++; });
+    $("start-hint").textContent = !s.settings.repo ? "Choose the project in Settings first." : (run || waiting ? "It will wait for its turn." : "");
+    $("hold").textContent = s.settings.hold ? "Let the queue go" : "Hold the queue";
+    $("queue-hint").textContent = s.settings.hold ? "The queue is held. " + waiting + " waiting; nothing new starts until you let it go." : (waiting ? waiting + " waiting for a turn." : "");
+    $("show-removed").hidden = !gone;
+    $("show-removed").textContent = showRemoved ? "Hide removed" : "Show removed (" + gone + ")";
+    var shown = s.tickets.filter(function (x) { return showRemoved || !x.removed; });
     if (run) {
       var t = null; s.tickets.forEach(function (x) { if (x.ticket === run.ticket) t = x; });
       $("now-title").textContent = "Working on " + (run.ticket || "a new ticket");
@@ -260,14 +303,14 @@ ol.story li.flag .x { color: var(--bad); }
     var list = $("tickets");
     if (!busy) {
       // Only a ticket that changed is drawn again, so an open story keeps its place and a focused button stays focused.
-      var order = s.tickets.map(function (t) { return t.ticket; }).join(",");
+      var order = shown.map(function (t) { return t.ticket; }).join(",");
       if (order !== drawn) {
         drawn = order; nodes = {};
         while (list.firstChild) list.removeChild(list.firstChild);
-        if (!s.tickets.length) list.appendChild(el("p", "empty", "No tickets yet. Your first sentence starts one."));
+        if (!shown.length) list.appendChild(el("p", "empty", "No tickets yet. Your first sentence starts one."));
       }
-      s.tickets.forEach(function (t) {
-        var sig = JSON.stringify(t) + "|" + (confirming === t.ticket || confirming === "undo " + t.ticket) + "|" + (acceptError[t.ticket] || "");
+      shown.forEach(function (t) {
+        var sig = JSON.stringify(t) + "|" + (confirming === t.ticket || confirming === "undo " + t.ticket || confirming === "remove " + t.ticket) + "|" + (editing === t.ticket) + "|" + (acceptError[t.ticket] || "");
         var had = nodes[t.ticket];
         if (had && had.sig === sig) return;
         var fresh = ticketNode(t);
@@ -303,8 +346,10 @@ ol.story li.flag .x { color: var(--bad); }
     $("ask-msg").textContent = "";
     if (!text.trim()) { $("ask-msg").textContent = "Write what you want first."; $("sentence").focus(); return; }
     $("start").disabled = true;
-    post("/api/step1/work", { sentence: text }).then(function (r) { if (r.ok) { $("sentence").value = ""; } else { $("ask-msg").textContent = r.why; $("start").disabled = false; } load(); });
+    post("/api/step1/work", { sentence: text, kind: $("kind").value }).then(function (r) { if (r.ok) { $("sentence").value = ""; } else { $("ask-msg").textContent = r.why; $("start").disabled = false; } load(); });
   };
+  $("hold").onclick = function () { $("hold").disabled = true; post("/api/step1/settings", { hold: !(last && last.settings.hold) }).then(function () { $("hold").disabled = false; load(); }); };
+  $("show-removed").onclick = function () { showRemoved = !showRemoved; drawn = null; render(last); };
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
