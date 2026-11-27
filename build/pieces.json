@@ -142,14 +142,14 @@
         {
           "id": "since-you-left",
           "title": "Since you left",
-          "status": "built",
+          "status": "proven",
           "from": "leg 3",
           "done": "You return to one screen that says what finished, what did not and why."
         },
         {
           "id": "stuck-ladder",
           "title": "Stuck ladder: once more, another way, split, park",
-          "status": "built",
+          "status": "proven",
           "from": "leg 4",
           "done": "A failing ticket climbs the ladder by itself."
         },

@@ -328,9 +328,10 @@ A ticket whose run did not finish is not left lying, and is not tried forever
 
 The ladder is for a run that failed its checks, crashed in the room, or was parked at its ceiling, turns or
 time. It is not for a stop you pressed, a held result, the plan limit (that has its own return) or a fence that
-did not hold. Only a run that ended within the last hour climbs, so an old failure never starts work by itself
-when SoftwareFactory is opened. Every climb is a line in the record by SoftwareFactory and counts under limit 2.
+did not hold. Only a run that ended while this SoftwareFactory was open, and within the last hour, climbs: opening the screen
+never starts paid work on a failure from before. A ticket of one short sentence is not sent to the split reader. Every climb is a line in the record by SoftwareFactory and counts under limit 2.
 "Work it again" by you starts the ladder anew for that ticket.
 
 Settings: `ladder` (on), `ladderAgain` 1, `ladderOtherWay` 1, `ladderModel` (empty: the same model),
-`ladderSplit` (on), `ladderSharedTries` 2, `ladderSplitModel` sonnet, `ladderWithinMinutes` 60.
+`ladderSplit` (on), `ladderSharedTries` 2, `ladderSplitModel` haiku, `ladderSplitMinChars` 120,
+`ladderWithinMinutes` 60.

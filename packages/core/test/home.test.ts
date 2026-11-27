@@ -346,7 +346,7 @@ describe("the page and its door", () => {
     const seen: { ticket: string; model: string; hint: string }[] = [];
     let n = 0;
     const { url, h } = await serve(r, {
-      settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, ladderModel: "opus" }),
+      settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, ladderModel: "opus", ladderSplitMinChars: 0 }),
       work: async (st, ticket) => {
         const run = `${ticket}-${++n}`;
         seen.push({ ticket, model: st.model, hint: st.hint ?? "" });

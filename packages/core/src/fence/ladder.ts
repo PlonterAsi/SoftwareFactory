@@ -21,11 +21,13 @@ export interface LadderSettings {
   ladderWithinMinutes: number;
   /** The model for "another way". Empty: the same model. */
   ladderModel: string;
+  /** A ticket shorter than this many characters is not sent to the split reader: one short sentence is one piece. */
+  ladderSplitMinChars: number;
   /** The model that reads a ticket to split it. */
   ladderSplitModel: string;
 }
 
-export const LADDER_DEFAULTS: LadderSettings = { ladder: true, ladderAgain: 1, ladderOtherWay: 1, ladderSplit: true, ladderSharedTries: 2, ladderWithinMinutes: 60, ladderModel: "", ladderSplitModel: "sonnet" };
+export const LADDER_DEFAULTS: LadderSettings = { ladder: true, ladderAgain: 1, ladderOtherWay: 1, ladderSplit: true, ladderSharedTries: 2, ladderWithinMinutes: 60, ladderModel: "", ladderSplitMinChars: 120, ladderSplitModel: "haiku" };
 
 export type Rung = "once more" | "another way" | "split";
 
@@ -79,6 +81,7 @@ export function ladderHint(rung: Rung, failed: { state: string; reason: string; 
 export function checkLadder(s: LadderSettings): void {
   for (const [k, name] of [["ladderAgain", "Once more"], ["ladderOtherWay", "Another way"], ["ladderSharedTries", "The shared tries after a split"]] as const) if (!Number.isInteger(s[k]) || s[k] < 0 || s[k] > 5) throw new Error(`${name} must be a whole number from 0 to 5.`);
   if (!Number.isInteger(s.ladderWithinMinutes) || s.ladderWithinMinutes < 1 || s.ladderWithinMinutes > 10080) throw new Error("The ladder's time window must be from 1 to 10080 minutes.");
+  if (!Number.isInteger(s.ladderSplitMinChars) || s.ladderSplitMinChars < 0 || s.ladderSplitMinChars > 10000) throw new Error("The shortest ticket worth splitting must be from 0 to 10000 characters.");
   for (const k of ["ladderModel", "ladderSplitModel"] as const) if (s[k] && !/^[a-z0-9][a-z0-9.-]{0,60}$/.test(s[k])) throw new Error(`"${s[k]}" is not a model name.`);
   if (!s.ladderSplitModel) throw new Error("The model that splits a ticket must be named.");
 }
