@@ -691,7 +691,10 @@ export function createHome(deps: HomeDeps) {
       if (req.method === "GET" && url.pathname === "/" && url.searchParams.has("pass")) {
         if (passUsed || !same(url.searchParams.get("pass") ?? "", pass)) { res.writeHead(403).end("this pass is not the one SoftwareFactory printed"); return; }
         passUsed = true;
-        res.writeHead(303, { location: "/", "set-cookie": `${cookieName}=${cookie}; HttpOnly; SameSite=Strict; Path=/`, "cache-control": "no-store", "referrer-policy": "no-referrer" }).end();
+        // Not a redirect: the app's window comes here from its own start page, and a browser does not send a strict
+        // cookie along a redirect that another page began. This small page moves on by itself, from here, so it is sent.
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": `${cookieName}=${cookie}; HttpOnly; SameSite=Strict; Path=/`, "cache-control": "no-store", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff", "x-frame-options": "DENY", "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" })
+          .end('<!doctype html><meta charset="utf-8"><title>SoftwareFactory</title><script>location.replace("/")</script><noscript><a href="/">Open SoftwareFactory</a></noscript>');
         return;
       }
       const got = new RegExp(`(?:^|;\\s*)${cookieName}=([A-Za-z0-9]+)`).exec(String(req.headers.cookie ?? ""))?.[1] ?? "";

@@ -182,7 +182,9 @@ describe("the page and its door", () => {
     for (const path of ["/", "/api/step1/state", "/api/step1/events"]) expect((await fetch(`${url}${path}`)).status).toBe(403);
     expect((await fetch(`${url}/?pass=wrong`, { redirect: "manual" })).status).toBe(403);
     const inn = await fetch(`${url}/?pass=${h.pass}`, { redirect: "manual" });
-    expect(inn.status).toBe(303);
+    // A page that moves on by itself, not a redirect: the app window comes from its own start page, and a strict cookie does not ride a redirect.
+    expect(inn.status).toBe(200);
+    expect(await inn.text()).toContain('location.replace("/")');
     expect(inn.headers.get("set-cookie")).toMatch(/^sf[a-f0-9]{8}=[a-f0-9]+; HttpOnly; SameSite=Strict/);
     expect((await fetch(`${url}/?pass=${h.pass}`, { redirect: "manual" })).status).toBe(403);
     expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "application/json", "x-sf-key": h.key }, body: "{}" })).status).toBe(403);
