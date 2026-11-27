@@ -163,7 +163,7 @@ export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> 
   const canary = `/srv/sf-fence/canary-${nonce}`;
   const listed = s.netList[0] ?? "github.com";
   const seen = new Map<string, { verdict: Verdict; detail: string }>();
-  const set = (id: string, verdict: Verdict, detail: string) => seen.set(id, { verdict, detail: detail.slice(0, 200) });
+  const set = (id: string, verdict: Verdict, detail: string) => seen.set(id, { verdict, detail: detail.slice(0, 400) });
 
   // Wall 1, straight as the worker.
   const exe = `/srv/sf-fence/probe-${nonce}.exe`;
@@ -179,7 +179,7 @@ export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> 
     const r = await exec("worker", wallOneScript(s, probe, mark?.path), s.stepTimeoutMs);
     const got = parseLines(r.stdout);
     if (mark?.exists()) { mark.remove(); got.set("windows-program", { verdict: "THROUGH", detail: "a-mark-appeared-on-Windows" }); }
-    else if (mark && got.get("windows-program")?.verdict === "REFUSED") got.get("windows-program")!.detail += ",no-mark-on-Windows";
+    else if (mark && got.get("windows-program")?.verdict === "REFUSED") got.get("windows-program")!.detail = `no-mark-on-Windows,${got.get("windows-program")!.detail}`;
     for (const id of ["attach-drive", "become-root", "windows-program", "windows-side"]) {
       const g = got.get(id);
       if (!g) set(id, "could-not-judge", r.timedOut ? "timed out" : `no answer (exit ${r.code})`);
