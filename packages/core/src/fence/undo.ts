@@ -41,7 +41,8 @@ export async function undoTicket(deps: UndoDeps, ticket: string): Promise<UndoRe
       tree = plainGit(h.dir, "merge-tree", "--write-tree", tip, back).split("\n")[0]!.trim();
     } catch (e) {
       // Exit 1 is git saying the two sides touch the same lines. Anything else is a failure of the tool, and is said as one.
-      if ((e as { status?: number }).status === 1) return { ok: false, why: "Later work was built on top of this change, so it cannot be taken back by itself. Undo it by hand on GitHub, or ask for a ticket that removes it." };
+      // (A real conflict also prints the tree it got as far as; a failure of the tool prints none.)
+      if ((e as { status?: number }).status === 1 && /^[0-9a-f]{40}/.test(String((e as { stdout?: unknown }).stdout ?? ""))) return { ok: false, why: "Later work was built on top of this change, so it cannot be taken back by itself. Undo it by hand on GitHub, or ask for a ticket that removes it." };
       return { ok: false, why: `Git on this computer could not work out the undo (it needs Git 2.38 or newer): ${String((e as Error).message).split("\n")[0]!.slice(0, 160)}` };
     }
     if (!/^[0-9a-f]{40}$/.test(tree)) return { ok: false, why: "The undo could not be worked out." };
