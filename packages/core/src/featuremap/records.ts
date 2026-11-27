@@ -489,6 +489,15 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     files: [`${C}events.ts`, `${C}store/`], api: ["/api/store"],
   },
   {
+    id: "fence", name: "The fence (the room and its test)", group: "Foundation",
+    purpose: "A run never works on Windows as the person: it works in a closed room that holds nothing of theirs, and the room proves itself before every run.",
+    spec: ["The room is a WSL2 distribution of its own with no Windows drives, no Windows programs and a worker that cannot become root.", "Inside it, Claude Code's sandbox and a root-owned settings file hold a run to its project copy and to a list of network addresses.", "Before a run, seven tries to break out must be refused and two allowed things must work; anything else, or a test that could not run, stops the run.", "Each line is judged from outside by evidence, never by what the agent says.", "Every fence value is a setting with a safe starting value."],
+    flow: ["SoftwareFactory writes the rules into the room as root", "Before a run it tries the room straight as the worker", "It asks Claude Code in the room to run a fixed probe", "It looks from outside at what the probe left behind", "Nine lines are shown; all nine as expected lets the run start"],
+    design: "No screen yet: `npm run fence -- test` prints the nine lines. The home screen shows them from build step 1, slice 3.",
+    screens: [], docs: ["docs/fence.md"], stations: [],
+    files: [`${C}fence/`, `${C}fence-cli.ts`], api: [],
+  },
+  {
     id: "core-api", name: "Core server and live stream", group: "Foundation",
     purpose: "The one local server the Bridge talks to: routes every API call to its feature and streams every event live.",
     spec: ["Listens only on this computer.", "Every API area is answered by one feature.", "The event stream sends every event as it is appended.", "A fault in a route becomes a bug ticket and a plain sentence for the person."],
