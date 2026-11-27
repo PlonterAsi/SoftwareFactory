@@ -19,6 +19,8 @@ export interface FoundChecks {
   found: string[];
   /** The script entries the found checks stand on: a result that changes one of them is held. */
   watch: { path: string; scripts: string[] }[];
+  /** The folders the found checks look at ("" is the whole project). A change outside them was checked by nothing. */
+  covers: string[];
 }
 
 /** Folder names go into a command line, and a project's files are data: only plain names are used. */
@@ -43,8 +45,8 @@ export function findChecks(files: string[], read: (path: string) => string | nul
   const has = new Set(files);
   const dirs = ["", ...[...new Set(files.filter((f) => f.split("/").length === 2).map((f) => f.split("/")[0]!))].filter((d) => PLAIN.test(d) && !SKIP.has(d)).sort()];
   const at = (d: string, f: string) => (d ? `${d}/${f}` : f);
-  const out: FoundChecks = { prepare: [], checks: [], found: [], watch: [] };
-  const go: FoundChecks = { prepare: [], checks: [], found: [], watch: [] };
+  const out: FoundChecks = { prepare: [], checks: [], found: [], watch: [], covers: [] };
+  const go: FoundChecks = { prepare: [], checks: [], found: [], watch: [], covers: [] };
   const root = has.has("package.json") ? scriptsOf(read("package.json")) : null;
   for (const d of dirs) {
     // Node. With workspaces the top folder speaks for the folders under it.
@@ -57,6 +59,7 @@ export function findChecks(files: string[], read: (path: string) => string | nul
         if (wanted.length) {
           out.prepare.push(has.has(at(d, "package-lock.json")) ? `npm ci${where}` : `npm install --no-audit --no-fund${where}`);
           out.watch.push({ path: at(d, "package.json"), scripts: wanted });
+          out.covers.push(d);
           for (const k of wanted) { out.checks.push(`npm run ${k}${where}`); out.found.push(`${at(d, "package.json")}: ${k}`); }
         }
       }
@@ -67,7 +70,8 @@ export function findChecks(files: string[], read: (path: string) => string | nul
       go.prepare.push(`go${c} mod download`);
       go.checks.push(`go${c} vet ./...`, `go${c} build ./...`);
       go.found.push(`${at(d, "go.mod")}: vet and build`);
+      go.covers.push(d);
     }
   }
-  return { prepare: [...out.prepare, ...go.prepare], checks: [...out.checks, ...go.checks], found: [...out.found, ...go.found], watch: out.watch };
+  return { prepare: [...out.prepare, ...go.prepare], checks: [...out.checks, ...go.checks], found: [...out.found, ...go.found], watch: out.watch, covers: [...new Set([...out.covers, ...go.covers])] };
 }

@@ -135,12 +135,12 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     plainGit(h.dir, "bundle", "create", inFile, `refs/heads/${h.base}`);
     // Checks written in Settings win. With none written, the project tells its own, read from the starting point
     // before the run touched anything.
-    let checks = st.checks, prepare = st.prepare ?? [], checksFound: string[] | undefined, watch: FoundChecks["watch"] = [];
+    let checks = st.checks, prepare = st.prepare ?? [], checksFound: string[] | undefined, watch: FoundChecks["watch"] = [], covers: string[] | null = null;
     if (!checks.length) {
       // The branch by its full name: a tag that happens to carry the same name is never read instead.
       const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean);
       const found = findChecks(files, (path) => { try { const t = plainGit(h.dir, "show", `refs/heads/${h.base}:${path}`); return t.length > 1_000_000 ? null : t; } catch { return null; } });
-      checks = found.checks; prepare = [...prepare, ...found.prepare.filter((c) => !prepare.includes(c))]; checksFound = found.found; watch = found.watch;
+      checks = found.checks; prepare = [...prepare, ...found.prepare.filter((c) => !prepare.includes(c))]; checksFound = found.found; watch = found.watch; covers = found.covers;
     }
     const result = await runInRoom(deps.exec, deps.files, record, {
       run, ticket, project, sentence, bundle: readFileSync(inFile), base: h.base, branch,
@@ -173,10 +173,12 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     const diff = plainGit(h.dir, "diff", "--no-renames", "--no-ext-diff", "--no-textconv", `${result.baseSha}..${branch}`);
     if (cleanText(diff).hit) return hold("a secret was found in the result, so it does not leave this computer");
 
+    // Said plainly: files the found checks do not look at were checked by nothing.
+    const unchecked = covers && checks.length && !covers.includes("") ? changed.filter((f) => !covers!.some((d) => f.startsWith(`${d}/`))) : [];
     // Out: the branch, and a draft pull request. Never the base branch.
     const title = `${ticket}: ${quiet(sentence.trim().split("\n")[0]!).slice(0, 120)}`;
     if (deps.signal?.aborted) return hold("you pressed stop before the result left this computer");
-    const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", ...(st.done?.length ? ["Done when (written by SoftwareFactory before the run, from the request):", "", ...st.done.map((x) => `- ${quiet(x)}`), ""] : []), "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.${checksFound ? " It found them in the project as it was before the run." : ""}` : checksFound ? "SoftwareFactory found no build or type check in this project, so nothing was checked." : "No checks were set for this project."].join("\n");
+    const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", ...(st.done?.length ? ["Done when (written by SoftwareFactory before the run, from the request):", "", ...st.done.map((x) => `- ${quiet(x)}`), ""] : []), "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.${checksFound ? " It found them in the project as it was before the run." : ""}${unchecked.length ? ` These changed files lie outside what those checks look at, so nothing checked them: ${unchecked.slice(0, 10).map((f) => `\`${quiet(f)}\``).join(", ")}${unchecked.length > 10 ? " and more" : ""}.` : ""}` : checksFound ? "SoftwareFactory found no build or type check in this project, so nothing was checked." : "No checks were set for this project."].join("\n");
     let url: string, number: number | null = null;
     if (deps.github.hasToken()) {
       // openPr pushes HEAD, so HEAD of the bare history points at the ticket's branch for the length of the call.
@@ -187,7 +189,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
       await deps.github.pushBranch({ repo: st.repo, dir: h.dir, branch, base: h.base });
       url = deps.github.compareUrl(st.repo, h.base, branch);
     }
-    record.append({ kind: "result.proposed", who: "SF itself", run, ticket, project, data: { url, number, branch, base: h.base, files: changed.slice(0, 50), baseSha: result.baseSha, headSha: result.headSha } });
+    record.append({ kind: "result.proposed", who: "SF itself", run, ticket, project, data: { url, number, branch, base: h.base, files: changed.slice(0, 50), baseSha: result.baseSha, headSha: result.headSha, ...(unchecked.length ? { unchecked: unchecked.slice(0, 50) } : {}) } });
     return out({ run, end: "passed", reason: result.reason, url, branch, costUsd: result.costUsd });
   } catch (e) {
     const reason = (e as Error).message.slice(0, 300);

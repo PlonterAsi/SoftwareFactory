@@ -9,6 +9,7 @@ describe("the project tells its own checks", () => {
     expect(r.prepare).toEqual(["npm ci --prefix web", "go -C backend mod download"]);
     expect(r.checks).toEqual(["npm run build --prefix web", "go -C backend vet ./...", "go -C backend build ./..."]);
     expect(r.found).toEqual(["web/package.json: build", "backend/go.mod: vet and build"]);
+    expect(r.covers).toEqual(["web", "backend"]);
   });
   it("lets the top folder speak for its workspaces, type check before build", () => {
     const r = tree({ "package.json": JSON.stringify({ workspaces: ["packages/*"], scripts: { build: "x", typecheck: "y", test: "z" } }), "package-lock.json": "{}", "apps/package.json": JSON.stringify({ scripts: { build: "x" } }) });
@@ -16,7 +17,7 @@ describe("the project tells its own checks", () => {
     expect(r.checks).toEqual(["npm run typecheck", "npm run build"]);
   });
   it("takes no tests, and nothing from a project without a build", () => {
-    expect(tree({ "package.json": JSON.stringify({ scripts: { test: "vitest" } }), "package-lock.json": "{}" })).toEqual({ prepare: [], checks: [], found: [], watch: [] });
+    expect(tree({ "package.json": JSON.stringify({ scripts: { test: "vitest" } }), "package-lock.json": "{}" })).toEqual({ prepare: [], checks: [], found: [], watch: [], covers: [] });
   });
   it("installs without a lock file when there is none", () => {
     expect(tree({ "package.json": JSON.stringify({ scripts: { build: "x" } }) }).prepare).toEqual(["npm install --no-audit --no-fund"]);

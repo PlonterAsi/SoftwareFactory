@@ -80,7 +80,7 @@ export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare" 
     ] : []),
     "- Read the project's own instructions (CLAUDE.md, README) first and follow them.",
     "- Make the change with the project's own style and tests. Do not commit; your files are collected when you finish.",
-    "- Your shell commands run in a sandbox and nobody is there to approve anything. If a shell command is refused, do not give up on the shell: run it again as plain single commands, one per call (for example first `npm ci --prefix web`, then the next), without pipes, `;`, redirects or `cd ... &&`. Use the Read, Grep and Glob tools for looking at files.",
+    "- Your shell commands run in a sandbox and nobody is there to approve anything. If a shell command is refused, do not give up on the shell: run it again as plain single commands, one per call (for example first `npm ci --prefix web`, then the next), without pipes, `;`, redirects or `cd ... &&`. Use the Read and Glob tools for looking at files, and a plain `grep -rn` command to search inside them.",
     "- You can reach only a short list of network addresses (the package registries and GitHub). If something is refused, do not look for a way around it; say so in your final answer.",
     ...(r.checks.length ? [
       "- When you are done, these checks will be run on your work WITHOUT any network, so install whatever they need now (for example `npm ci`) and make sure each one passes:",
