@@ -72,6 +72,9 @@ button:disabled { opacity: 0.55; cursor: default; }
 .says { margin: 0; color: var(--soft); font-size: 15px; overflow-wrap: anywhere; }
 .meta { color: var(--soft); font-size: 14px; margin-left: auto; font-variant-numeric: tabular-nums; }
 details { margin-top: 10px; }
+details.settings { margin-top: 34px; }
+details.settings > summary { font-size: 15px; width: auto; }
+details.settings[open] > summary { margin-bottom: 14px; }
 summary { cursor: pointer; color: var(--soft); font-size: 14px; font-weight: 600; width: fit-content; border-radius: 6px; }
 ol.story { list-style: none; margin: 8px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font: 13.5px/1.55 var(--mono); max-height: 420px; overflow: auto; }
 ol.story li { display: grid; grid-template-columns: 5.2em 6.2em 1fr; gap: 0 8px; }
@@ -117,8 +120,8 @@ ol.story li.flag .x { color: var(--bad); }
   <h2 id="tickets-title">Tickets</h2>
   <section class="card" aria-labelledby="tickets-title"><div id="tickets"><p class="empty">No tickets yet. Your first sentence starts one.</p></div></section>
 
-  <h2 id="settings-title">Settings</h2>
-  <section class="card" aria-labelledby="settings-title">
+  <details class="card settings" id="settings">
+    <summary id="settings-title">Settings <span class="hint" id="settings-hint"></span></summary>
     <div class="grid">
       <div class="wide"><label for="s-repo">Project on GitHub <span class="hint">owner/name</span></label><input id="s-repo" autocomplete="off" spellcheck="false"></div>
       <div><label for="s-base">Start from branch <span class="hint">empty: the project's main one</span></label><input id="s-base" autocomplete="off" spellcheck="false"></div>
@@ -134,14 +137,14 @@ ol.story li.flag .x { color: var(--bad); }
     <div class="row"><button id="save" type="button">Save settings</button><button id="phone-test" type="button">Send a test line to the phone</button><span class="hint" id="save-hint"></span></div>
     <p class="msg" id="set-msg" role="alert"></p>
     <p class="fence" id="fence"></p>
-  </section>
+  </details>
 </main>
 <script>
 (function () {
   "use strict";
   var KEY = "__SF_KEY__";
   var $ = function (id) { return document.getElementById(id); };
-  var open = {}, nodes = {}, drawn = null, confirming = null, settingsLoaded = false, last = null, busy = false;
+  var open = {}, askedOpen = false, nodes = {}, drawn = null, confirming = null, settingsLoaded = false, last = null, busy = false;
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
   function clock(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }); }
@@ -282,6 +285,9 @@ ol.story li.flag .x { color: var(--bad); }
       $("s-stuck").value = s.settings.stuckMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
       $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n");
     }
+    // Settings stay folded when everything a run needs is set; they open by themselves only when the project is missing.
+    $("settings-hint").textContent = s.settings.repo ? "Already set. Nothing to fill in." : "Choose the project first.";
+    if (!s.settings.repo && !askedOpen) { askedOpen = true; $("settings").open = true; }
     $("fence").textContent = s.fence ? "The room is " + s.fence.room + ". A run may reach only: " + s.fence.netList.join(", ") + ". The fence is tested before every run." : "";
   }
 
