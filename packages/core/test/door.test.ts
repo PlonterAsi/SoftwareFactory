@@ -168,6 +168,15 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     expect(storyText(record, "T1")).toMatch(/you asked: Add a hello file\.[\s\S]*check passed: test -f hello\.txt[\s\S]*proposed on GitHub/);
   });
 
+  it("with no checks written, asks the project itself, and says in the story what it found", async () => {
+    mode("ok");
+    const record = new TheRecord();
+    const o = await workTicket(deps(record), settings({ checks: [] }), "Add a hello file.");
+    expect(o.end).toBe("passed");
+    expect(record.story("T1").find((l) => l.kind === "run.started")!.data).toMatchObject({ checks: [], checksFound: [] });
+    expect(storyText(record, "T1")).toMatch(/no build or type check was found in the project/);
+  });
+
   it("starts nothing when the fence does not hold", async () => {
     mode("ok");
     const record = new TheRecord();
@@ -227,6 +236,6 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     mode("secret");
     const b = await workTicket(deps(new TheRecord()), settings(), "Add a hello file.");
     expect(b.reason).toMatch(/secret/);
-    expect(g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean)).toHaveLength(2);
+    expect(g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean)).toHaveLength(3);
   });
 });

@@ -40,6 +40,8 @@ export interface RunRequest {
   checks: string[];
   /** Commands that fetch what the checks need (packages, modules). The agent runs them first, while it still has the listed addresses. */
   prepare?: string[];
+  /** Set when the checks were found in the project itself (and not written in Settings): where each came from. */
+  checksFound?: string[];
   signal?: AbortSignal;
 }
 
@@ -177,7 +179,7 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
   };
   const step = async (user: "worker" | "root", script: string, timeoutMs = s.stepTimeoutMs, onLine?: (l: string) => void): Promise<ExecResult> => exec(user, script, timeoutMs, onLine);
 
-  record.append({ kind: "run.started", who: "SF itself", ...stamp, data: { branch: req.branch, base: req.base, model: req.model, timeLimitMinutes: Math.round(req.timeLimitMs / 60_000), checks: req.checks, prepare: req.prepare ?? [] } });
+  record.append({ kind: "run.started", who: "SF itself", ...stamp, data: { branch: req.branch, base: req.base, model: req.model, timeLimitMinutes: Math.round(req.timeLimitMs / 60_000), checks: req.checks, prepare: req.prepare ?? [], ...(req.checksFound ? { checksFound: req.checksFound } : {}) } });
   try {
     if (stopped()) return await finish("stopped", "you pressed stop");
     // 1. The copy goes in as data and is unpacked by git inside the no-network box.

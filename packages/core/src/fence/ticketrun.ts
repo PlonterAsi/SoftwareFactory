@@ -1,3 +1,4 @@
+import { findChecks } from "./projectchecks.js";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -120,9 +121,17 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     mkdirSync(tmp, { recursive: true });
     const h = history(deps, st);
     plainGit(h.dir, "bundle", "create", inFile, h.base);
+    // Checks written in Settings win. With none written, the project tells its own, read from the starting point
+    // before the run touched anything.
+    let checks = st.checks, prepare = st.prepare ?? [], checksFound: string[] | undefined;
+    if (!checks.length) {
+      const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", h.base).split("\0").filter(Boolean);
+      const found = findChecks(files, (path) => { try { const t = plainGit(h.dir, "show", `${h.base}:${path}`); return t.length > 1_000_000 ? null : t; } catch { return null; } });
+      checks = found.checks; prepare = [...prepare, ...found.prepare.filter((c) => !prepare.includes(c))]; checksFound = found.found;
+    }
     const result = await runInRoom(deps.exec, deps.files, record, {
       run, ticket, project, sentence, bundle: readFileSync(inFile), base: h.base, branch,
-      model: st.model, maxTurns: st.maxTurns, timeLimitMs: st.timeLimitMinutes * 60_000, checks: st.checks, prepare: st.prepare ?? [], signal: deps.signal,
+      model: st.model, maxTurns: st.maxTurns, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, signal: deps.signal,
     }, deps.fence);
     if (result.end !== "passed" || !result.bundle || !result.baseSha || !result.headSha) return out({ run, end: result.end, reason: result.reason, costUsd: result.costUsd });
 
@@ -147,7 +156,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     // Out: the branch, and a draft pull request. Never the base branch.
     const title = `${ticket}: ${quiet(sentence.trim().split("\n")[0]!).slice(0, 120)}`;
     if (deps.signal?.aborted) return hold("you pressed stop before the result left this computer");
-    const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.` : "No checks were set for this project."].join("\n");
+    const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.${checksFound ? " It found them in the project as it was before the run." : ""}` : checksFound ? "SoftwareFactory found no build or type check in this project, so nothing was checked." : "No checks were set for this project."].join("\n");
     let url: string, number: number | null = null;
     if (deps.github.hasToken()) {
       // openPr pushes HEAD, so HEAD of the bare history points at the ticket's branch for the length of the call.
@@ -175,7 +184,7 @@ export function storyLine(l: RecordLine): string {
     const what =
       l.kind === "ticket.opened" ? `you asked: ${d.sentence}` :
       l.kind === "fence.tested" ? (d.ok ? "the fence held: nine lines as they should be" : `the fence did not hold${d.error ? `: ${d.error}` : ""}`) :
-      l.kind === "run.started" ? `a run started on ${d.model}` :
+      l.kind === "run.started" ? `a run started on ${d.model}${Array.isArray(d.checksFound) ? (d.checks?.length ? `; checks found in the project (${d.checksFound.join(", ")})` : "; no build or type check was found in the project, so nothing will be checked") : ""}` :
       l.kind === "run.step" ? (d.did ?? d.says?.split("\n")[0]?.slice(0, 140) ?? (d.tools ? `used ${d.tools.map((x: any) => x.tool).join(", ")}` : d.toolErrors ? `a command or tool ended with an error: ${String(d.toolErrors[0]).split("\n")[0]!.slice(0, 100)}` : "finished")) :
       l.kind === "run.checked" ? `check ${d.ok ? "passed" : "FAILED"}: ${d.command}` :
       l.kind === "run.ended" ? `the run ended: ${d.end} (${d.reason})` :

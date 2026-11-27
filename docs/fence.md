@@ -122,3 +122,13 @@ starter file (`SoftwareFactory-Step1.cmd` stays for a checkout without an instal
 The Windows smoke test (part 7c of `scripts/smoke/windows-smoke.mjs`) proves this path on every build: the home
 screen answers, refuses a visitor without the pass, the window opens it, closing the window writes the goodbye,
 and killing the app alone leaves nothing on port 4517.
+
+## The project tells its own checks
+
+With no checks written in Settings, SoftwareFactory finds them in the project (`fence/projectchecks.ts`): it reads
+the file list of the starting point, before the run touched anything, so a run cannot weaken its own checks. It
+looks at the top folder and the folders right under it. A `package.json` with a `typecheck` or `build` script gives
+`npm ci` to prepare and those scripts as checks; a `go.mod` gives `go mod download`, then `go vet` and `go build`.
+Node comes before Go. Tests are not taken: they often need a database or a key, and come in when a project is
+brought in and proven in the room. Folder names that are not plain letters, digits, dot, dash or underscore are
+never put into a command. The story of the ticket says what was found; checks written in Settings always win.

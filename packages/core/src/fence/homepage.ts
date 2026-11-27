@@ -133,7 +133,7 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-phone">Lines to your phone</label><select id="s-phone"><option value="none">None, the home screen only</option><option value="ntfy">The ntfy app</option></select></div>
       <div class="wide"><label for="s-topic">ntfy channel name <span class="hint">16 or more letters and digits; whoever knows it can read the lines</span></label><input id="s-topic" autocomplete="off" spellcheck="false"></div>
       <div class="wide"><label for="s-prepare">The run does these first <span class="hint">one per line; they fetch what the checks need</span></label><textarea id="s-prepare" spellcheck="false"></textarea></div>
-      <div class="wide"><label for="s-checks">Checks SoftwareFactory runs on the result <span class="hint">one per line, in this order, without network</span></label><textarea id="s-checks" spellcheck="false"></textarea></div>
+      <div class="wide"><label for="s-checks">Checks SoftwareFactory runs on the result <span class="hint">leave empty and SoftwareFactory finds them in the project; or one per line, in this order</span></label><textarea id="s-checks" spellcheck="false"></textarea></div>
     </div>
     <div class="row"><button id="save" type="button">Save settings</button><button id="phone-test" type="button">Send a test line to the phone</button><span class="hint" id="save-hint"></span></div>
     <p class="msg" id="set-msg" role="alert"></p>
