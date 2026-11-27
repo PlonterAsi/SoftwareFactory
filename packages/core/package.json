@@ -17,6 +17,7 @@
     "test": "vitest run",
     "factory": "tsx src/factory-cli.ts",
     "order": "tsx src/order-cli.ts",
+    "fence": "tsx src/fence-cli.ts",
     "kit": "node scripts/kit.mjs",
     "wiring": "node scripts/wiring.mjs"
   },
