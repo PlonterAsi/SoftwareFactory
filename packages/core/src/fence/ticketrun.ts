@@ -135,12 +135,12 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     plainGit(h.dir, "bundle", "create", inFile, `refs/heads/${h.base}`);
     // Checks written in Settings win. With none written, the project tells its own, read from the starting point
     // before the run touched anything.
-    let checks = st.checks, prepare = st.prepare ?? [], checksFound: string[] | undefined, watch: FoundChecks["watch"] = [], covers: string[] | null = null;
+    let checks = st.checks, prepare = st.prepare ?? [], checksFound: string[] | undefined, watch: FoundChecks["watch"] = [], covers: string[] | null = null, workspaces = false;
     if (!checks.length) {
       // The branch by its full name: a tag that happens to carry the same name is never read instead.
       const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean);
       const found = findChecks(files, (path) => { try { const t = plainGit(h.dir, "show", `refs/heads/${h.base}:${path}`); return t.length > 1_000_000 ? null : t; } catch { return null; } });
-      checks = found.checks; prepare = [...prepare, ...found.prepare.filter((c) => !prepare.includes(c))]; checksFound = found.found; watch = found.watch; covers = found.covers;
+      checks = found.checks; prepare = [...prepare, ...found.prepare.filter((c) => !prepare.includes(c))]; checksFound = found.found; watch = found.watch; covers = found.covers; workspaces = found.workspaces;
     }
     const result = await runInRoom(deps.exec, deps.files, record, {
       run, ticket, project, sentence, bundle: readFileSync(inFile), base: h.base, branch,
@@ -163,10 +163,14 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     const heldFile = changed.find((f) => HELD_PATHS.some((re) => re.test(f)));
     if (heldFile) return hold(`the result changes ${heldFile}, which decides what runs by itself on GitHub: that needs your look before it leaves`);
     // A found check runs the project's own script. A result that rewrites that script has checked itself.
-    for (const w of watch.filter((x) => changed.includes(x.path))) {
+    // npm also runs "pre" and "post" of a script by itself; and with workspaces the top folder's script hands on
+    // to the scripts of every package under it, so there any changed script counts.
+    const watched = [...watch, ...(workspaces ? changed.filter((f) => /(^|\/)package\.json$/.test(f) && !watch.some((w) => w.path === f)).map((path) => ({ path, scripts: null as string[] | null })) : [])];
+    for (const w of watched.filter((x) => changed.includes(x.path))) {
       const at = (rev: string) => { try { return scriptsOf(plainGit(h.dir, "show", `${rev}:${w.path}`))?.scripts ?? {}; } catch { return {} as Record<string, string>; } };
       const was = at(result.baseSha), now = at(`refs/heads/${branch}`);
-      const moved = w.scripts.find((k) => was[k] !== now[k]);
+      const keys = w.scripts ? w.scripts.flatMap((k) => [k, `pre${k}`, `post${k}`]) : [...new Set([...Object.keys(was), ...Object.keys(now)])];
+      const moved = keys.find((k) => was[k] !== now[k]);
       if (moved) return hold(`the result changes the "${moved}" command in ${w.path}, which is the very check SoftwareFactory ran on it: that needs your look before it leaves`);
     }
     // The project's own settings may not choose a program to show a file with: this side runs nothing of the result's.

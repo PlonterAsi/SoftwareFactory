@@ -37,7 +37,7 @@ describe("the ready gate", () => {
     const r = await askGate(exec, fenceSettings(), q);
     expect(r).toEqual({ ok: true, answer: { clear: true, kind: "request", done: ["A footer is on every page."], guesses: [], question: null, costUsd: 0.002 } });
     expect(script).toMatch(/^worker\n/);
-    expect(script).toContain('--tools "" --permission-mode dontAsk');
+    expect(script).toContain('--tools "" --setting-sources user --strict-mcp-config --permission-mode dontAsk'); expect(script).toContain("ENABLE_CLAUDEAI_MCP_SERVERS=false");
     expect(script).toContain("--max-turns 1");
     expect(script).toContain("unset ANTHROPIC_API_KEY");
   });

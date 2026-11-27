@@ -21,6 +21,8 @@ export interface FoundChecks {
   watch: { path: string; scripts: string[] }[];
   /** The folders the found checks look at ("" is the whole project). A change outside them was checked by nothing. */
   covers: string[];
+  /** The top folder speaks for workspaces: its scripts hand on to the scripts of every package under it. */
+  workspaces: boolean;
 }
 
 /** Folder names go into a command line, and a project's files are data: only plain names are used. */
@@ -45,8 +47,8 @@ export function findChecks(files: string[], read: (path: string) => string | nul
   const has = new Set(files);
   const dirs = ["", ...[...new Set(files.filter((f) => f.split("/").length === 2).map((f) => f.split("/")[0]!))].filter((d) => PLAIN.test(d) && !SKIP.has(d)).sort()];
   const at = (d: string, f: string) => (d ? `${d}/${f}` : f);
-  const out: FoundChecks = { prepare: [], checks: [], found: [], watch: [], covers: [] };
-  const go: FoundChecks = { prepare: [], checks: [], found: [], watch: [], covers: [] };
+  const out: FoundChecks = { prepare: [], checks: [], found: [], watch: [], covers: [], workspaces: false };
+  const go: FoundChecks = { prepare: [], checks: [], found: [], watch: [], covers: [], workspaces: false };
   const root = has.has("package.json") ? scriptsOf(read("package.json")) : null;
   for (const d of dirs) {
     // Node. With workspaces the top folder speaks for the folders under it.
@@ -73,5 +75,5 @@ export function findChecks(files: string[], read: (path: string) => string | nul
       go.covers.push(d);
     }
   }
-  return { prepare: [...out.prepare, ...go.prepare], checks: [...out.checks, ...go.checks], found: [...out.found, ...go.found], watch: out.watch, covers: [...new Set([...out.covers, ...go.covers])] };
+  return { prepare: [...out.prepare, ...go.prepare], checks: [...out.checks, ...go.checks], found: [...out.found, ...go.found], watch: out.watch, covers: [...new Set([...out.covers, ...go.covers])], workspaces: !!root?.workspaces && out.watch.some((w) => w.path === "package.json") };
 }

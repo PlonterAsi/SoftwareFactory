@@ -171,3 +171,11 @@ them and cannot change them; they are in the story and in the proposal on GitHub
 - A ticket sent to be worked again keeps the test of done it has.
 - Settings: `gate` (on by default) and `gateModel` (`haiku`). Record lines: `gate.asked`, `gate.answered`,
   `gate.passed`.
+
+## What the agent is started with
+
+The agent is started with `--setting-sources user --strict-mcp-config` and with `ENABLE_CLAUDEAI_MCP_SERVERS=false`.
+
+- The project's own Claude settings (`.claude/settings.json` in the copy) do not count inside the room. They could deny reads (which hid `node_modules` from the run) and name hooks and plugins; only the room's managed rules and the worker's sign-in apply.
+- The room is signed in with the owner's account, so that account's connectors (mail, files, documents) would otherwise be offered to the run as tools, and those do not pass the room's network list. They are switched off, and SF reads the first line of the agent's stream: if any `mcp__` tool or connected server is listed, the run is ended at once and nothing of it is kept.
+- The ready gate's reader is started the same way, with no tools at all.

@@ -71,7 +71,7 @@ export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare" 
     "",
     "The owner's request:",
     r.sentence.trim(),
-    ...(r.done?.length ? ["", "The work is finished when all of these are true (written down before you started; they are fixed):", ...r.done.map((x) => `- ${x}`)] : []),
+    ...(r.done?.length ? ["", "SoftwareFactory's reading of when this is finished, written down before you started. It is a reading of the request above, not more than it: where the two differ, the owner's request wins.", ...r.done.map((x) => `- ${x}`)] : []),
     "",
     "How to work:",
     ...(r.prepare?.length ? [
@@ -80,7 +80,7 @@ export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare" 
     ] : []),
     "- Read the project's own instructions (CLAUDE.md, README) first and follow them.",
     "- Make the change with the project's own style and tests. Do not commit; your files are collected when you finish.",
-    "- Your shell commands run in a sandbox and nobody is there to approve anything. If a shell command is refused, do not give up on the shell: run it again as plain single commands, one per call (for example first `npm ci --prefix web`, then the next), without pipes, `;`, redirects or `cd ... &&`. Use the Read and Glob tools for looking at files, and a plain `grep -rn` command to search inside them.",
+    "- Your shell commands run in a sandbox and nobody is there to approve anything. If a shell command is refused, do not give up on the shell: run it again as plain single commands, one per call (for example first `npm ci --prefix web`, then the next), without pipes, `;`, redirects or `cd ... &&`. Use the Read tool for looking at a file, and plain `ls` and `grep -rn` commands to find files and search inside them.",
     "- You can reach only a short list of network addresses (the package registries and GitHub). If something is refused, do not look for a way around it; say so in your final answer.",
     ...(r.checks.length ? [
       "- When you are done, these checks will be run on your work WITHOUT any network, so install whatever they need now (for example `npm ci`) and make sure each one passes:",
@@ -110,14 +110,18 @@ fenced() {
 }
 # git as ours: our name, no hooks, no signing, whatever the copy's own settings say.
 ourgit() { fenced git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false -c user.name="SoftwareFactory worker" -c user.email=worker@softwarefactory.invalid "$@"; }
-agent_env() { export ${env}; export PATH=/usr/local/go/bin:$PATH; }
+# The agent sees no tools from the owner's own account (mail, files, documents): the switch is off here, and the run is ended if any shows anyway.
+agent_env() { export ${env}; export PATH=/usr/local/go/bin:$PATH; export ENABLE_CLAUDEAI_MCP_SERVERS=false; }
 `;
 }
+
+/** How the agent is started: only the room's own rules and the worker's sign-in count, never the project's own Claude settings, and no outside tools. */
+export const AGENT_FLAGS = "--setting-sources user --strict-mcp-config";
 
 interface AgentEnd { isError: boolean; outOfTurns: boolean; text: string; costUsd: number; turns: number }
 
 /** One line of Claude Code's stream becomes at most one line of the record. Content only: the stamps are ours. */
-export function stepOf(line: string): { data: Record<string, unknown>; end?: AgentEnd } | null {
+export function stepOf(line: string): { data: Record<string, unknown>; end?: AgentEnd; outside?: string[] } | null {
   let j: any;
   try { j = JSON.parse(line); } catch { return null; }
   if (!j || typeof j !== "object") return null;
@@ -131,6 +135,13 @@ export function stepOf(line: string): { data: Record<string, unknown>; end?: Age
   if (j.type === "user" && Array.isArray(j.message?.content)) {
     const errors = j.message.content.filter((c: any) => c.type === "tool_result" && c.is_error).map((c: any) => cut(c.content, 1500));
     return errors.length ? { data: { toolErrors: errors } } : null;
+  }
+  if (j.type === "system" && j.subtype === "init") {
+    // Tools from outside the room (mail, files, documents of the signed-in account) must not be there at all.
+    const tools: string[] = Array.isArray(j.tools) ? j.tools.map((x: unknown) => String(x)) : [];
+    const servers: string[] = Array.isArray(j.mcp_servers) ? j.mcp_servers.filter((m: any) => !m?.status || m.status === "connected").map((m: any) => String(m?.name ?? m)) : [];
+    const outside = [...new Set([...tools.filter((n) => n.startsWith("mcp__")), ...servers.map((n) => `server ${n}`)])];
+    return { data: { did: "agent started", toolCount: tools.length, ...(outside.length ? { outsideTools: outside.slice(0, 20) } : {}) }, ...(outside.length ? { outside } : {}) };
   }
   if (j.type === "result") {
     const sub = typeof j.subtype === "string" ? j.subtype : "";
@@ -205,16 +216,19 @@ echo "SFBASE $(ourgit rev-parse HEAD)"
 
     // 2. The agent works, under Claude Code's sandbox and the managed rules. Each of its lines is stamped by us.
     let agentEnd: AgentEnd | null = null;
+    let outside: string[] = [];
     const agent = await step("worker", `${pre}
 cd "$copy" || exit 97
 agent_env
 unset ANTHROPIC_API_KEY
-claude -p --output-format stream-json --verbose --model ${req.model} --max-turns ${Math.max(1, Math.floor(req.maxTurns))} --permission-mode dontAsk <<'SF_PROMPT_${tag}'
+claude -p --output-format stream-json --verbose --model ${req.model} --max-turns ${Math.max(1, Math.floor(req.maxTurns))} ${AGENT_FLAGS} --permission-mode dontAsk <<'SF_PROMPT_${tag}'
 ${runPrompt(req).split(`SF_PROMPT_${tag}`).join("")}
 SF_PROMPT_${tag}
 `, req.timeLimitMs, (line) => {
       const st = stepOf(line);
       if (!st) return;
+      // An outside tool in the agent's hands ends the run at once, before it can use one.
+      if (st.outside?.length && !outside.length) { outside = st.outside; void killAll(); }
       if (st.end) { agentEnd = st.end; costUsd = st.end.costUsd; summary = st.end.text; }
       record.append({ kind: "run.step", who: "worker", ...stamp, costUsd: st.end ? st.end.costUsd : null, data: st.data });
     });
@@ -222,6 +236,7 @@ SF_PROMPT_${tag}
     const quiet = await killAll();
     const done = agentEnd as AgentEnd | null;
     if (stopped()) return await finish("stopped", "you pressed stop");
+    if (outside.length) return await finish("crashed", `the run was ended at its start: it was handed tools from outside the room (${outside.slice(0, 5).join(", ")}), which must never be there`);
     if (!quiet) return await finish("crashed", "something the run started could not be ended, so its work is not trusted");
     if (agent.timedOut) return await finish("parked", `the time limit of ${Math.round(req.timeLimitMs / 60_000)} minutes was reached`);
     if (!done) return await finish(looksLikeLimit(agent.stdout + agent.stderr) ? "parked" : "crashed", looksLikeLimit(agent.stdout + agent.stderr) ? "the plan limit was reached" : `the agent ended without an answer (exit ${agent.code}): ${(agent.stderr || agent.stdout).slice(-300)}`);

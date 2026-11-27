@@ -91,13 +91,14 @@ export async function askGate(exec: RoomExec, s: FenceSettings, q: GateQuestion)
 d=$(mktemp -d ${s.copies}/gate-XXXXXXXX) || exit 97
 cd "$d" || exit 97
 unset ANTHROPIC_API_KEY
-claude -p --output-format json --model ${q.model} --max-turns 1 --tools "" --permission-mode dontAsk <<'SF_GATE_${tag}'
+export ENABLE_CLAUDEAI_MCP_SERVERS=false
+claude -p --output-format json --model ${q.model} --max-turns 1 --tools "" --setting-sources user --strict-mcp-config --permission-mode dontAsk <<'SF_GATE_${tag}'
 ${gatePrompt(q).split(`SF_GATE_${tag}`).join("")}
 SF_GATE_${tag}
 code=$?
 cd / && rm -rf "$d"
 exit $code
-`, q.timeoutMs ?? 120_000);
+`, q.timeoutMs ?? 90_000);
   } catch (e) { return { ok: false, why: `the room could not be reached: ${(e as Error).message.slice(0, 200)}` }; }
   if (r.timedOut) return { ok: false, why: "the reader did not answer in time" };
   let out: any = null;

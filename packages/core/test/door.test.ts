@@ -52,7 +52,8 @@ describe("the record", () => {
 describe("the door's small parts", () => {
   it("reads Claude Code's stream into content only", () => {
     expect(stepOf("not json")).toBeNull();
-    expect(stepOf(JSON.stringify({ type: "system", subtype: "init" }))).toBeNull();
+    expect(stepOf(JSON.stringify({ type: "system", subtype: "init", tools: ["Bash", "Read"] }))).toEqual({ data: { did: "agent started", toolCount: 2 } });
+    expect(stepOf(JSON.stringify({ type: "system", subtype: "init", tools: ["Bash", "mcp__claude_ai_Gmail__send_message"], mcp_servers: [{ name: "claude.ai Gmail", status: "connected" }, { name: "off", status: "disabled" }] }))!.outside).toEqual(["mcp__claude_ai_Gmail__send_message", "server claude.ai Gmail"]);
     expect(stepOf(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Reading the code." }, { type: "tool_use", name: "Bash", input: { command: "ls" } }] } }))!.data).toEqual({ says: "Reading the code.", tools: [{ tool: "Bash", input: '{"command":"ls"}' }] });
     expect(stepOf(JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", is_error: true, content: "denied" }] } }))!.data).toEqual({ toolErrors: ["denied"] });
     const end = stepOf(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "All done.", total_cost_usd: 0.42, num_turns: 7 }))!.end!;
@@ -126,8 +127,9 @@ exec "$@"
     writeFileSync(join(shim, "claude"), `#!/bin/bash
 cat > /dev/null
 m=$(cat "$(dirname "$0")/mode")
+echo "$* connectors=$ENABLE_CLAUDEAI_MCP_SERVERS" > "$(dirname "$0")/args"
 say() { printf '%s\\n' "$1"; }
-say '{"type":"system","subtype":"init"}'
+if [ "$m" = mail ]; then say '{"type":"system","subtype":"init","tools":["Bash","mcp__claude_ai_Gmail__send_message"]}'; else say '{"type":"system","subtype":"init","tools":["Bash","Read"]}'; fi
 case "$m" in
   limit) say '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude usage limit reached. Your limit will reset at 3pm.","total_cost_usd":0,"num_turns":0}'; exit 1;;
   nothing) ;;
@@ -204,6 +206,18 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     mode("nothing");
     const b = await workTicket(deps(new TheRecord()), settings({ checks: [] }), "Add a hello file.");
     expect(b).toMatchObject({ end: "parked", reason: "the run changed nothing in the project" });
+  });
+
+  it("starts the agent without the project's own settings or outside tools, and ends a run that was handed one", async () => {
+    mode("mail");
+    const record = new TheRecord();
+    const a = await workTicket(deps(record), settings(), "Add a hello file.");
+    expect(a).toMatchObject({ end: "crashed" });
+    expect(a.reason).toMatch(/tools from outside the room.*mcp__claude_ai_Gmail__send_message/);
+    expect(a.pr ?? null).toBeNull();
+    const args = readFileSync(join(shim, "args"), "utf8");
+    expect(args).toMatch(/--setting-sources user --strict-mcp-config/);
+    expect(args).toMatch(/connectors=false/);
   });
 
   it("ignores a hook and a hidden-file list the agent planted, and fails a check that rewrites the work", async () => {

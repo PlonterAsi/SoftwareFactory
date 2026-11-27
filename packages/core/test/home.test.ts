@@ -105,6 +105,17 @@ describe("accept", () => {
     expect(await h.accept("T1")).toMatchObject({ ok: false, why: expect.stringMatching(/already/) });
   });
 
+  it("does not accept an older proposal of a ticket that was sent to be worked again", async () => {
+    const r = new TheRecord();
+    proposed(r);
+    r.append({ kind: "ticket.queued", who: "you", ticket: "T1", project: "o/p", data: {} });
+    const g = fakeGitHub();
+    const h = home(r, { github: g.gh });
+    expect(await h.accept("T1")).toMatchObject({ ok: false });
+    expect(await h.look("T1")).toMatchObject({ ok: false });
+    expect(g.calls).toEqual([]);
+  });
+
   it("refuses when the proposal changed on GitHub after it was checked, was closed, or was never made", async () => {
     const r = new TheRecord();
     proposed(r);

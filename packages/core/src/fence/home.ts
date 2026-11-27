@@ -149,14 +149,14 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
     else if (running === ticket) { state = "working"; says = "A run is working on it now."; }
     else if (proposed && d(proposed).held) { state = "held"; says = `Held on this computer: ${d(proposed).reason}`; }
     else if (proposed) { state = "proposed"; says = "Done and checked. Waiting for you to accept."; }
-    else if (!go.length && question) { state = "asked"; says = question; }
+    else if (!go.length && question && WORKED.includes(kindNow)) { state = "asked"; says = question; }
     else if (!go.length && !WORKED.includes(kindNow)) { state = "kept"; says = `Kept on the list as ${kindNow === "idea" ? "an idea" : `a ${kindNow}`}. Only requests, bugs and tasks are sent to a run for now.`; }
     // A ticket from before there was a queue (its first line names no kind) is never started by itself.
     else if (!go.length && (typeof d(opened).kind === "string" || sent.kind === "ticket.queued")) { state = "waiting"; says = "Waiting for its turn."; }
     else if (ended) { state = d(ended).end as TicketState; says = String(d(ended).reason ?? ""); }
     else if (go.some((l) => l.kind === "stop.pressed")) { state = "stopped"; says = "You pressed stop."; }
     else if (fence && d(fence).ok === false) { state = "not started"; says = "The fence did not hold, so no run started."; }
-    else { state = "interrupted"; says = ls.some((l) => l.id > sent.id && l.kind === "watchdog.spoke" && d(l).why === "gone") ? "SoftwareFactory went away while this was being worked. The watchdog ended the run; nothing left the computer." : "SoftwareFactory was closed while this ticket was being worked."; }
+    else { state = "interrupted"; says = ls.some((l) => l.id > sent.id && l.kind === "watchdog.spoke" && d(l).why === "gone") ? "SoftwareFactory went away while this was being worked. The watchdog ended the run; nothing left the computer." : !go.length ? "From before tickets waited their turn. Use Work it again to send it." : "SoftwareFactory was closed while this ticket was being worked."; }
     const number = proposed && typeof d(proposed).number === "number" ? (d(proposed).number as number) : null;
     out.push({
       ticket, project: opened.project, sentence: String(d(edit).sentence ?? d(opened).sentence ?? ""), kind: kindNow, openedAt: opened.ts, state, says,
@@ -167,7 +167,7 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
       canEdit: (state === "waiting" || state === "kept" || state === "asked") && !removed, canRemove: state !== "working" && !removed,
       canAgain: !removed && ["proposed", "failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held"].includes(state),
       removed, place: null, question: state === "asked" ? question : null, done: Array.isArray(d(gPassed).done) ? (d(gPassed).done as unknown[]).map(String) : [],
-      asked: gAsked && gAnswered ? { question: String(d(gAsked).question ?? ""), answer: String(d(gAnswered).answer ?? "") } : null, gatePassed: !!gPassed, waitingSince: Math.max(sent.id, lastOf(ls, "ticket.restored")?.id ?? 0),
+      asked: gAsked && gAnswered ? { question: String(d(gAsked).question ?? ""), answer: String(d(gAnswered).answer ?? "") } : null, gatePassed: !!gPassed && !d(gPassed).skipped, waitingSince: Math.max(sent.id, lastOf(ls, "ticket.restored")?.id ?? 0),
       story: ls.map((l) => ({ id: l.id, at: l.ts, who: l.who, what: storyLine(l), flagged: l.flagged })),
     });
   }
@@ -263,12 +263,14 @@ export function createHome(deps: HomeDeps) {
       if (next.gatePassed) return next.done;
       if (!s.gate || !deps.gate) return [];
       let g: GateResult;
-      try { g = await deps.gate({ repo, base: s.base, sentence: next.sentence, asked: next.asked, model: s.gateModel }); } catch (e) { g = { ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }; }
+      // Stop does not wait for the reader: the queue is free at once, and whatever the reader says later is dropped.
+      const stopped = new Promise<null>((ok) => stop.signal.addEventListener("abort", () => ok(null), { once: true }));
+      try { const got = await Promise.race([deps.gate({ repo, base: s.base, sentence: next.sentence, asked: next.asked, model: s.gateModel }), stopped]); if (!got) return null; g = got; } catch (e) { g = { ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }; }
       if (stop.signal.aborted) return null;
       // A gate that cannot be asked never holds a ticket up: it passes without a test of done, and the story says so.
       if (!g.ok) { record.append({ kind: "gate.passed", who: "SF itself", ...stamp, data: { skipped: `the gate could not be asked: ${g.why}`, done: [] } }); return []; }
       const a = g.answer;
-      if (!a.clear && a.question) { record.append({ kind: "gate.asked", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { question: a.question } }); return null; }
+      if (!a.clear && a.question && !next.asked) { record.append({ kind: "gate.asked", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { question: a.question } }); return null; }
       record.append({ kind: "gate.passed", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { kind: a.kind, done: a.done, guesses: a.guesses } });
       return a.done;
     };
@@ -357,6 +359,8 @@ export function createHome(deps: HomeDeps) {
       const lines = record.story(ticket);
       if (lines.some((l) => l.kind === "result.accepted")) return { ok: false, why: "You accepted this one already." };
       if (view(ticket)?.removed) return { ok: false, why: "This ticket is off the list. Put it back first." };
+      // Only a proposal of the ticket's latest go, with nothing working on it: an older one that was sent to be worked again is not accepted from here.
+      if (!view(ticket)?.canAccept) return { ok: false, why: "This ticket has no proposal that can be accepted from here." };
       const p = [...lines].reverse().find((l) => l.kind === "result.proposed");
       const d = (p?.data ?? {}) as Record<string, any>;
       if (!p || d.held || typeof d.number !== "number" || typeof d.headSha !== "string") return { ok: false, why: "This ticket has no proposal that can be accepted from here." };
@@ -388,7 +392,7 @@ export function createHome(deps: HomeDeps) {
     const p = [...record.story(ticket)].reverse().find((l) => l.kind === "result.proposed");
     const d = (p?.data ?? {}) as Record<string, any>;
     const repo = parseGitHubRepo(p?.project ?? "");
-    if (!p || !repo || typeof d.headSha !== "string") return { ok: false, why: "This ticket has no proposal that can be accepted from here." };
+    if (!p || !repo || typeof d.headSha !== "string" || !["proposed", "accepted"].includes(view(ticket)?.state ?? "")) return { ok: false, why: "This ticket has no proposal that can be accepted from here." };
     try {
       const ci = await github.ci(repo, d.headSha);
       const says = ci.state === "green" ? "GitHub's own checks passed." : ci.state === "running" ? "GitHub's own checks are still running." : ci.state === "none" ? "GitHub ran no checks of its own on this proposal." : `GitHub's own checks FAILED (${ci.failed.slice(0, 4).join(", ") || "see the proposal"}).`;
