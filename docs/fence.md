@@ -223,7 +223,10 @@ The plan limit can also be met before a run, by the gate's reader or by the fenc
 
 With more, each run gets a cell of its own (`fence/cell.ts`): a cgroup made by root in the room, named after the run. Every step of the run says its process number and waits; root moves it into the cell; only then does it go on, so whatever it starts is born in the cell. Tried on the real room (27 Nov 2026): the worker cannot move a process out or make a cell of its own, a child started with `setsid`, `nohup` or a double fork stays in, bubblewrap with `--unshare-all` stays in, and `cgroup.kill` leaves nothing. Stop, the time limit and the end of a run end the cell and nothing else; "nothing left running" is the cell's empty list.
 
-- The fence test before a run does not end the worker's processes while another run works.
+- Root moves exactly the process that asked (same number and same birth time), only when it is the worker's and still in the room's top group. A step that was on its way in when Stop came is ended once it is inside.
+- Whether anything is left is the kernel's own word (`cgroup.events`, populated).
+- The fence test before a run does not end the worker's processes while another run works. Its agent and the gate's reader each get a short cell of their own, ended when they are done.
+- The rest after the plan limit is not ended by another run starting.
 - Two copies do not see each other: the agent's shell sees only its own copy, and the Read and Edit tools refuse the other (tried the same day).
 - What two runs still share: the one worker account, its home and `/tmp`, and the one sign-in. SoftwareFactory's own steps run as that account too.
 - The home screen shows every run that works, with a Stop for each. The watchdog still ends the whole room when SoftwareFactory itself goes away.

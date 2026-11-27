@@ -233,12 +233,13 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
 
 /**
  * The rest after the plan limit. A run that met the limit says the next one would meet it too, so the queue rests
- * for the wait in Settings. It ends early when a run started since, or when you sent a ticket to be worked again.
+ * for the wait in Settings. It ends early only when you send a ticket to be worked again. (Not when another run
+ * starts: with two runs at once, one may start just as the other meets the limit.)
  */
 export function restOf(lines: RecordLine[], waitMinutes: number, now = Date.now()): { until: string; why: string } | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i]!;
-    if (l.kind === "run.started" || (l.kind === "ticket.queued" && l.who === "you")) return null;
+    if (l.kind === "ticket.queued" && l.who === "you") return null;
     if (l.kind === "run.ended" && (l.data as any).parkedFor === "limit") {
       const until = Date.parse(l.ts) + waitMinutes * 60_000;
       return until > now ? { until: new Date(until).toISOString(), why: "the plan limit was reached" } : null;

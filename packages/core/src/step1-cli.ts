@@ -1,3 +1,4 @@
+import { celled } from "./fence/cell.js";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -65,14 +66,16 @@ async function main(): Promise<void> {
     const github = new GitHub({ dataDir: workDir, cli: ghCliToken });
     const { repo: _r, workDir: _w, ...start } = raw;
     let cleared: Promise<void> = Promise.resolve();
+    // More than one run may work at once (Settings, slots): helpers get a cell of their own too.
+    const many = (): boolean => { try { return home.state().settings.slots > 1; } catch { return false; } };
     const home = createHome({
       record, github, settings: settingsFileIn(workDir, { ...start, ...(raw.repo ? { repo: raw.repo } : {}) }),
       hosts: [`127.0.0.1:${port}`, `localhost:${port}`], fence: { room: fence.room, netList: fence.netList },
       undo: (ticket) => undoTicket({ record, github, workDir }, ticket),
       // The reader at the gate sees the sentence and the project's file names, and works in the room like every agent.
-      gate: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askGate(exec, fence, { sentence: q.sentence, files, asked: q.asked ?? undefined, model: q.model }); },
+      gate: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askGate(many() ? celled(exec, fence, "gate") : exec, fence, { sentence: q.sentence, files, asked: q.asked ?? undefined, model: q.model }); },
       // A run of this start waits until the room was cleared of an earlier start's leftovers.
-      work: async (st, ticket, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: (o) => runFenceTest(exec, fence, { ...windowsProbe(), ...(o?.others ? { others: true } : {}) }) }, { ...st, workDir }, sentence, ticket)),
+      work: async (st, ticket, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: (o) => runFenceTest(o?.others ? celled(exec, fence, "fence") : exec, fence, { ...windowsProbe(), ...(o?.others ? { others: true } : {}) }) }, { ...st, workDir }, sentence, ticket)),
     });
     home.watchIssues();
     // The two things SoftwareFactory itself says out loud.
@@ -88,7 +91,7 @@ async function main(): Promise<void> {
     const before = readAlive(workDir);
     // A sign of life whose process is gone (a crash a moment ago) is nobody's: this start goes on and takes over.
     const lives = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; } };
-    const otherIsOpen = !!before && !before.closed && before.pid !== process.pid && Date.now() - new Date(before.at).getTime() < 15_000 && lives(before.pid);
+    const otherIsOpen = !!before && !before.closed && before.pid !== process.pid && lives(before.pid);
     if (otherIsOpen) { console.error("SoftwareFactory is open already. Use its window, or close it first."); process.exit(1); }
     const server = createServer((req, res) => { void home.handler(req, res); });
     server.once("error", (e) => { console.error((e as NodeJS.ErrnoException).code === "EADDRINUSE" ? `Port ${port} is taken, so SoftwareFactory did not start. Nothing was touched.` : `SoftwareFactory did not start: ${(e as Error).message}`); process.exit(1); });

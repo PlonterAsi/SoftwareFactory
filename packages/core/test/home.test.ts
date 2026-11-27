@@ -408,14 +408,15 @@ describe("the page and its door", () => {
     expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ state: "interrupted", cutOffReturns: 1, returns: 0 });
   });
 
-  it("ends the rest early when a run started since or you sent a ticket again", () => {
+  it("ends the rest early only when you sent a ticket again", () => {
     const at = (m: number) => new Date(Date.UTC(2026, 10, 27, 20, m)).toISOString();
     const park = { id: 1, ts: at(0), kind: "run.ended", who: "SF itself", run: "a", ticket: "T1", project: "o/p", costUsd: null, flagged: false, data: { end: "parked", parkedFor: "limit" } } as any;
     expect(restOf([park], 30, Date.parse(at(10)))).toEqual({ until: at(30), why: "the plan limit was reached" });
     expect(restOf([park], 30, Date.parse(at(31)))).toBeNull();
     expect(restOf([park, { ...park, id: 2, kind: "ticket.queued", who: "you", data: {} }], 30, Date.parse(at(10)))).toBeNull();
     expect(restOf([park, { ...park, id: 2, kind: "ticket.queued", who: "SF itself", data: { returned: true } }], 30, Date.parse(at(10)))).not.toBeNull();
-    expect(restOf([park, { ...park, id: 2, kind: "run.started", data: {} }], 30, Date.parse(at(10)))).toBeNull();
+    // Another run starting just then does not end the rest.
+    expect(restOf([park, { ...park, id: 2, kind: "run.started", data: {} }], 30, Date.parse(at(10)))).not.toBeNull();
     expect(() => cleanSettings({ parkedWaitMinutes: 0 })).toThrow(/1 to 1440/);
     expect(() => cleanSettings({ parkedReturns: 21 })).toThrow(/0 to 20/);
   });
