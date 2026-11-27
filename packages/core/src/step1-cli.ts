@@ -9,7 +9,7 @@ import { fenceReportText, runFenceTest, wslExec, wslFiles } from "./fence/fencet
 import { fenceSettings, type FenceSettings } from "./fence/room.js";
 import { TheRecord } from "./fence/record.js";
 import { history, plainGit, releaseHeld, storyText, workTicket, type TicketSettings } from "./fence/ticketrun.js";
-import { askGate } from "./fence/gate.js";
+import { askGate, askSplit } from "./fence/gate.js";
 import { windowsProbe } from "./fence-cli.js";
 import { createHome, settingsFileIn } from "./fence/home.js";
 import { undoTicket } from "./fence/undo.js";
@@ -74,6 +74,7 @@ async function main(): Promise<void> {
       undo: (ticket) => undoTicket({ record, github, workDir }, ticket),
       release: (ticket) => releaseHeld({ record, github, workDir }, ticket),
       // The reader at the gate sees the sentence and the project's file names, and works in the room like every agent.
+      split: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askSplit(many() ? celled(exec, fence, "gate") : exec, fence, { sentence: q.sentence, failed: q.failed, files, model: q.model }); },
       gate: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askGate(many() ? celled(exec, fence, "gate") : exec, fence, { sentence: q.sentence, files, asked: q.asked ?? undefined, model: q.model }); },
       // A run of this start waits until the room was cleared of an earlier start's leftovers.
       work: async (st, ticket, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: (o) => runFenceTest(o?.others ? celled(exec, fence, "fence") : exec, fence, { ...windowsProbe(), ...(o?.others ? { others: true } : {}) }) }, { ...st, workDir }, sentence, ticket)),

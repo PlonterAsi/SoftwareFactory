@@ -17,6 +17,7 @@ export const RECORD_KINDS = [
   "ticket.queued",
   "ticket.removed",
   "ticket.restored",
+  "ticket.split",
   "issue.linked",
   "gate.asked",
   "gate.answered",

@@ -32,7 +32,7 @@ function fakeGitHub(pr: Record<string, unknown> = {}) {
 
 function home(record: TheRecord, over: Partial<HomeDeps> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
-  return createHome({ record, github: fakeGitHub().gh, settings: settingsFileIn(dir, { repo: "o/p" }), hosts: ["127.0.0.1:1"], key: "k".repeat(48), work: async () => { throw new Error("not used"); }, ...over });
+  return createHome({ record, github: fakeGitHub().gh, settings: settingsFileIn(dir, { repo: "o/p", ladder: false }), hosts: ["127.0.0.1:1"], key: "k".repeat(48), work: async () => { throw new Error("not used"); }, ...over });
 }
 
 describe("the home screen's settings", () => {
@@ -327,6 +327,41 @@ describe("the page and its door", () => {
     h.close();
   });
 
+  it("climbs the stuck ladder by itself: once more, another way, split, a few shared tries, then waits for the owner", async () => {
+    const r = new TheRecord();
+    const seen: { ticket: string; model: string; hint: string }[] = [];
+    let n = 0;
+    const { url, h } = await serve(r, {
+      settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, ladderModel: "opus" }),
+      work: async (st, ticket) => {
+        const run = `${ticket}-${++n}`;
+        seen.push({ ticket, model: st.model, hint: st.hint ?? "" });
+        r.append({ kind: "run.started", who: "SF itself", run, ticket, project: "o/p", data: {} });
+        r.append({ kind: "run.checked", who: "SF itself", run, ticket, project: "o/p", data: { command: "npm run build", ok: false, tail: "TS2304 boom" } });
+        r.append({ kind: "run.ended", who: "SF itself", run, ticket, project: "o/p", data: { end: "failed its checks", reason: "a check failed: npm run build" } });
+        return {} as any;
+      },
+      split: async (q) => { expect(q.failed).toContain("TS2304 boom"); return { ok: true, parts: ["First half.", "Second half."], costUsd: 0.02 }; },
+    });
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    await post("work", { sentence: "A big thing." });
+    for (let i = 0; i < 40; i++) await new Promise((ok) => setTimeout(ok, 10));
+    expect(seen.map((x) => x.ticket)).toEqual(["T1", "T1", "T1", "T2", "T3", "T2", "T3"]);
+    expect(seen[0]).toMatchObject({ model: "sonnet", hint: "" });
+    expect(seen[1]!.hint).toMatch(/did not finish[\s\S]*TS2304 boom/);
+    expect(seen[2]).toMatchObject({ model: "opus" });
+    expect(seen[2]!.hint).toMatch(/a different way/);
+    const st = h.state();
+    const of = (t: string) => st.tickets.find((x) => x.ticket === t)!;
+    expect(of("T1")).toMatchObject({ state: "split", splitInto: ["T2", "T3"], canAgain: true });
+    expect(of("T2")).toMatchObject({ state: "failed its checks", parent: "T1", bucket: "alone", sentence: "First half.", ladderUsed: 1 });
+    expect(r.all().filter((l) => l.kind === "ticket.split")).toHaveLength(1);
+    expect(r.all().filter((l) => l.kind === "ticket.queued").map((l) => (l.data as any).ladder)).toEqual(["once more", "another way", "once more", "once more"]);
+    // Everything SoftwareFactory did here by itself counts under limit 2; only the first run was the owner's.
+    expect(st.since.counts.unfinished).toBe(2);
+    h.close();
+  });
+
   it("lets a held result go only by the owner's own press, and only a stop-list hold", async () => {
     const r = new TheRecord();
     proposed(r, "T1", { held: true, reason: "a secret was found", url: undefined, number: undefined });
@@ -354,7 +389,7 @@ describe("the page and its door", () => {
     expect(seen).toEqual(["T1"]);
     expect(ticketsFrom(r.all(), null).find((t) => t.ticket === "T2")).toMatchObject({ state: "waiting" });
     // A fresh start on the same record, with Settings on another project: T2 stays where it is.
-    const other = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/other" }), work: async (_s, ticket) => { seen.push(`other ${ticket}`); return {} as any; } });
+    const other = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/other", ladder: false }), work: async (_s, ticket) => { seen.push(`other ${ticket}`); return {} as any; } });
     other.h.pump();
     await new Promise((ok) => setTimeout(ok, 20));
     expect(seen).toEqual(["T1"]);
@@ -420,7 +455,7 @@ describe("the page and its door", () => {
       const r = new TheRecord();
       const seen: string[] = [];
       let limit = true;
-      const { url, h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, parkedWaitMinutes: 10, parkedReturns: 1 }), work: async (_s, ticket) => {
+      const { url, h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, ladder: false, parkedWaitMinutes: 10, parkedReturns: 1 }), work: async (_s, ticket) => {
         seen.push(ticket);
         r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-${seen.length}`, ticket, project: "o/p", data: {} });
         r.append({ kind: "run.ended", who: "SF itself", run: `${ticket}-${seen.length}`, ticket, project: "o/p", data: limit ? { end: "parked", reason: "the plan limit was reached", parkedFor: "limit" } : { end: "crashed", reason: "done for the test" } });
@@ -461,7 +496,7 @@ describe("the page and its door", () => {
   it("works two tickets at once when Settings give two slots, and stops one without touching the other", async () => {
     const r = new TheRecord();
     const live = new Map<string, boolean | undefined>();
-    const { url, h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, slots: 2 }), work: async (st, ticket, _t, signal) => {
+    const { url, h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, ladder: false, slots: 2 }), work: async (st, ticket, _t, signal) => {
       live.set(ticket, st.ownCell);
       r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-a`, ticket, project: "o/p", data: {} });
       await new Promise<void>((ok) => signal.addEventListener("abort", () => ok()));
@@ -498,7 +533,7 @@ describe("the page and its door", () => {
     expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ state: "interrupted", cutOff: true, cutOffReturns: 0 });
     const seen: string[] = [];
     // The run is cut off again each time: it leaves a start and no end.
-    const { h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false }), work: async (_s, ticket) => { seen.push(ticket); r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-b`, ticket, project: "o/p", data: {} }); return {} as any; } });
+    const { h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, ladder: false }), work: async (_s, ticket) => { seen.push(ticket); r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-b`, ticket, project: "o/p", data: {} }); return {} as any; } });
     h.pump();
     await new Promise((ok) => setTimeout(ok, 30));
     expect(seen).toEqual(["T1"]);

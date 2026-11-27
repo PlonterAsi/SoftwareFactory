@@ -313,3 +313,24 @@ A ticket shows once, as it stands: one that failed and was then worked again and
 What you did yourself is not news and is left out. The panel also says how many tickets SoftwareFactory brought
 back by itself and what the time used. **Got it** writes one line in the record (`home.seen`, by you) and the
 panel starts anew from there; no ticket is hidden or changed by it.
+
+## The stuck ladder
+
+A ticket whose run did not finish is not left lying, and is not tried forever
+(`packages/core/src/fence/ladder.ts`). It climbs by itself, one rung at a time:
+
+1. **Once more.** The next run is told how the earlier one ended and the end of the failed check's output.
+2. **Another way.** The run is told not to repeat the approach; a different model can be set for this rung.
+3. **Split.** A reader in the room (no tools, one turn) cuts the ticket once into two or three smaller tickets.
+   They are opened by SoftwareFactory, say which ticket they came from, and are worked in its place. Between
+   them they share a small number of further tries, and they are never split again.
+4. **Parked.** The ticket waits for you, with everything that was tried in its story.
+
+The ladder is for a run that failed its checks, crashed in the room, or was parked at its ceiling, turns or
+time. It is not for a stop you pressed, a held result, the plan limit (that has its own return) or a fence that
+did not hold. Only a run that ended within the last hour climbs, so an old failure never starts work by itself
+when SoftwareFactory is opened. Every climb is a line in the record by SoftwareFactory and counts under limit 2.
+"Work it again" by you starts the ladder anew for that ticket.
+
+Settings: `ladder` (on), `ladderAgain` 1, `ladderOtherWay` 1, `ladderModel` (empty: the same model),
+`ladderSplit` (on), `ladderSharedTries` 2, `ladderSplitModel` sonnet, `ladderWithinMinutes` 60.

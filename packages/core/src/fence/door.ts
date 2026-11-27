@@ -50,6 +50,8 @@ export interface RunRequest {
   ownCell?: boolean;
   /** The most this run may use, in dollars. Claude Code stops the agent near it; the work so far is kept. */
   budgetUsd?: number;
+  /** What SoftwareFactory tells the run about an earlier run of this ticket that did not finish (the stuck ladder). */
+  hint?: string;
   /** A branch in the bundle with this ticket's unfinished work from an earlier run that met a limit: the run goes on from it. */
   resume?: string;
   signal?: AbortSignal;
@@ -75,9 +77,10 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/;
 
 /** What the agent is told. The sentence is the person's; the rest is fixed. */
-export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare" | "done">, resumed = false): string {
+export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare" | "done" | "hint">, resumed = false): string {
   return [
     "You are working on a copy of a real project. Do what the owner asks below, completely and with care, and nothing beyond it.",
+    ...(r.hint ? ["", "From SoftwareFactory, about an earlier try:", r.hint.slice(0, 2500)] : []),
     ...(resumed ? ["", "An earlier run on this same request stopped at a limit before it finished. Its unfinished changes are already in your files (see `git status`). Look at them first, keep what is right, and finish the request from there."] : []),
     "",
     "The owner's request:",

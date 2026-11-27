@@ -37,6 +37,8 @@ export interface TicketSettings {
   ownCell?: boolean;
   /** More paths on the stop list (Settings). They add to the fixed list and never take from it. */
   stopPaths?: string[];
+  /** What the run is told about an earlier run of this ticket that did not finish (the stuck ladder). */
+  hint?: string;
   /** The most this run may use, in dollars (the two limits). Left out: no ceiling of its own. */
   budgetUsd?: number;
   model: string;
@@ -152,12 +154,13 @@ export const TICKET_KINDS = ["request", "bug", "task", "idea", "plan", "question
 export type TicketKind = (typeof TICKET_KINDS)[number];
 
 /** Open a ticket: it gets its name and its first line in the record. Nothing runs yet. */
-export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | null = null): string {
+export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | { parent: string } | null = null): string {
   // Counting and writing happen under one lock, so two SoftwareFactory windows cannot give two tickets one name.
   record.db.exec("BEGIN IMMEDIATE");
   try {
     const ticket = `T${record.all().filter((l) => l.kind === "ticket.opened").length + 1}`;
-    record.append({ kind: "ticket.opened", who: "you", ticket, project, data: { sentence: sentence.trim(), kind, ...(from ?? {}) } });
+    // A smaller ticket cut from another by the stuck ladder is SoftwareFactory's own doing, and the record says so.
+    record.append({ kind: "ticket.opened", who: from && "parent" in from ? "SF itself" : "you", ticket, project, data: { sentence: sentence.trim(), kind, ...(from ?? {}) } });
     record.db.exec("COMMIT");
     return ticket;
   } catch (e) { record.db.exec("ROLLBACK"); throw e; }
@@ -220,7 +223,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     }
     const result = await runInRoom(deps.exec, deps.files, record, {
       run, ticket, project, sentence, bundle: readFileSync(inFile), base: h.base, branch,
-      model: st.model, maxTurns: st.maxTurns, budgetUsd: st.budgetUsd, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, ownCell: !!st.ownCell, ...(resume ? { resume } : {}), signal: deps.signal,
+      model: st.model, maxTurns: st.maxTurns, budgetUsd: st.budgetUsd, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, ownCell: !!st.ownCell, ...(st.hint ? { hint: st.hint } : {}), ...(resume ? { resume } : {}), signal: deps.signal,
     }, deps.fence);
     // Parked at a limit with work done: the work comes in as data and stays here, unchecked, for the next run of this ticket.
     if (result.end === "parked" && result.kept && result.bundle && result.headSha) {
@@ -306,8 +309,9 @@ export function storyLine(l: RecordLine): string {
     const what =
       l.kind === "ticket.opened" ? `you asked${d.from === "github" ? ` (issue #${d.issue} on GitHub)` : ""}: ${d.sentence}` :
       l.kind === "issue.linked" ? (d.direction === "in" ? `taken from issue #${d.number} on GitHub` : `issue #${d.number} opened on GitHub for it`) :
+      l.kind === "ticket.split" ? (Array.isArray(d.into) && d.into.length ? `SoftwareFactory split it into ${d.into.join(", ")}` : `it could not be split: ${d.why ?? ""}`) :
       l.kind === "ticket.edited" ? `you changed it${d.sentence ? ` to: ${d.sentence}` : ""}${d.kind ? ` (kind: ${d.kind})` : ""}` :
-      l.kind === "ticket.queued" ? (d.returned ? `it came back to the queue by itself: ${d.why ?? "the wait is over"}` : "you sent it to be worked again") :
+      l.kind === "ticket.queued" ? (d.ladder ? `SoftwareFactory sent it again by itself (the stuck ladder: ${d.ladder})` : d.returned ? `it came back to the queue by itself: ${d.why ?? "the wait is over"}` : "you sent it to be worked again") :
       l.kind === "ticket.removed" ? (d.from === "github" ? `it left the list: ${d.why}` : l.who === "you" ? "you removed it from the list" : "it was removed from the list") :
       l.kind === "ticket.restored" ? "you put it back on the list" :
       l.kind === "gate.asked" ? `before starting, SoftwareFactory asks: ${d.question}` :
