@@ -21,7 +21,7 @@ export type ProtectedKey = keyof typeof PROTECTED;
 export const PROTECTED_KEYS = Object.keys(PROTECTED) as ProtectedKey[];
 export const isProtected = (k: string): k is ProtectedKey => Object.prototype.hasOwnProperty.call(PROTECTED, k);
 
-export interface HandChange { key: ProtectedKey; says: string; /** For a value in doubt: what the owner set. */ set?: unknown }
+export interface HandChange { key: ProtectedKey; says: string; /** For a value in doubt: what the owner set, and what the settings file says. */ set?: unknown; file?: unknown }
 
 const show = (v: unknown): string => (Array.isArray(v) ? (v.length ? v.map(String).join(", ") : "nothing") : String(v)).slice(0, 200);
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -45,5 +45,5 @@ export function protectedOnRecord<S extends Record<ProtectedKey, unknown>>(lines
 /** Protected settings whose value in the settings file is not the one the owner set. Empty: all is as they left it. */
 export function settingsInDoubt<S extends Record<ProtectedKey, unknown>>(lines: RecordLine[], file: S, defaults: S): HandChange[] {
   const set = protectedOnRecord(lines, defaults);
-  return PROTECTED_KEYS.filter((k) => !eq(set[k], file[k])).map((k) => ({ key: k, says: `${PROTECTED[k]}: you set ${show(set[k])}, the settings file says ${show(file[k])}`, set: set[k] }));
+  return PROTECTED_KEYS.filter((k) => !eq(set[k], file[k])).map((k) => ({ key: k, says: `${PROTECTED[k]}: you set ${show(set[k])}, the settings file says ${show(file[k])}`, set: set[k], file: file[k] }));
 }

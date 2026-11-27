@@ -100,7 +100,9 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
 
 /** Settings live in one small file beside the record. Each change is also a line in the record. */
 export class SettingsFile {
-  constructor(private path: string, private start: Partial<HomeSettings> = {}) {}
+  private start: Partial<HomeSettings>;
+  // A protected setting never comes from how SoftwareFactory was started: only from the screen, by the owner's hand.
+  constructor(private path: string, start: Partial<HomeSettings> = {}) { this.start = Object.fromEntries(Object.entries(start).filter(([k]) => !isProtected(k))) as Partial<HomeSettings>; }
   read(): HomeSettings {
     let base = HOME_DEFAULTS;
     try { base = cleanSettings(this.start); } catch { /* a bad starting value never breaks the page; the defaults stand */ }
@@ -110,8 +112,9 @@ export class SettingsFile {
   write(s: HomeSettings): void {
     const tmp = `${this.path}.${randomBytes(4).toString("hex")}.tmp`;
     // Only what differs from the defaults is kept, so a default that changes in a later build still reaches this computer.
+    // The protected settings are always written: a default that changes later must not move what the owner set.
     const base = (() => { try { return cleanSettings(this.start); } catch { return HOME_DEFAULTS; } })() as unknown as Record<string, unknown>;
-    const own = Object.fromEntries(Object.entries(s as unknown as Record<string, unknown>).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(base[k])));
+    const own = Object.fromEntries(Object.entries(s as unknown as Record<string, unknown>).filter(([k, v]) => isProtected(k) || JSON.stringify(v) !== JSON.stringify(base[k])));
     writeFileSync(tmp, JSON.stringify(own, null, 2));
     renameSync(tmp, this.path);
   }
@@ -369,6 +372,20 @@ export function createHome(deps: HomeDeps) {
     for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, roomLeft(settings, limits.used), t.bucket) <= 0) { t.limitUntil = limits.until; t.says = `Waiting: ${t.bucket === "you" ? "limit 1 (work you sent)" : "limit 2 (what SoftwareFactory does by itself)"} is used up for this ${limits.period}.`; } }
     return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, settingsDoubt: settingsInDoubt(all, settings, HOME_DEFAULTS), since: sinceYouLeft(all, tickets, settings.sinceShow) };
   };
+  // A line the watchdog said stays on the screen while it is still the news: not once "Got it" covered it, and not
+  // once its ticket moved on (the owner sent it again, a new run started, a result came). One pass from the end.
+  const spokeNow = (lines: RecordLine[]): RecordLine[] => {
+    const out: RecordLine[] = [], moved = new Set<string>();
+    let seenUpTo = -1;
+    for (let i = lines.length - 1; i >= 0 && out.length < 3; i--) {
+      const l = lines[i]!;
+      if (l.kind === "home.seen" && l.who === "you") { const u = (l.data as any)?.upTo; seenUpTo = Math.max(seenUpTo, Number.isInteger(u) && u <= l.id ? u : l.id); }
+      else if (l.ticket && (l.kind === "run.started" || l.kind === "result.proposed" || l.kind === "ticket.removed" || (l.kind === "ticket.queued" && l.who === "you"))) moved.add(l.ticket);
+      else if (l.kind === "watchdog.spoke" && (l.data as any).why !== "test" && l.id > seenUpTo && !(l.ticket && moved.has(l.ticket))) out.unshift(l);
+      if (l.id <= seenUpTo) break;
+    }
+    return out;
+  };
   const stateOf = (settings: HomeSettings, tickets: TicketView[]) => ({
     settings,
     fence: deps.fence ?? null,
@@ -377,7 +394,7 @@ export function createHome(deps: HomeDeps) {
     tickets,
     // A line the watchdog said stays on the screen while it is still the news: not once "Got it" was said after it,
     // and not once its ticket moved on (sent again, a new run, a result).
-    spoke: all.filter((l) => l.kind === "watchdog.spoke" && (l.data as any).why !== "test" && !all.some((x) => x.id > l.id && ((x.kind === "home.seen" && x.who === "you") || (!!l.ticket && x.ticket === l.ticket && ["ticket.queued", "run.started", "result.proposed", "ticket.removed"].includes(x.kind))))).slice(-3).map((l) => ({ id: l.id, at: l.ts, line: String((l.data as any).line ?? ""), phone: String((l.data as any).phone ?? "") })),
+    spoke: spokeNow(all).map((l) => ({ id: l.id, at: l.ts, line: String((l.data as any).line ?? ""), phone: String((l.data as any).phone ?? "") })),
   });
   /** The sign of life the watchdog reads. */
   // The watchdog reads one run: the one that has been quiet longest speaks for all.
@@ -441,6 +458,8 @@ export function createHome(deps: HomeDeps) {
     if (runs.size >= s.slots) return;
     // Parked for the plan limit: after the wait the ticket comes back to the queue by itself, a set number of times.
     const lines = record.all(), now = Date.now();
+    // A protected setting that is not what the owner set: nothing starts and nothing is sent again until they have looked.
+    if (settingsInDoubt(lines, s, HOME_DEFAULTS).length) return;
     let wake = Infinity;
     const seenNow = ticketsFrom(lines, working());
     // The stuck ladder climbs only in the project Settings speak for, only while limit 2 has room for a run, and
@@ -469,8 +488,6 @@ export function createHome(deps: HomeDeps) {
     wakeTimer = wake === Infinity ? null : setTimeout(() => { wakeTimer = null; try { pump(); tell(); } catch { /* the next thing that happens wakes the queue */ } }, Math.min(Math.max(wake - now, 1000), 2 ** 31 - 1));
     wakeTimer?.unref?.();
     if (s.hold || rest) return;
-    // A protected setting that is not what the owner set: nothing starts until they have looked.
-    if (settingsInDoubt(lines, s, HOME_DEFAULTS).length) return;
     // A ticket at the split rung: the reader takes the free place now, and the queue goes on when it has answered.
     if (toSplit && !runs.has(toSplit.ticket)) { split(toSplit, s); if (runs.size >= s.slots) return; }
     // Settings speak for one project. A ticket of another project waits until Settings point at it again.
@@ -676,6 +693,9 @@ export function createHome(deps: HomeDeps) {
     // A value in doubt that the owner now names by hand is theirs again: the record gets their line for it.
     const set = protectedOnRecord(lines, HOME_DEFAULTS);
     const kept = doubt.map((c) => c.key).filter((k) => byHand.has(k) && !changed.includes(k));
+    // "Keep it" is a yes to the value the screen showed. If the file moved again since, the owner looks again first.
+    const shown = (((raw as any)?.shown ?? {}) as Record<string, unknown>);
+    if (kept.some((k) => JSON.stringify(shown[k]) !== JSON.stringify(was[k]))) return { ok: false, why: "The settings file is not what this screen showed any more. Look at the values again.", needsHand: doubt };
     if (changed.length || kept.length) {
       deps.settings.write(now);
       const hand = [...changed.filter(isProtected), ...kept];
@@ -747,7 +767,7 @@ export function createHome(deps: HomeDeps) {
         if (url.pathname === "/api/step1/seen") {
           // "Got it": from here on the panel shows only what happens after this line. Nothing is hidden or removed.
           const sn = state().since, upTo = Number.isInteger(b.upTo) && b.upTo >= 0 && b.upTo <= sn.upTo ? (b.upTo as number) : sn.upTo;
-          if (sn.items.length || sn.cameBack) { record.append({ kind: "home.seen", who: "you", data: { upTo, cutOff: sn.cutOff.slice(0, 500) } }); tell(); }
+          if (sn.items.length || sn.cameBack || spokeNow(all).length) { record.append({ kind: "home.seen", who: "you", data: { upTo, cutOff: sn.cutOff.slice(0, 500) } }); tell(); }
           return send(res, 200, { ok: true });
         }
         if (url.pathname === "/api/step1/release") {

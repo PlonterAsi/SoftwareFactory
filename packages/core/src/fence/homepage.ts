@@ -574,8 +574,8 @@ ol.story li.flag .x { color: var(--bad); }
   }
   $("hand-yes").onclick = function () { if (!asked) return; $("set-msg").textContent = ""; post("/api/step1/settings", asked).then(saved); };
   $("hand-no").onclick = function () { asked = null; $("hand").hidden = true; $("set-msg").textContent = ""; settingsLoaded = false; load(); };
-  $("doubt-back").onclick = function () { var body = { byHand: [] }; ((last && last.settingsDoubt) || []).forEach(function (c) { body[c.key] = c.set; body.byHand.push(c.key); }); $("doubt-back").disabled = true; post("/api/step1/settings", body).then(function () { $("doubt-back").disabled = false; settingsLoaded = false; load(); }); };
-  $("doubt-keep").onclick = function () { var keys = ((last && last.settingsDoubt) || []).map(function (c) { return c.key; }); $("doubt-keep").disabled = true; post("/api/step1/settings", { byHand: keys }).then(function () { $("doubt-keep").disabled = false; load(); }); };
+  $("doubt-back").onclick = function () { var body = { byHand: [] }; ((last && last.settingsDoubt) || []).forEach(function (c) { body[c.key] = c.set; body.byHand.push(c.key); }); $("doubt-back").disabled = true; post("/api/step1/settings", body).then(function (r) { $("doubt-back").disabled = false; if (r && r.ok === false) $("doubt-say").textContent = "That did not go through: " + (r.why || "SoftwareFactory did not answer"); settingsLoaded = false; load(); }); };
+  $("doubt-keep").onclick = function () { var body = { byHand: [], shown: {} }; ((last && last.settingsDoubt) || []).forEach(function (c) { body.byHand.push(c.key); body.shown[c.key] = c.file; }); $("doubt-keep").disabled = true; post("/api/step1/settings", body).then(function () { $("doubt-keep").disabled = false; settingsLoaded = false; load(); }); };
 
   $("phone-test").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";

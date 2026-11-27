@@ -19,6 +19,6 @@ describe("the protected settings", () => {
     r.append({ kind: "setting.changed", who: "worker", data: { changed: { runLimit: { from: 5, to: 500 } } } });
     expect(protectedOnRecord(r.all(), HOME_DEFAULTS)).toMatchObject({ limitAlone: 80, runLimit: 5, limitYou: 100 });
     expect(settingsInDoubt(r.all(), { ...HOME_DEFAULTS, limitAlone: 80 }, HOME_DEFAULTS)).toEqual([]);
-    expect(settingsInDoubt(r.all(), { ...HOME_DEFAULTS, limitAlone: 9000 }, HOME_DEFAULTS)).toEqual([{ key: "limitAlone", says: "Limit 2 (work SoftwareFactory sent by itself): you set 80, the settings file says 9000", set: 80 }]);
+    expect(settingsInDoubt(r.all(), { ...HOME_DEFAULTS, limitAlone: 9000 }, HOME_DEFAULTS)).toEqual([{ key: "limitAlone", says: "Limit 2 (work SoftwareFactory sent by itself): you set 80, the settings file says 9000", set: 80, file: 9000 }]);
   });
 });

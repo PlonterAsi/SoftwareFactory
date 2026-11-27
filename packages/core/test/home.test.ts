@@ -50,7 +50,8 @@ describe("the home screen's settings", () => {
     const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
     const f = settingsFileIn(dir, { repo: "o/p" });
     f.write({ ...f.read(), hold: true });
-    expect(JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"))).toEqual({ hold: true });
+    // What differs from the defaults, and always the protected settings: a default that changes later must not move what the owner set.
+    expect(JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"))).toEqual({ hold: true, limitPeriod: "month", limitYou: 100, limitAlone: 50, ownSharePercent: 20, runLimit: 5, runFloor: 0.5, stopPaths: [] });
     expect(f.read()).toMatchObject({ repo: "o/p", hold: true, slots: 1 });
   });
 
@@ -557,8 +558,14 @@ describe("the page and its door", () => {
     r.append({ kind: "watchdog.spoke", who: "watchdog", ticket: "T1", data: { line: "T1 is parked: a limit of the run was reached.", why: "parked", phone: "not set" } });
     r.append({ kind: "watchdog.spoke", who: "watchdog", ticket: null, data: { line: "SoftwareFactory went away.", why: "gone", phone: "not set" } });
     expect(h.state().spoke.map((w) => w.line)).toEqual(["T1 is parked: a limit of the run was reached.", "SoftwareFactory went away."]);
+    // Brought back by SoftwareFactory itself: the owner has not seen the line yet, so it stays. A new run moves it on.
     r.append({ kind: "ticket.queued", who: "SF itself", ticket: "T1", project: "o/p", data: { returned: true } });
+    expect(h.state().spoke).toHaveLength(2);
+    r.append({ kind: "run.started", who: "SF itself", ticket: "T1", run: "R1", project: "o/p", data: {} });
     expect(h.state().spoke.map((w) => w.line)).toEqual(["SoftwareFactory went away."]);
+    // "Got it" covers only what the page had read.
+    r.append({ kind: "home.seen", who: "you", data: { upTo: 1 } });
+    expect(h.state().spoke).toHaveLength(1);
     r.append({ kind: "home.seen", who: "you", data: {} });
     expect(h.state().spoke).toEqual([]);
   });
@@ -588,7 +595,10 @@ describe("the page and its door", () => {
     // Naming another setting by hand does not clear it; keeping it by hand does.
     expect((await post("settings", { byHand: ["limitYou"] })).status).toBe(200);
     expect(h.state().settingsDoubt).toHaveLength(1);
-    expect((await post("settings", { byHand: ["limitAlone"] })).status).toBe(200);
+    // Keeping is a yes to the value the screen showed, not to whatever the file says by then.
+    expect((await post("settings", { byHand: ["limitAlone"], shown: { limitAlone: 500 } })).status).toBe(400);
+    expect(h.state().settingsDoubt).toHaveLength(1);
+    expect((await post("settings", { byHand: ["limitAlone"], shown: { limitAlone: 5000 } })).status).toBe(200);
     expect(h.state().settingsDoubt).toEqual([]);
     expect((r.all().filter((l) => l.kind === "setting.changed").at(-1)!.data as any).changed.limitAlone).toEqual({ from: 50, to: 5000 });
     await new Promise((ok) => setTimeout(ok, 20));
