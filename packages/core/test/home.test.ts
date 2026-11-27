@@ -62,7 +62,7 @@ describe("the home screen's settings", () => {
     expect(h.state().settings).toMatchObject({ model: "opus", checks: ["npm test"] });
     expect(r.all().at(-1)).toMatchObject({ kind: "setting.changed", who: "you", data: { changed: { model: { from: "sonnet", to: "opus" } } } });
     h.saveSettings({ model: "opus" });
-    expect(r.all()).toHaveLength(1);
+    expect(r.all().filter((l) => l.who === "you")).toHaveLength(1);
     expect(h.saveSettings({ maxTurns: -1 })).toMatchObject({ ok: false });
   });
 });
@@ -215,7 +215,7 @@ describe("the page and its door", () => {
     expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "application/json", cookie }, body: "{}" })).status).toBe(403);
     expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "text/plain", "x-sf-key": h.key, cookie }, body: "{}" })).status).toBe(403);
     expect((await fetch(`${url}/api/step1/settings`, { method: "POST", headers: json("wrong"), body: "{}" })).status).toBe(403);
-    expect(r.all()).toHaveLength(0);
+    expect(r.all().filter((l) => l.who !== "SF itself")).toHaveLength(0);
   });
 
   it("is a queue: tickets wait their turn, one is worked at a time, and stop reaches only the run", async () => {

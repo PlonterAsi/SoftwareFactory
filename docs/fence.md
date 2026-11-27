@@ -354,3 +354,7 @@ settings (`fence/protected.ts`).
   an issue from GitHub and a run's output are never read as settings.
 - The fence's own settings (the room, the net list) are not changed from the page: they are written into the room by
   `npm run fence -- setup`, by hand on this computer.
+- **Where it starts.** The first time this protection runs on a computer, SoftwareFactory writes the protected values
+  down as they stand (`setting.changed` by SoftwareFactory, `baseline`). Saves from before had no second step, so they
+  are not taken as your word. From then on only a line of yours that names the setting by hand counts, and the screen
+  says since when a value in doubt has stood.

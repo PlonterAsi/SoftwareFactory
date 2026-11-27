@@ -484,7 +484,7 @@ ol.story li.flag .x { color: var(--bad); }
     drawSince(s.since);
     var db = s.settingsDoubt || [];
     $("doubt").hidden = !db.length;
-    if (db.length) { $("doubt-say").textContent = "Nothing starts for now: these protected settings are not what you set on this screen. Something else changed the settings file."; $("doubt-list").textContent = ""; db.forEach(function (c) { $("doubt-list").appendChild(el("li", "", c.says)); }); }
+    if (db.length) { $("doubt-say").textContent = "Nothing starts for now: these protected settings are not what you set on this screen. Something else changed the settings file."; $("doubt-list").textContent = ""; db.forEach(function (c) { $("doubt-list").appendChild(el("li", "", c.says + (c.setAt ? " (since " + day(c.setAt) + ")" : ""))); }); }
     if (s.limits) $("limits-line").textContent = "This " + s.limits.period + ": you sent " + money(s.limits.used.you) + " of " + money(s.limits.limit.you) + "; by itself " + money(s.limits.used.alone + s.limits.used.own) + " of " + money(s.limits.limit.alone) + ". New on " + day(s.limits.until) + ".";
     $("queue-hint").textContent = s.settings.hold ? "The queue is held. " + waiting + " waiting; nothing new starts until you let it go." : s.resting ? "The queue rests until " + clock(s.resting.until) + ": " + s.resting.why + ". Work it again on a ticket starts sooner." : (waiting ? waiting + " waiting for a turn." : "");
     $("show-removed").hidden = !gone;

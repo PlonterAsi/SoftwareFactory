@@ -8,7 +8,7 @@ import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
 import { type Bucket, type LimitPeriod, type LimitSettings, LIMIT_DEFAULTS, bucketOfSend, checkLimits, periodEnd, periodStart, roomLeft, runBudget, spendOf } from "./limits.js";
 import { sinceYouLeft } from "./since.js";
-import { type HandChange, isProtected, protectedChanges, protectedOnRecord, settingsInDoubt } from "./protected.js";
+import { type HandChange, baselineOf, hasBaseline, isProtected, protectedChanges, protectedOnRecord, settingsInDoubt } from "./protected.js";
 import { type LadderSettings, type Rung, LADDER_DEFAULTS, checkLadder, isClimbable, ladderHint, nextRung } from "./ladder.js";
 import type { SplitResult } from "./gate.js";
 import { type Sender, type WatchSettings, WATCH_DEFAULTS, cleanWatch, speak } from "./watchdog.js";
@@ -350,6 +350,8 @@ export function createHome(deps: HomeDeps) {
   // The ladder climbs only runs that ended while this SoftwareFactory was open: opening the screen never starts
   // paid work on a failure from before.
   const openedAt = Date.now();
+  // The first time the protection of settings runs here, the protected values are written down as they stand.
+  try { if (!hasBaseline(record.all())) record.append({ kind: "setting.changed", who: "SF itself", data: { baseline: baselineOf(deps.settings.read()), why: "the protected settings as they stood when their protection began" } }); } catch { /* without it they stand at their defaults */ }
   let accepting = false, undoing = false, releasing = false, closing = false;
   let wakeTimer: ReturnType<typeof setTimeout> | null = null;
   const streams = new Set<ServerResponse>();
@@ -699,7 +701,7 @@ export function createHome(deps: HomeDeps) {
     if (changed.length || kept.length) {
       deps.settings.write(now);
       const hand = [...changed.filter(isProtected), ...kept];
-      record.append({ kind: "setting.changed", who: "you", data: { changed: Object.fromEntries([...changed.map((k) => [k, k === "ntfyTopic" ? { changed: true } : { from: isProtected(k) ? set[k] : was[k], to: now[k] }]), ...kept.map((k) => [k, { from: set[k], to: now[k] }])]), ...(hand.length ? { byHand: hand } : {}) } });
+      record.append({ kind: "setting.changed", who: "you", data: { changed: Object.fromEntries([...changed.map((k) => [k, k === "ntfyTopic" ? { changed: true } : { from: isProtected(k) ? set[k].value : was[k], to: now[k] }]), ...kept.map((k) => [k, { from: set[k].value, to: now[k] }])]), ...(hand.length ? { byHand: hand } : {}) } });
     }
     // A queue that was held and is let go starts at once.
     pump();
