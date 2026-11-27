@@ -10,15 +10,7 @@
     "frontendDist": "../apps/bridge/dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "SoftwareFactory \u00b7 Bridge",
-        "width": 1440,
-        "height": 900,
-        "minWidth": 960,
-        "minHeight": 600
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

@@ -11,7 +11,7 @@ definition, the step 1 plan). Exactly one piece is `now`. Any session, on any ma
    definition page of its leg is the source; the piece never widens it.
 3. **Build.** Tests first where a rule can be tested. Every number, switch and list is a setting with a safe
    default; everything SoftwareFactory holds can be created, seen, edited and deleted (the record is the exception).
-4. **Check.** `npm run typecheck`, the tests of what changed, `node scripts/wiring.mjs` and the feature map test.
+4. **Check.** `npm run typecheck`, the tests of what changed, `node packages/core/scripts/wiring.mjs` and the feature map test.
 5. **Second pair of eyes.** A reviewer that did not write the piece reads the diff. Nobody judges their own work.
 6. **Fix** what the reviewer found, and check again. At most three rounds; what is still open is written down.
 7. **Wire.** The piece is reachable from the installed app before the next piece starts. No half-built surface.

@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   const s = settings();
   if (cmd === "setup-script") { process.stdout.write(setupScript(s)); return; }
   if (cmd !== "test" && cmd !== "setup") { console.error("usage: fence test | setup | setup-script"); process.exit(2); }
-  const list = spawnSync("wsl.exe", ["-l", "-q"]);
+  const list = spawnSync("wsl.exe", ["-l", "-q"], { windowsHide: true });
   if (list.error || !roomExists(s.room, list.stdout ?? Buffer.alloc(0))) {
     console.error(`The room "${s.room}" does not exist on this computer yet. No run starts.`);
     process.exit(1);
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
     process.stdout.write(r.stdout); process.stderr.write(r.stderr);
     if (r.code !== 0 || !/room ready/.test(r.stdout)) process.exit(1);
     // wsl.conf is read when the room starts, so the room is stopped; the next call starts it with the new rules.
-    spawnSync("wsl.exe", ["--terminate", s.room]);
+    spawnSync("wsl.exe", ["--terminate", s.room], { windowsHide: true });
     return;
   }
   const report = await runFenceTest(exec, s, { ...(process.env.CLAUDE_CODE_OAUTH_TOKEN ? { token: process.env.CLAUDE_CODE_OAUTH_TOKEN } : {}), ...windowsProbe() });

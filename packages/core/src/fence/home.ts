@@ -26,9 +26,11 @@ export interface HomeSettings extends WatchSettings {
   model: string;
   maxTurns: number;
   timeLimitMinutes: number;
+  /** The installed app installs a newer signed build by itself at start (never while a ticket is being worked). */
+  autoUpdate: boolean;
 }
 
-export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45 };
+export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true };
 
 /** Check what came from the screen. Returns clean settings or says, in a sentence, what is wrong. */
 export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS): HomeSettings {
@@ -37,7 +39,7 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   const list = (k: "checks" | "prepare") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
   const num = (k: "maxTurns" | "timeLimitMinutes") => (r[k] === undefined ? from[k] : Number(r[k]));
   const watch = cleanWatch(r, from);
-  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes") };
+  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate };
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
   if (s.base && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(s.base) || s.base.includes(".."))) throw new Error(`"${s.base}" is not a branch name.`);
   if (!/^[a-z0-9][a-z0-9.-]{0,60}$/.test(s.model)) throw new Error(`"${s.model}" is not a model name.`);
@@ -160,7 +162,7 @@ export function createHome(deps: HomeDeps) {
     spoke: all.filter((l) => l.kind === "watchdog.spoke" && (l.data as any).why !== "test").slice(-3).map((l) => ({ id: l.id, at: l.ts, line: String((l.data as any).line ?? ""), phone: String((l.data as any).phone ?? "") })),
   });
   /** The sign of life the watchdog reads. */
-  const alive = () => ({ pid: process.pid, at: new Date().toISOString(), running: running ? { ticket: running.ticket, startedAt: running.startedAt, lastLineAt: running.lastLineAt } : null });
+  const alive = () => ({ pid: process.pid, at: new Date().toISOString(), opened: passUsed, running: running ? { ticket: running.ticket, startedAt: running.startedAt, lastLineAt: running.lastLineAt } : null });
 
   /** Start one run. One at a time in step 1. */
   function start(sentence: string): { ok: true } | { ok: false; why: string } {

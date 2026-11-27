@@ -17,6 +17,8 @@ export interface Alive {
   at: string;
   /** SoftwareFactory was closed on purpose: nothing to watch. */
   closed?: boolean;
+  /** The home screen was opened with this start's pass (the window found its way in). */
+  opened?: boolean;
   running: { ticket: string | null; startedAt: string; lastLineAt: string } | null;
 }
 

@@ -112,8 +112,12 @@ async function main(): Promise<void> {
     // (Windows sends SIGHUP when the console window is closed, and gives a few seconds.)
     // Said first, before anything slow: Windows gives a closing window only a few seconds.
     const closed = () => { try { writeAlive(workDir, { ...home.alive(), closed: true }); } catch { /* the watchdog then speaks, which is the safe side */ } };
-    const bye = () => { if (!ours) process.exit(0); if (beat) clearInterval(beat); closed(); if (home.isRunning()) { home.stop(); setTimeout(() => process.exit(0), 4000); } else process.exit(0); };
+    let leaving = false;
+    const bye = () => { if (leaving) return; leaving = true; if (!ours) process.exit(0); if (beat) clearInterval(beat); closed(); if (home.isRunning()) { home.stop(); setTimeout(() => process.exit(0), 4000); } else process.exit(0); };
     for (const sig of ["SIGINT", "SIGHUP", "SIGBREAK", "SIGTERM"] as const) process.once(sig, bye);
+    // Inside the installed app there is no console to close. The app holds a pipe to this process instead, and the
+    // pipe ends when the app's window is closed or the app is gone for any reason: that is the same goodbye.
+    if (process.env.SF_SHELL === "1") { process.stdin.on("end", bye); process.stdin.on("close", bye); process.stdin.on("error", bye); process.stdin.resume(); }
     return;
   }
   if (cmd !== "work" || !arg?.trim()) { console.error('usage: step1 work "<one sentence>" | step1 story <ticket> | step1 home | step1 watchdog'); process.exit(2); }

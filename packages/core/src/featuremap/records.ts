@@ -495,7 +495,7 @@ export const DEFAULT_FEATURES: FeatureRecord[] = [
     flow: ["SoftwareFactory writes the rules into the room as root", "Before a run it tries the room straight as the worker", "It asks Claude Code in the room to run a fixed probe", "It looks from outside at what the probe left behind", "Nine lines are shown; all nine as expected lets the run start"],
     design: "No screen yet: `npm run fence -- test` prints the nine lines. The home screen shows them from build step 1, slice 3.",
     screens: [], docs: ["docs/fence.md"], stations: [],
-    files: [`${C}fence/`, `${C}fence-cli.ts`, `${C}step1-cli.ts`], api: ["/api/step1"],
+    files: [`${C}fence/`, `${C}fence-cli.ts`, `${C}step1-cli.ts`, "src-tauri/src/home.rs"], api: ["/api/step1"],
   },
   {
     id: "core-api", name: "Core server and live stream", group: "Foundation",

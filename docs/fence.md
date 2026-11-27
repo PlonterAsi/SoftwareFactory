@@ -97,3 +97,28 @@ Double-click `SoftwareFactory-Step1.cmd`, or run `npm run step1 -- home`. One pa
 - Line 3 on the laptop (27 Nov 2026): both tries ended in a timeout on the room's side and no mark appeared on Windows. There is no positive control yet, a run where the mark does appear from a distribution that is allowed to start Windows programs, so "no mark" rests on cmd.exe being able to write to the Public folder when it does run.
 - `npm run fence -- test` through the root script can end with exit code 0 even when the test fails. Read the last line, or call `runFenceTest` in code; never gate on that exit code.
 - Not tried yet on a real laptop: creating the room itself. `fence setup` expects the room to exist.
+
+## The home screen inside the installed app
+
+The installed SoftwareFactory app opens the home screen in its own window. There is no console window and no
+starter file (`SoftwareFactory-Step1.cmd` stays for a checkout without an installed app).
+
+- The shell (`src-tauri/src/home.rs`) starts `step1-cli.js watchdog` and `step1-cli.js home --no-open` as hidden
+  processes on the bundled Node.js. The window first shows a small starting page, then the home screen.
+- The home screen prints its address with the one-use pass on its output. The shell reads that line and opens it in
+  the window; the pass is not written to `home.log`. The window's page gets no access to the shell's commands.
+- The shell holds a pipe to the home screen (`SF_SHELL=1`). Closing the window, or the shell going away for any
+  reason, ends the pipe, and the home screen says goodbye exactly as on Ctrl+C: `closed` is written for the watchdog
+  and a run in the room is stopped.
+- If the home screen stops by itself, the shell starts it again once (a start that held five minutes earns a new
+  restart). A second stop is shown in the window with the last lines of `home.log`.
+- Logs are in the app's data folder: `home.log`, `home.prev.log`, `watchdog.log`. The record and the settings stay
+  where they were (`%LOCALAPPDATA%\SoftwareFactoryStep1`).
+- Updates: the home screen has no update page. At start the app looks once and installs a newer signed build by
+  itself, never while a ticket is being worked. The setting `autoUpdate` (Settings, Updates) turns that off.
+- `SF_WINDOW=bridge` starts the older Bridge and its core instead. Nothing starts the older core beside the home
+  screen.
+
+The Windows smoke test (part 7c of `scripts/smoke/windows-smoke.mjs`) proves this path on every build: the home
+screen answers, refuses a visitor without the pass, the window opens it, closing the window writes the goodbye,
+and killing the app alone leaves nothing on port 4517.

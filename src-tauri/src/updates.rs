@@ -187,7 +187,7 @@ pub async fn update_install(app: tauri::AppHandle) -> UpdateStatus {
     set(&app, |s| s.phase = "installing".into());
     // Give the Bridge a moment to show "Installing" before the window goes away.
     std::thread::sleep(std::time::Duration::from_millis(400));
-    crate::stop_core(&app);
+    crate::stop_all(&app);
     // On Windows this starts the installer (passive: a small progress window, no questions)
     // and exits; the installer starts the new version when it is done.
     match update.install(bytes) {
@@ -196,13 +196,26 @@ pub async fn update_install(app: tauri::AppHandle) -> UpdateStatus {
             app.restart();
         }
         Err(e) => {
-            crate::start_core(&app);
+            crate::start_all(&app);
             set(&app, |s| {
                 s.phase = "error".into();
                 s.error = Some(format!("The installer could not start, so the current version keeps running: {}", explain(&e)));
             })
         }
     }
+}
+
+/// The home screen has no update page. At start the app looks once and installs what is there: a signed build
+/// only, never while a ticket is being worked, and not at all when the setting "autoUpdate" is off.
+pub async fn auto_update(app: tauri::AppHandle) {
+    if !crate::home::auto_update_on() {
+        return;
+    }
+    let found = update_check(app.clone()).await;
+    if found.phase != "available" || crate::home::working() {
+        return;
+    }
+    let _ = update_install(app).await;
 }
 
 #[derive(serde::Serialize)]
