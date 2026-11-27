@@ -180,7 +180,7 @@ describe("the fence test", () => {
     expect(() => wallOneScript(FENCE_DEFAULTS, "/srv/x.exe", 'C:/x"; rm -rf /')).toThrow();
   });
 
-  it("line 3, for real on plain Linux: a file that cannot run as a Windows program is refused", () => {
+  it.skipIf(process.platform !== "linux")("line 3, for real on plain Linux: a file that cannot run as a Windows program is refused", () => {
     const f = join(mkdtempSync(join(tmpdir(), "sf-fence-")), "probe.exe");
     writeFileSync(f, "MZ-not-a-real-program", { mode: 0o755 });
     const out = spawnSync("bash", ["-s"], { input: wallOneScript(fenceSettings({ hostPorts: [9] }), f), encoding: "utf8" }).stdout;

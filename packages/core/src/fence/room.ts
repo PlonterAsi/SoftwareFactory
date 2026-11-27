@@ -26,6 +26,9 @@ export interface FenceSettings {
   testModel: string;
   /** How long one step of the test may take. */
   stepTimeoutMs: number;
+  /** Tools the projects' own checks need, installed by root from the makers' own sites. Empty: not installed. */
+  goVersion: string;
+  nodeVersion: string;
 }
 
 /** Safe starting values. Every one of them is a setting (Assaf, 27 Nov 2026: everything configurable). */
@@ -39,6 +42,8 @@ export const FENCE_DEFAULTS: FenceSettings = {
   hostPorts: [445, 135, 3389, 5432],
   testModel: "haiku",
   stepTimeoutMs: 120_000,
+  goVersion: "1.26.0",
+  nodeVersion: "22.12.0",
 };
 
 export function fenceSettings(over: Partial<FenceSettings> = {}): FenceSettings {
@@ -50,6 +55,7 @@ export function fenceSettings(over: Partial<FenceSettings> = {}): FenceSettings 
   if (!s.netList.length) throw new Error("fence: netList is empty, so the test could not tell a working net from a dead one");
   if (!/^[a-z0-9][a-z0-9.-]{0,60}$/.test(s.testModel)) throw new Error(`fence: "${s.testModel}" is not a model name`);
   if (!Number.isInteger(s.stepTimeoutMs) || s.stepTimeoutMs < 1000 || s.stepTimeoutMs > 3_600_000) throw new Error(`fence: stepTimeoutMs must be between a second and an hour`);
+  for (const [k, v] of [["goVersion", s.goVersion], ["nodeVersion", s.nodeVersion]] as const) if (v && !/^\d+\.\d+(\.\d+)?$/.test(v)) throw new Error(`fence: ${k} must look like 1.2.3, got "${v}"`);
   for (const p of s.hostPorts) if (!Number.isInteger(p) || p < 1 || p > 65535) throw new Error(`fence: "${p}" is not a port`);
   return s;
 }
@@ -134,10 +140,21 @@ install -d -m 0755 -o root -g root /srv/sf-fence
 
 # What the sandbox and a run need. Skipped when already there, so a rerun needs no network.
 need=""
-for p in bubblewrap socat git ripgrep curl ca-certificates iproute2 procps nodejs npm; do dpkg -s "$p" >/dev/null 2>&1 || need="$need $p"; done
+for p in bubblewrap socat git ripgrep curl ca-certificates iproute2 procps xz-utils nodejs npm; do dpkg -s "$p" >/dev/null 2>&1 || need="$need $p"; done
 if [ -n "$need" ]; then export DEBIAN_FRONTEND=noninteractive; apt-get update -qq </dev/null; apt-get install -y -qq $need </dev/null; fi
 # Claude Code for everyone, in a place only root can write, so the worker cannot swap the program.
 [ -x /usr/local/bin/claude ] || [ -x /usr/bin/claude ] || npm install -g --silent @anthropic-ai/claude-code </dev/null
+
+# The projects' own tools, from their makers, into root's folders. A run can use them and cannot change them.
+${s.goVersion ? `if [ "$(/usr/local/go/bin/go version 2>/dev/null | awk '{print $3}')" != "go${s.goVersion}" ]; then
+  curl -fsSL -o /tmp/go.tgz "https://go.dev/dl/go${s.goVersion}.linux-amd64.tar.gz" </dev/null
+  rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tgz && rm -f /tmp/go.tgz
+fi` : "# (no Go asked for)"}
+${s.nodeVersion ? `if [ "$(/usr/local/node/bin/node --version 2>/dev/null)" != "v${s.nodeVersion}" ]; then
+  curl -fsSL -o /tmp/node.txz "https://nodejs.org/dist/v${s.nodeVersion}/node-v${s.nodeVersion}-linux-x64.tar.xz" </dev/null
+  rm -rf /usr/local/node && mkdir -p /usr/local/node && tar -C /usr/local/node --strip-components=1 -xJf /tmp/node.txz && rm -f /tmp/node.txz
+  for b in node npm npx; do ln -sf /usr/local/node/bin/$b /usr/local/bin/$b; done
+fi` : "# (no Node asked for)"}
 
 install -d -m 0755 /etc/claude-code
 cat > /etc/claude-code/managed-settings.json <<'SF_SETTINGS_EOF'

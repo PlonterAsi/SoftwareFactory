@@ -17,6 +17,7 @@
     "app:build": "tauri build",
     "order": "npm run order -w @sf/core --",
     "fence": "npm run fence -w @sf/core --",
+    "step1": "npm run step1 -w @sf/core --",
     "ui:tour": "node scripts/ui-tour/tour.mjs"
   },
   "devDependencies": {

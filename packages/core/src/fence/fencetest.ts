@@ -19,7 +19,7 @@ import { type FenceSettings, fenceSettings } from "./room.js";
 export interface ExecResult { code: number | null; stdout: string; stderr: string; timedOut: boolean }
 
 /** Runs a bash script inside the room as the worker or as root. The script arrives on stdin, never on a command line. */
-export type RoomExec = (user: "worker" | "root", script: string, timeoutMs: number) => Promise<ExecResult>;
+export type RoomExec = (user: "worker" | "root", script: string, timeoutMs: number, onLine?: (line: string) => void) => Promise<ExecResult>;
 
 export type Verdict = "refused" | "works" | "got-through" | "did-not-work" | "could-not-judge";
 
@@ -268,19 +268,61 @@ export function fenceReportText(r: FenceReport): string {
  * starts it. bash is started directly with a clean environment and no profile, so nothing the worker left
  * in its home runs before the script does.
  */
+function wslArgs(s: FenceSettings, user: "worker" | "root", program: string[]): string[] {
+  const [name, home] = user === "root" ? ["root", "/root"] : [s.worker, `/home/${s.worker}`];
+  return ["-d", s.room, "-u", name, "--exec", "/usr/bin/env", "-i", `HOME=${home}`, `USER=${name}`, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8", ...program];
+}
+
+/** The most text one step may send back, and the largest file that may come out of the room. */
+const MAX_TEXT = 32 * 1024 * 1024, MAX_FILE = 512 * 1024 * 1024;
+
 export function wslExec(over: Partial<FenceSettings> = {}, command = "wsl.exe"): RoomExec {
   const s = fenceSettings(over);
-  return (user, script, timeoutMs) => new Promise((resolve, reject) => {
-    const [name, home] = user === "root" ? ["root", "/root"] : [s.worker, `/home/${s.worker}`];
-    const args = ["-d", s.room, "-u", name, "--exec", "/usr/bin/env", "-i", `HOME=${home}`, `USER=${name}`, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8", "/bin/bash", "--noprofile", "--norc", "-s"];
-    const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-    let stdout = "", stderr = "", timedOut = false;
+  return (user, script, timeoutMs, onLine) => new Promise((resolve, reject) => {
+    const child = spawn(command, wslArgs(s, user, ["/bin/bash", "--noprofile", "--norc", "-s"]), { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    let stdout = "", stderr = "", timedOut = false, rest = "";
+    // Whole characters, never half of one; and a room that talks without end cannot fill this side's memory.
+    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
     const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
-    child.stdout.on("data", (d) => { stdout += d; });
-    child.stderr.on("data", (d) => { stderr += d; });
+    child.stdout.on("data", (d: string) => {
+      if (stdout.length < MAX_TEXT) stdout += d;
+      if (!onLine) return;
+      rest += d;
+      if (rest.length > MAX_TEXT) rest = "";
+      const parts = rest.split(/\r?\n/);
+      rest = parts.pop() ?? "";
+      for (const l of parts) { try { onLine(l); } catch { /* a listener never breaks the door */ } }
+    });
+    child.stderr.on("data", (d: string) => { if (stderr.length < MAX_TEXT) stderr += d; });
     child.on("error", (e) => { clearTimeout(timer); reject(e); });
-    child.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr, timedOut }); });
+    child.on("close", (code) => { clearTimeout(timer); if (onLine && rest) { try { onLine(rest); } catch { /* same */ } } resolve({ code, stdout, stderr, timedOut }); });
     child.stdin.on("error", () => undefined);
     child.stdin.end(script.replace(/\r\n/g, "\n"));
   });
+}
+
+/** Bytes in and out of the room, as the worker, to and from one named file under the copies folder. Data only: nothing is run. */
+export interface RoomFiles {
+  put(path: string, data: Buffer, timeoutMs: number): Promise<void>;
+  get(path: string, timeoutMs: number): Promise<Buffer>;
+}
+
+export function wslFiles(over: Partial<FenceSettings> = {}, command = "wsl.exe"): RoomFiles {
+  const s = fenceSettings(over);
+  const safe = (path: string) => { if (!path.startsWith(`${s.copies}/`) || !/^[A-Za-z0-9/._-]+$/.test(path) || path.includes("..")) throw new Error(`fence: "${path}" is not a file under the copies folder`); };
+  const run = (program: string[], input: Buffer | null, timeoutMs: number) => new Promise<Buffer>((resolve, reject) => {
+    const child = spawn(command, wslArgs(s, "worker", program), { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const out: Buffer[] = []; let err = "", size = 0;
+    const timer = setTimeout(() => { child.kill(); reject(new Error("the room did not answer in time")); }, timeoutMs);
+    child.stdout.on("data", (d: Buffer) => { size += d.length; if (size > MAX_FILE) { child.kill(); clearTimeout(timer); reject(new Error("what the room sent is too large to be a result")); } else out.push(d); });
+    child.stderr.on("data", (d) => { if (err.length < 4000) err += d; });
+    child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    child.on("close", (code) => { clearTimeout(timer); code === 0 ? resolve(Buffer.concat(out)) : reject(new Error(`the room refused the file (exit ${code}): ${err.slice(0, 200)}`)); });
+    child.stdin.on("error", () => undefined);
+    child.stdin.end(input ?? undefined);
+  });
+  return {
+    put: async (path, data, timeoutMs) => { safe(path); await run(["/bin/dd", `of=${path}`, "status=none"], data, timeoutMs); },
+    get: (path, timeoutMs) => { safe(path); return run(["/bin/cat", path], null, timeoutMs); },
+  };
 }

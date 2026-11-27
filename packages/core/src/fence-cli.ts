@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fenceSettings, setupScript, type FenceSettings } from "./fence/room.js";
-import { fenceReportText, runFenceTest, wslExec } from "./fence/fencetest.js";
+import { fenceReportText, runFenceTest, wslExec, type WindowsMark } from "./fence/fencetest.js";
 
 /**
  * The fence from the command line, on the Windows side:
@@ -21,6 +21,14 @@ function settings(): FenceSettings {
 export function roomExists(room: string, list: Buffer): boolean {
   const text = list.includes(0) ? list.toString("utf16le") : list.toString("utf8");
   return text.split(/\r?\n/).map((l) => l.replace(/\0/g, "").trim()).includes(room);
+}
+
+/** Line 3 really tries: cmd.exe is handed in and told to leave a small file in the Public folder. No file, no hole. */
+export function windowsProbe(): { windowsProgram?: Buffer; windowsMark?: WindowsMark } {
+  const cmdExe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
+  const markFile = join(process.env.PUBLIC ?? "C:\\Users\\Public", `sf-fence-mark-${process.pid}.txt`);
+  if (!existsSync(cmdExe) || !/^[A-Za-z]:[\\/][A-Za-z0-9\\/._-]+$/.test(markFile)) return {};
+  return { windowsProgram: readFileSync(cmdExe), windowsMark: { path: markFile.replace(/\\/g, "/"), exists: () => existsSync(markFile), remove: () => rmSync(markFile, { force: true }) } };
 }
 
 async function main(): Promise<void> {
@@ -42,14 +50,7 @@ async function main(): Promise<void> {
     spawnSync("wsl.exe", ["--terminate", s.room]);
     return;
   }
-  // Line 3 really tries: cmd.exe is handed in and told to leave a small file in the Public folder. No file, no hole.
-  const cmdExe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
-  const markFile = join(process.env.PUBLIC ?? "C:\\Users\\Public", `sf-fence-mark-${process.pid}.txt`);
-  const usable = existsSync(cmdExe) && /^[A-Za-z]:[\\/][A-Za-z0-9\\/._-]+$/.test(markFile);
-  const report = await runFenceTest(exec, s, {
-    ...(process.env.CLAUDE_CODE_OAUTH_TOKEN ? { token: process.env.CLAUDE_CODE_OAUTH_TOKEN } : {}),
-    ...(usable ? { windowsProgram: readFileSync(cmdExe), windowsMark: { path: markFile.replace(/\\/g, "/"), exists: () => existsSync(markFile), remove: () => rmSync(markFile, { force: true }) } } : {}),
-  });
+  const report = await runFenceTest(exec, s, { ...(process.env.CLAUDE_CODE_OAUTH_TOKEN ? { token: process.env.CLAUDE_CODE_OAUTH_TOKEN } : {}), ...windowsProbe() });
   console.log(fenceReportText(report));
   // `fence test --details` adds the fact behind every line, also the ones that passed.
   if (process.argv.includes("--details")) for (const l of report.lines) console.log(`   ${l.n}. ${l.verdict}: ${l.detail}`);

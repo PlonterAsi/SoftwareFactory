@@ -33,7 +33,23 @@ Lines 1 to 4 are tried straight as the worker, with no sandbox in the way, so th
 
 All in `FenceSettings` (`packages/core/src/fence/room.ts`), passed as JSON in `SF_FENCE` until the settings screen exists: `room`, `worker`, `copies`, `netList`, `hostPorts`, `testModel`, `stepTimeoutMs`. After a change, `npm run fence -- setup` writes the rules into the room again.
 
+## One ticket through the door (slice 2)
+
+`npm run step1 -- work "<your sentence>"` works one ticket, and `npm run step1 -- story T1` tells it back. Settings come from `SF_STEP1` (project, starting branch, checks, model, turns, time limit, work folder) and `SF_FENCE`.
+
+1. The sentence is written to the record. The record only grows; it lives on the Windows side, outside the room.
+2. The fence test runs. One line off, and nothing starts.
+3. The project comes from GitHub and goes into the room as one file of data. The room never gets the GitHub pass.
+4. The agent works under wall 2. When it ends, everything it left running is ended.
+5. SoftwareFactory's own steps on the copy (commit, the project's checks, packing) run in a box with no network at all. The agent's git hooks, git settings and hidden-file lists are thrown away first.
+6. The result comes back as one file of data. On Windows it is looked at, never opened as files and never run. It is held, and stays on this computer, when it touches `.github/`, `.gitmodules` or `.gitattributes`, when a secret is found in it, or when a file the project keeps changed while the checks ran.
+7. Otherwise it leaves as a branch and a draft pull request. The base branch is never written.
+
 ## Known limits, said plainly
+
+- The checks prove what the project's own scripts prove. An agent writes those scripts too, so the checks are a help for your review and not a replacement for it.
+- Go and Node are downloaded from go.dev and nodejs.org over HTTPS when the room is set up. Their checksums are not compared yet.
+- The record refuses rewriting through SoftwareFactory itself. A program on Windows that opens the file directly could still change it; nothing in the room can reach it.
 
 - Microsoft does not call WSL2 a security boundary. Claude Code's sandbox covers commands only; its file tools are held by permission rules. That is why the fence is tested every time instead of trusted.
 - A run needs a Claude sign-in. SoftwareFactory hands it in for the run; it is not on the room's disk, but the run's own process holds it.
