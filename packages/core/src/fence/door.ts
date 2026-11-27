@@ -170,7 +170,8 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
     req.signal?.removeEventListener("abort", onAbort);
     const clear = await killAll();
     // The copy does not stay: a later run must not find an earlier one's files, and the disk must not fill.
-    await exec("worker", `rm -rf ${copyDir} ${scratchDir}`, s.stepTimeoutMs).catch(() => undefined);
+    // Go writes its package folders read-only, so they are made writable first or they would stay behind.
+    await exec("worker", `chmod -R u+rwX ${copyDir} ${scratchDir} 2>/dev/null; rm -rf ${copyDir} ${scratchDir}`, s.stepTimeoutMs).catch(() => undefined);
     record.append({ kind: "run.ended", who: "SF itself", ...stamp, costUsd: null, data: { end, reason, costUsd, nothingLeftRunning: clear } });
     return { end, reason, bundle, baseSha, headSha, costUsd, summary, checks };
   };
@@ -181,7 +182,7 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
     if (stopped()) return await finish("stopped", "you pressed stop");
     // 1. The copy goes in as data and is unpacked by git inside the no-network box.
     await killAll();
-    const clear = await step("worker", `rm -rf ${copyDir} ${scratchDir} && mkdir -p ${copyDir} ${scratchDir} && chmod 0700 ${scratchDir} && echo cleared`);
+    const clear = await step("worker", `chmod -R u+rwX ${copyDir} ${scratchDir} 2>/dev/null; rm -rf ${copyDir} ${scratchDir} && mkdir -p ${copyDir} ${scratchDir} && chmod 0700 ${scratchDir} && echo cleared`);
     if (!/cleared/.test(clear.stdout)) return await finish("crashed", `the room could not be prepared: ${clear.stderr.slice(0, 200)}`);
     await files.put(inFile, req.bundle, s.stepTimeoutMs);
     const unpack = await step("worker", `${pre}

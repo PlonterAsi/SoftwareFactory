@@ -142,7 +142,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     // Out: the branch, and a draft pull request. Never the base branch.
     const title = `${ticket}: ${quiet(sentence.trim().split("\n")[0]!).slice(0, 120)}`;
     if (deps.signal?.aborted) return hold("you pressed stop before the result left this computer");
-    const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", "What the run says it did (its own words, not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `Checks run without network: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.` : "No checks were set for this project."].join("\n");
+    const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.` : "No checks were set for this project."].join("\n");
     let url: string, number: number | null = null;
     if (deps.github.hasToken()) {
       // openPr pushes HEAD, so HEAD of the bare history points at the ticket's branch for the length of the call.

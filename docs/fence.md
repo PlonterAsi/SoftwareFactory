@@ -47,6 +47,10 @@ All in `FenceSettings` (`packages/core/src/fence/room.ts`), passed as JSON in `S
 
 ## Known limits, said plainly
 
+- Seen on the laptop (27 Nov 2026): inside its own sandbox the agent could not use what its own `npm ci` had just installed (`tsc: not found`), while SoftwareFactory's check seconds later found it and built. Not understood yet. Until it is, a run cannot test a web build itself; SoftwareFactory's checks still do.
+- Checks run in the order they are set, in the same copy. RoadToMill's Go check needs the web build's output, so the web check must come first.
+- Some long chained shell commands are refused inside the room without a reason given. The run is told to fall back to plain single commands.
+
 - The checks prove what the project's own scripts prove. An agent writes those scripts too, so the checks are a help for your review and not a replacement for it.
 - Go and Node are downloaded from go.dev and nodejs.org over HTTPS when the room is set up. Both downloads are compared with their makers' published checksums (`goSha256`, `nodeSha256`). Change a version and its checksum together.
 - The record refuses rewriting through SoftwareFactory itself. A program on Windows that opens the file directly could still change it; nothing in the room can reach it.
