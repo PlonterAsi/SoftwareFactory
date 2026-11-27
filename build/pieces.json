@@ -1,0 +1,383 @@
+{
+  "note": "The one build list of SoftwareFactory, in order. One piece is 'now'. A step counts only when a real ticket on a real product went through it. How a piece is worked: docs/build-loop.md.",
+  "steps": [
+    {
+      "n": 1,
+      "title": "First safe ticket",
+      "line": "One sentence becomes a checked result on a real project, inside the fence.",
+      "pieces": [
+        {
+          "id": "fence",
+          "title": "The fence: a closed room and a nine-line self-test before every run",
+          "status": "proven",
+          "from": "leg 4",
+          "done": "All nine lines pass on the laptop."
+        },
+        {
+          "id": "record",
+          "title": "The record: one list of what happened, never rewritten",
+          "status": "proven",
+          "from": "leg 3",
+          "done": "Every screen line is drawn from it."
+        },
+        {
+          "id": "run",
+          "title": "One run in the room, checked by SoftwareFactory, proposed on GitHub",
+          "status": "proven",
+          "from": "leg 1",
+          "done": "Ticket T3 on RoadToMill passed and became a draft pull request."
+        },
+        {
+          "id": "home",
+          "title": "Home screen: sentence, live run, ticket stories",
+          "status": "built",
+          "from": "leg 3",
+          "done": "A real ticket is typed and watched on it."
+        },
+        {
+          "id": "accept-stop-undo",
+          "title": "Accept, Stop and Undo",
+          "status": "built",
+          "from": "leg 3",
+          "done": "Each is pressed once on a real ticket and the record shows it."
+        },
+        {
+          "id": "watchdog",
+          "title": "Watchdog beside SoftwareFactory",
+          "status": "built",
+          "from": "leg 3",
+          "done": "It speaks when SoftwareFactory goes away in the middle of a real run."
+        },
+        {
+          "id": "window",
+          "title": "One real window: the safe path inside the installed app",
+          "status": "built",
+          "from": "step 1 plan",
+          "done": "The installed app opens the home screen; no black window, no starter file."
+        },
+        {
+          "id": "own-checks",
+          "title": "The project tells its own checks: nothing to fill in",
+          "status": "proven",
+          "from": "leg 5",
+          "done": "A ticket runs on RoadToMill with empty settings."
+        }
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Tickets",
+      "line": "Many sentences, one front door, each with its story.",
+      "pieces": [
+        {
+          "id": "ticket-list",
+          "title": "Ticket list with create, edit, delete and kinds",
+          "status": "proven",
+          "from": "leg 2",
+          "done": "Three real tickets are opened, one edited, one deleted, from the screen."
+        },
+        {
+          "id": "queue",
+          "title": "Queue: tickets worked one after another",
+          "status": "proven",
+          "from": "leg 4",
+          "done": "Three sentences typed in a row all end with a written end."
+        },
+        {
+          "id": "ready-gate",
+          "title": "Ready gate: SoftwareFactory fills the test of done and asks once when a sentence is unclear",
+          "status": "proven",
+          "from": "leg 2",
+          "done": "An unclear sentence is asked about before any run; a clear one is not."
+        },
+        {
+          "id": "story",
+          "title": "Ticket story with proof at every step",
+          "status": "proven",
+          "from": "leg 3",
+          "done": "A finished ticket shows each step with its proof."
+        },
+        {
+          "id": "parked",
+          "title": "Parked with a reason, and back to the gate",
+          "status": "built",
+          "from": "leg 2",
+          "done": "A parked ticket returns and finishes."
+        },
+        {
+          "id": "github-both-ways",
+          "title": "GitHub in step, both ways",
+          "status": "built",
+          "from": "leg 2",
+          "done": "An issue opened on GitHub appears as a ticket, and the other way round."
+        }
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Runs alone",
+      "line": "Go by default, inside limits, and he can always stop.",
+      "pieces": [
+        {
+          "id": "go-default",
+          "title": "Go by default: two runs at once, sleep is not run time",
+          "status": "proven",
+          "from": "leg 4",
+          "done": "Tickets finish while you are away."
+        },
+        {
+          "id": "stop-list",
+          "title": "The stop list: actions that always wait for you",
+          "status": "now",
+          "from": "leg 4",
+          "done": "A run that tries one is blocked and the factory goes on."
+        },
+        {
+          "id": "limits",
+          "title": "Two limits and SoftwareFactory's own share",
+          "status": "later",
+          "from": "leg 1",
+          "done": "A run parks at the limit and keeps its work."
+        },
+        {
+          "id": "since-you-left",
+          "title": "Since you left",
+          "status": "later",
+          "from": "leg 3",
+          "done": "You return to one screen that says what finished, what did not and why."
+        },
+        {
+          "id": "stuck-ladder",
+          "title": "Stuck ladder: once more, another way, split, park",
+          "status": "later",
+          "from": "leg 4",
+          "done": "A failing ticket climbs the ladder by itself."
+        },
+        {
+          "id": "phone",
+          "title": "Phone, two ways: told, and can stop",
+          "status": "later",
+          "from": "leg 3",
+          "done": "You stop a run from the phone."
+        },
+        {
+          "id": "settings",
+          "title": "Every number and switch is a setting; the protected core only by your hand",
+          "status": "later",
+          "from": "rules",
+          "done": "You change a limit from the screen; an agent cannot."
+        }
+      ]
+    },
+    {
+      "n": 4,
+      "title": "Projects",
+      "line": "Every product has one home, and SoftwareFactory looks after it.",
+      "pieces": [
+        {
+          "id": "project-home",
+          "title": "Project home and all projects on one screen",
+          "status": "later",
+          "from": "leg 5",
+          "done": "RoadToMill and a second product each show one colour and one sentence."
+        },
+        {
+          "id": "bring-in",
+          "title": "Bring a project in with one action",
+          "status": "later",
+          "from": "leg 5",
+          "done": "A product is pointed at and proven to run in the fence."
+        },
+        {
+          "id": "live-check",
+          "title": "Live check: reads changes, runs it, walks the main paths",
+          "status": "later",
+          "from": "leg 5",
+          "done": "A real new bug is found with proof."
+        },
+        {
+          "id": "sorting",
+          "title": "Sorting of machine-made tickets",
+          "status": "later",
+          "from": "leg 2",
+          "done": "A finding is accepted, another declined with a reason."
+        },
+        {
+          "id": "idea-bank",
+          "title": "Idea bank and the first doors for ideas",
+          "status": "later",
+          "from": "leg 2",
+          "done": "Your idea is caught in one sentence and stays in your words."
+        }
+      ]
+    },
+    {
+      "n": 5,
+      "title": "Ways of working",
+      "line": "Several ways to build, compared on real tickets.",
+      "pieces": [
+        {
+          "id": "contract",
+          "title": "One contract for every way of working",
+          "status": "later",
+          "from": "leg 1",
+          "done": "The first way runs through it unchanged."
+        },
+        {
+          "id": "second-way",
+          "title": "A second way: the spec line",
+          "status": "later",
+          "from": "leg 1",
+          "done": "A real ticket is finished by it."
+        },
+        {
+          "id": "races",
+          "title": "Races with a blind judge",
+          "status": "later",
+          "from": "leg 1",
+          "done": "The same real ticket is built two ways and judged."
+        },
+        {
+          "id": "score",
+          "title": "Score with weights you can set",
+          "status": "later",
+          "from": "leg 1",
+          "done": "Best, fastest and cheapest are shown per ticket."
+        },
+        {
+          "id": "choice",
+          "title": "Choice rule: a way takes a kind of case after a lead of three wins",
+          "status": "later",
+          "from": "leg 1",
+          "done": "SoftwareFactory picks the way and says why in one line."
+        }
+      ]
+    },
+    {
+      "n": 6,
+      "title": "Agents",
+      "line": "Workers he can create, edit and trust by proof.",
+      "pieces": [
+        {
+          "id": "agent-cards",
+          "title": "Agent cards with create, edit, delete and versions",
+          "status": "later",
+          "from": "leg 6",
+          "done": "You make an agent by saying it and it works a ticket."
+        },
+        {
+          "id": "trust",
+          "title": "Trust states: unproven, not worse, proven, retired",
+          "status": "later",
+          "from": "leg 6",
+          "done": "An agent's state changes by results only."
+        },
+        {
+          "id": "swaps",
+          "title": "Swap tests on fresh tickets",
+          "status": "later",
+          "from": "leg 6",
+          "done": "One agent is swapped and the count decides."
+        },
+        {
+          "id": "lessons",
+          "title": "Lessons as proposed changes",
+          "status": "later",
+          "from": "leg 6",
+          "done": "A lesson is tried like any change before it stays."
+        },
+        {
+          "id": "skills",
+          "title": "Skill shelf",
+          "status": "later",
+          "from": "leg 6",
+          "done": "A skill is added from the screen and used in a run."
+        }
+      ]
+    },
+    {
+      "n": 7,
+      "title": "Ideas to products",
+      "line": "Ideas are cooked, tried small, and released with one yes.",
+      "pieces": [
+        {
+          "id": "cooking",
+          "title": "Cooking ideas in rounds",
+          "status": "later",
+          "from": "leg 2",
+          "done": "One of your ideas reaches ready with a plan and a test of done."
+        },
+        {
+          "id": "experiments",
+          "title": "Experiments: quick proof, first version, riskiest part",
+          "status": "later",
+          "from": "leg 2",
+          "done": "A cooked idea becomes a small working thing."
+        },
+        {
+          "id": "release",
+          "title": "Release: one bundle, one picture, one yes",
+          "status": "later",
+          "from": "leg 4",
+          "done": "A real product is released from the screen."
+        },
+        {
+          "id": "passes",
+          "title": "Passes per account, project and purpose",
+          "status": "later",
+          "from": "leg 4",
+          "done": "A run uses an account only with its pass."
+        }
+      ]
+    },
+    {
+      "n": 8,
+      "title": "Scan, bench and the town",
+      "line": "The outside world feeds SoftwareFactory, safely.",
+      "pieces": [
+        {
+          "id": "bench",
+          "title": "Test bench: a throwaway room that can only fail a find",
+          "status": "later",
+          "from": "leg 7",
+          "done": "A find is installed, measured and thrown away."
+        },
+        {
+          "id": "scan",
+          "title": "The scan: your drop box, search on need, a small weekly look",
+          "status": "later",
+          "from": "leg 7",
+          "done": "A saved link gets an answer."
+        },
+        {
+          "id": "weekly",
+          "title": "The weekly picture",
+          "status": "later",
+          "from": "leg 7",
+          "done": "You get one picture of what got in and what it improved."
+        },
+        {
+          "id": "ai-user",
+          "title": "The AI user",
+          "status": "later",
+          "from": "leg 3",
+          "done": "It orders work through the side door and cannot raise limits."
+        },
+        {
+          "id": "town",
+          "title": "The town",
+          "status": "later",
+          "from": "leg 3",
+          "done": "Every movement on it is a real event."
+        },
+        {
+          "id": "machines",
+          "title": "Other machines with the same fence",
+          "status": "later",
+          "from": "leg 4",
+          "done": "A run works on a second machine."
+        }
+      ]
+    }
+  ]
+}

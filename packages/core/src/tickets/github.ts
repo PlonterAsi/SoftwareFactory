@@ -24,6 +24,8 @@ export interface MergedPr extends PullRequest { branch: string; mergedAt: string
 /** A pull request as the git manager reads it. */
 export interface PrDetail extends PullRequest { headSha: string; branch: string; base: string; nodeId: string; author: string; additions: number; deletions: number; changedFiles: number; mergeable: boolean | null; createdAt: string; updatedAt: string; mergedAt: string | null }
 /** CI on one commit: green (all passed), red (one failed), running, or none (no CI). */
+/** An issue, as SoftwareFactory's safe path reads it. Never a pull request. */
+export interface Issue { number: number; url: string; title: string; body: string; state: "open" | "closed"; author: string; association: string; labels: string[] }
 export interface CiState { state: "green" | "red" | "running" | "none"; failed: string[]; total: number }
 export interface Commit { sha: string; message: string; author: string; at: string }
 
@@ -279,6 +281,26 @@ export class GitHub {
   async publishPush(dir: string, repo: GitHubRepo, branch = "HEAD"): Promise<void> {
     this.git(dir, "push", "-q", this.remote(repo), `${branch}:refs/heads/main`);
     try { this.git(dir, "push", "-q", "--tags", this.remote(repo)); } catch { /* no tags */ }
+  }
+
+  /** Issues with one label, open and closed, the newest change first. Pull requests are left out. */
+  async issues(repo: GitHubRepo, label: string): Promise<Issue[]> {
+    const all: any[] = [];
+    // Up to five pages of 100: a project with more labelled issues than that is told so by the caller's count.
+    for (let page = 1; page <= 5; page++) {
+      const rows = await this.call<any[]>("GET", `/repos/${repo.owner}/${repo.name}/issues?state=all&sort=updated&direction=desc&per_page=100&page=${page}${label ? `&labels=${encodeURIComponent(label)}` : ""}`);
+      if (!Array.isArray(rows)) break;
+      all.push(...rows);
+      if (rows.length < 100) break;
+    }
+    return all.filter((j) => !j.pull_request).map((j) => ({ number: Number(j.number), url: String(j.html_url ?? ""), title: String(j.title ?? ""), body: String(j.body ?? ""), state: j.state === "closed" ? "closed" as const : "open" as const,
+      author: String(j.user?.login ?? ""), association: String(j.author_association ?? ""), labels: (Array.isArray(j.labels) ? j.labels : []).map((l: any) => String(typeof l === "string" ? l : l?.name ?? "")) }));
+  }
+
+  /** Open an issue. */
+  async createIssue(repo: GitHubRepo, o: { title: string; body: string; labels: string[] }): Promise<{ number: number; url: string }> {
+    const j = await this.call<any>("POST", `/repos/${repo.owner}/${repo.name}/issues`, { title: o.title.slice(0, 250), body: o.body.slice(0, 60_000), labels: o.labels });
+    return { number: Number(j.number), url: String(j.html_url ?? "") };
   }
 
   async pr(repo: GitHubRepo, number: number): Promise<PullRequest> {

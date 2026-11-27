@@ -40,7 +40,10 @@ const OUT = resolve(args.out ?? "smoke-out");
 const API = "http://127.0.0.1:4317";
 const IDENT = "dev.plonter.softwarefactory";
 const DATA = join(process.env.APPDATA ?? join(process.env.HOME ?? ".", ".config"), IDENT);
-const APP_ENV = { ...process.env, SF_RUNTIME: "mock", SF_MOCK_DELAY_MS: args.delay ?? "400", SF_DROP: join(OUT, "drop") };
+// SF_WINDOW=bridge: the older Bridge and its core, which most of this test drives. The home screen, the window an
+// installed app opens by default, has its own part (7c).
+const HOME_DATA = join(process.env.LOCALAPPDATA ?? join(process.env.HOME ?? ".", ".local"), "SoftwareFactoryStep1");
+const APP_ENV = { ...process.env, SF_WINDOW: "bridge", SF_RUNTIME: "mock", SF_MOCK_DELAY_MS: args.delay ?? "400", SF_DROP: join(OUT, "drop") };
 // Safety: this test installs and uninstalls SoftwareFactory and starts from an empty data folder.
 // It deletes nothing (an existing data folder is moved aside to a dated backup), and it runs only
 // on a CI machine or when told this is a test machine, never by accident on a PC with real work.
@@ -142,9 +145,9 @@ function findExe(dir) {
 }
 
 let app = null;
-function launch(exe, label) {
+function launch(exe, label, env = APP_ENV) {
   log("launching", exe);
-  const child = spawn(exe, [], { env: APP_ENV, detached: true, stdio: "ignore", cwd: OUT });
+  const child = spawn(exe, [], { env, detached: true, stdio: "ignore", cwd: OUT });
   child.on("error", (e) => log("launch error", label, e.message));
   child.unref();
   app = { child, exe, label };
@@ -408,6 +411,53 @@ console.log("seeded", db);
     if (!gone && h3.pid) { spawnSync("taskkill", ["/PID", String(h3.pid), "/F"]); await waitDown(10_000); }
   }
 
+  // ---------- 7c. the default window: the home screen of the fenced path ----------
+  // No room exists on this machine, so no ticket can run; what is proven is the window's own path: the app
+  // starts the home screen hidden on the bundled Node.js, the window finds its way in with the pass, the older
+  // core is not started, and closing the window is a goodbye the watchdog can read.
+  {
+    moveAside(HOME_DATA);
+    // This part is about the window. The app's own look for a newer build would reach the real update address
+    // and could install over the build under test, so it is switched off by its setting.
+    mkdirSync(HOME_DATA, { recursive: true });
+    writeFileSync(join(HOME_DATA, "settings.json"), JSON.stringify({ autoUpdate: false }));
+    const HOME = "http://127.0.0.1:4517";
+    const homeEnv = { ...process.env, SF_WINDOW: "" };
+    const readAlive = () => { try { return JSON.parse(readFileSync(join(HOME_DATA, "alive.json"), "utf8")); } catch { return null; } };
+    const homeUp = async () => { try { return (await fetch(HOME + "/", { redirect: "manual" })).status; } catch { return null; } };
+    const homeLogs = (tag) => { for (const f of ["home.log", "home.prev.log", "watchdog.log"]) { const p = join(DATA, f); if (existsSync(p)) copyFileSync(p, join(OUT, `${tag}-${f}`)); } };
+    launch(exe, "installed-home", homeEnv);
+    const up = await until("the home screen to answer", homeUp, 120_000, 1000);
+    check("the app starts the home screen on 127.0.0.1:4517", up, up ? `answers ${up} without a pass` : readTail(join(DATA, "home.log")));
+    check("the home screen refuses a visitor without the pass", up && up !== 200, `status ${up}`);
+    const opened = await until("the window to open the home screen", async () => readAlive()?.opened === true, 60_000, 1000);
+    screenshot("3b-home-screen");
+    check("the app window opened the home screen with its pass", opened, JSON.stringify(readAlive()));
+    check("the pass is not in the log", !/pass=/.test(readTail(join(DATA, "home.log"))), "");
+    check("the older core is not started beside the home screen", !(await health()), "");
+    const homePid = readAlive()?.pid;
+    ps(`$p = Get-Process -Id ${app.child.pid} -ErrorAction SilentlyContinue; if ($p) { [void]$p.CloseMainWindow() }`);
+    const shellGone = await until("the app to exit", async () => !alive(app.child.pid), 30_000, 300);
+    check("closing the home window exits the app", shellGone, "");
+    const homeDown = await until("the home screen to stop", async () => !(await homeUp()), 15_000, 300);
+    check("closing the window stops the home screen", homeDown, homeDown ? "" : `home pid ${homePid} still answers`);
+    check("the goodbye is written for the watchdog", readAlive()?.closed === true, JSON.stringify(readAlive()));
+    // Killed alone (a crash, Task Manager): the pipe to the home screen ends, so it must not linger either.
+    launch(exe, "installed-home-orphan-check", homeEnv);
+    const up2 = await until("the home screen to answer again", homeUp, 120_000, 1000);
+    if (up2) {
+      await until("the window to open the home screen again", async () => readAlive()?.opened === true && readAlive()?.closed !== true, 60_000, 1000);
+      spawnSync("taskkill", ["/PID", String(app.child.pid), "/F"]);
+      const gone2 = await until("the home screen to stop", async () => !(await homeUp()), 20_000, 300);
+      check("the home screen exits when the app is killed alone (no orphan on port 4517)", gone2, gone2 ? "" : `home pid ${readAlive()?.pid} still answers`);
+      if (!gone2 && readAlive()?.pid) spawnSync("taskkill", ["/PID", String(readAlive().pid), "/T", "/F"]);
+    } else check("the home screen starts a second time", false, readTail(join(DATA, "home.log")));
+    homeLogs("home");
+    // The watchdog goes home by itself; anything of this install's Node.js still around is ended before the next part.
+    await sleep(8000);
+    ps(`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -ieq '${bundledNode}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`);
+  }
+
   // ---------- 8. portable zip ----------
   if (args.portable) {
     const zip = resolve(args.portable);
@@ -489,6 +539,9 @@ async function updatePhase() {
     exeName = basename(exe);
     // The read token, as Systems > Updates saves it (the repo may be private).
     writeFileSync(join(DATA, "updater-token"), TOKEN);
+    // The installer restarts the app after the update, and may not hand this test's environment on: the same
+    // word in a file keeps the restarted app on the older Bridge, which the checks below ask.
+    writeFileSync(join(DATA, "window-mode"), "bridge");
     launch(exe, "old-version");
     const h = await until("the old version's core", health, 120_000, 1000);
     must("the old version runs", h?.appVersion === "0.0.1", h ? `appVersion ${h.appVersion}` : readTail(join(DATA, "core.log")));

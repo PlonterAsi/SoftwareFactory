@@ -17,6 +17,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::Manager;
 
+mod home;
 mod updates;
 
 #[derive(Default)]
@@ -44,7 +45,7 @@ struct CoreStatus {
 }
 
 /// Strip the Windows verbatim prefix (`\\?\`) so Node sees a normal path.
-fn plain(p: PathBuf) -> PathBuf {
+pub(crate) fn plain(p: PathBuf) -> PathBuf {
     let stripped = p
         .to_str()
         .and_then(|s| s.strip_prefix(r"\\?\"))
@@ -55,7 +56,7 @@ fn plain(p: PathBuf) -> PathBuf {
 
 /// Folders where a bundled resource may be: the installer's resource dir, or
 /// next to the exe (the portable zip).
-fn resource_dirs(app: &tauri::AppHandle) -> Vec<PathBuf> {
+pub(crate) fn resource_dirs(app: &tauri::AppHandle) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(dir) = app.path().resource_dir() {
         dirs.push(plain(dir));
@@ -68,7 +69,7 @@ fn resource_dirs(app: &tauri::AppHandle) -> Vec<PathBuf> {
 
 /// Where the compiled core lives. Override with SF_CORE_ENTRY.
 /// An installed app ships it as a bundled resource; a dev build uses the repo copy.
-fn core_entry(app: &tauri::AppHandle) -> PathBuf {
+pub(crate) fn core_entry(app: &tauri::AppHandle) -> PathBuf {
     if let Ok(p) = std::env::var("SF_CORE_ENTRY") {
         return PathBuf::from(p);
     }
@@ -82,7 +83,7 @@ fn core_entry(app: &tauri::AppHandle) -> PathBuf {
 }
 
 /// The Node.js that runs the core: SF_NODE, else the one shipped with the app, else `node` on PATH.
-fn node_bin(app: &tauri::AppHandle) -> (String, bool) {
+pub(crate) fn node_bin(app: &tauri::AppHandle) -> (String, bool) {
     if let Ok(p) = std::env::var("SF_NODE") {
         return (p, false);
     }
@@ -122,12 +123,33 @@ fn find_claude() -> Option<(&'static str, PathBuf)> {
         .map(|p| ("SF_CLAUDE_JS", p))
 }
 
-fn data_dir(app: &tauri::AppHandle) -> PathBuf {
+pub(crate) fn data_dir(app: &tauri::AppHandle) -> PathBuf {
     plain(app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 fn log_path(app: &tauri::AppHandle) -> PathBuf {
     data_dir(app).join("core.log")
+}
+
+/// Stop a process and everything it started, and wait until it is gone.
+/// The core and the home screen start their own Node processes (plugins, finished apps' servers, Claude Code).
+/// They run the same bundled node.exe, and an update cannot replace it while they live, so on Windows the whole
+/// tree is stopped, not only the one process.
+pub(crate) fn kill_tree(old: &mut Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = Command::new("taskkill")
+            .args(["/PID", &old.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    let _ = old.kill();
+    let _ = old.wait();
 }
 
 /// Stop the core and wait until it is gone, so its files are free (an update replaces them).
@@ -136,24 +158,39 @@ fn stop_core(app: &tauri::AppHandle) {
     let state = app.state::<Core>();
     let mut st = state.0.lock().unwrap();
     if let Some(mut old) = st.child.take() {
-        // The core starts its own Node processes (plugins, finished apps' servers, Claude Code).
-        // They run the same bundled node.exe, and an update cannot replace it while they live,
-        // so on Windows stop the whole tree, not only the core.
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            let _ = Command::new("taskkill")
-                .args(["/PID", &old.id().to_string(), "/T", "/F"])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .creation_flags(CREATE_NO_WINDOW)
-                .status();
-        }
-        let _ = old.kill();
-        let _ = old.wait();
+        kill_tree(&mut old);
     }
+}
+
+/// Which window this start shows: the home screen of the fenced path, unless SF_WINDOW=bridge asks for the
+/// older Bridge and its core (kept for the smoke test and for looking back).
+///
+/// An update restarts the app through the installer, which may not hand the environment on. So the same word in
+/// the file `window-mode` in the data folder also counts when SF_WINDOW is not set at all.
+pub(crate) fn bridge_mode() -> bool {
+    match std::env::var("SF_WINDOW") {
+        Ok(v) => v == "bridge",
+        Err(_) => std::env::var_os("APPDATA")
+            .map(|d| PathBuf::from(d).join("dev.plonter.softwarefactory").join("window-mode"))
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|t| t.trim() == "bridge")
+            .unwrap_or(false),
+    }
+}
+
+/// Start what this window needs.
+pub(crate) fn start_all(app: &tauri::AppHandle) {
+    if bridge_mode() {
+        start_core(app);
+    } else {
+        home::reopen(app);
+    }
+}
+
+/// Stop everything this app started, so its files are free.
+pub(crate) fn stop_all(app: &tauri::AppHandle) {
+    stop_core(app);
+    home::stop(app);
 }
 
 /// Start the core (stopping any earlier one) and record how it went.
@@ -222,7 +259,7 @@ fn start_core(app: &tauri::AppHandle) {
 }
 
 /// The last few KB of core.log.
-fn log_tail(path: &PathBuf) -> String {
+pub(crate) fn log_tail(path: &PathBuf) -> String {
     let Ok(mut f) = File::open(path) else { return String::new() };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     let _ = f.seek(SeekFrom::Start(len.saturating_sub(4000)));
@@ -272,6 +309,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Core(Mutex::new(CoreState::default())))
+        .manage(home::Home(Mutex::new(home::HomeState::default())))
         .manage(updates::Updates::default())
         .invoke_handler(tauri::generate_handler![
             core_status,
@@ -284,14 +322,31 @@ fn main() {
             updates::update_token_set
         ])
         .setup(|app| {
-            start_core(app.handle());
+            let (page, title) = if bridge_mode() { ("index.html", "SoftwareFactory \u{b7} Bridge") } else { ("starting.html", "SoftwareFactory") };
+            let handle = app.handle().clone();
+            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(page.into()))
+                .title(title)
+                .inner_size(1440.0, 900.0)
+                .min_inner_size(960.0, 600.0)
+                .on_page_load(move |_window, payload| {
+                    if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                        home::page_ready(&handle);
+                    }
+                })
+                .build()?;
+            start_all(app.handle());
+            // The home screen has no update page: look once at start.
+            if !bridge_mode() {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move { updates::auto_update(handle).await });
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building SoftwareFactory")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                stop_core(app);
+                stop_all(app);
             }
         });
 }
