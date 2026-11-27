@@ -19,8 +19,32 @@ export interface ProjectCard {
   /** A sleeping project keeps its tickets, and none of them is worked. */
   asleep: boolean;
 }
-export interface ProjectSettings { projects: ProjectCard[]; maxProjects: number }
-export const PROJECT_DEFAULTS: ProjectSettings = { projects: [], maxProjects: 30 };
+export interface ProjectSettings {
+  projects: ProjectCard[];
+  maxProjects: number;
+  /** Adding a project brings it in at once: one run that changes nothing shows whether the project runs here. */
+  bringInOnAdd: boolean;
+}
+export const PROJECT_DEFAULTS: ProjectSettings = { projects: [], maxProjects: 30, bringInOnAdd: true };
+
+/** The words of the ticket that brings a project in. They are fixed: the run is told what to do by SoftwareFactory, not by these. */
+export const BRING_IN = "Bring this project in: show that it runs here. Nothing in it is changed.";
+
+export interface Proof { at: string; checks: number; ticket: string | null }
+/**
+ * Which projects are proven to run here, read from the record: the latest run of each that ended "passed" with at
+ * least one check SoftwareFactory ran itself. A bring-in run counts, and so does every ticket whose checks passed.
+ */
+export function provenFrom(lines: { kind: string; run: string | null; ticket: string | null; project: string | null; ts: string; data: Record<string, unknown> }[]): Map<string, Proof> {
+  const ok = new Map<string, number>(), out = new Map<string, Proof>();
+  for (const l of lines) {
+    if (!l.run || !l.project) continue;
+    if (l.kind === "run.checked" && l.data.ok === true) ok.set(l.run, (ok.get(l.run) ?? 0) + 1);
+    else if (l.kind === "run.checked") ok.set(l.run, -1000);
+    else if (l.kind === "run.ended" && l.data.end === "passed" && (ok.get(l.run) ?? 0) > 0) out.set(l.project.toLowerCase(), { at: l.ts, checks: ok.get(l.run)!, ticket: l.ticket });
+  }
+  return out;
+}
 
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/;
 const lines = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean).slice(0, 40) : []);
@@ -57,8 +81,14 @@ export function projectList(s: Chosen & ProjectSettings): ProjectCard[] {
 export const cardOf = (s: Chosen & ProjectSettings, project: string | null): ProjectCard | null => projectList(s).find((c) => same(c.repo, project ?? "")) ?? null;
 
 export type Colour = "red" | "amber" | "green" | "blue" | "grey";
-export interface ProjectLight { repo: string; name: string; chosen: boolean; asleep: boolean; /** False: it has tickets in the record and no card. */ listed: boolean; colour: Colour; says: string; open: number }
-export interface LightTicket { project: string | null; state: string; removed: boolean; canRelease?: boolean }
+export interface ProjectLight {
+  repo: string; name: string; chosen: boolean; asleep: boolean; /** False: it has tickets in the record and no card. */ listed: boolean; colour: Colour; says: string; open: number;
+  /** The latest time its checks passed here, or null: nothing has shown yet that it runs here. */
+  proof: Proof | null;
+  /** A ticket that brings it in waits or is being worked right now. */
+  bringing: boolean;
+}
+export interface LightTicket { project: string | null; state: string; removed: boolean; canRelease?: boolean; bringIn?: boolean }
 
 const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
 
@@ -66,7 +96,7 @@ const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many
  * One colour and one sentence for each project. What waits for the owner comes first, then what did not finish,
  * then what is ready, then what is being worked. The sentence names the first of these and counts the rest.
  */
-export function projectLights(listed: ProjectCard[], chosen: string, tickets: LightTicket[], running: string[] = []): ProjectLight[] {
+export function projectLights(listed: ProjectCard[], chosen: string, tickets: LightTicket[], running: string[] = [], proven: Map<string, Proof> = new Map()): ProjectLight[] {
   // A project with tickets and no card (taken off the list, or from before there was one) is still shown, so nothing of it hides.
   const off = [...new Set(tickets.filter((t) => !t.removed && t.project && !listed.some((c) => same(c.repo, t.project!))).map((t) => t.project!))];
   const cards = [...listed, ...off.map((repo) => ({ repo, name: "", base: "", checks: [], prepare: [], asleep: false }))];
@@ -85,7 +115,10 @@ export function projectLights(listed: ProjectCard[], chosen: string, tickets: Li
     const isListed = at < listed.length;
     const colour: Colour = c.asleep || !isListed ? "grey" : yours ? "red" : unfinished ? "amber" : ready ? "green" : working || waiting ? "blue" : "grey";
     const open = yours + unfinished + ready + working + waiting;
+    const proof = proven.get(c.repo.toLowerCase()) ?? null, bringing = mine.some((t) => t.bringIn && (t.state === "waiting" || t.state === "working"));
+    // Said only where nothing else is: a listed, awake project with nothing open that nothing has yet shown to run here.
+    const unproven = isListed && !c.asleep && !parts.length && !proof && !bringing ? " Nothing has shown yet that it runs here." : "";
     const says = !isListed ? `Not on the list: ${n(mine.length, "ticket", "tickets")} kept, none is worked. Choose it to bring it back.` : c.asleep ? `Asleep${open ? `: ${n(open, "ticket", "tickets")} kept, none is worked` : ""}.` : parts.length ? `${parts.join("; ")}.`.replace(/^./, (x) => x.toUpperCase()) : "Nothing open.";
-    return { repo: c.repo, name: c.name, chosen: same(c.repo, chosen), asleep: c.asleep, listed: isListed, colour, says, open };
+    return { repo: c.repo, name: c.name, chosen: same(c.repo, chosen), asleep: c.asleep, listed: isListed, colour, says: says + unproven, open, proof, bringing };
   });
 }

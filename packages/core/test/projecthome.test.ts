@@ -37,7 +37,7 @@ describe("projects", () => {
       ["o/c", "green", "2 results are ready for you."],
       ["o/d", "blue", "1 ticket is being worked; 2 tickets wait their turn."],
       ["o/e", "grey", "Asleep: 1 ticket kept, none is worked."],
-      ["o/f", "grey", "Nothing open."],
+      ["o/f", "grey", "Nothing open. Nothing has shown yet that it runs here."],
       ["o/g", "grey", "Not on the list: 1 ticket kept, none is worked. Choose it to bring it back."],
     ]);
     expect(projectLights([card("o/g")], "", [t("o/g", "stopped")])[0]).toMatchObject({ colour: "amber", says: "1 ticket did not finish.", listed: true });

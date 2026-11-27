@@ -49,16 +49,19 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
   const out: StoryStep[] = [];
 
   // 1. Asked: the words, as they stand now.
-  out.push(step("asked", "done", `${words.kind === "ticket.edited" ? "You changed it to" : opened.who !== "you" ? "SoftwareFactory cut this from a bigger ticket" : "You asked"}: ${clean(d(words).sentence ?? d(opened).sentence, 200)}`, [opened, words.id !== opened.id ? words : undefined, sent.id !== opened.id ? sent : undefined], goes > 1 ? [`sent to be worked ${goes} times; this is the latest`] : []));
+  out.push(step("asked", "done", `${words.kind === "ticket.edited" ? "You changed it to" : opened.who !== "you" ? "SoftwareFactory cut this from a bigger ticket" : d(opened).bringIn ? "You brought the project in" : "You asked"}: ${clean(d(words).sentence ?? d(opened).sentence, 200)}`, [opened, words.id !== opened.id ? words : undefined, sent.id !== opened.id ? sent : undefined], goes > 1 ? [`sent to be worked ${goes} times; this is the latest`] : []));
 
   // 2. Ready: the test of done, written before any run.
   const asked = last(gate, "gate.asked"), answered = asked ? gate.find((l) => l.kind === "gate.answered" && l.id > asked.id) : undefined, passed = last(gate, "gate.passed");
   const started = last(go, "run.started"), fence = last(go, "fence.tested");
+  // Bringing a project in: the run keeps no change and proposes nothing.
+  const trying = d(opened).bringIn === true || d(started).tryOnly === true;
   if (passed && d(passed).skipped) out.push(step("ready", "skipped", `No test of done was written: ${d(passed).skipped}`, [asked, answered, passed]));
   else if (passed) {
     const done = (Array.isArray(d(passed).done) ? d(passed).done : []).map(String), guesses = (Array.isArray(d(passed).guesses) ? d(passed).guesses : []).map(String);
     out.push(step("ready", "done", `The test of done has ${done.length} ${done.length === 1 ? "line" : "lines"}, written before the run${answered ? ", after your answer" : ""}.`, [asked, answered, passed], [...done.map((x: string) => `done when: ${x}`), ...guesses.map((x: string) => `assumed: ${x}`), ...(asked && answered ? [`asked: ${d(asked).question}`, `you answered: ${d(answered).answer}`] : [])]));
   } else if (asked && !answered) out.push(step("ready", "now", `Waiting for your answer: ${d(asked).question}`, [asked]));
+  else if (trying) out.push(step("ready", fence || started ? "done" : "not reached", "Its test of done is fixed: the project's own checks pass here, on the project as it stands."));
   else if (fence || started) out.push(step("ready", "skipped", "This run started without a test of done (the ready gate was off).", []));
   else out.push(step("ready", "not reached", "The test of done is written when its turn comes.", [asked, answered]));
 
@@ -73,7 +76,7 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
   const ended = last(go, "run.ended"), run = started?.run ?? null;
   const ofRun = run ? go.filter((l) => l.run === run) : [];
   const agentSteps = ofRun.filter((l) => l.kind === "run.step" && l.who !== "SF itself");
-  const finished = agentSteps.find((l) => d(l).finished), committed = ofRun.find((l) => l.kind === "run.step" && d(l).did === "work committed in the room");
+  const finished = agentSteps.find((l) => d(l).finished), tried = ofRun.find((l) => l.kind === "run.step" && l.who === "SF itself" && d(l).tried === true), committed = ofRun.find((l) => l.kind === "run.step" && d(l).did === "work committed in the room") ?? tried;
   const uses = agentSteps.reduce((a, l) => a + (Array.isArray(d(l).tools) ? d(l).tools.length : 0), 0);
   const cost = ofRun.reduce((a, l) => a + (l.costUsd ?? 0), 0) || Number(d(ended).costUsd ?? 0) || 0;
   const checks = ofRun.filter((l) => l.kind === "run.checked");
@@ -88,7 +91,8 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
     if (fence && d(fence).ok === false) broke = true;
   } else {
     const facts = [`model ${d(started).model}`, `${Number(d(finished).turns ?? 0) || agentSteps.length} turns, ${uses} tool uses`, money(cost), ...(short(d(committed).headSha) ? [`commit ${short(d(committed).headSha)} made by SoftwareFactory from a fresh list of files`] : [])];
-    if (committed) out.push(step("worked", "done", `The run finished its work and SoftwareFactory committed it (${short(d(committed).headSha)}).`, [started, finished, committed], facts));
+    if (tried) out.push(step("worked", "done", `The run prepared the project and kept no change${Number(d(tried).putBack) ? `: ${d(tried).putBack === 1 ? "1 file it had changed was" : `${d(tried).putBack} files it had changed were`} put back` : ""}.`, [started, finished, tried], facts));
+    else if (committed) out.push(step("worked", "done", `The run finished its work and SoftwareFactory committed it (${short(d(committed).headSha)}).`, [started, finished, committed], facts));
     else if (ended) { out.push(step("worked", "failed", `The run ended as ${end}: ${reason}`, [started, stoppedBy, ended], facts)); broke = true; }
     else if (working) out.push(step("worked", "now", agentSteps.length ? `A run is working: ${agentSteps.length} steps so far.` : "A run is starting in the room.", [started], facts.slice(0, 3)));
     else { out.push(step("worked", "failed", "The run was cut off before it finished.", [started, stoppedBy], facts.slice(0, 3))); broke = true; }
@@ -96,7 +100,7 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
 
   // 5. Checked: SoftwareFactory's own checks, in a box with no network.
   const found = Array.isArray(d(started).checksFound) ? (d(started).checksFound as unknown[]).map(String) : null;
-  if (broke || !committed) out.push(step("checked", "not reached", "The checks run after the work is committed."));
+  if (broke || !committed) out.push(step("checked", "not reached", trying ? "The checks run on the project as it stands." : "The checks run after the work is committed."));
   else {
     const planned = Array.isArray(d(started).checks) ? d(started).checks.length : 0, bad = checks.filter((l) => !d(l).ok);
     const facts = [...checks.map((l) => `${d(l).ok ? "passed" : "FAILED"}: ${d(l).command}`), ...(found ? [`found in the project: ${found.join(", ") || "nothing"}`] : [])];
@@ -109,6 +113,9 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
     else if (!ended && !proposed && working) out.push(step("checked", "now", all ? `The checks are running: ${checks.length} of ${all} so far.` : "The work is being packed.", checks, facts));
     else { out.push(step("checked", "failed", ended ? `Only ${checks.length} of ${all} checks ran. The run ended as ${end}: ${reason}` : `Only ${checks.length} of ${all} checks ran before the run was cut off.`, [...checks, stoppedBy, ended], facts)); broke = true; }
   }
+
+  // Bringing a project in proposes nothing: its road ends at the checks.
+  if (trying) return out;
 
   // 6. Proposed: on GitHub, or held on this computer.
   if (proposed && d(proposed).held && Array.isArray(d(proposed).stop) && d(proposed).stop.length) {

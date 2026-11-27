@@ -8,7 +8,7 @@ import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
 import { type Bucket, type LimitPeriod, type LimitSettings, LIMIT_DEFAULTS, bucketOfSend, checkLimits, periodEnd, periodStart, roomLeft, runBudget, spendOf } from "./limits.js";
 import { sinceYouLeft } from "./since.js";
-import { type ProjectSettings, PROJECT_DEFAULTS, cardOf, cleanProjects, projectLights, projectList } from "./projecthome.js";
+import { type ProjectSettings, BRING_IN, PROJECT_DEFAULTS, cardOf, cleanProjects, projectLights, projectList, provenFrom } from "./projecthome.js";
 import { type HandChange, baselineOf, hasBaseline, isProtected, protectedChanges, protectedOnRecord, settingsInDoubt } from "./protected.js";
 import { type LadderSettings, type Rung, LADDER_DEFAULTS, checkLadder, isClimbable, ladderHint, nextRung } from "./ladder.js";
 import type { SplitResult } from "./gate.js";
@@ -77,7 +77,7 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   const maxProjects = r.maxProjects === undefined ? from.maxProjects : Number(r.maxProjects);
   if (!Number.isInteger(maxProjects) || maxProjects < 1 || maxProjects > 200) throw new Error("The most projects must be a whole number from 1 to 200.");
   if (r.projects === undefined && from.projects.length > maxProjects) throw new Error(`There are ${from.projects.length} projects on the list. The most cannot be less than that.`);
-  const s: HomeSettings = { ...watch, maxProjects, projects: cleanProjects(r.projects, from.projects, maxProjects), repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths"), limitPeriod: (r.limitPeriod === undefined ? from.limitPeriod : r.limitPeriod) as LimitPeriod, limitYou: num("limitYou"), limitAlone: num("limitAlone"), ownSharePercent: num("ownSharePercent"), runLimit: num("runLimit"), runFloor: num("runFloor"), sinceShow: num("sinceShow"), ladder: typeof r.ladder === "boolean" ? r.ladder : from.ladder, ladderAgain: num("ladderAgain"), ladderOtherWay: num("ladderOtherWay"), ladderSplit: typeof r.ladderSplit === "boolean" ? r.ladderSplit : from.ladderSplit, ladderSharedTries: num("ladderSharedTries"), ladderWithinMinutes: num("ladderWithinMinutes"), ladderSplitMinChars: num("ladderSplitMinChars"), ladderModel: text("ladderModel"), ladderSplitModel: text("ladderSplitModel") };
+  const s: HomeSettings = { ...watch, maxProjects, bringInOnAdd: typeof r.bringInOnAdd === "boolean" ? r.bringInOnAdd : from.bringInOnAdd, projects: cleanProjects(r.projects, from.projects, maxProjects), repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths"), limitPeriod: (r.limitPeriod === undefined ? from.limitPeriod : r.limitPeriod) as LimitPeriod, limitYou: num("limitYou"), limitAlone: num("limitAlone"), ownSharePercent: num("ownSharePercent"), runLimit: num("runLimit"), runFloor: num("runFloor"), sinceShow: num("sinceShow"), ladder: typeof r.ladder === "boolean" ? r.ladder : from.ladder, ladderAgain: num("ladderAgain"), ladderOtherWay: num("ladderOtherWay"), ladderSplit: typeof r.ladderSplit === "boolean" ? r.ladderSplit : from.ladderSplit, ladderSharedTries: num("ladderSharedTries"), ladderWithinMinutes: num("ladderWithinMinutes"), ladderSplitMinChars: num("ladderSplitMinChars"), ladderModel: text("ladderModel"), ladderSplitModel: text("ladderSplitModel") };
   checkLadder(s);
   if (!Number.isInteger(s.sinceShow) || s.sinceShow < 1 || s.sinceShow > 100) throw new Error("The panel names from 1 to 100 tickets of each group.");
   checkLimits(s);
@@ -130,6 +130,8 @@ export const settingsFileIn = (workDir: string, start: Partial<HomeSettings> = {
 export type TicketState = "waiting" | "asked" | "kept" | "working" | "proposed" | "accepted" | "undone" | "held" | "split" | "passed" | "failed its checks" | "parked" | "stopped" | "crashed" | "not started" | "interrupted";
 
 export interface TicketView {
+  /** It brings a project in: its run changes nothing and proposes nothing. Its words are fixed, and the ladder leaves it alone. */
+  bringIn: boolean;
   ticket: string;
   project: string | null;
   sentence: string;
@@ -241,6 +243,7 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
     const splitInto = splitLine && Array.isArray(d(splitLine).into) && d(splitLine).into.length ? (d(splitLine).into as unknown[]).map(String) : null;
     const anyEnded = lastOf(ls.filter((l) => !!l.run), "run.ended");
     const failedCheck = anyEnded ? lastOf(ls.filter((l) => l.run === anyEnded.run && d(l).ok === false), "run.checked") : undefined;
+    const bringIn = d(opened).bringIn === true;
     let state: TicketState, says: string;
     if (undone) { state = "undone"; says = d(undone).sha ? "You undid it. The project is as it was before, and its history keeps both steps." : "The undo is on GitHub and still has to be put in there."; }
     else if (accepted) { state = "accepted"; says = d(accepted).foundMerged ? `It was already put into the project on GitHub${d(accepted).notTheCheckedCommit ? ", with changes made after SoftwareFactory checked it" : ""}.` : "You accepted it. It is in the project."; }
@@ -259,14 +262,14 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
     else { state = "interrupted"; says = ls.some((l) => l.id > sent.id && l.kind === "watchdog.spoke" && d(l).why === "gone") ? "SoftwareFactory went away while this was being worked. The watchdog ended the run; nothing left the computer." : !go.length ? "From before tickets waited their turn. Use Work it again to send it." : "SoftwareFactory was closed while this ticket was being worked."; }
     const number = proposed && typeof d(proposed).number === "number" ? (d(proposed).number as number) : null;
     out.push({
-      ticket, project: opened.project, sentence: String(d(edit).sentence ?? d(opened).sentence ?? ""), kind: kindNow, openedAt: opened.ts, state, says,
+      bringIn, ticket, project: opened.project, sentence: String(d(edit).sentence ?? d(opened).sentence ?? ""), kind: kindNow, openedAt: opened.ts, state, says,
       url: proposed && typeof d(proposed).url === "string" ? d(proposed).url : null, number,
       costUsd: Math.round(ls.reduce((a, l) => a + (l.costUsd ?? 0), 0) * 10000) / 10000,
       canAccept: state === "proposed" && number !== null,
       canUndo: state === "accepted" && typeof d(accepted).sha === "string" && !!d(accepted).sha,
       stops: state === "held" && Array.isArray(d(proposed).stop) ? (d(proposed).stop as any[]).slice(0, 40).map((x) => ({ family: String(x?.family ?? ""), file: String(x?.file ?? ""), why: String(x?.why ?? "") })) : [],
       canRelease: state === "held" && !removed && Array.isArray(d(proposed).stop) && d(proposed).stop.length > 0,
-      canEdit: (state === "waiting" || state === "kept" || state === "asked") && !removed, canRemove: state !== "working" && !removed,
+      canEdit: (state === "waiting" || state === "kept" || state === "asked") && !removed && !bringIn, canRemove: state !== "working" && !removed,
       canAgain: !removed && ["proposed", "failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held"].includes(state) || (!removed && state === "waiting" && sent.kind === "ticket.queued" && sent.who !== "you"),
       removed, place: null, question: state === "asked" ? question : null, done: Array.isArray(d(gPassed).done) ? (d(gPassed).done as unknown[]).map(String) : [],
       asked: gAsked && gAnswered ? { question: String(d(gAsked).question ?? ""), answer: String(d(gAnswered).answer ?? "") } : null, gatePassed: !!gPassed && !d(gPassed).skipped, waitingSince: Math.max(sent.id, lastOf(ls, "ticket.restored")?.id ?? 0),
@@ -275,13 +278,13 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
       returns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after !== "cut off").length, returnsAt: null,
       parent: typeof d(opened).parent === "string" ? d(opened).parent : null, ladder: sent.kind === "ticket.queued" && typeof d(sent).ladder === "string" ? (d(sent).ladder as Rung) : null, ladderUsed, splitInto, wasSplit: !!splitLine,
       // A stop the owner pressed ends the climbing too, however the run then wrote its end.
-      climbable: !removed && !go.some((l) => l.kind === "stop.pressed") && isClimbable(state, ended ? { ...d(ended), run: ended.run } : null),
+      climbable: !bringIn && !removed && !go.some((l) => l.kind === "stop.pressed") && isClimbable(state, ended ? { ...d(ended), run: ended.run } : null),
       lastFail: anyEnded && d(anyEnded).end !== "passed" ? { state: String(d(anyEnded).end ?? ""), reason: String(d(anyEnded).reason ?? ""), ...(failedCheck ? { tail: `${String(d(failedCheck).command ?? "")}\n${String(d(failedCheck).tail ?? "")}` } : {}) } : null,
       bucket: bucketOfSend(sent), limitUntil: null, keptWork: !!ended && !!d(ended).kept && !proposed,
       everWorked: ls.some((l) => l.kind === "fence.tested" || l.kind === "run.started"),
       lastWorkAt: go.at(-1)?.ts ?? null,
       cutOff: state === "interrupted" && go.length > 0, cutOffReturns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after === "cut off").length,
-      steps: WORKED.includes(kindNow) ? stepsOf(ls, isWorking(ticket)) : [],
+      steps: WORKED.includes(kindNow) || bringIn ? stepsOf(ls, isWorking(ticket)) : [],
       story: ls.map((l) => ({ id: l.id, at: l.ts, who: l.who, what: storyLine(l), flagged: l.flagged })),
     });
   }
@@ -380,7 +383,7 @@ export function createHome(deps: HomeDeps) {
     const doubt = settingsInDoubt(all, settings, HOME_DEFAULTS);
     const limits = limitsNow(doubt.length ? { ...settings, ...Object.fromEntries(doubt.map((c) => [c.key, c.set])) } as HomeSettings : settings, all);
     for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, roomLeft(settings, limits.used), t.bucket) <= 0) { t.limitUntil = limits.until; t.says = `Waiting: ${t.bucket === "you" ? "limit 1 (work you sent)" : "limit 2 (what SoftwareFactory does by itself)"} is used up for this ${limits.period}.`; } }
-    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, settingsDoubt: doubt, projects: projectLights(projectList(settings), settings.repo, tickets), since: sinceYouLeft(all, tickets, settings.sinceShow) };
+    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, settingsDoubt: doubt, projects: projectLights(projectList(settings), settings.repo, tickets, [], provenFrom(all)), since: sinceYouLeft(all, tickets, settings.sinceShow) };
   };
   // A line the watchdog said stays on the screen while it is still the news: not once "Got it" covered it, and not
   // once its ticket moved on (the owner sent it again, a new run started, a result came). One pass from the end.
@@ -527,7 +530,8 @@ export function createHome(deps: HomeDeps) {
     // The ready gate first: the test of done is written before the run, and an unclear sentence is asked about once.
     const ready = async (): Promise<string[] | null> => {
       if (next.gatePassed) return next.done;
-      if (!s.gate || !deps.gate) return [];
+      // Bringing a project in has its own fixed test of done (its checks pass here), so there is nothing to read or ask.
+      if (next.bringIn || !s.gate || !deps.gate) return [];
       let g: GateResult;
       // Stop does not wait for the reader: the queue is free at once, and whatever the reader says later is dropped.
       const stopped = new Promise<null>((ok) => stop.signal.addEventListener("abort", () => ok(null), { once: true }));
@@ -542,7 +546,7 @@ export function createHome(deps: HomeDeps) {
       record.append({ kind: "gate.passed", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { kind: a.kind, done: a.done, guesses: a.guesses } });
       return a.done;
     };
-    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: card.base, checks: card.checks, prepare: card.prepare, model: next.ladder === "another way" && s.ladderModel ? s.ladderModel : s.model, ...(next.ladder && next.ladder !== "split" && next.lastFail ? { hint: ladderHint(next.ladder, next.lastFail) } : {}), maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, stopPaths: s.stopPaths, budgetUsd: budget, done, ...(next.issue ? { issue: next.issue.number } : {}), ...(s.slots > 1 ? { ownCell: true } : {}) }, next.ticket, next.sentence, stop.signal)))
+    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: card.base, checks: card.checks, prepare: card.prepare, model: next.ladder === "another way" && s.ladderModel ? s.ladderModel : s.model, ...(next.ladder && next.ladder !== "split" && next.lastFail ? { hint: ladderHint(next.ladder, next.lastFail) } : {}), maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, stopPaths: s.stopPaths, budgetUsd: budget, done, ...(next.bringIn ? { tryOnly: true } : {}), ...(next.issue ? { issue: next.issue.number } : {}), ...(s.slots > 1 ? { ownCell: true } : {}) }, next.ticket, next.sentence, stop.signal)))
       .catch((e) => { record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, project: next.project, data: { end: "crashed", reason: String((e as Error)?.message ?? e).slice(0, 300), where: "before the run" } }); })
       .catch(() => undefined)
       .finally(() => {
@@ -566,7 +570,7 @@ export function createHome(deps: HomeDeps) {
     if (syncing) return syncing;
     const s = deps.settings.read(), repo = parseGitHubRepo(s.repo);
     if (!repo || s.issues === "off" || closing) return Promise.resolve({ ok: true, in: [], out: [], closed: [], skipped: 0 });
-    const tickets = () => ticketsFrom(record.all(), working()).map((t) => ({ ticket: t.ticket, project: t.project, sentence: t.sentence, kind: t.kind, removed: t.removed, untouched: ["waiting", "asked", "kept"].includes(t.state) && !t.everWorked && !runs.has(t.ticket) }));
+    const tickets = () => ticketsFrom(record.all(), working()).filter((t) => !t.bringIn).map((t) => ({ ticket: t.ticket, project: t.project, sentence: t.sentence, kind: t.kind, removed: t.removed, untouched: ["waiting", "asked", "kept"].includes(t.state) && !t.everWorked && !runs.has(t.ticket) }));
     syncing = syncIssues({ record, github }, repo, { mode: s.issues, label: s.issuesLabel, tickets })
       .then((r) => { lastSync = { at: new Date().toISOString(), ok: r.ok, why: r.why ?? null }; return r; })
       .finally(() => { syncing = null; try { tell(); pump(); } catch { /* the next thing that happens wakes the queue */ } });
@@ -719,8 +723,16 @@ export function createHome(deps: HomeDeps) {
       // Choosing: the Settings fields speak for the chosen project from here, and the other keeps its card.
       if (b.choose === true || !was.repo) over = { repo: cards[i]!.repo, base: cards[i]!.base, checks: cards[i]!.checks, prepare: cards[i]!.prepare };
     }
+    // Proving it again: asked for by name, for a project that is on the list.
+    const again = b.bringIn === true && at >= 0 && b.remove !== true;
+    const busy = () => ticketsFrom(record.all(), working()).some((t) => t.bringIn && !t.removed && (t.project ?? "").toLowerCase() === repo.toLowerCase() && (t.state === "waiting" || t.state === "working"));
+    if (again && busy()) return { ok: false, why: "It is being brought in already. Its ticket is on the list." };
     const r = saveSettings({ ...over, projects: cards });
-    return r.ok ? { ok: true } : { ok: false, why: r.why };
+    if (!r.ok) return { ok: false, why: r.why };
+    // A new project is brought in at once (Settings), unless this call says otherwise.
+    const added = at < 0 && b.remove !== true;
+    if (again || (added && (typeof b.bringIn === "boolean" ? b.bringIn : r.settings.bringInOnAdd) && !busy())) { openTicket(record, repo, BRING_IN, "task", { bringIn: true }); pump(); }
+    return { ok: true };
   }
 
   function saveSettings(raw: unknown): { ok: true; settings: HomeSettings } | { ok: false; why: string; needsHand?: HandChange[] } {

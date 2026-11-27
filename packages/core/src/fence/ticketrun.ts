@@ -39,6 +39,8 @@ export interface TicketSettings {
   stopPaths?: string[];
   /** What the run is told about an earlier run of this ticket that did not finish (the stuck ladder). */
   hint?: string;
+  /** Bringing a project in: the run changes nothing and proposes nothing. It only shows whether the project runs here. */
+  tryOnly?: boolean;
   /** The most this run may use, in dollars (the two limits). Left out: no ceiling of its own. */
   budgetUsd?: number;
   model: string;
@@ -154,7 +156,7 @@ export const TICKET_KINDS = ["request", "bug", "task", "idea", "plan", "question
 export type TicketKind = (typeof TICKET_KINDS)[number];
 
 /** Open a ticket: it gets its name and its first line in the record. Nothing runs yet. */
-export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | { parent: string } | null = null): string {
+export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | { parent: string } | { bringIn: true } | null = null): string {
   // Counting and writing happen under one lock, so two SoftwareFactory windows cannot give two tickets one name.
   record.db.exec("BEGIN IMMEDIATE");
   try {
@@ -204,7 +206,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     const keptLine = [...story].reverse().find((l) => l.kind === "run.ended" && l.run);
     const sentClean = !!(([...story].reverse().find((l) => l.kind === "ticket.queued")?.data as any)?.clean);
     const k = ((keptLine && keptLine.id > lastOut && !sentClean ? (keptLine.data as any)?.kept : null) ?? {}) as Record<string, unknown>;
-    if (typeof k.branch === "string" && /^sf\/[a-z0-9-]+$/.test(k.branch) && typeof k.headSha === "string" && typeof k.baseSha === "string" && /^[0-9a-f]{40}$/.test(k.baseSha)) {
+    if (!st.tryOnly && typeof k.branch === "string" && /^sf\/[a-z0-9-]+$/.test(k.branch) && typeof k.headSha === "string" && typeof k.baseSha === "string" && /^[0-9a-f]{40}$/.test(k.baseSha)) {
       try {
         // It must still stand on this project's starting branch: kept work from another base would drag that base in.
         plainGit(h.dir, "merge-base", "--is-ancestor", k.baseSha, `refs/heads/${h.base}`);
@@ -221,9 +223,15 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
       const found = findChecks(files, (path) => { try { const t = plainGit(h.dir, "show", `refs/heads/${h.base}:${path}`); return t.length > 1_000_000 ? null : t; } catch { return null; } });
       checks = found.checks; prepare = [...prepare, ...found.prepare.filter((c) => !prepare.includes(c))]; checksFound = found.found; watch = found.watch; covers = found.covers; workspaces = found.workspaces;
     }
+    // Bringing in with nothing to run proves nothing, so no run is spent on it.
+    if (st.tryOnly && !checks.length) {
+      const reason = "no build, type check or test was found in this project, so nothing could show that it runs here. Write its checks in Settings, then prove it again";
+      record.append({ kind: "run.ended", who: "SF itself", ticket, project, data: { end: "parked", reason, parkedFor: "no checks", where: "before the run" } });
+      return out({ end: "parked", reason });
+    }
     const result = await runInRoom(deps.exec, deps.files, record, {
       run, ticket, project, sentence, bundle: readFileSync(inFile), base: h.base, branch,
-      model: st.model, maxTurns: st.maxTurns, budgetUsd: st.budgetUsd, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, ownCell: !!st.ownCell, ...(st.hint ? { hint: st.hint } : {}), ...(resume ? { resume } : {}), signal: deps.signal,
+      model: st.model, maxTurns: st.maxTurns, budgetUsd: st.budgetUsd, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, ownCell: !!st.ownCell, ...(st.hint ? { hint: st.hint } : {}), ...(resume ? { resume } : {}), ...(st.tryOnly ? { tryOnly: true } : {}), signal: deps.signal,
     }, deps.fence);
     // Parked at a limit with work done: the work comes in as data and stays here, unchecked, for the next run of this ticket.
     if (result.end === "parked" && result.kept && result.bundle && result.headSha) {
@@ -307,6 +315,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
 export function storyLine(l: RecordLine): string {
     const d = l.data as any;
     const what =
+      l.kind === "ticket.opened" && d.bringIn ? "you brought the project in: SoftwareFactory shows whether it runs here, and changes nothing" :
       l.kind === "ticket.opened" && l.who !== "you" ? `SoftwareFactory opened it${d.parent ? `, a smaller piece cut from ${d.parent}` : ""}: ${d.sentence}` :
       l.kind === "ticket.opened" ? `you asked${d.from === "github" ? ` (issue #${d.issue} on GitHub)` : ""}: ${d.sentence}` :
       l.kind === "issue.linked" ? (d.direction === "in" ? `taken from issue #${d.number} on GitHub` : `issue #${d.number} opened on GitHub for it`) :
@@ -319,7 +328,7 @@ export function storyLine(l: RecordLine): string {
       l.kind === "gate.answered" ? `you answered: ${d.answer}` :
       l.kind === "gate.passed" ? (d.skipped ? `ready, without a test of done (${d.skipped})` : `ready. Done when: ${(d.done ?? []).join("; ")}${d.guesses?.length ? `. Assumed: ${d.guesses.join("; ")}` : ""}`) :
       l.kind === "fence.tested" ? (d.ok ? "the fence held: nine lines as they should be" : `the fence did not hold${d.error ? `: ${d.error}` : ""}`) :
-      l.kind === "run.started" ? `a run started on ${d.model}${Array.isArray(d.checksFound) ? (d.checks?.length ? `; checks found in the project (${d.checksFound.join(", ")})` : "; no build or type check was found in the project, so nothing will be checked") : ""}` :
+      l.kind === "run.started" ? `a run started on ${d.model}${d.tryOnly ? " to try the project; it keeps no change" : ""}${Array.isArray(d.checksFound) ? (d.checks?.length ? `; checks found in the project (${d.checksFound.join(", ")})` : "; no build or type check was found in the project, so nothing will be checked") : ""}` :
       l.kind === "run.step" ? (d.did ?? d.says?.split("\n")[0]?.slice(0, 140) ?? (d.tools ? `used ${d.tools.map((x: any) => x.tool).join(", ")}` : d.toolErrors ? `a command or tool ended with an error: ${String(d.toolErrors[0]).split("\n")[0]!.slice(0, 100)}` : "finished")) :
       l.kind === "run.checked" ? `check ${d.ok ? "passed" : "FAILED"}: ${d.command}` :
       l.kind === "run.ended" ? `the run ended: ${d.end} (${d.reason})` :
