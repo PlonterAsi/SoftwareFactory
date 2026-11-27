@@ -120,6 +120,8 @@ export interface WatchdogDeps extends SpeakDeps {
   now?: () => Date;
   /** How long to wait for SoftwareFactory's first sign of life before going home. */
   giveUpMs?: number;
+  /** Called at every look, for the watchdog's own sign of life. */
+  tick?: () => void;
 }
 
 /** The loop. Looks every `everyMs` until there is nothing left to watch. */
@@ -130,6 +132,7 @@ export async function runWatchdog(deps: WatchdogDeps, everyMs = 5000, signal?: A
   const born = now().getTime() - 2000;
   let everSeen = false;
   while (!signal?.aborted) {
+    try { deps.tick?.(); } catch { /* the watching goes on */ }
     const seen = readAlive(deps.workDir);
     const fresh = seen && new Date(seen.at).getTime() >= born ? seen : null;
     if (fresh) everSeen = true;

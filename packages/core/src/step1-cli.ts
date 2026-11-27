@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ import { storyText, workTicket, type TicketSettings } from "./fence/ticketrun.js
 import { windowsProbe } from "./fence-cli.js";
 import { createHome, settingsFileIn } from "./fence/home.js";
 import { undoTicket } from "./fence/undo.js";
-import { cleanWatch, runWatchdog, speak, writeAlive } from "./fence/watchdog.js";
+import { cleanWatch, readAlive, runWatchdog, speak, writeAlive } from "./fence/watchdog.js";
 
 /**
  * Build step 1 from the command line, on the Windows side, until the home screen exists (slice 3):
@@ -36,15 +36,21 @@ async function main(): Promise<void> {
     const exec = wslExec(fence);
     const settings = settingsFileIn(workDir);
     // One watchdog at a time: a second one would say everything twice.
+    // The one that watches renews its mark at every look; a mark that is not renewed belongs to nobody, whatever
+    // process number it carries. A watchdog that is just going home gets a few seconds to leave before this one gives way.
     const lock = join(workDir, "watchdog.pid");
-    const other = existsSync(lock) ? Number(readFileSync(lock, "utf8")) : 0;
-    if (other > 0 && other !== process.pid) { try { process.kill(other, 0); console.log("A watchdog is watching already."); return; } catch { /* that one is gone */ } }
-    writeFileSync(lock, String(process.pid));
+    const taken = () => { try { return existsSync(lock) && Number(readFileSync(lock, "utf8")) !== process.pid && Date.now() - statSync(lock).mtimeMs < 12_000; } catch { return false; } };
+    for (let i = 0; i < 8 && taken(); i++) await new Promise((ok) => setTimeout(ok, 2500));
+    if (taken()) { console.log("A watchdog is watching already."); return; }
+    const mark = () => writeFileSync(lock, String(process.pid));
+    mark();
     console.log("SoftwareFactory's watchdog is watching. It closes by itself when SoftwareFactory is closed.");
     await runWatchdog({
       record, workDir, settings: () => cleanWatch(settings.read()),
       endRoom: async () => { await exec("root", `pkill -KILL -u ${fence.worker} >/dev/null 2>&1; true`, 30_000); },
+      tick: mark,
     });
+    try { if (Number(readFileSync(lock, "utf8")) === process.pid) rmSync(lock, { force: true }); } catch { /* an unrenewed mark counts for nothing anyway */ }
     return;
   }
   if (cmd === "home") {
@@ -57,12 +63,23 @@ async function main(): Promise<void> {
     const exec = wslExec(fence), files = wslFiles(fence);
     const github = new GitHub({ dataDir: workDir, cli: ghCliToken });
     const { repo: _r, workDir: _w, ...start } = raw;
+    let cleared: Promise<void> = Promise.resolve();
     const home = createHome({
       record, github, settings: settingsFileIn(workDir, { ...start, ...(raw.repo ? { repo: raw.repo } : {}) }),
       hosts: [`127.0.0.1:${port}`, `localhost:${port}`], fence: { room: fence.room, netList: fence.netList },
       undo: (ticket) => undoTicket({ record, github, workDir }, ticket),
-      work: (st, sentence, signal) => workTicket({ exec, files, record, fence, signal, github, fenceTest: () => runFenceTest(exec, fence, windowsProbe()) }, { ...st, workDir }, sentence),
+      // A run of this start waits until the room was cleared of an earlier start's leftovers.
+      work: async (st, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: () => runFenceTest(exec, fence, windowsProbe()) }, { ...st, workDir }, sentence)),
     });
+    // A fresh start owns no run. Whatever an earlier SoftwareFactory left working in the room is ended now, and when
+    // that earlier one went away in the middle of a ticket and nobody said so yet, it is said.
+    const before = readAlive(workDir);
+    cleared = exec("root", `pkill -KILL -u ${fence.worker} >/dev/null 2>&1; true`, 30_000).then(() => undefined, () => undefined);
+    if (before?.running && !before.closed && before.pid !== process.pid) {
+      const t = before.running.ticket;
+      const said = t ? record.story(t).some((l) => l.kind === "watchdog.spoke" && (l.data as Record<string, unknown>).why === "gone") : false;
+      if (!said) void speak({ record, settings: () => cleanWatch(home.state().settings) }, { line: `SoftwareFactory went away while ${t ?? "a ticket"} was being worked. The run was ended; nothing left the computer.`, ticket: t, why: "gone" });
+    }
     // A sign of life for the watchdog, and the two things SoftwareFactory itself says out loud.
     const beat = setInterval(() => { try { writeAlive(workDir, home.alive()); } catch { /* the next beat tries again */ } }, 5000);
     beat.unref();
