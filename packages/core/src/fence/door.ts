@@ -38,6 +38,8 @@ export interface RunRequest {
   timeLimitMs: number;
   /** The project's own checks, run by SoftwareFactory after the agent, without network. */
   checks: string[];
+  /** Commands that fetch what the checks need (packages, modules). The agent runs them first, while it still has the listed addresses. */
+  prepare?: string[];
   signal?: AbortSignal;
 }
 
@@ -59,7 +61,7 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/;
 
 /** What the agent is told. The sentence is the person's; the rest is fixed. */
-export function runPrompt(r: Pick<RunRequest, "sentence" | "checks">): string {
+export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare">): string {
   return [
     "You are working on a copy of a real project. Do what the owner asks below, completely and with care, and nothing beyond it.",
     "",
@@ -67,6 +69,10 @@ export function runPrompt(r: Pick<RunRequest, "sentence" | "checks">): string {
     r.sentence.trim(),
     "",
     "How to work:",
+    ...(r.prepare?.length ? [
+      "- FIRST, before anything else, run each of these commands exactly as written, one per call, from the project's top folder. They fetch what the project needs; later there is no network, so nothing can be fetched then:",
+      ...r.prepare.map((c) => `    ${c}`),
+    ] : []),
     "- Read the project's own instructions (CLAUDE.md, README) first and follow them.",
     "- Make the change with the project's own style and tests. Do not commit; your files are collected when you finish.",
     "- Your shell commands run in a sandbox and nobody is there to approve anything. If a shell command is refused, do not give up on the shell: run it again as plain single commands, one per call (for example first `npm ci --prefix web`, then the next), without pipes, `;`, redirects or `cd ... &&`. Use the Read, Grep and Glob tools for looking at files.",
@@ -170,7 +176,7 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
   };
   const step = async (user: "worker" | "root", script: string, timeoutMs = s.stepTimeoutMs, onLine?: (l: string) => void): Promise<ExecResult> => exec(user, script, timeoutMs, onLine);
 
-  record.append({ kind: "run.started", who: "SF itself", ...stamp, data: { branch: req.branch, base: req.base, model: req.model, timeLimitMinutes: Math.round(req.timeLimitMs / 60_000), checks: req.checks } });
+  record.append({ kind: "run.started", who: "SF itself", ...stamp, data: { branch: req.branch, base: req.base, model: req.model, timeLimitMinutes: Math.round(req.timeLimitMs / 60_000), checks: req.checks, prepare: req.prepare ?? [] } });
   try {
     if (stopped()) return await finish("stopped", "you pressed stop");
     // 1. The copy goes in as data and is unpacked by git inside the no-network box.

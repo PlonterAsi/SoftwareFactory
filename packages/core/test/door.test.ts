@@ -72,7 +72,8 @@ describe("the door's small parts", () => {
   });
 
   it("tells the agent the owner's sentence, the checks, and that the net is a short list", () => {
-    const p = runPrompt({ sentence: "Add a footer.", checks: ["npm run build"] });
+    const p = runPrompt({ sentence: "Add a footer.", checks: ["npm run build"], prepare: ["npm ci --prefix web"] });
+    expect(p).toMatch(/FIRST[\s\S]*npm ci --prefix web/);
     expect(p).toContain("Add a footer.");
     expect(p).toContain("npm run build");
     expect(p).toMatch(/WITHOUT any network/);

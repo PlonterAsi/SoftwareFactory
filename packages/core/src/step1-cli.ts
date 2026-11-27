@@ -12,10 +12,10 @@ import { windowsProbe } from "./fence-cli.js";
  * Build step 1 from the command line, on the Windows side, until the home screen exists (slice 3):
  *   step1 work "<one sentence>"     one ticket: fence test, a run in the room, a proposal on GitHub
  *   step1 story <ticket>            the story of a ticket from the record
- * Settings: SF_STEP1 (JSON: repo "owner/name", base, checks, model, maxTurns, timeLimitMinutes, workDir)
+ * Settings: SF_STEP1 (JSON: repo "owner/name", base, checks, prepare, model, maxTurns, timeLimitMinutes, workDir)
  * and SF_FENCE (JSON, the fence settings).
  */
-const DEFAULTS = { base: "", checks: [] as string[], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45 };
+const DEFAULTS = { base: "", checks: [] as string[], prepare: [] as string[], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45 };
 
 async function main(): Promise<void> {
   const [cmd, arg] = process.argv.slice(2);

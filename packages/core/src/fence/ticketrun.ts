@@ -24,6 +24,8 @@ export interface TicketSettings {
   base: string;
   /** The project's own checks, run in the room without network after the agent finished. */
   checks: string[];
+  /** Commands the run is told to do first, to fetch what the checks need while it still has the listed addresses. */
+  prepare?: string[];
   model: string;
   maxTurns: number;
   timeLimitMinutes: number;
@@ -115,7 +117,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     plainGit(h.dir, "bundle", "create", inFile, h.base);
     const result = await runInRoom(deps.exec, deps.files, record, {
       run, ticket, project, sentence, bundle: readFileSync(inFile), base: h.base, branch,
-      model: st.model, maxTurns: st.maxTurns, timeLimitMs: st.timeLimitMinutes * 60_000, checks: st.checks, signal: deps.signal,
+      model: st.model, maxTurns: st.maxTurns, timeLimitMs: st.timeLimitMinutes * 60_000, checks: st.checks, prepare: st.prepare ?? [], signal: deps.signal,
     }, deps.fence);
     if (result.end !== "passed" || !result.bundle || !result.baseSha || !result.headSha) return out({ run, end: result.end, reason: result.reason, costUsd: result.costUsd });
 
@@ -171,7 +173,7 @@ export function storyText(record: TheRecord, ticket: string): string {
       l.kind === "ticket.opened" ? `you asked: ${d.sentence}` :
       l.kind === "fence.tested" ? (d.ok ? "the fence held: nine lines as they should be" : `the fence did not hold${d.error ? `: ${d.error}` : ""}`) :
       l.kind === "run.started" ? `a run started on ${d.model}` :
-      l.kind === "run.step" ? (d.did ?? d.says?.split("\n")[0]?.slice(0, 140) ?? (d.tools ? `used ${d.tools.map((x: any) => x.tool).join(", ")}` : d.toolErrors ? "a tool refused" : "finished")) :
+      l.kind === "run.step" ? (d.did ?? d.says?.split("\n")[0]?.slice(0, 140) ?? (d.tools ? `used ${d.tools.map((x: any) => x.tool).join(", ")}` : d.toolErrors ? `a command or tool ended with an error: ${String(d.toolErrors[0]).split("\n")[0]!.slice(0, 100)}` : "finished")) :
       l.kind === "run.checked" ? `check ${d.ok ? "passed" : "FAILED"}: ${d.command}` :
       l.kind === "run.ended" ? `the run ended: ${d.end} (${d.reason})` :
       l.kind === "result.proposed" ? (d.held ? `the result is held: ${d.reason}` : `proposed on GitHub: ${d.url}`) : l.kind;
