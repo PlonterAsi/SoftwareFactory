@@ -50,6 +50,17 @@ textarea:focus, input:focus, select:focus, button:focus-visible, summary:focus-v
 button, a.btn { font: inherit; font-weight: 600; border-radius: 8px; padding: 9px 16px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; display: inline-block; }
 button.main { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button.good { background: var(--good); color: var(--card); border-color: var(--good); }
+.projects { display: grid; gap: 6px; margin: 0 0 14px; padding: 0; list-style: none; }
+.projects[hidden] { display: none; }
+.projects button { width: 100%; display: flex; gap: 10px; align-items: baseline; text-align: left; padding: 10px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); cursor: pointer; flex-wrap: wrap; }
+.projects button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.projects b { overflow-wrap: anywhere; }
+.projects .says { color: var(--soft); min-width: 0; overflow-wrap: anywhere; }
+.dot { flex: none; width: 12px; height: 12px; border-radius: 50%; align-self: center; border: 1px solid transparent; }
+.dot.c-red { background: var(--bad); } .dot.c-amber { background: var(--wait); } .dot.c-green { background: var(--good); } .dot.c-blue { background: var(--accent); } .dot.c-grey { background: var(--calm-bg); border-color: var(--soft); }
+.plist { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 8px; }
+.plist li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.plist input { flex: 1 1 160px; min-width: 0; }
 button.stop { background: var(--bad); color: var(--card); border-color: var(--bad); }
 button:disabled { opacity: 0.55; cursor: default; }
 .msg { font-size: 15px; color: var(--bad); min-height: 1.4em; margin: 8px 0 0; overflow-wrap: anywhere; }
@@ -137,6 +148,8 @@ ol.story li.flag .x { color: var(--bad); }
   <section class="card spoke" id="spoke" aria-live="polite"></section>
   <div class="msg" id="doubt" role="alert" hidden><p id="doubt-say"></p><ul id="doubt-list"></ul><div class="row"><button id="doubt-back" type="button">Put back what stood</button><button id="doubt-keep" type="button">The file is right: keep it by my hand</button></div></div>
 
+  <ul class="projects" id="projects" aria-label="Projects" hidden></ul>
+
   <section class="card" aria-labelledby="ask-label">
     <label id="ask-label" for="sentence">What should be done? <span class="hint">One ticket, in your own words. Add as many as you like: they are worked one after another.</span></label>
     <textarea id="sentence" maxlength="4000"></textarea>
@@ -170,8 +183,13 @@ ol.story li.flag .x { color: var(--bad); }
 
   <details class="card settings" id="settings">
     <summary id="settings-title">Settings <span class="hint" id="settings-hint"></span></summary>
+    <div class="wide"><label for="p-add">Projects <span class="hint">every product SoftwareFactory works on. The chosen one gets your new tickets, and the fields below speak for it. A sleeping project keeps its tickets and none is worked. Taking one off the list keeps its tickets in the record.</span></label>
+      <ul class="plist" id="plist"></ul>
+      <div class="row"><input id="p-add" autocomplete="off" spellcheck="false" placeholder="owner/name"><button id="p-add-go" type="button">Add the project</button></div>
+      <p class="msg" id="p-msg" role="alert"></p>
+    </div>
     <div class="grid">
-      <div class="wide"><label for="s-repo">Project on GitHub <span class="hint">owner/name</span></label><input id="s-repo" autocomplete="off" spellcheck="false"></div>
+      <div class="wide"><label for="s-repo">The chosen project <span class="hint">owner/name on GitHub. The branch, the prepare lines and the checks below are this project's.</span></label><input id="s-repo" autocomplete="off" spellcheck="false"></div>
       <div><label for="s-base">Start from branch <span class="hint">empty: the project's main one</span></label><input id="s-base" autocomplete="off" spellcheck="false"></div>
       <div><label for="s-model">Model</label><input id="s-model" autocomplete="off" spellcheck="false"></div>
       <div><label for="s-turns">Most turns in a run</label><input id="s-turns" type="number" min="1" max="500"></div>
@@ -196,6 +214,7 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-own-share">SoftwareFactory's own share of limit 2 <span class="hint">percent</span></label><input id="s-own-share" type="number" min="0" max="100"></div>
       <div><label for="s-run-limit">The most one run may use <span class="hint">dollars; at it the run is parked and its work is kept</span></label><input id="s-run-limit" type="number" min="0" step="0.5"></div>
       <div><label for="s-run-floor">Do not start a run with less than <span class="hint">dollars left of its limit; the ticket waits for the new period instead</span></label><input id="s-run-floor" type="number" min="0" step="0.1"></div>
+      <div><label for="s-max-projects">The most projects <span class="hint">on the list</span></label><input id="s-max-projects" type="number" min="1" max="200"></div>
       <div><label for="s-since-show">The panel "since you last looked" names up to <span class="hint">tickets of each group</span></label><input id="s-since-show" type="number" min="1" max="100"></div>
       <div><label for="s-slots">Runs at once <span class="hint">1 is the proven way; with 2 each run gets its own cell in the room</span></label><input id="s-slots" type="number" min="1" max="4"></div>
       <div><label for="s-cut-returns">A cut-off ticket comes back by itself, times <span class="hint">cut off: SoftwareFactory closed or the computer restarted mid-run</span></label><input id="s-cut-returns" type="number" min="0" max="20"></div>
@@ -469,6 +488,32 @@ ol.story li.flag .x { color: var(--bad); }
   var acceptError = {}, looked = {};
   var MARK = { "done": "\u2713", "failed": "!", "now": "\u25B8", "skipped": "\u2013", "not reached": "" };
 
+  function nameOf(s, repo) { var n = repo; (s.projects || []).forEach(function (p) { if (p.repo === repo && p.name) n = p.name; }); return n; }
+  var projSig = "";
+  function project(body, msg) { return post("/api/step1/project", body).then(function (r) { if (msg) msg.textContent = r && r.ok === false ? r.why : ""; settingsLoaded = false; projSig = ""; load(); return r; }); }
+  function drawProjects(s) {
+    var ps = s.projects || [], sig = JSON.stringify(ps);
+    if (sig === projSig) return;
+    projSig = sig;
+    var top = $("projects"); top.textContent = ""; top.hidden = ps.length < 2;
+    var list = $("plist"); list.textContent = "";
+    var words = { red: "waits for you", amber: "did not finish", green: "ready", blue: "working", grey: "quiet" };
+    ps.forEach(function (p) {
+      var li = el("li"), b = el("button"); b.type = "button"; b.setAttribute("aria-pressed", p.chosen ? "true" : "false");
+      var dot = el("span", "dot c-" + p.colour); dot.setAttribute("role", "img"); dot.setAttribute("aria-label", words[p.colour] || p.colour);
+      b.appendChild(dot); b.appendChild(el("b", "", p.name || p.repo)); b.appendChild(el("span", "says", p.says + (p.chosen ? " Chosen: new tickets go here." : "")));
+      b.onclick = function () { if (!p.chosen) project({ repo: p.repo, choose: true }, $("ask-msg")); };
+      li.appendChild(b); top.appendChild(li);
+      var row = el("li"); row.appendChild(el("b", "", p.repo));
+      var name = el("input"); name.value = p.name; name.maxLength = 60; name.placeholder = "Your own name for it"; name.setAttribute("aria-label", "Your own name for " + p.repo); row.appendChild(name);
+      var bt = function (text, body) { var x = el("button", "", text); x.type = "button"; x.onclick = function () { x.disabled = true; project(body(), $("p-msg")); }; row.appendChild(x); };
+      bt("Save the name", function () { return { repo: p.repo, name: name.value }; });
+      if (!p.chosen) bt("Choose", function () { return { repo: p.repo, choose: true }; });
+      bt(p.asleep ? "Wake" : "Put to sleep", function () { return { repo: p.repo, asleep: !p.asleep }; });
+      if (!p.chosen || ps.length === 1) bt("Take off the list", function () { return { repo: p.repo, remove: true }; });
+      list.appendChild(row);
+    });
+  }
   function render(s) {
     if (!s) return;
     last = s;
@@ -489,7 +534,11 @@ ol.story li.flag .x { color: var(--bad); }
     $("queue-hint").textContent = s.settings.hold ? "The queue is held. " + waiting + " waiting; nothing new starts until you let it go." : s.resting ? "The queue rests until " + clock(s.resting.until) + ": " + s.resting.why + ". Work it again on a ticket starts sooner." : (waiting ? waiting + " waiting for a turn." : "");
     $("show-removed").hidden = !gone;
     $("show-removed").textContent = showRemoved ? "Hide removed" : "Show removed (" + gone + ")";
-    var shown = s.tickets.filter(function (x) { return showRemoved || !x.removed; });
+    drawProjects(s);
+    // The list below is the chosen project's. The others are one line each at the top.
+    var here = (s.settings.repo || "").toLowerCase(), many = (s.projects || []).length > 1;
+    var shown = s.tickets.filter(function (x) { return (showRemoved || !x.removed) && (!many || !here || (x.project || "").toLowerCase() === here); });
+    $("tickets-title").textContent = many && s.settings.repo ? "Tickets of " + nameOf(s, s.settings.repo) : "Tickets";
     if (run) {
       var t = null; s.tickets.forEach(function (x) { if (x.ticket === run.ticket) t = x; });
       var names = (s.runs || []).map(function (x) { return x.ticket; });
@@ -529,7 +578,7 @@ ol.story li.flag .x { color: var(--bad); }
       settingsLoaded = true;
       $("s-repo").value = s.settings.repo; $("s-base").value = s.settings.base; $("s-model").value = s.settings.model;
       $("s-turns").value = s.settings.maxTurns; $("s-minutes").value = s.settings.timeLimitMinutes;
-      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-ladder").value = s.settings.ladder ? "yes" : "no"; $("s-ladder-again").value = s.settings.ladderAgain; $("s-ladder-other").value = s.settings.ladderOtherWay; $("s-ladder-model").value = s.settings.ladderModel; $("s-ladder-split").value = s.settings.ladderSplit ? "yes" : "no"; $("s-ladder-shared").value = s.settings.ladderSharedTries; $("s-ladder-split-model").value = s.settings.ladderSplitModel; $("s-ladder-within").value = s.settings.ladderWithinMinutes; $("s-ladder-split-min").value = s.settings.ladderSplitMinChars; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-slots").value = s.settings.slots; $("s-limit-period").value = s.settings.limitPeriod; $("s-limit-you").value = s.settings.limitYou; $("s-limit-alone").value = s.settings.limitAlone; $("s-own-share").value = s.settings.ownSharePercent; $("s-run-limit").value = s.settings.runLimit; $("s-run-floor").value = s.settings.runFloor; $("s-since-show").value = s.settings.sinceShow; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
+      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-ladder").value = s.settings.ladder ? "yes" : "no"; $("s-ladder-again").value = s.settings.ladderAgain; $("s-ladder-other").value = s.settings.ladderOtherWay; $("s-ladder-model").value = s.settings.ladderModel; $("s-ladder-split").value = s.settings.ladderSplit ? "yes" : "no"; $("s-ladder-shared").value = s.settings.ladderSharedTries; $("s-ladder-split-model").value = s.settings.ladderSplitModel; $("s-ladder-within").value = s.settings.ladderWithinMinutes; $("s-ladder-split-min").value = s.settings.ladderSplitMinChars; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-slots").value = s.settings.slots; $("s-limit-period").value = s.settings.limitPeriod; $("s-limit-you").value = s.settings.limitYou; $("s-limit-alone").value = s.settings.limitAlone; $("s-own-share").value = s.settings.ownSharePercent; $("s-run-limit").value = s.settings.runLimit; $("s-run-floor").value = s.settings.runFloor; $("s-since-show").value = s.settings.sinceShow; $("s-max-projects").value = s.settings.maxProjects; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
       $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n"); $("s-stop-paths").value = (s.settings.stopPaths || []).join("\\n");
     }
     // Settings stay folded when everything a run needs is set; they open by themselves only when the project is missing.
@@ -557,7 +606,7 @@ ol.story li.flag .x { color: var(--bad); }
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
-    post("/api/step1/settings", asked = { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, ladder: $("s-ladder").value === "yes", ladderAgain: Number($("s-ladder-again").value), ladderOtherWay: Number($("s-ladder-other").value), ladderModel: $("s-ladder-model").value, ladderSplit: $("s-ladder-split").value === "yes", ladderSharedTries: Number($("s-ladder-shared").value), ladderSplitModel: $("s-ladder-split-model").value, ladderWithinMinutes: Number($("s-ladder-within").value), ladderSplitMinChars: Number($("s-ladder-split-min").value), parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), limitPeriod: $("s-limit-period").value, limitYou: Number($("s-limit-you").value), limitAlone: Number($("s-limit-alone").value), ownSharePercent: Number($("s-own-share").value), runLimit: Number($("s-run-limit").value), runFloor: Number($("s-run-floor").value), sinceShow: Number($("s-since-show").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value), stopPaths: lines($("s-stop-paths").value) })
+    post("/api/step1/settings", asked = { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, ladder: $("s-ladder").value === "yes", ladderAgain: Number($("s-ladder-again").value), ladderOtherWay: Number($("s-ladder-other").value), ladderModel: $("s-ladder-model").value, ladderSplit: $("s-ladder-split").value === "yes", ladderSharedTries: Number($("s-ladder-shared").value), ladderSplitModel: $("s-ladder-split-model").value, ladderWithinMinutes: Number($("s-ladder-within").value), ladderSplitMinChars: Number($("s-ladder-split-min").value), parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), limitPeriod: $("s-limit-period").value, limitYou: Number($("s-limit-you").value), limitAlone: Number($("s-limit-alone").value), ownSharePercent: Number($("s-own-share").value), runLimit: Number($("s-run-limit").value), runFloor: Number($("s-run-floor").value), sinceShow: Number($("s-since-show").value), maxProjects: Number($("s-max-projects").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value), stopPaths: lines($("s-stop-paths").value) })
       .then(saved);
   };
   // A protected setting is saved in two steps: the page shows each change as a sentence, and the owner says yes.
@@ -572,6 +621,7 @@ ol.story li.flag .x { color: var(--bad); }
     asked.byHand = r.needsHand.map(function (c) { return c.key; });
     $("hand").hidden = false;
   }
+  $("p-add-go").onclick = function () { var v = $("p-add").value.trim(); if (!v) { $("p-msg").textContent = "Write the project as owner/name first."; return; } project({ repo: v }, $("p-msg")).then(function (r) { if (r && r.ok) $("p-add").value = ""; }); };
   $("hand-yes").onclick = function () { if (!asked) return; $("set-msg").textContent = ""; post("/api/step1/settings", asked).then(saved); };
   $("hand-no").onclick = function () { asked = null; $("hand").hidden = true; $("set-msg").textContent = ""; settingsLoaded = false; load(); };
   $("doubt-back").onclick = function () { var body = { byHand: [] }; ((last && last.settingsDoubt) || []).forEach(function (c) { body[c.key] = c.set; body.byHand.push(c.key); }); $("doubt-back").disabled = true; post("/api/step1/settings", body).then(function (r) { $("doubt-back").disabled = false; if (r && r.ok === false) $("doubt-say").textContent = "That did not go through: " + (r.why || "SoftwareFactory did not answer"); settingsLoaded = false; load(); }); };

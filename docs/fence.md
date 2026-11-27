@@ -358,3 +358,22 @@ settings (`fence/protected.ts`).
   down as they stand (`setting.changed` by SoftwareFactory, `baseline`). Saves from before had no second step, so they
   are not taken as your word. From then on only a line of yours that names the setting by hand counts, and the screen
   says since when a value in doubt has stood.
+
+## Projects on one screen
+
+A project is one product on GitHub that SoftwareFactory works on (`fence/projecthome.ts`). Each has a card in Settings
+(`projects`): its GitHub name, a name of your own, its starting branch, what prepares it, its checks, and whether it
+sleeps. `maxProjects` (30) says how many there can be.
+
+- **One is chosen.** New tickets go to the chosen project, and the Settings fields for the branch, the prepare lines
+  and the checks speak for it. Choosing another swaps those fields; every project keeps its own card.
+- **One queue.** Tickets of every project that is on the list and awake are worked from the one queue, each from its
+  own card. A sleeping project keeps its tickets and none is worked. A ticket of a project that is not on the list
+  waits.
+- **One colour and one sentence each**, at the top of the screen when there is more than one project: red when a
+  ticket waits for your word, amber when one did not finish, green when a result is ready, blue while work goes on or
+  waits its turn, grey when nothing is open or the project sleeps. The ticket list below is the chosen project's.
+- **Add, see, change, remove.** In Settings: add a project by its GitHub name, name it, choose it, put it to sleep,
+  wake it, take it off the list. Taking it off removes the card only: its tickets and their stories stay in the
+  record, and adding it again brings them back to the screen. Every change is a line in the record.
+- GitHub issues (in and out) are read for the chosen project only.
