@@ -12,6 +12,7 @@ export type SinceGroup = "ready" | "yours" | "unfinished";
 
 export interface SinceItem {
   ticket: string;
+  project: string | null;
   sentence: string;
   group: SinceGroup;
   /** One plain sentence: what happened, and for what did not finish, why. */
@@ -71,7 +72,7 @@ export function sinceYouLeft(lines: RecordLine[], tickets: SinceTicket[], show =
   for (const t of tickets) {
     if (t.state === "interrupted" && !t.removed) cutOff.push(t.ticket);
     const l = last.get(t.ticket);
-    const item = (group: SinceGroup, says: string, at: string) => all.push({ ticket: t.ticket, sentence: t.sentence.split("\n")[0]!.slice(0, 140), group, says: says.slice(0, 300), url: t.url && /^https:\/\//.test(t.url) ? t.url : null, at });
+    const item = (group: SinceGroup, says: string, at: string) => all.push({ ticket: t.ticket, project: t.project, sentence: t.sentence.split("\n")[0]!.slice(0, 140), group, says: says.slice(0, 300), url: t.url && /^https:\/\//.test(t.url) ? t.url : null, at });
     // Taken off the list by SoftwareFactory itself (its issue was closed on GitHub): said once.
     if (t.removed) { if (l?.kind === "ticket.removed") item("unfinished", "SoftwareFactory took it off the list: its issue was closed on GitHub. Show removed brings it back.", l.ts); continue; }
     // Cut off (SoftwareFactory closed, the computer restarted): there is no line for that, so it is news until it was named once.

@@ -551,6 +551,50 @@ describe("the page and its door", () => {
     expect(live.size).toBe(0);
   });
 
+  it("works the tickets of every awake project from one queue, each from its own card", async () => {
+    const r = new TheRecord();
+    const seen: { ticket: string; repo: string; base: string; checks: string[] }[] = [];
+    const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
+    const h = createHome({ record: r, github: fakeGitHub().gh, settings: settingsFileIn(dir, { repo: "o/p", base: "main", checks: ["npm test"], ladder: false, gate: false }), hosts: ["127.0.0.1:1"], key: "k".repeat(48),
+      work: async (st, ticket) => { seen.push({ ticket, repo: `${st.repo.owner}/${st.repo.name}`, base: st.base, checks: st.checks }); r.append({ kind: "run.ended", who: "SF itself", ticket, project: `${st.repo.owner}/${st.repo.name}`, data: { end: "parked", reason: "x" } }); return {} as any; } });
+    expect(h.state().projects).toMatchObject([{ repo: "o/p", chosen: true, colour: "grey", says: "Nothing open." }]);
+    // A second project: added, not chosen. A ticket of the first is still worked from the first one's card.
+    expect(h.project({ repo: "nope" })).toMatchObject({ ok: false });
+    expect(h.project({ repo: "o/q", name: "Second" })).toEqual({ ok: true });
+    expect(h.state().settings).toMatchObject({ repo: "o/p", checks: ["npm test"] });
+    // Chosen: new tickets go to it, the Settings fields are its own, and the first keeps its card.
+    expect(h.project({ repo: "o/q", choose: true })).toEqual({ ok: true });
+    expect(h.state().settings).toMatchObject({ repo: "o/q", base: "", checks: [], projects: [{ repo: "o/p", base: "main", checks: ["npm test"] }, { repo: "o/q", name: "Second" }] });
+    h.saveSettings({ base: "dev" });
+    h.project({ repo: "o/p", asleep: true });
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "For the sleeper.", kind: "request" } });
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T2", project: "x/unknown", data: { sentence: "For nobody.", kind: "request" } });
+    expect(h.start("For nobody.", "request", "x/unknown")).toMatchObject({ ok: false, why: expect.stringMatching(/not on the list/) });
+    h.start("For the second.", "request", "O/Q");
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual([{ ticket: "T3", repo: "o/q", base: "dev", checks: [] }]);
+    expect(h.state().projects.filter((p) => p.listed).map((p) => [p.repo, p.colour, p.says])).toEqual([["o/p", "grey", "Asleep: 1 ticket kept, none is worked."], ["o/q", "amber", "1 ticket did not finish."]]);
+    // Awake again: its ticket is worked from its own card, though another project is the chosen one.
+    h.project({ repo: "o/p", asleep: false });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen[1]).toEqual({ ticket: "T1", repo: "o/p", base: "main", checks: ["npm test"] });
+    // The most projects cannot be set under how many there are: the settings stay whole.
+    expect(h.saveSettings({ maxProjects: 1 })).toMatchObject({ ok: false, why: expect.stringMatching(/2 projects/) });
+    expect(h.state().settings.projects).toHaveLength(2);
+    // Naming a listed project in the Settings form chooses it with its own card, not with the form's fields.
+    expect(h.saveSettings({ repo: "https://github.com/o/p", base: "dev", checks: [], prepare: [] })).toMatchObject({ ok: true, settings: { repo: "o/p", base: "main", checks: ["npm test"] } });
+    expect(h.state().settings.projects.find((c) => c.repo === "o/q")).toMatchObject({ base: "dev" });
+    expect(h.project({ repo: "o/q", choose: true })).toEqual({ ok: true });
+    // Off the list: the chosen one only when it is the last; the tickets stay in the record.
+    expect(h.project({ repo: "o/q", remove: true })).toMatchObject({ ok: false, why: expect.stringMatching(/Choose another/) });
+    expect(h.project({ repo: "o/p", remove: true })).toEqual({ ok: true });
+    // Its tickets do not hide: the project is shown as not on the list, and so is one that never had a card.
+    expect(h.state().projects.map((p) => [p.repo, p.listed, p.colour]).sort()).toEqual([["o/p", false, "grey"], ["o/q", true, "amber"], ["x/unknown", false, "grey"]]);
+    expect(h.state().projects.find((p) => p.repo === "o/p")!.says).toBe("Not on the list: 1 ticket kept, none is worked. Choose it to bring it back.");
+    expect(h.state().tickets.some((t) => t.ticket === "T1")).toBe(true);
+    expect(r.all().filter((l) => l.kind === "setting.changed" && l.who === "you").length).toBeGreaterThan(4);
+  });
+
   it("shows what the watchdog said only while it is still the news", () => {
     const r = new TheRecord();
     const h = home(r);

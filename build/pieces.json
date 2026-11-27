@@ -177,14 +177,14 @@
         {
           "id": "project-home",
           "title": "Project home and all projects on one screen",
-          "status": "now",
+          "status": "proven",
           "from": "leg 5",
           "done": "RoadToMill and a second product each show one colour and one sentence."
         },
         {
           "id": "bring-in",
           "title": "Bring a project in with one action",
-          "status": "later",
+          "status": "now",
           "from": "leg 5",
           "done": "A product is pointed at and proven to run in the fence."
         },

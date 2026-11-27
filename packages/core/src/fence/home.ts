@@ -8,6 +8,7 @@ import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
 import { type Bucket, type LimitPeriod, type LimitSettings, LIMIT_DEFAULTS, bucketOfSend, checkLimits, periodEnd, periodStart, roomLeft, runBudget, spendOf } from "./limits.js";
 import { sinceYouLeft } from "./since.js";
+import { type ProjectSettings, PROJECT_DEFAULTS, cardOf, cleanProjects, projectLights, projectList } from "./projecthome.js";
 import { type HandChange, baselineOf, hasBaseline, isProtected, protectedChanges, protectedOnRecord, settingsInDoubt } from "./protected.js";
 import { type LadderSettings, type Rung, LADDER_DEFAULTS, checkLadder, isClimbable, ladderHint, nextRung } from "./ladder.js";
 import type { SplitResult } from "./gate.js";
@@ -26,7 +27,7 @@ import { type TicketKind, type TicketOutcome, type TicketSettings, TICKET_KINDS,
  */
 
 /** What you can change on the screen. The project is written "owner/name". */
-export interface HomeSettings extends WatchSettings, LimitSettings, LadderSettings {
+export interface HomeSettings extends WatchSettings, LimitSettings, LadderSettings, ProjectSettings {
   repo: string;
   base: string;
   checks: string[];
@@ -64,7 +65,7 @@ export interface HomeSettings extends WatchSettings, LimitSettings, LadderSettin
   stopPaths: string[];
 }
 
-export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, ...LIMIT_DEFAULTS, ...LADDER_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, slots: 1, cutOffReturns: 1, cutOffWithinHours: 24, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5, stopPaths: [], sinceShow: 10 };
+export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, ...LIMIT_DEFAULTS, ...LADDER_DEFAULTS, ...PROJECT_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, slots: 1, cutOffReturns: 1, cutOffWithinHours: 24, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5, stopPaths: [], sinceShow: 10 };
 
 /** Check what came from the screen. Returns clean settings or says, in a sentence, what is wrong. */
 export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS): HomeSettings {
@@ -73,11 +74,16 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   const list = (k: "checks" | "prepare" | "stopPaths") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
   const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "slots" | "cutOffReturns" | "cutOffWithinHours" | "issuesEveryMinutes" | "limitYou" | "limitAlone" | "ownSharePercent" | "runLimit" | "runFloor" | "sinceShow" | "ladderAgain" | "ladderOtherWay" | "ladderSharedTries" | "ladderWithinMinutes" | "ladderSplitMinChars") => (r[k] === undefined ? from[k] : Number(r[k]));
   const watch = cleanWatch(r, from);
-  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths"), limitPeriod: (r.limitPeriod === undefined ? from.limitPeriod : r.limitPeriod) as LimitPeriod, limitYou: num("limitYou"), limitAlone: num("limitAlone"), ownSharePercent: num("ownSharePercent"), runLimit: num("runLimit"), runFloor: num("runFloor"), sinceShow: num("sinceShow"), ladder: typeof r.ladder === "boolean" ? r.ladder : from.ladder, ladderAgain: num("ladderAgain"), ladderOtherWay: num("ladderOtherWay"), ladderSplit: typeof r.ladderSplit === "boolean" ? r.ladderSplit : from.ladderSplit, ladderSharedTries: num("ladderSharedTries"), ladderWithinMinutes: num("ladderWithinMinutes"), ladderSplitMinChars: num("ladderSplitMinChars"), ladderModel: text("ladderModel"), ladderSplitModel: text("ladderSplitModel") };
+  const maxProjects = r.maxProjects === undefined ? from.maxProjects : Number(r.maxProjects);
+  if (!Number.isInteger(maxProjects) || maxProjects < 1 || maxProjects > 200) throw new Error("The most projects must be a whole number from 1 to 200.");
+  if (r.projects === undefined && from.projects.length > maxProjects) throw new Error(`There are ${from.projects.length} projects on the list. The most cannot be less than that.`);
+  const s: HomeSettings = { ...watch, maxProjects, projects: cleanProjects(r.projects, from.projects, maxProjects), repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths"), limitPeriod: (r.limitPeriod === undefined ? from.limitPeriod : r.limitPeriod) as LimitPeriod, limitYou: num("limitYou"), limitAlone: num("limitAlone"), ownSharePercent: num("ownSharePercent"), runLimit: num("runLimit"), runFloor: num("runFloor"), sinceShow: num("sinceShow"), ladder: typeof r.ladder === "boolean" ? r.ladder : from.ladder, ladderAgain: num("ladderAgain"), ladderOtherWay: num("ladderOtherWay"), ladderSplit: typeof r.ladderSplit === "boolean" ? r.ladderSplit : from.ladderSplit, ladderSharedTries: num("ladderSharedTries"), ladderWithinMinutes: num("ladderWithinMinutes"), ladderSplitMinChars: num("ladderSplitMinChars"), ladderModel: text("ladderModel"), ladderSplitModel: text("ladderSplitModel") };
   checkLadder(s);
   if (!Number.isInteger(s.sinceShow) || s.sinceShow < 1 || s.sinceShow > 100) throw new Error("The panel names from 1 to 100 tickets of each group.");
   checkLimits(s);
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
+  // Kept as owner/name, however it was written: tickets name their project that way.
+  if (s.repo) { const g = parseGitHubRepo(s.repo)!; s.repo = `${g.owner}/${g.name}`; }
   if (/^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)$/.test(s.base)) throw new Error(`"${s.base}" is not a branch name.`);
   if (s.base && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(s.base) || s.base.includes(".."))) throw new Error(`"${s.base}" is not a branch name.`);
   if (!/^[a-z0-9][a-z0-9.-]{0,60}$/.test(s.model)) throw new Error(`"${s.model}" is not a model name.`);
@@ -374,7 +380,7 @@ export function createHome(deps: HomeDeps) {
     const doubt = settingsInDoubt(all, settings, HOME_DEFAULTS);
     const limits = limitsNow(doubt.length ? { ...settings, ...Object.fromEntries(doubt.map((c) => [c.key, c.set])) } as HomeSettings : settings, all);
     for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, roomLeft(settings, limits.used), t.bucket) <= 0) { t.limitUntil = limits.until; t.says = `Waiting: ${t.bucket === "you" ? "limit 1 (work you sent)" : "limit 2 (what SoftwareFactory does by itself)"} is used up for this ${limits.period}.`; } }
-    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, settingsDoubt: doubt, since: sinceYouLeft(all, tickets, settings.sinceShow) };
+    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, settingsDoubt: doubt, projects: projectLights(projectList(settings), settings.repo, tickets), since: sinceYouLeft(all, tickets, settings.sinceShow) };
   };
   // A line the watchdog said stays on the screen while it is still the news: not once "Got it" covered it, and not
   // once its ticket moved on (the owner sent it again, a new run started, a result came). One pass from the end.
@@ -411,11 +417,14 @@ export function createHome(deps: HomeDeps) {
   const isKind = (k: unknown): k is TicketKind => (TICKET_KINDS as readonly string[]).includes(k as string);
 
   /** A new ticket. It waits for its turn; the queue takes it from there. */
-  function start(sentence: string, kind: unknown = "request"): { ok: true; ticket: string } | { ok: false; why: string } {
+  function start(sentence: string, kind: unknown = "request", project = ""): { ok: true; ticket: string } | { ok: false; why: string } {
     const bad = words(sentence);
     if (bad) return { ok: false, why: bad };
     if (!isKind(kind)) return { ok: false, why: "That is not a kind of ticket." };
-    const repo = parseGitHubRepo(deps.settings.read().repo);
+    // A ticket goes to the project the page is looking at, when it is on the list; otherwise to the chosen one.
+    const s = deps.settings.read(), named = project ? cardOf(s, project) : null;
+    if (project && !named) return { ok: false, why: "That project is not on the list. Add it in Settings first." };
+    const repo = parseGitHubRepo(named ? named.repo : s.repo);
     if (!repo) return { ok: false, why: "Choose the project first, in Settings." };
     const ticket = openTicket(record, `${repo.owner}/${repo.name}`, sentence, kind);
     pump();
@@ -436,7 +445,7 @@ export function createHome(deps: HomeDeps) {
     runs.set(t.ticket, mine);
     splitTries.set(key, (splitTries.get(key) ?? 0) + 1);
     const failed = t.lastFail ? `${t.lastFail.state}: ${t.lastFail.reason}${t.lastFail.tail ? `\n${t.lastFail.tail}` : ""}` : t.says;
-    void deps.split({ repo, base: s.base, sentence: t.sentence, failed, model: s.ladderSplitModel })
+    void deps.split({ repo, base: (cardOf(s, t.project) ?? s).base, sentence: t.sentence, failed, model: s.ladderSplitModel })
       .catch((e): SplitResult => ({ ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }))
       .then((r) => {
         if (runs.get(t.ticket) === mine) runs.delete(t.ticket);
@@ -466,16 +475,17 @@ export function createHome(deps: HomeDeps) {
     if (settingsInDoubt(lines, s, HOME_DEFAULTS).length) return;
     let wake = Infinity;
     const seenNow = ticketsFrom(lines, working());
-    // The stuck ladder climbs only in the project Settings speak for, only while limit 2 has room for a run, and
+    // The stuck ladder climbs only in a project that is on the list and awake, only while limit 2 has room for a run, and
     // counts the tries of a split's smaller tickets as it goes, so one pass cannot hand out more than they share.
-    const mineOnly = parseGitHubRepo(s.repo), aloneRoom = runBudget(s, limitsNow(s, lines).room, "alone") > 0;
+    const awake = new Set(projectList(s).filter((c) => !c.asleep).map((c) => c.repo.toLowerCase()));
+    const aloneRoom = runBudget(s, limitsNow(s, lines).room, "alone") > 0;
     const shared = new Map<string, number>();
     for (const x of seenNow) if (x.parent) shared.set(`${x.project}\n${x.parent}`, (shared.get(`${x.project}\n${x.parent}`) ?? 0) + x.ladderUsed);
     let toSplit: TicketView | null = null;
     for (const t of seenNow) {
       // The stuck ladder: a ticket whose run did not finish climbs by itself, one rung at a time, then waits for the owner.
       const fam = `${t.project}\n${t.parent}`;
-      const rung = mineOnly && t.project === `${mineOnly.owner}/${mineOnly.name}` && aloneRoom ? nextRung(s, { climbable: t.climbable && !!t.endedAt && Date.parse(t.endedAt) >= openedAt && now - Date.parse(t.endedAt) < s.ladderWithinMinutes * 60_000, used: t.ladderUsed, child: !!t.parent, siblingsUsed: t.parent ? shared.get(fam) ?? 0 : 0, wasSplit: t.wasSplit }) : null;
+      const rung = awake.has((t.project ?? "").toLowerCase()) && aloneRoom ? nextRung(s, { climbable: t.climbable && !!t.endedAt && Date.parse(t.endedAt) >= openedAt && now - Date.parse(t.endedAt) < s.ladderWithinMinutes * 60_000, used: t.ladderUsed, child: !!t.parent, siblingsUsed: t.parent ? shared.get(fam) ?? 0 : 0, wasSplit: t.wasSplit }) : null;
       if (rung === "once more" || rung === "another way") { record.append({ kind: "ticket.queued", who: "SF itself", ticket: t.ticket, project: t.project, data: { ladder: rung, rung: t.ladderUsed + 1, why: `its run ended as ${t.state}` } }); if (t.parent) shared.set(fam, (shared.get(fam) ?? 0) + 1); }
       else if (rung === "split" && !toSplit) toSplit = t;
       const at = returnTime(t, s);
@@ -494,11 +504,10 @@ export function createHome(deps: HomeDeps) {
     if (s.hold || rest) return;
     // A ticket at the split rung: the reader takes the free place now, and the queue goes on when it has answered.
     if (toSplit && !runs.has(toSplit.ticket)) { split(toSplit, s); if (runs.size >= s.slots) return; }
-    // Settings speak for one project. A ticket of another project waits until Settings point at it again.
-    const here = parseGitHubRepo(s.repo);
+    // Tickets of every project that is on the list and awake are worked from the one queue. Others wait.
     // The two limits: work of a kind whose limit is used up does not start, and the other kind goes on. Nothing is asked for.
     const limits = limitsNow(s, record.all());
-    const inLine = queueOf(ticketsFrom(record.all(), working())).filter((t) => !here || t.project === `${here.owner}/${here.name}`);
+    const inLine = queueOf(ticketsFrom(record.all(), working())).filter((t) => awake.has((t.project ?? "").toLowerCase()));
     const next = inLine.find((t) => runBudget(s, limits.room, t.bucket) > 0);
     if (!next) {
       // When the period turns the limits are whole again: the queue wakes by itself then.
@@ -508,6 +517,8 @@ export function createHome(deps: HomeDeps) {
     const budget = runBudget(s, limits.room, next.bucket);
     const repo = parseGitHubRepo(next.project ?? "");
     if (!repo) { record.append({ kind: "run.ended", who: "SF itself", ticket: next.ticket, project: next.project, data: { end: "crashed", reason: "the record does not say which project this ticket is for", where: "before the run" } }); return pump(); }
+    // Each project is worked from its own card: its starting branch, what prepares it, its checks.
+    const card = cardOf(s, next.project) ?? { base: s.base, checks: s.checks, prepare: s.prepare };
     const stop = new AbortController();
     const mine: Run = { ticket: next.ticket, stop, startedAt: new Date().toISOString(), lastLineAt: new Date().toISOString(), bucket: next.bucket, budget };
     runs.set(mine.ticket, mine);
@@ -520,7 +531,7 @@ export function createHome(deps: HomeDeps) {
       let g: GateResult;
       // Stop does not wait for the reader: the queue is free at once, and whatever the reader says later is dropped.
       const stopped = new Promise<null>((ok) => stop.signal.addEventListener("abort", () => ok(null), { once: true }));
-      try { const got = await Promise.race([deps.gate({ repo, base: s.base, sentence: next.sentence, asked: next.asked, model: s.gateModel }), stopped]); if (!got) return null; g = got; } catch (e) { g = { ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }; }
+      try { const got = await Promise.race([deps.gate({ repo, base: card.base, sentence: next.sentence, asked: next.asked, model: s.gateModel }), stopped]); if (!got) return null; g = got; } catch (e) { g = { ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }; }
       if (stop.signal.aborted) return null;
       // A gate that cannot be asked never holds a ticket up: it passes without a test of done, and the story says so.
       // The plan limit met at the gate: the ticket is parked for it, the queue rests, and it comes back by itself.
@@ -531,7 +542,7 @@ export function createHome(deps: HomeDeps) {
       record.append({ kind: "gate.passed", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { kind: a.kind, done: a.done, guesses: a.guesses } });
       return a.done;
     };
-    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: next.ladder === "another way" && s.ladderModel ? s.ladderModel : s.model, ...(next.ladder && next.ladder !== "split" && next.lastFail ? { hint: ladderHint(next.ladder, next.lastFail) } : {}), maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, stopPaths: s.stopPaths, budgetUsd: budget, done, ...(next.issue ? { issue: next.issue.number } : {}), ...(s.slots > 1 ? { ownCell: true } : {}) }, next.ticket, next.sentence, stop.signal)))
+    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: card.base, checks: card.checks, prepare: card.prepare, model: next.ladder === "another way" && s.ladderModel ? s.ladderModel : s.model, ...(next.ladder && next.ladder !== "split" && next.lastFail ? { hint: ladderHint(next.ladder, next.lastFail) } : {}), maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, stopPaths: s.stopPaths, budgetUsd: budget, done, ...(next.issue ? { issue: next.issue.number } : {}), ...(s.slots > 1 ? { ownCell: true } : {}) }, next.ticket, next.sentence, stop.signal)))
       .catch((e) => { record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, project: next.project, data: { end: "crashed", reason: String((e as Error)?.message ?? e).slice(0, 300), where: "before the run" } }); })
       .catch(() => undefined)
       .finally(() => {
@@ -683,8 +694,44 @@ export function createHome(deps: HomeDeps) {
     } catch { return { ok: true, githubChecks: "GitHub's own checks could not be read just now." }; }
   }
 
+  /**
+   * Projects: add one, choose the one new tickets go to, name it, put it to sleep, wake it, take it off the list.
+   * Taking a project off the list removes its card only: its tickets and its story stay in the record.
+   */
+  function project(raw: unknown): { ok: true } | { ok: false; why: string } {
+    const b = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const got = parseGitHubRepo(typeof b.repo === "string" ? b.repo.trim() : "");
+    if (!got) return { ok: false, why: "Write the project as owner/name, the way GitHub shows it." };
+    const repo = `${got.owner}/${got.name}`, was = deps.settings.read();
+    let cards = projectList(was);
+    const at = cards.findIndex((c) => c.repo.toLowerCase() === repo.toLowerCase());
+    const chosenNow = was.repo.toLowerCase() === repo.toLowerCase();
+    let over: Partial<HomeSettings> = {};
+    if (b.remove === true) {
+      if (at < 0) return { ok: false, why: "That project is not on the list." };
+      if (chosenNow && cards.length > 1) return { ok: false, why: "This is the chosen project. Choose another one first." };
+      cards = cards.filter((_, i) => i !== at);
+      if (chosenNow) over = { repo: "", base: "", checks: [], prepare: [] };
+    } else {
+      if (at < 0) cards = [...cards, { repo, name: "", base: "", checks: [], prepare: [], asleep: false }];
+      const i = at < 0 ? cards.length - 1 : at;
+      cards[i] = { ...cards[i]!, ...(typeof b.name === "string" ? { name: b.name } : {}), ...(typeof b.asleep === "boolean" ? { asleep: b.asleep } : {}) };
+      // Choosing: the Settings fields speak for the chosen project from here, and the other keeps its card.
+      if (b.choose === true || !was.repo) over = { repo: cards[i]!.repo, base: cards[i]!.base, checks: cards[i]!.checks, prepare: cards[i]!.prepare };
+    }
+    const r = saveSettings({ ...over, projects: cards });
+    return r.ok ? { ok: true } : { ok: false, why: r.why };
+  }
+
   function saveSettings(raw: unknown): { ok: true; settings: HomeSettings } | { ok: false; why: string; needsHand?: HandChange[] } {
     const was = deps.settings.read();
+    // The project named in Settings is changed by hand: the one that was chosen keeps its card.
+    if (raw && typeof raw === "object" && (raw as any).projects === undefined && typeof (raw as any).repo === "string" && (raw as any).repo.trim().toLowerCase() !== was.repo.toLowerCase()) {
+      const cards = projectList(was), typed = parseGitHubRepo((raw as any).repo.trim());
+      // Naming a project that has a card chooses it: the branch, prepare lines and checks are its own, not the form's.
+      const other = typed ? cards.find((c) => c.repo.toLowerCase() === `${typed.owner}/${typed.name}`.toLowerCase()) : undefined;
+      raw = { ...(raw as object), projects: cards, ...(other ? { base: other.base, checks: other.checks, prepare: other.prepare } : {}) };
+    }
     let now: HomeSettings;
     try { now = cleanSettings(raw, was); } catch (e) { return { ok: false, why: (e as Error).message }; }
     const changed = (Object.keys(now) as (keyof HomeSettings)[]).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(was[k]));
@@ -758,7 +805,7 @@ export function createHome(deps: HomeDeps) {
         // The page's own key, and a body that only a page of ours would send as JSON.
         if (!sameKey(String(req.headers["x-sf-key"] ?? "")) || !String(req.headers["content-type"] ?? "").startsWith("application/json")) return send(res, 403, { ok: false, why: "This did not come from the SoftwareFactory page. Reload the page." });
         const b = await body(req);
-        if (url.pathname === "/api/step1/work") { const r = start(String(b.sentence ?? ""), b.kind ?? "request"); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/work") { const r = start(String(b.sentence ?? ""), b.kind ?? "request", typeof b.project === "string" ? b.project : ""); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/edit") { const r = edit(String(b.ticket ?? ""), b.sentence, b.kind); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/remove") { const r = remove(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/restore") { const r = restore(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
@@ -790,6 +837,15 @@ export function createHome(deps: HomeDeps) {
           const r = await speak({ record, settings: () => deps.settings.read(), send: deps.send }, { line: "This is SoftwareFactory. Your phone line works.", why: "test" });
           return send(res, r.phone === "sent" ? 200 : 409, r.phone === "sent" ? { ok: true } : { ok: false, why: r.phone === "not set" ? "No phone is set yet. Choose ntfy and a channel name, and save first." : "The line did not reach the phone service. Check the server address and your network." });
         }
+        if (url.pathname === "/api/step1/project") {
+          // A new project is looked up on GitHub first, where that can be done here: a typing mistake never becomes a card.
+          const g = parseGitHubRepo(typeof b.repo === "string" ? b.repo.trim() : "");
+          if (g && b.remove !== true && !cardOf(deps.settings.read(), `${g.owner}/${g.name}`) && github.hasToken?.() && typeof (github as any).check === "function") {
+            let seen: { ok: boolean; why?: string };
+            try { seen = await github.check(g); } catch (e) { seen = { ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }; }
+            if (!seen.ok) return send(res, 400, { ok: false, why: `${g.owner}/${g.name} could not be reached on GitHub from this computer: ${seen.why ?? "no answer"}` });
+          }
+          const r = project(b); if (r.ok) tell(); return send(res, r.ok ? 200 : 400, r); }
         if (url.pathname === "/api/step1/settings") { const r = saveSettings(b); return send(res, r.ok ? 200 : 400, r); }
       }
       send(res, 404, { ok: false, why: "no such thing here" });
@@ -799,5 +855,5 @@ export function createHome(deps: HomeDeps) {
     }
   }
 
-  return { handler, state, start, pump, close, issues, watchIssues, answer, edit, remove, restore, again, stop: stopNow, accept, saveSettings, key, pass, cookie, cookieName, look, alive, isRunning: () => runs.size > 0 };
+  return { handler, state, start, project, pump, close, issues, watchIssues, answer, edit, remove, restore, again, stop: stopNow, accept, saveSettings, key, pass, cookie, cookieName, look, alive, isRunning: () => runs.size > 0 };
 }
