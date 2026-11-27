@@ -230,3 +230,30 @@ With more, each run gets a cell of its own (`fence/cell.ts`): a cgroup made by r
 - Two copies do not see each other: the agent's shell sees only its own copy, and the Read and Edit tools refuse the other (tried the same day).
 - What two runs still share: the one worker account, its home and `/tmp`, and the one sign-in. SoftwareFactory's own steps run as that account too.
 - The home screen shows every run that works, with a Stop for each. The watchdog still ends the whole room when SoftwareFactory itself goes away.
+
+## The stop list
+
+Inside the fence a run is free. Five kinds of change still wait for your own look before they leave this
+computer, whatever the checks said (`packages/core/src/fence/stoplist.ts`):
+
+| Family | What holds a result |
+| --- | --- |
+| security | `.claude/`, `CLAUDE.md` and its like, `.env` files, key files, `.npmrc` and its like, `CODEOWNERS`, files named for sign-in, rights or secrets |
+| leaves the computer | Dockerfile, compose files, hosting files (Vercel, Netlify, Fly, Render, Wrangler and others), Terraform, deploy and infra folders |
+| live data and money | migrations, `.sql` files, any path named for payments, payouts, billing, checkout, a wallet or a ledger |
+| runs by itself | git hook folders, other CI files, Makefile and its like, a package.json script that npm runs by itself (`postinstall`, `prepare` and others) |
+| new package | a new or moved package in package.json or go.mod, and any change to the package lists of other languages |
+
+How it behaves:
+
+- The stop blocks that one result, not the factory. The run ends, the ticket shows **Held here** with each
+  file and its reason, and the queue goes on with the next ticket.
+- The result stays whole in SoftwareFactory's own history. The record line (`result.proposed`, `held`, `stop`)
+  keeps the branch, the two commits, the title and the words of the proposal.
+- Only you let it go: **I looked: let it go to GitHub**, then **Yes**. The result is checked for secrets once
+  more, sent as the same draft pull request, and the record says you released it (`released`, who: you). It still
+  needs your accept like any other.
+- A hold for a secret, for `.github/`, or for a check the result rewrote is not on this list and is never let go
+  from the screen. Work it again instead.
+- The list is closed. Settings can add paths (**More on the stop list**, `stopPaths`, plain text matched anywhere
+  in a file's path) and can never take one away. Nothing of the result is run to decide any of this.

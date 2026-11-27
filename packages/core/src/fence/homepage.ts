@@ -108,6 +108,8 @@ ol.steps .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; cl
 ol.steps details.facts { margin-top: 2px; font-size: 14px; }
 ol.steps details.facts ul { margin: 4px 0 0; padding-left: 18px; color: var(--soft); overflow-wrap: anywhere; }
 ol.story { list-style: none; margin: 8px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font: 13.5px/1.55 var(--mono); max-height: 420px; overflow: auto; }
+ul.stops { margin: 4px 0 8px; padding-left: 20px; font-size: 14px; line-height: 1.5; }
+ul.stops code { font-family: var(--mono); overflow-wrap: anywhere; }
 ol.story li { display: grid; grid-template-columns: 5.2em 6.2em 1fr; gap: 0 8px; }
 ol.story .t, ol.story .w { color: var(--soft); }
 ol.story .x { overflow-wrap: anywhere; min-width: 0; }
@@ -176,6 +178,7 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-phone">Lines to your phone</label><select id="s-phone"><option value="none">None, the home screen only</option><option value="ntfy">The ntfy app</option></select></div>
       <div class="wide"><label for="s-topic">ntfy channel name <span class="hint">16 or more letters and digits; whoever knows it can read the lines</span></label><input id="s-topic" autocomplete="off" spellcheck="false"></div>
       <div class="wide"><label for="s-prepare">The run does these first <span class="hint">one per line; they fetch what the checks need</span></label><textarea id="s-prepare" spellcheck="false"></textarea></div>
+      <div class="wide"><label for="s-stop-paths">More on the stop list <span class="hint">one per line; a result that changes a file whose path holds one of these waits for your look. The built-in list (security, going live, money and live data, what runs by itself, new packages) always holds</span></label><textarea id="s-stop-paths" spellcheck="false"></textarea></div>
       <div class="wide"><label for="s-checks">Checks SoftwareFactory runs on the result <span class="hint">leave empty and SoftwareFactory finds them in the project; or one per line, in this order</span></label><textarea id="s-checks" spellcheck="false"></textarea></div>
     </div>
     <div class="row"><button id="save" type="button">Save settings</button><button id="phone-test" type="button">Send a test line to the phone</button><span class="hint" id="save-hint"></span></div>
@@ -232,6 +235,12 @@ ol.story li.flag .x { color: var(--bad); }
     } else box.appendChild(el("p", "sentence", t.sentence));
     box.appendChild(el("p", t.state === "asked" ? "sentence" : "says", (t.state === "asked" ? "SoftwareFactory asks before it starts: " : "") + t.says));
     if (t.issue) { var ip = el("p", "says"); if (t.issue.url) { var ia = el("a", "", "Issue #" + t.issue.number + " on GitHub"); ia.href = t.issue.url; ia.target = "_blank"; ia.rel = "noopener noreferrer"; ip.appendChild(ia); } else ip.textContent = "Issue #" + t.issue.number + " on GitHub"; box.appendChild(ip); }
+    if (t.stops && t.stops.length) {
+      box.appendChild(el("p", "says", "Nothing failed. These changes always wait for your own look before they leave this computer:"));
+      var sl = el("ul", "stops");
+      t.stops.forEach(function (x) { var li = el("li"); li.appendChild(el("b", "", x.family + ": ")); li.appendChild(el("code", "", x.file)); li.appendChild(document.createTextNode(" " + x.why)); sl.appendChild(li); });
+      box.appendChild(sl);
+    }
     if (t.returnsAt) box.appendChild(el("p", "says", "It comes back to the queue by itself at " + clock(t.returnsAt) + "."));
     else if (t.state === "parked" && t.parkedFor === "limit") box.appendChild(el("p", "says", "It came back by itself " + t.returns + (t.returns === 1 ? " time" : " times") + " already. Now it waits for you: Work it again sends it."));
     if (t.state === "asked" && !t.removed) {
@@ -264,6 +273,18 @@ ol.story li.flag .x { color: var(--bad); }
       if (t.canAgain) row.appendChild(act("again", "Work it again"));
       if (t.canEdit && editing !== t.ticket) { var ch = el("button", "", "Change"); ch.type = "button"; ch.onclick = function () { editing = t.ticket; render(last); }; row.appendChild(ch); }
       if (t.removed) row.appendChild(act("restore", "Put it back"));
+      if (t.canRelease) {
+        if (confirming === "release " + t.ticket) {
+          var ryes = el("button", "good", "Yes, send it to GitHub as a draft"); ryes.type = "button";
+          ryes.onclick = function () { busy = true; ryes.disabled = true; post("/api/step1/release", { ticket: t.ticket }).then(function (r) { busy = false; confirming = null; if (!r.ok) { acceptError[t.ticket] = r.why; } else { delete acceptError[t.ticket]; } load(); }); };
+          var rno = el("button", "", "Not now"); rno.type = "button"; rno.onclick = function () { confirming = null; render(last); };
+          row.appendChild(rno); row.appendChild(ryes);
+        } else {
+          var rel = el("button", "good", "I looked: let it go to GitHub"); rel.type = "button";
+          rel.onclick = function () { confirming = "release " + t.ticket; render(last); };
+          row.appendChild(rel);
+        }
+      }
       if (t.canAccept) {
         if (confirming === t.ticket) {
           var yes = el("button", "good", "Yes, put it in the project");
@@ -423,7 +444,7 @@ ol.story li.flag .x { color: var(--bad); }
         if (!shown.length) list.appendChild(el("p", "empty", "No tickets yet. Your first sentence starts one."));
       }
       shown.forEach(function (t) {
-        var sig = JSON.stringify(t) + "|" + (confirming === t.ticket || confirming === "undo " + t.ticket || confirming === "remove " + t.ticket) + "|" + (editing === t.ticket) + "|" + (acceptError[t.ticket] || "");
+        var sig = JSON.stringify(t) + "|" + (confirming === t.ticket || confirming === "undo " + t.ticket || confirming === "remove " + t.ticket || confirming === "release " + t.ticket) + "|" + (editing === t.ticket) + "|" + (acceptError[t.ticket] || "");
         var had = nodes[t.ticket];
         if (had && had.sig === sig) return;
         var fresh = ticketNode(t);
@@ -440,7 +461,7 @@ ol.story li.flag .x { color: var(--bad); }
       $("s-repo").value = s.settings.repo; $("s-base").value = s.settings.base; $("s-model").value = s.settings.model;
       $("s-turns").value = s.settings.maxTurns; $("s-minutes").value = s.settings.timeLimitMinutes;
       $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-slots").value = s.settings.slots; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
-      $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n");
+      $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n"); $("s-stop-paths").value = (s.settings.stopPaths || []).join("\\n");
     }
     // Settings stay folded when everything a run needs is set; they open by themselves only when the project is missing.
     $("settings-hint").textContent = s.settings.repo ? "Already set. Nothing to fill in." : "Choose the project first.";
@@ -467,7 +488,7 @@ ol.story li.flag .x { color: var(--bad); }
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
-    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value) })
+    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value), stopPaths: lines($("s-stop-paths").value) })
       .then(function (r) { if (r.ok) { $("save-hint").textContent = "Saved."; settingsLoaded = false; load(); } else { $("set-msg").textContent = r.why; } });
   };
 

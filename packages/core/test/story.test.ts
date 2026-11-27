@@ -64,6 +64,11 @@ describe("the story in steps", () => {
     const d = ticket(); d.open(); d.fence(); d.start(); d.agent(); d.commit(); d.check();
     d.r.append({ kind: "result.proposed", who: "SF itself", run: "r1", ticket: "T1", project: "o/p", data: { held: true, reason: "the result changes a check script" } });
     expect(states(d)).toMatchObject({ checked: "done", proposed: "failed", accepted: "not reached" });
+    // The stop list is not a failure: the step waits for the owner, and says for what.
+    const e = ticket(); e.open(); e.fence(); e.start(); e.agent(); e.commit(); e.check();
+    e.r.append({ kind: "result.proposed", who: "SF itself", run: "r1", ticket: "T1", project: "o/p", data: { held: true, reason: "it waits for your look", stop: [{ family: "new package", file: "package.json", why: "a new package: left-pad" }] } });
+    expect(states(e)).toMatchObject({ checked: "done", proposed: "now", accepted: "not reached" });
+    expect(e.steps().find((x) => x.id === "proposed")!.facts).toEqual(["new package: package.json (a new package: left-pad)"]);
   });
 
   it("never calls the checks done when the end says otherwise, when not all ran, or when nothing is running", () => {

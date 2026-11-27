@@ -8,7 +8,7 @@ import { GitHub, ghCliToken, parseGitHubRepo } from "./tickets/github.js";
 import { fenceReportText, runFenceTest, wslExec, wslFiles } from "./fence/fencetest.js";
 import { fenceSettings, type FenceSettings } from "./fence/room.js";
 import { TheRecord } from "./fence/record.js";
-import { history, plainGit, storyText, workTicket, type TicketSettings } from "./fence/ticketrun.js";
+import { history, plainGit, releaseHeld, storyText, workTicket, type TicketSettings } from "./fence/ticketrun.js";
 import { askGate } from "./fence/gate.js";
 import { windowsProbe } from "./fence-cli.js";
 import { createHome, settingsFileIn } from "./fence/home.js";
@@ -72,6 +72,7 @@ async function main(): Promise<void> {
       record, github, settings: settingsFileIn(workDir, { ...start, ...(raw.repo ? { repo: raw.repo } : {}) }),
       hosts: [`127.0.0.1:${port}`, `localhost:${port}`], fence: { room: fence.room, netList: fence.netList },
       undo: (ticket) => undoTicket({ record, github, workDir }, ticket),
+      release: (ticket) => releaseHeld({ record, github, workDir }, ticket),
       // The reader at the gate sees the sentence and the project's file names, and works in the room like every agent.
       gate: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askGate(many() ? celled(exec, fence, "gate") : exec, fence, { sentence: q.sentence, files, asked: q.asked ?? undefined, model: q.model }); },
       // A run of this start waits until the room was cleared of an earlier start's leftovers.

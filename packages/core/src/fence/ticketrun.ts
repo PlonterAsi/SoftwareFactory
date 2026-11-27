@@ -4,7 +4,8 @@ import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { GitHub, GitHubRepo } from "../tickets/github.js";
+import { type GitHub, type GitHubRepo, parseGitHubRepo } from "../tickets/github.js";
+import { stopSentence, stopsFor } from "./stoplist.js";
 import { type RunResult, runInRoom } from "./door.js";
 import type { FenceReport, RoomExec, RoomFiles } from "./fencetest.js";
 import type { FenceSettings } from "./room.js";
@@ -34,6 +35,8 @@ export interface TicketSettings {
   issue?: number;
   /** More than one run may work at once (Settings, slots): this run gets its own cell in the room. */
   ownCell?: boolean;
+  /** More paths on the stop list (Settings). They add to the fixed list and never take from it. */
+  stopPaths?: string[];
   model: string;
   maxTurns: number;
   timeLimitMinutes: number;
@@ -97,6 +100,49 @@ export function history(deps: Pick<TicketDeps, "github">, st: Pick<TicketSetting
   // The starting point as a local branch, so a bundle can name it.
   plainGit(dir, "update-ref", `refs/heads/${base}`, `refs/remotes/origin/${base}`);
   return { dir, base };
+}
+
+/** Out: the branch, and a draft pull request (or, with no token for the API, the page that starts one). */
+async function sendOut(github: GitHub, repo: GitHubRepo, dir: string, branch: string, base: string, title: string, body: string): Promise<{ url: string; number: number | null }> {
+  if (!github.hasToken()) {
+    await github.pushBranch({ repo, dir, branch, base });
+    return { url: github.compareUrl(repo, base, branch), number: null };
+  }
+  // openPr pushes HEAD, so HEAD of the bare history points at the ticket's branch for the length of the call.
+  plainGit(dir, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
+  try { const pr = await github.openPr({ repo, dir, branch, base, title, body }); return { url: pr.url, number: pr.number }; }
+  finally { plainGit(dir, "symbolic-ref", "HEAD", `refs/heads/${base}`); }
+}
+
+export type ReleaseResult = { ok: true; url: string; number: number | null } | { ok: false; why: string };
+
+/**
+ * The owner looked at a result the stop list held, and lets it go: it is sent to GitHub as the same draft pull
+ * request it would have been. Only a stop-list hold can be let go. A result held for a secret, for what runs by
+ * itself on GitHub, or for a check it rewrote stays where it is.
+ */
+export async function releaseHeld(deps: { record: TheRecord; github: GitHub; workDir: string }, ticket: string): Promise<ReleaseResult> {
+  const { record, github } = deps;
+  const lines = record.story(ticket);
+  const p = [...lines].reverse().find((l) => l.kind === "result.proposed");
+  const d = (p?.data ?? {}) as Record<string, any>;
+  const no = "This ticket has no held result that can be let go from here.";
+  if (!p || !d.held || !Array.isArray(d.stop) || !d.stop.length) return { ok: false, why: no };
+  if (lines.some((l) => l.id > p.id && (l.kind === "ticket.queued" || l.kind === "run.started"))) return { ok: false, why: "This ticket was sent to be worked again since, so the held result is no longer its latest." };
+  const sha = (x: unknown) => typeof x === "string" && /^[0-9a-f]{40}$/.test(x);
+  const repo = parseGitHubRepo(p.project ?? "");
+  if (!repo || !sha(d.headSha) || !sha(d.baseSha) || typeof d.branch !== "string" || !/^sf\/[a-z0-9-]+$/.test(d.branch) || typeof d.base !== "string" || !d.base || typeof d.title !== "string" || typeof d.body !== "string") return { ok: false, why: no };
+  try {
+    const dir = join(deps.workDir, "projects", `${repo.owner}-${repo.name}.git`.replace(/[^A-Za-z0-9._-]/g, "-"));
+    let at = "";
+    try { at = plainGit(dir, "rev-parse", "--verify", "-q", `refs/heads/${d.branch}`); } catch { /* not there */ }
+    if (at !== d.headSha) return { ok: false, why: "The held result is no longer on this computer as it was checked. Use Work it again." };
+    // Looked at once more as data before it leaves: a secret never goes, whoever says so.
+    if (cleanText(plainGit(dir, "diff", "--no-renames", "--no-ext-diff", "--no-textconv", `${d.baseSha}..${d.headSha}`)).hit) return { ok: false, why: "A secret was found in the result, so it does not leave this computer." };
+    const { url, number } = await sendOut(github, repo, dir, d.branch, d.base, d.title, d.body);
+    record.append({ kind: "result.proposed", who: "you", run: p.run, ticket, project: p.project, data: { url, number, branch: d.branch, base: d.base, files: d.files ?? [], baseSha: d.baseSha, headSha: d.headSha, released: true, stop: d.stop, ...(Array.isArray(d.unchecked) ? { unchecked: d.unchecked } : {}) } });
+    return { ok: true, url, number };
+  } catch (e) { return { ok: false, why: `It could not be sent to GitHub: ${(e as Error).message.slice(0, 200)}` }; }
 }
 
 /** The kinds of ticket (leg 2). The door takes one sentence; the kind is "request" until someone says otherwise. */
@@ -195,16 +241,15 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     const title = `${ticket}: ${quiet(sentence.trim().split("\n")[0]!).slice(0, 120)}`;
     if (deps.signal?.aborted) return hold("you pressed stop before the result left this computer");
     const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", ...(Number.isInteger(st.issue) && st.issue! > 0 ? [`Closes #${st.issue}`, ""] : []), `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", ...(st.done?.length ? ["Done when (written by SoftwareFactory before the run, from the request):", "", ...st.done.map((x) => `- ${quiet(x)}`), ""] : []), "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.${checksFound ? " It found them in the project as it was before the run." : ""}${unchecked.length ? ` These changed files lie outside what those checks look at, so nothing checked them: ${unchecked.slice(0, 10).map((f) => `\`${quiet(f)}\``).join(", ")}${unchecked.length > 10 ? " and more" : ""}.` : ""}` : checksFound ? "SoftwareFactory found no build or type check in this project, so nothing was checked." : "No checks were set for this project."].join("\n");
-    let url: string, number: number | null = null;
-    if (deps.github.hasToken()) {
-      // openPr pushes HEAD, so HEAD of the bare history points at the ticket's branch for the length of the call.
-      plainGit(h.dir, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
-      try { const pr = await deps.github.openPr({ repo: st.repo, dir: h.dir, branch, base: h.base, title, body }); url = pr.url; number = pr.number; }
-      finally { plainGit(h.dir, "symbolic-ref", "HEAD", `refs/heads/${h.base}`); }
-    } else {
-      await deps.github.pushBranch({ repo: st.repo, dir: h.dir, branch, base: h.base });
-      url = deps.github.compareUrl(st.repo, h.base, branch);
+    // The stop list: these kinds of change wait for the owner's own look, whatever the checks said. The result
+    // stays whole in SoftwareFactory's own history, and the record keeps what is needed to send it on later.
+    const stops = stopsFor(changed, (file, when) => { try { return plainGit(h.dir, "show", `${when === "before" ? result.baseSha : `refs/heads/${branch}`}:${file}`); } catch { return null; } }, st.stopPaths ?? []);
+    if (stops.length) {
+      const reason = stopSentence(stops);
+      record.append({ kind: "result.proposed", who: "SF itself", run, ticket, project, data: { held: true, reason, stop: stops, branch, base: h.base, baseSha: result.baseSha, headSha: result.headSha, files: changed.slice(0, 50), title, body, ...(unchecked.length ? { unchecked: unchecked.slice(0, 50) } : {}) } });
+      return out({ run, end: "parked", reason, branch, costUsd: result.costUsd });
     }
+    const { url, number } = await sendOut(deps.github, st.repo, h.dir, branch, h.base, title, body);
     record.append({ kind: "result.proposed", who: "SF itself", run, ticket, project, data: { url, number, branch, base: h.base, files: changed.slice(0, 50), baseSha: result.baseSha, headSha: result.headSha, ...(unchecked.length ? { unchecked: unchecked.slice(0, 50) } : {}) } });
     return out({ run, end: "passed", reason: result.reason, url, branch, costUsd: result.costUsd });
   } catch (e) {
@@ -234,7 +279,7 @@ export function storyLine(l: RecordLine): string {
       l.kind === "run.step" ? (d.did ?? d.says?.split("\n")[0]?.slice(0, 140) ?? (d.tools ? `used ${d.tools.map((x: any) => x.tool).join(", ")}` : d.toolErrors ? `a command or tool ended with an error: ${String(d.toolErrors[0]).split("\n")[0]!.slice(0, 100)}` : "finished")) :
       l.kind === "run.checked" ? `check ${d.ok ? "passed" : "FAILED"}: ${d.command}` :
       l.kind === "run.ended" ? `the run ended: ${d.end} (${d.reason})` :
-      l.kind === "result.proposed" ? (d.held ? `the result is held: ${d.reason}` : `proposed on GitHub: ${d.url}`) :
+      l.kind === "result.proposed" ? (d.held ? `the result is held: ${d.reason}` : d.released ? `you looked and let it go to GitHub: ${d.url}` : `proposed on GitHub: ${d.url}`) :
       l.kind === "result.accepted" ? (d.foundMerged ? "found already put into the project on GitHub" : "you accepted it: it is in the project now") :
       l.kind === "result.undone" ? (d.url && !d.sha ? `the undo is ready on GitHub, waiting to be put in: ${d.url}` : "you undid it: the project is as it was before, and its history keeps both steps") :
       l.kind === "stop.pressed" ? "you pressed stop" :

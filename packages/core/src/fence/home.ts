@@ -53,18 +53,20 @@ export interface HomeSettings extends WatchSettings {
   issuesLabel: string;
   /** How often GitHub is looked at, in minutes. */
   issuesEveryMinutes: number;
+  /** More paths on the stop list: a result that changes a file whose path holds one of these waits for your look. They add to the fixed list. */
+  stopPaths: string[];
 }
 
-export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, slots: 1, cutOffReturns: 1, cutOffWithinHours: 24, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5 };
+export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, slots: 1, cutOffReturns: 1, cutOffWithinHours: 24, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5, stopPaths: [] };
 
 /** Check what came from the screen. Returns clean settings or says, in a sentence, what is wrong. */
 export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS): HomeSettings {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const text = (k: keyof HomeSettings) => (typeof r[k] === "string" ? (r[k] as string).trim() : (from[k] as string));
-  const list = (k: "checks" | "prepare") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
+  const list = (k: "checks" | "prepare" | "stopPaths") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
   const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "slots" | "cutOffReturns" | "cutOffWithinHours" | "issuesEveryMinutes") => (r[k] === undefined ? from[k] : Number(r[k]));
   const watch = cleanWatch(r, from);
-  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes") };
+  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths") };
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
   if (/^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)$/.test(s.base)) throw new Error(`"${s.base}" is not a branch name.`);
   if (s.base && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(s.base) || s.base.includes(".."))) throw new Error(`"${s.base}" is not a branch name.`);
@@ -82,6 +84,7 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   if (!Number.isInteger(s.issuesEveryMinutes) || s.issuesEveryMinutes < 1 || s.issuesEveryMinutes > 1440) throw new Error("GitHub is looked at every 1 to 1440 minutes.");
   for (const c of [...s.checks, ...s.prepare]) if (c.length > 500 || /[\r\n\0]/.test(c)) throw new Error("A check or a prepare command is one line of at most 500 characters.");
   if (s.checks.length > 20 || s.prepare.length > 20) throw new Error("At most 20 checks and 20 prepare commands.");
+  if (s.stopPaths.length > 100 || s.stopPaths.some((x) => x.length > 200 || /[\r\n\0]/.test(x))) throw new Error("At most 100 extra stop paths, each one line of at most 200 characters.");
   return s;
 }
 
@@ -122,6 +125,9 @@ export interface TicketView {
   costUsd: number;
   canAccept: boolean;
   canUndo: boolean;
+  /** What on the stop list holds its result, when that is why it waits. Only the owner lets it go. */
+  stops: { family: string; file: string; why: string }[];
+  canRelease: boolean;
   /** Only while it waits: after a run its words are frozen. */
   canEdit: boolean;
   canRemove: boolean;
@@ -199,6 +205,7 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
     else if (accepted) { state = "accepted"; says = d(accepted).foundMerged ? `It was already put into the project on GitHub${d(accepted).notTheCheckedCommit ? ", with changes made after SoftwareFactory checked it" : ""}.` : "You accepted it. It is in the project."; }
     else if (isWorking(ticket)) { state = "working"; says = "A run is working on it now."; }
     else if (proposed && d(proposed).held) { state = "held"; says = `Held on this computer: ${d(proposed).reason}`; }
+    else if (proposed && d(proposed).released) { state = "proposed"; says = "You looked and let it go to GitHub. Waiting for you to accept."; }
     else if (proposed) { state = "proposed"; says = "Done and checked. Waiting for you to accept."; }
     else if (!go.length && question && WORKED.includes(kindNow)) { state = "asked"; says = question; }
     else if (!go.length && !WORKED.includes(kindNow)) { state = "kept"; says = `Kept on the list as ${kindNow === "idea" ? "an idea" : `a ${kindNow}`}. Only requests, bugs and tasks are sent to a run for now.`; }
@@ -215,6 +222,8 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
       costUsd: Math.round(ls.reduce((a, l) => a + (l.costUsd ?? 0), 0) * 10000) / 10000,
       canAccept: state === "proposed" && number !== null,
       canUndo: state === "accepted" && typeof d(accepted).sha === "string" && !!d(accepted).sha,
+      stops: state === "held" && Array.isArray(d(proposed).stop) ? (d(proposed).stop as any[]).slice(0, 40).map((x) => ({ family: String(x?.family ?? ""), file: String(x?.file ?? ""), why: String(x?.why ?? "") })) : [],
+      canRelease: state === "held" && !removed && Array.isArray(d(proposed).stop) && d(proposed).stop.length > 0,
       canEdit: (state === "waiting" || state === "kept" || state === "asked") && !removed, canRemove: state !== "working" && !removed,
       canAgain: !removed && ["proposed", "failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held"].includes(state),
       removed, place: null, question: state === "asked" ? question : null, done: Array.isArray(d(gPassed).done) ? (d(gPassed).done as unknown[]).map(String) : [],
@@ -272,6 +281,8 @@ export interface HomeDeps {
   pass?: string;
   /** Takes an accepted change back. Left out: the page offers no undo. */
   undo?: (ticket: string) => Promise<{ ok: true; sha: string | null; url: string } | { ok: false; why: string }>;
+  /** Sends a result the stop list held on to GitHub, after the owner looked. Left out: the page offers no release. */
+  release?: (ticket: string) => Promise<{ ok: true; url: string; number: number | null } | { ok: false; why: string }>;
   /** How a line reaches the phone. Left out: the real sender. */
   send?: Sender;
   /** Shown on the page: which room, and what a run may reach. Read-only here; the fence is changed by hand. */
@@ -290,7 +301,7 @@ export function createHome(deps: HomeDeps) {
   const runs = new Map<string, Run>();
   const working = (): ReadonlySet<string> => new Set(runs.keys());
   const first = (): Run | null => runs.values().next().value ?? null;
-  let accepting = false, undoing = false, closing = false;
+  let accepting = false, undoing = false, releasing = false, closing = false;
   let wakeTimer: ReturnType<typeof setTimeout> | null = null;
   const streams = new Set<ServerResponse>();
   record.onLine((l) => { const mine = l.ticket ? runs.get(l.ticket) : undefined; if (mine && l.kind !== "watchdog.spoke") mine.lastLineAt = l.ts; for (const s of streams) s.write(`data: ${JSON.stringify({ id: l.id })}\n\n`); });
@@ -385,7 +396,7 @@ export function createHome(deps: HomeDeps) {
       record.append({ kind: "gate.passed", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { kind: a.kind, done: a.done, guesses: a.guesses } });
       return a.done;
     };
-    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, done, ...(next.issue ? { issue: next.issue.number } : {}), ...(s.slots > 1 ? { ownCell: true } : {}) }, next.ticket, next.sentence, stop.signal)))
+    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, stopPaths: s.stopPaths, done, ...(next.issue ? { issue: next.issue.number } : {}), ...(s.slots > 1 ? { ownCell: true } : {}) }, next.ticket, next.sentence, stop.signal)))
       .catch((e) => { record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, project: next.project, data: { end: "crashed", reason: String((e as Error)?.message ?? e).slice(0, 300), where: "before the run" } }); })
       .catch(() => undefined)
       .finally(() => {
@@ -605,6 +616,13 @@ export function createHome(deps: HomeDeps) {
         if (url.pathname === "/api/step1/stop") { const r = stopNow(typeof b.ticket === "string" && b.ticket ? b.ticket : undefined); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/look") { const r = await look(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/accept") { const r = await accept(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/release") {
+          const t = String(b.ticket ?? "");
+          if (!deps.release || releasing) return send(res, 409, { ok: false, why: releasing ? "A release is already on its way." : "Letting a held result go is not set up here." });
+          if (!view(t)?.canRelease) return send(res, 409, { ok: false, why: "This ticket has no held result that can be let go from here." });
+          releasing = true;
+          try { const r = await deps.release(t); if (r.ok) tell(); return send(res, r.ok ? 200 : 409, r); } finally { releasing = false; }
+        }
         if (url.pathname === "/api/step1/undo") {
           if (!deps.undo || undoing) return send(res, 409, { ok: false, why: undoing ? "An undo is already on its way." : "Undo is not set up here." });
           undoing = true;

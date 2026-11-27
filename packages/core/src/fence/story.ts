@@ -111,10 +111,15 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
   }
 
   // 6. Proposed: on GitHub, or held on this computer.
-  if (proposed && d(proposed).held) { out.push(step("proposed", "failed", `Held on this computer: ${d(proposed).reason}`, [proposed])); broke = true; }
+  if (proposed && d(proposed).held && Array.isArray(d(proposed).stop) && d(proposed).stop.length) {
+    // The stop list: nothing failed. The result waits for the owner's look, and only they let it go.
+    const stops = (d(proposed).stop as any[]).map((x) => `${String(x?.family ?? "stop")}: ${String(x?.file ?? "")} (${String(x?.why ?? "")})`);
+    out.push(step("proposed", "now", `Waiting for your look before it leaves this computer: ${stops.length} ${stops.length === 1 ? "thing" : "things"} on the stop list.`, [proposed], stops)); broke = true;
+  }
+  else if (proposed && d(proposed).held) { out.push(step("proposed", "failed", `Held on this computer: ${d(proposed).reason}`, [proposed])); broke = true; }
   else if (proposed) {
     const files: string[] = Array.isArray(d(proposed).files) ? d(proposed).files.map(String) : [], un: string[] = Array.isArray(d(proposed).unchecked) ? d(proposed).unchecked.map(String) : [];
-    out.push(step("proposed", "done", `Draft pull request ${d(proposed).number ? `#${d(proposed).number} ` : ""}on GitHub: ${files.length} ${files.length === 1 ? "file" : "files"} changed, commit ${short(d(proposed).headSha)}.`, [proposed], [...files.map((f) => `changed: ${f}`), ...un.map((f) => `no check looked at: ${f}`)], typeof d(proposed).url === "string" && /^https:\/\//.test(d(proposed).url) ? d(proposed).url : null));
+    out.push(step("proposed", "done", `${d(proposed).released ? "You looked and let it go. " : ""}Draft pull request ${d(proposed).number ? `#${d(proposed).number} ` : ""}on GitHub: ${files.length} ${files.length === 1 ? "file" : "files"} changed, commit ${short(d(proposed).headSha)}.`, [proposed], [...files.map((f) => `changed: ${f}`), ...un.map((f) => `no check looked at: ${f}`)], typeof d(proposed).url === "string" && /^https:\/\//.test(d(proposed).url) ? d(proposed).url : null));
   } else if (!broke && ended && end !== "passed") { out.push(step("proposed", "failed", `Nothing was proposed: ${reason}`, [ended])); broke = true; }
   else out.push(step("proposed", "not reached", broke ? "Nothing was proposed." : "A checked result is proposed on GitHub as a draft."));
 

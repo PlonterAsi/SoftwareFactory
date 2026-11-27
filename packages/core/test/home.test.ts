@@ -93,6 +93,13 @@ describe("tickets, drawn from the record alone", () => {
     const r = new TheRecord();
     proposed(r, "T1", { held: true, reason: "a secret was found", url: undefined, number: undefined });
     expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ state: "held", canAccept: false });
+    expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ canRelease: false, stops: [] });
+    // The stop list holds too, and that one the owner can let go; once let go it is an ordinary proposal.
+    const r3 = new TheRecord();
+    proposed(r3, "T1", { held: true, reason: "it waits for your look", stop: [{ family: "new package", file: "package.json", why: "a new package: left-pad" }], url: undefined, number: undefined });
+    expect(ticketsFrom(r3.all(), null)[0]).toMatchObject({ state: "held", canAccept: false, canRelease: true, stops: [{ family: "new package", file: "package.json" }] });
+    r3.append({ kind: "result.proposed", who: "you", ticket: "T1", project: "o/p", data: { url: "https://github.com/o/p/pull/9", number: 9, released: true } });
+    expect(ticketsFrom(r3.all(), null)[0]).toMatchObject({ state: "proposed", canAccept: true, canRelease: false, stops: [] });
     const r2 = new TheRecord();
     proposed(r2, "T1");
     r2.append({ kind: "result.accepted", who: "you", ticket: "T1", project: "o/p", data: {} });
@@ -248,6 +255,22 @@ describe("the page and its door", () => {
     expect(seen.at(-1)).toBe("T2: Another.");
     release(); await tick();
     expect((await post("ticket/edit", { ticket: "T9", sentence: "x" })).status).toBe(409);
+  });
+
+  it("lets a held result go only by the owner's own press, and only a stop-list hold", async () => {
+    const r = new TheRecord();
+    proposed(r, "T1", { held: true, reason: "a secret was found", url: undefined, number: undefined });
+    proposed(r, "T2", { held: true, reason: "it waits for your look", stop: [{ family: "security", file: ".env.example", why: "a file of keys and passwords" }], url: undefined, number: undefined });
+    const asked: string[] = [];
+    const { url, h } = await serve(r, { release: async (ticket) => { asked.push(ticket); r.append({ kind: "result.proposed", who: "you", ticket, project: "o/p", data: { url: "https://github.com/o/p/pull/9", number: 9, released: true } }); return { ok: true, url: "https://github.com/o/p/pull/9", number: 9 }; } });
+    const post = (path: string, body: unknown, key = h.key) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(key), body: JSON.stringify(body) });
+    expect((await post("release", { ticket: "T2" }, "x".repeat(48))).status).not.toBe(200);
+    expect((await post("release", { ticket: "T1" })).status).toBe(409);
+    expect(asked).toEqual([]);
+    expect((await post("release", { ticket: "T2" })).status).toBe(200);
+    expect((await post("release", { ticket: "T2" })).status).toBe(409);
+    expect(asked).toEqual(["T2"]);
+    h.close();
   });
 
   it("starts nothing new once it is closing, and leaves another project's ticket waiting", async () => {

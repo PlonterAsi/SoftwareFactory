@@ -8,7 +8,7 @@ import type { FenceReport, RoomExec, RoomFiles } from "../src/fence/fencetest.js
 import { looksLikeLimit, roomPrelude, runPrompt, stepOf } from "../src/fence/door.js";
 import { fenceSettings } from "../src/fence/room.js";
 import { RECORD_KINDS, TheRecord, cleanText } from "../src/fence/record.js";
-import { quiet, storyText, workTicket, type TicketSettings } from "../src/fence/ticketrun.js";
+import { quiet, storyText, releaseHeld, workTicket, type TicketSettings } from "../src/fence/ticketrun.js";
 
 describe("the record", () => {
   it("stamps who, run, ticket and project as real fields and tells a ticket's story in order", () => {
@@ -140,6 +140,7 @@ case "$m" in
   workflow) mkdir -p .github/workflows && echo "on: push" > .github/workflows/x.yml; echo hi > hello.txt;;
   hook) echo "hello from the room" > hello.txt; echo "you see me" > kept-out.txt; mkdir -p .git/hooks .git/info; printf '#!/bin/sh\\necho pwned > hello.txt\\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit; echo kept-out.txt > .git/info/exclude;;
   late) echo hi > hello.txt; say '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__claude_ai_Google_Drive__search_files","input":{}}]}}';;
+  docker) echo "FROM node:22" > Dockerfile; echo hi > hello.txt;;
   secret) echo "token = ghp_abcdefghijklmnopqrstuvwxyz0123456789" > hello.txt;;
   *) echo "hello from the room" > hello.txt;;
 esac
@@ -293,5 +294,34 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     const b = await workTicket(deps(new TheRecord()), settings(), "Add a hello file.");
     expect(b.reason).toMatch(/secret/);
     expect(g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean)).toHaveLength(3);
+  });
+
+  it("holds what is on the stop list until the owner lets it go, and sends on nothing before", async () => {
+    const before = g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean).length;
+    mode("docker");
+    const r1 = new TheRecord(), d1 = deps(r1), st = settings();
+    const a = await workTicket(d1, st, "Add a hello file.");
+    expect(a.end).toBe("parked");
+    expect(a.reason).toMatch(/waits for your look.*Dockerfile/);
+    const held = r1.all().at(-1)!;
+    expect(held.data).toMatchObject({ held: true, stop: [{ family: "leaves the computer", file: "Dockerfile" }] });
+    expect(g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean)).toHaveLength(before);
+    const out = await releaseHeld({ record: r1, github: d1.github, workDir: st.workDir }, "T1");
+    expect(out.ok).toBe(true);
+    expect(g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean)).toHaveLength(before + 1);
+    expect(r1.all().at(-1)).toMatchObject({ kind: "result.proposed", who: "you", data: { released: true, headSha: (held.data as any).headSha } });
+    expect((await releaseHeld({ record: r1, github: d1.github, workDir: st.workDir }, "T1")).ok).toBe(false);
+
+    // Your own extra path holds too; a hold that is not from the stop list is never let go.
+    mode("ok");
+    const r2 = new TheRecord(), d2 = deps(r2);
+    const b = await workTicket(d2, settings({ stopPaths: ["HELLO"] }), "Add a hello file.");
+    expect(b.end).toBe("parked");
+    expect(b.reason).toMatch(/your own stop list/);
+    mode("workflow");
+    const r3 = new TheRecord(), d3 = deps(r3);
+    await workTicket(d3, settings(), "Add a hello file.");
+    expect(await releaseHeld({ record: r3, github: d3.github, workDir: st.workDir }, "T1")).toMatchObject({ ok: false });
+    expect(g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean)).toHaveLength(before + 1);
   });
 });
