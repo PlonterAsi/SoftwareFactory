@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -44,6 +44,14 @@ describe("the home screen's settings", () => {
     expect(() => cleanSettings({ model: "x; rm" })).toThrow(/model/);
     expect(() => cleanSettings({ base: "a..b" })).toThrow(/branch/);
     expect(() => cleanSettings({ checks: ["a\nb"] })).toThrow(/one line/);
+  });
+
+  it("keeps only what differs from the defaults in its file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
+    const f = settingsFileIn(dir, { repo: "o/p" });
+    f.write({ ...f.read(), hold: true });
+    expect(JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"))).toEqual({ hold: true });
+    expect(f.read()).toMatchObject({ repo: "o/p", hold: true, slots: 1 });
   });
 
   it("saves a change to its file and writes it in the record; no change, no line", () => {

@@ -96,7 +96,10 @@ export class SettingsFile {
   }
   write(s: HomeSettings): void {
     const tmp = `${this.path}.${randomBytes(4).toString("hex")}.tmp`;
-    writeFileSync(tmp, JSON.stringify(s, null, 2));
+    // Only what differs from the defaults is kept, so a default that changes in a later build still reaches this computer.
+    const base = (() => { try { return cleanSettings(this.start); } catch { return HOME_DEFAULTS; } })() as unknown as Record<string, unknown>;
+    const own = Object.fromEntries(Object.entries(s as unknown as Record<string, unknown>).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(base[k])));
+    writeFileSync(tmp, JSON.stringify(own, null, 2));
     renameSync(tmp, this.path);
   }
 }

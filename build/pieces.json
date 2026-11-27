@@ -72,7 +72,7 @@
         {
           "id": "ticket-list",
           "title": "Ticket list with create, edit, delete and kinds",
-          "status": "built",
+          "status": "proven",
           "from": "leg 2",
           "done": "Three real tickets are opened, one edited, one deleted, from the screen."
         },
@@ -121,14 +121,14 @@
         {
           "id": "go-default",
           "title": "Go by default: two runs at once, sleep is not run time",
-          "status": "now",
+          "status": "proven",
           "from": "leg 4",
           "done": "Tickets finish while you are away."
         },
         {
           "id": "stop-list",
           "title": "The stop list: actions that always wait for you",
-          "status": "later",
+          "status": "now",
           "from": "leg 4",
           "done": "A run that tries one is blocked and the factory goes on."
         },
