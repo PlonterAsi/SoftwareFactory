@@ -128,42 +128,42 @@
         {
           "id": "stop-list",
           "title": "The stop list: actions that always wait for you",
-          "status": "now",
+          "status": "proven",
           "from": "leg 4",
           "done": "A run that tries one is blocked and the factory goes on."
         },
         {
           "id": "limits",
           "title": "Two limits and SoftwareFactory's own share",
-          "status": "later",
+          "status": "proven",
           "from": "leg 1",
           "done": "A run parks at the limit and keeps its work."
         },
         {
           "id": "since-you-left",
           "title": "Since you left",
-          "status": "later",
+          "status": "proven",
           "from": "leg 3",
           "done": "You return to one screen that says what finished, what did not and why."
         },
         {
           "id": "stuck-ladder",
           "title": "Stuck ladder: once more, another way, split, park",
-          "status": "later",
+          "status": "proven",
           "from": "leg 4",
           "done": "A failing ticket climbs the ladder by itself."
         },
         {
           "id": "phone",
           "title": "Phone, two ways: told, and can stop",
-          "status": "later",
+          "status": "parked",
           "from": "leg 3",
           "done": "You stop a run from the phone."
         },
         {
           "id": "settings",
           "title": "Every number and switch is a setting; the protected core only by your hand",
-          "status": "later",
+          "status": "now",
           "from": "rules",
           "done": "You change a limit from the screen; an agent cannot."
         }

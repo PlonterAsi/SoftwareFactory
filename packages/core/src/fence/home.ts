@@ -6,6 +6,10 @@ import { type GitHub, type GitHubRepo, parseGitHubRepo } from "../tickets/github
 import type { GateResult } from "./gate.js";
 import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
+import { type Bucket, type LimitPeriod, type LimitSettings, LIMIT_DEFAULTS, bucketOfSend, checkLimits, periodEnd, periodStart, roomLeft, runBudget, spendOf } from "./limits.js";
+import { sinceYouLeft } from "./since.js";
+import { type LadderSettings, type Rung, LADDER_DEFAULTS, checkLadder, isClimbable, ladderHint, nextRung } from "./ladder.js";
+import type { SplitResult } from "./gate.js";
 import { type Sender, type WatchSettings, WATCH_DEFAULTS, cleanWatch, speak } from "./watchdog.js";
 import { type IssueSync, type IssuesMode, syncIssues } from "./issues.js";
 import { type StoryStep, stepsOf } from "./story.js";
@@ -21,7 +25,7 @@ import { type TicketKind, type TicketOutcome, type TicketSettings, TICKET_KINDS,
  */
 
 /** What you can change on the screen. The project is written "owner/name". */
-export interface HomeSettings extends WatchSettings {
+export interface HomeSettings extends WatchSettings, LimitSettings, LadderSettings {
   repo: string;
   base: string;
   checks: string[];
@@ -53,18 +57,25 @@ export interface HomeSettings extends WatchSettings {
   issuesLabel: string;
   /** How often GitHub is looked at, in minutes. */
   issuesEveryMinutes: number;
+  /** How many tickets of each group the "since you left" panel names. */
+  sinceShow: number;
+  /** More paths on the stop list: a result that changes a file whose path holds one of these waits for your look. They add to the fixed list. */
+  stopPaths: string[];
 }
 
-export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, slots: 1, cutOffReturns: 1, cutOffWithinHours: 24, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5 };
+export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, ...LIMIT_DEFAULTS, ...LADDER_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, slots: 1, cutOffReturns: 1, cutOffWithinHours: 24, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5, stopPaths: [], sinceShow: 10 };
 
 /** Check what came from the screen. Returns clean settings or says, in a sentence, what is wrong. */
 export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS): HomeSettings {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const text = (k: keyof HomeSettings) => (typeof r[k] === "string" ? (r[k] as string).trim() : (from[k] as string));
-  const list = (k: "checks" | "prepare") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
-  const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "slots" | "cutOffReturns" | "cutOffWithinHours" | "issuesEveryMinutes") => (r[k] === undefined ? from[k] : Number(r[k]));
+  const list = (k: "checks" | "prepare" | "stopPaths") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
+  const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "slots" | "cutOffReturns" | "cutOffWithinHours" | "issuesEveryMinutes" | "limitYou" | "limitAlone" | "ownSharePercent" | "runLimit" | "runFloor" | "sinceShow" | "ladderAgain" | "ladderOtherWay" | "ladderSharedTries" | "ladderWithinMinutes" | "ladderSplitMinChars") => (r[k] === undefined ? from[k] : Number(r[k]));
   const watch = cleanWatch(r, from);
-  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes") };
+  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths"), limitPeriod: (r.limitPeriod === undefined ? from.limitPeriod : r.limitPeriod) as LimitPeriod, limitYou: num("limitYou"), limitAlone: num("limitAlone"), ownSharePercent: num("ownSharePercent"), runLimit: num("runLimit"), runFloor: num("runFloor"), sinceShow: num("sinceShow"), ladder: typeof r.ladder === "boolean" ? r.ladder : from.ladder, ladderAgain: num("ladderAgain"), ladderOtherWay: num("ladderOtherWay"), ladderSplit: typeof r.ladderSplit === "boolean" ? r.ladderSplit : from.ladderSplit, ladderSharedTries: num("ladderSharedTries"), ladderWithinMinutes: num("ladderWithinMinutes"), ladderSplitMinChars: num("ladderSplitMinChars"), ladderModel: text("ladderModel"), ladderSplitModel: text("ladderSplitModel") };
+  checkLadder(s);
+  if (!Number.isInteger(s.sinceShow) || s.sinceShow < 1 || s.sinceShow > 100) throw new Error("The panel names from 1 to 100 tickets of each group.");
+  checkLimits(s);
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
   if (/^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)$/.test(s.base)) throw new Error(`"${s.base}" is not a branch name.`);
   if (s.base && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(s.base) || s.base.includes(".."))) throw new Error(`"${s.base}" is not a branch name.`);
@@ -82,6 +93,7 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   if (!Number.isInteger(s.issuesEveryMinutes) || s.issuesEveryMinutes < 1 || s.issuesEveryMinutes > 1440) throw new Error("GitHub is looked at every 1 to 1440 minutes.");
   for (const c of [...s.checks, ...s.prepare]) if (c.length > 500 || /[\r\n\0]/.test(c)) throw new Error("A check or a prepare command is one line of at most 500 characters.");
   if (s.checks.length > 20 || s.prepare.length > 20) throw new Error("At most 20 checks and 20 prepare commands.");
+  if (s.stopPaths.length > 100 || s.stopPaths.some((x) => x.length > 200 || /[\r\n\0]/.test(x))) throw new Error("At most 100 extra stop paths, each one line of at most 200 characters.");
   return s;
 }
 
@@ -105,7 +117,7 @@ export class SettingsFile {
 }
 export const settingsFileIn = (workDir: string, start: Partial<HomeSettings> = {}) => new SettingsFile(join(workDir, "settings.json"), start);
 
-export type TicketState = "waiting" | "asked" | "kept" | "working" | "proposed" | "accepted" | "undone" | "held" | "passed" | "failed its checks" | "parked" | "stopped" | "crashed" | "not started" | "interrupted";
+export type TicketState = "waiting" | "asked" | "kept" | "working" | "proposed" | "accepted" | "undone" | "held" | "split" | "passed" | "failed its checks" | "parked" | "stopped" | "crashed" | "not started" | "interrupted";
 
 export interface TicketView {
   ticket: string;
@@ -122,6 +134,9 @@ export interface TicketView {
   costUsd: number;
   canAccept: boolean;
   canUndo: boolean;
+  /** What on the stop list holds its result, when that is why it waits. Only the owner lets it go. */
+  stops: { family: string; file: string; why: string }[];
+  canRelease: boolean;
   /** Only while it waits: after a run its words are frozen. */
   canEdit: boolean;
   canRemove: boolean;
@@ -158,6 +173,21 @@ export interface TicketView {
   lastWorkAt: string | null;
   /** When it comes back by itself, if it will. Filled by the home screen from the settings. */
   returnsAt: string | null;
+  /** Whose work its latest go is: yours (limit 1), or SoftwareFactory's by itself (limit 2). */
+  bucket: Bucket;
+  /** It waits because its limit is used up, and until when. Filled by the home screen. */
+  limitUntil: string | null;
+  /** The stuck ladder: the ticket it was cut from, the rung its latest go is on, how many rungs it climbed since you last sent it, the tickets it was split into. */
+  parent: string | null;
+  ladder: Rung | null;
+  ladderUsed: number;
+  splitInto: string[] | null;
+  wasSplit: boolean;
+  /** Its latest run ended in a way the ladder is for, and how that run ended. */
+  climbable: boolean;
+  lastFail: { state: string; reason: string; tail?: string } | null;
+  /** Its latest run met a limit and its unfinished work is kept: the next run goes on from it, unless you start clean. */
+  keptWork: boolean;
   /** Where it stands on the fixed road, each step with what proves it. */
   steps: StoryStep[];
   story: { id: number; at: string; who: string; what: string; flagged: boolean }[];
@@ -194,12 +224,21 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
     const removed = lastOf(ls, "ticket.removed", "ticket.restored")?.kind === "ticket.removed";
     // The kind: what the owner chose wins; an unmarked ticket takes what the gate read.
     const kindNow = String(d(kindEdit).kind ?? (d(opened).kind && d(opened).kind !== "request" ? d(opened).kind : d(gPassed).kind ?? d(opened).kind ?? "request"));
+    // The stuck ladder, counted since the owner last sent the ticket: what SoftwareFactory did by itself after that.
+    const ownerSent = lastOf(ls.filter((l) => l.kind === "ticket.opened" || l.who === "you"), "ticket.opened", "ticket.queued")!;
+    const ladderUsed = ls.filter((l) => l.id > ownerSent.id && l.kind === "ticket.queued" && d(l).ladder).length;
+    const splitLine = lastOf(ls.filter((l) => l.id > ownerSent.id), "ticket.split");
+    const splitInto = splitLine && Array.isArray(d(splitLine).into) && d(splitLine).into.length ? (d(splitLine).into as unknown[]).map(String) : null;
+    const anyEnded = lastOf(ls.filter((l) => !!l.run), "run.ended");
+    const failedCheck = anyEnded ? lastOf(ls.filter((l) => l.run === anyEnded.run && d(l).ok === false), "run.checked") : undefined;
     let state: TicketState, says: string;
     if (undone) { state = "undone"; says = d(undone).sha ? "You undid it. The project is as it was before, and its history keeps both steps." : "The undo is on GitHub and still has to be put in there."; }
     else if (accepted) { state = "accepted"; says = d(accepted).foundMerged ? `It was already put into the project on GitHub${d(accepted).notTheCheckedCommit ? ", with changes made after SoftwareFactory checked it" : ""}.` : "You accepted it. It is in the project."; }
     else if (isWorking(ticket)) { state = "working"; says = "A run is working on it now."; }
     else if (proposed && d(proposed).held) { state = "held"; says = `Held on this computer: ${d(proposed).reason}`; }
+    else if (proposed && d(proposed).released) { state = "proposed"; says = "You looked and let it go to GitHub. Waiting for you to accept."; }
     else if (proposed) { state = "proposed"; says = "Done and checked. Waiting for you to accept."; }
+    else if (splitInto && splitLine!.id > sent.id) { state = "split"; says = `It did not get done whole, so SoftwareFactory split it into ${splitInto.join(", ")}. They are worked in its place.`; }
     else if (!go.length && question && WORKED.includes(kindNow)) { state = "asked"; says = question; }
     else if (!go.length && !WORKED.includes(kindNow)) { state = "kept"; says = `Kept on the list as ${kindNow === "idea" ? "an idea" : `a ${kindNow}`}. Only requests, bugs and tasks are sent to a run for now.`; }
     // A ticket from before there was a queue (its first line names no kind) is never started by itself.
@@ -215,13 +254,20 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
       costUsd: Math.round(ls.reduce((a, l) => a + (l.costUsd ?? 0), 0) * 10000) / 10000,
       canAccept: state === "proposed" && number !== null,
       canUndo: state === "accepted" && typeof d(accepted).sha === "string" && !!d(accepted).sha,
+      stops: state === "held" && Array.isArray(d(proposed).stop) ? (d(proposed).stop as any[]).slice(0, 40).map((x) => ({ family: String(x?.family ?? ""), file: String(x?.file ?? ""), why: String(x?.why ?? "") })) : [],
+      canRelease: state === "held" && !removed && Array.isArray(d(proposed).stop) && d(proposed).stop.length > 0,
       canEdit: (state === "waiting" || state === "kept" || state === "asked") && !removed, canRemove: state !== "working" && !removed,
-      canAgain: !removed && ["proposed", "failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held"].includes(state),
+      canAgain: !removed && ["proposed", "failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held"].includes(state) || (!removed && state === "waiting" && sent.kind === "ticket.queued" && sent.who !== "you"),
       removed, place: null, question: state === "asked" ? question : null, done: Array.isArray(d(gPassed).done) ? (d(gPassed).done as unknown[]).map(String) : [],
       asked: gAsked && gAnswered ? { question: String(d(gAsked).question ?? ""), answer: String(d(gAnswered).answer ?? "") } : null, gatePassed: !!gPassed && !d(gPassed).skipped, waitingSince: Math.max(sent.id, lastOf(ls, "ticket.restored")?.id ?? 0),
       issue: null,
       parkedFor: state === "parked" && typeof d(ended).parkedFor === "string" ? d(ended).parkedFor : null, endedAt: ended?.ts ?? null,
       returns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after !== "cut off").length, returnsAt: null,
+      parent: typeof d(opened).parent === "string" ? d(opened).parent : null, ladder: sent.kind === "ticket.queued" && typeof d(sent).ladder === "string" ? (d(sent).ladder as Rung) : null, ladderUsed, splitInto, wasSplit: !!splitLine,
+      // A stop the owner pressed ends the climbing too, however the run then wrote its end.
+      climbable: !removed && !go.some((l) => l.kind === "stop.pressed") && isClimbable(state, ended ? { ...d(ended), run: ended.run } : null),
+      lastFail: anyEnded && d(anyEnded).end !== "passed" ? { state: String(d(anyEnded).end ?? ""), reason: String(d(anyEnded).reason ?? ""), ...(failedCheck ? { tail: `${String(d(failedCheck).command ?? "")}\n${String(d(failedCheck).tail ?? "")}` } : {}) } : null,
+      bucket: bucketOfSend(sent), limitUntil: null, keptWork: !!ended && !!d(ended).kept && !proposed,
       everWorked: ls.some((l) => l.kind === "fence.tested" || l.kind === "run.started"),
       lastWorkAt: go.at(-1)?.ts ?? null,
       cutOff: state === "interrupted" && go.length > 0, cutOffReturns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after === "cut off").length,
@@ -230,6 +276,8 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
     });
   }
   for (const t of out) { const l = t.project ? links.get(`${t.project}\n${t.ticket}`) : undefined; if (l && l.number > 0) t.issue = { number: l.number, url: /^https:\/\//.test(l.url) ? l.url : "" }; }
+  // A ticket that has smaller tickets cut from it was split, whatever else the record says: it is never split twice.
+  for (const t of out) if (t.parent) { const p = out.find((x) => x.ticket === t.parent && x.project === t.project); if (p) p.wasSplit = true; }
   queueOf(out).forEach((t, i) => { t.place = i + 1; });
   return out.sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1));
 }
@@ -272,6 +320,10 @@ export interface HomeDeps {
   pass?: string;
   /** Takes an accepted change back. Left out: the page offers no undo. */
   undo?: (ticket: string) => Promise<{ ok: true; sha: string | null; url: string } | { ok: false; why: string }>;
+  /** The reader that cuts a stuck ticket into smaller ones. Without it a ticket is never split. */
+  split?: (q: { repo: GitHubRepo; base: string; sentence: string; failed: string; model: string }) => Promise<SplitResult>;
+  /** Sends a result the stop list held on to GitHub, after the owner looked. Left out: the page offers no release. */
+  release?: (ticket: string) => Promise<{ ok: true; url: string; number: number | null } | { ok: false; why: string }>;
   /** How a line reaches the phone. Left out: the real sender. */
   send?: Sender;
   /** Shown on the page: which room, and what a run may reach. Read-only here; the fence is changed by hand. */
@@ -285,23 +337,36 @@ export function createHome(deps: HomeDeps) {
   // The pass opens the page once. The address travels through a command line and the browser's history; after
   // the first use it is worth nothing.
   let passUsed = false;
-  type Run = { ticket: string; stop: AbortController; startedAt: string; lastLineAt: string };
+  type Run = { ticket: string; stop: AbortController; startedAt: string; lastLineAt: string; bucket: Bucket; budget: number };
   /** The runs that work right now, by ticket, in the order they started. */
   const runs = new Map<string, Run>();
   const working = (): ReadonlySet<string> => new Set(runs.keys());
   const first = (): Run | null => runs.values().next().value ?? null;
-  let accepting = false, undoing = false, closing = false;
+  const splitTries = new Map<string, number>();
+  // The ladder climbs only runs that ended while this SoftwareFactory was open: opening the screen never starts
+  // paid work on a failure from before.
+  const openedAt = Date.now();
+  let accepting = false, undoing = false, releasing = false, closing = false;
   let wakeTimer: ReturnType<typeof setTimeout> | null = null;
   const streams = new Set<ServerResponse>();
   record.onLine((l) => { const mine = l.ticket ? runs.get(l.ticket) : undefined; if (mine && l.kind !== "watchdog.spoke") mine.lastLineAt = l.ts; for (const s of streams) s.write(`data: ${JSON.stringify({ id: l.id })}\n\n`); });
 
   let all: RecordLine[] = [];
   const returnTime = (t: TicketView, s: HomeSettings) => (t.state === "parked" && t.parkedFor === "limit" && !t.removed && t.endedAt && t.returns < s.parkedReturns ? Date.parse(t.endedAt) + s.parkedWaitMinutes * 60_000 : null);
+  /** The two limits as they stand: what the record says was used this period, less what the runs at work may still use. */
+  const limitsNow = (s: HomeSettings, lines: RecordLine[], now = new Date()) => {
+    const used = spendOf(lines, periodStart(s.limitPeriod, now));
+    const held = { you: 0, alone: 0, own: 0 };
+    for (const r of runs.values()) held[r.bucket] += r.budget;
+    const room = roomLeft(s, { you: used.you + held.you, alone: used.alone + held.alone, own: used.own + held.own });
+    return { period: s.limitPeriod, until: periodEnd(s.limitPeriod, now).toISOString(), used, room, limit: { you: s.limitYou, alone: s.limitAlone, own: Math.round(s.limitAlone * s.ownSharePercent) / 100 } };
+  };
   const state = () => {
     const settings = deps.settings.read();
     const tickets = ticketsFrom(all = record.all(), working());
-    for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); }
-    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes) };
+    const limits = limitsNow(settings, all);
+    for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, roomLeft(settings, limits.used), t.bucket) <= 0) { t.limitUntil = limits.until; t.says = `Waiting: ${t.bucket === "you" ? "limit 1 (work you sent)" : "limit 2 (what SoftwareFactory does by itself)"} is used up for this ${limits.period}.`; } }
+    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, since: sinceYouLeft(all, tickets, settings.sinceShow) };
   };
   const stateOf = (settings: HomeSettings, tickets: TicketView[]) => ({
     settings,
@@ -333,6 +398,39 @@ export function createHome(deps: HomeDeps) {
     return { ok: true, ticket };
   }
 
+  /**
+   * The third rung: the ticket is cut once into smaller tickets, which are worked in its place. Never twice.
+   * The reader takes a place among the runs while it reads, so nothing else in the room ends it and Stop reaches it.
+   */
+  function split(t: TicketView, s: HomeSettings): void {
+    const key = `${t.project}\n${t.ticket}`, repo = parseGitHubRepo(t.project ?? "");
+    const stamp = { ticket: t.ticket, project: t.project };
+    if (!deps.split || !repo) { record.append({ kind: "ticket.split", who: "SF itself", ...stamp, data: { into: [], why: "there is no reader to split it here" } }); return; }
+    if (t.sentence.trim().length < s.ladderSplitMinChars) { record.append({ kind: "ticket.split", who: "SF itself", ...stamp, data: { into: [], why: "it is one short sentence, so there is nothing to cut" } }); return; }
+    const stop = new AbortController();
+    const mine: Run = { ticket: t.ticket, stop, startedAt: new Date().toISOString(), lastLineAt: new Date().toISOString(), bucket: "alone", budget: 0 };
+    runs.set(t.ticket, mine);
+    splitTries.set(key, (splitTries.get(key) ?? 0) + 1);
+    const failed = t.lastFail ? `${t.lastFail.state}: ${t.lastFail.reason}${t.lastFail.tail ? `\n${t.lastFail.tail}` : ""}` : t.says;
+    void deps.split({ repo, base: s.base, sentence: t.sentence, failed, model: s.ladderSplitModel })
+      .catch((e): SplitResult => ({ ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }))
+      .then((r) => {
+        if (runs.get(t.ticket) === mine) runs.delete(t.ticket);
+        // Only if the ticket still stands where it stood: the owner may have stopped, sent, changed or removed it meanwhile.
+        const now = view(t.ticket);
+        if (closing || stop.signal.aborted || !now || now.removed || !now.climbable || now.wasSplit) return;
+        // The plan limit met by the reader: the queue rests like after any run that met it, and the split is not used up.
+        if (!r.ok && /plan limit/.test(r.why)) { record.append({ kind: "run.ended", who: "SF itself", ...stamp, data: { end: "parked", reason: "the plan limit was reached before the ticket could be split", parkedFor: "limit", where: "before the run" } }); return; }
+        // A reader that could not be asked is tried once more later; only its second failure ends the rung.
+        if (!r.ok && (splitTries.get(key) ?? 0) < 2) return;
+        if (!r.ok || !r.parts.length) { record.append({ kind: "ticket.split", who: "SF itself", ...stamp, costUsd: r.ok ? r.costUsd || null : null, data: { into: [], why: r.ok ? "it cannot be cut into smaller whole pieces" : r.why } }); return; }
+        const into = r.parts.map((p) => openTicket(record, t.project!, p, "task", { parent: t.ticket }));
+        record.append({ kind: "ticket.split", who: "SF itself", ...stamp, costUsd: r.costUsd || null, data: { into } });
+      })
+      .catch(() => undefined)
+      .finally(() => { if (runs.get(t.ticket) === mine) runs.delete(t.ticket); try { tell(); pump(); } catch { /* the next thing that happens wakes the queue */ } });
+  }
+
   /** The queue: when nothing is being worked and the queue is not held, the ticket that waited longest starts. */
   function pump(): void {
     if (closing) return;
@@ -341,7 +439,19 @@ export function createHome(deps: HomeDeps) {
     // Parked for the plan limit: after the wait the ticket comes back to the queue by itself, a set number of times.
     const lines = record.all(), now = Date.now();
     let wake = Infinity;
-    for (const t of ticketsFrom(lines, working())) {
+    const seenNow = ticketsFrom(lines, working());
+    // The stuck ladder climbs only in the project Settings speak for, only while limit 2 has room for a run, and
+    // counts the tries of a split's smaller tickets as it goes, so one pass cannot hand out more than they share.
+    const mineOnly = parseGitHubRepo(s.repo), aloneRoom = runBudget(s, limitsNow(s, lines).room, "alone") > 0;
+    const shared = new Map<string, number>();
+    for (const x of seenNow) if (x.parent) shared.set(`${x.project}\n${x.parent}`, (shared.get(`${x.project}\n${x.parent}`) ?? 0) + x.ladderUsed);
+    let toSplit: TicketView | null = null;
+    for (const t of seenNow) {
+      // The stuck ladder: a ticket whose run did not finish climbs by itself, one rung at a time, then waits for the owner.
+      const fam = `${t.project}\n${t.parent}`;
+      const rung = mineOnly && t.project === `${mineOnly.owner}/${mineOnly.name}` && aloneRoom ? nextRung(s, { climbable: t.climbable && !!t.endedAt && Date.parse(t.endedAt) >= openedAt && now - Date.parse(t.endedAt) < s.ladderWithinMinutes * 60_000, used: t.ladderUsed, child: !!t.parent, siblingsUsed: t.parent ? shared.get(fam) ?? 0 : 0, wasSplit: t.wasSplit }) : null;
+      if (rung === "once more" || rung === "another way") { record.append({ kind: "ticket.queued", who: "SF itself", ticket: t.ticket, project: t.project, data: { ladder: rung, rung: t.ladderUsed + 1, why: `its run ended as ${t.state}` } }); if (t.parent) shared.set(fam, (shared.get(fam) ?? 0) + 1); }
+      else if (rung === "split" && !toSplit) toSplit = t;
       const at = returnTime(t, s);
       // Cut off in the middle (SoftwareFactory was closed, the computer restarted): the steps are safe to repeat.
       if (t.cutOff && !t.removed && t.cutOffReturns < s.cutOffReturns && t.lastWorkAt && now - Date.parse(t.lastWorkAt) < s.cutOffWithinHours * 3_600_000) record.append({ kind: "ticket.queued", who: "SF itself", ticket: t.ticket, project: t.project, data: { returned: true, after: "cut off", why: "it was cut off in the middle, so it is worked again from the start", time: t.cutOffReturns + 1 } });
@@ -356,14 +466,24 @@ export function createHome(deps: HomeDeps) {
     wakeTimer = wake === Infinity ? null : setTimeout(() => { wakeTimer = null; try { pump(); tell(); } catch { /* the next thing that happens wakes the queue */ } }, Math.min(Math.max(wake - now, 1000), 2 ** 31 - 1));
     wakeTimer?.unref?.();
     if (s.hold || rest) return;
+    // A ticket at the split rung: the reader takes the free place now, and the queue goes on when it has answered.
+    if (toSplit && !runs.has(toSplit.ticket)) { split(toSplit, s); if (runs.size >= s.slots) return; }
     // Settings speak for one project. A ticket of another project waits until Settings point at it again.
     const here = parseGitHubRepo(s.repo);
-    const next = queueOf(ticketsFrom(record.all(), working())).find((t) => !here || t.project === `${here.owner}/${here.name}`);
-    if (!next) return;
+    // The two limits: work of a kind whose limit is used up does not start, and the other kind goes on. Nothing is asked for.
+    const limits = limitsNow(s, record.all());
+    const inLine = queueOf(ticketsFrom(record.all(), working())).filter((t) => !here || t.project === `${here.owner}/${here.name}`);
+    const next = inLine.find((t) => runBudget(s, limits.room, t.bucket) > 0);
+    if (!next) {
+      // When the period turns the limits are whole again: the queue wakes by itself then.
+      if (inLine.length && !wakeTimer) { wakeTimer = setTimeout(() => { wakeTimer = null; try { pump(); tell(); } catch { /* the next thing that happens wakes the queue */ } }, Math.min(Math.max(Date.parse(limits.until) - now, 1000), 2 ** 31 - 1)); wakeTimer.unref?.(); }
+      return;
+    }
+    const budget = runBudget(s, limits.room, next.bucket);
     const repo = parseGitHubRepo(next.project ?? "");
     if (!repo) { record.append({ kind: "run.ended", who: "SF itself", ticket: next.ticket, project: next.project, data: { end: "crashed", reason: "the record does not say which project this ticket is for", where: "before the run" } }); return pump(); }
     const stop = new AbortController();
-    const mine = { ticket: next.ticket, stop, startedAt: new Date().toISOString(), lastLineAt: new Date().toISOString() };
+    const mine: Run = { ticket: next.ticket, stop, startedAt: new Date().toISOString(), lastLineAt: new Date().toISOString(), bucket: next.bucket, budget };
     runs.set(mine.ticket, mine);
     const before = record.all().at(-1)?.id ?? 0;
     const stamp = { ticket: next.ticket, project: next.project };
@@ -385,7 +505,7 @@ export function createHome(deps: HomeDeps) {
       record.append({ kind: "gate.passed", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { kind: a.kind, done: a.done, guesses: a.guesses } });
       return a.done;
     };
-    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, done, ...(next.issue ? { issue: next.issue.number } : {}), ...(s.slots > 1 ? { ownCell: true } : {}) }, next.ticket, next.sentence, stop.signal)))
+    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: next.ladder === "another way" && s.ladderModel ? s.ladderModel : s.model, ...(next.ladder && next.ladder !== "split" && next.lastFail ? { hint: ladderHint(next.ladder, next.lastFail) } : {}), maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, stopPaths: s.stopPaths, budgetUsd: budget, done, ...(next.issue ? { issue: next.issue.number } : {}), ...(s.slots > 1 ? { ownCell: true } : {}) }, next.ticket, next.sentence, stop.signal)))
       .catch((e) => { record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, project: next.project, data: { end: "crashed", reason: String((e as Error)?.message ?? e).slice(0, 300), where: "before the run" } }); })
       .catch(() => undefined)
       .finally(() => {
@@ -478,11 +598,12 @@ export function createHome(deps: HomeDeps) {
     return { ok: true };
   }
   /** Send a ticket to be worked again, under the same name. */
-  function again(ticket: string): Did {
+  function again(ticket: string, clean = false): Did {
     const t = view(ticket);
     if (!t) return NONE;
     if (!t.canAgain) return { ok: false, why: "This ticket cannot be sent again from where it stands." };
-    record.append({ kind: "ticket.queued", who: "you", ticket, project: t.project, data: {} });
+    // A ticket SoftwareFactory queued by itself and that still waits is taken over by the owner: it is theirs from here.
+    record.append({ kind: "ticket.queued", who: "you", ticket, project: t.project, data: clean ? { clean: true } : {} });
     pump();
     return { ok: true };
   }
@@ -601,10 +722,23 @@ export function createHome(deps: HomeDeps) {
         if (url.pathname === "/api/step1/ticket/restore") { const r = restore(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/answer") { const r = answer(String(b.ticket ?? ""), b.answer); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/issues") { const r = await issues(); return send(res, r.ok ? 200 : 409, r); }
-        if (url.pathname === "/api/step1/ticket/again") { const r = again(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/ticket/again") { const r = again(String(b.ticket ?? ""), b.clean === true); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/stop") { const r = stopNow(typeof b.ticket === "string" && b.ticket ? b.ticket : undefined); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/look") { const r = await look(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/accept") { const r = await accept(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/seen") {
+          // "Got it": from here on the panel shows only what happens after this line. Nothing is hidden or removed.
+          const sn = state().since, upTo = Number.isInteger(b.upTo) && b.upTo >= 0 && b.upTo <= sn.upTo ? (b.upTo as number) : sn.upTo;
+          if (sn.items.length || sn.cameBack) { record.append({ kind: "home.seen", who: "you", data: { upTo, cutOff: sn.cutOff.slice(0, 500) } }); tell(); }
+          return send(res, 200, { ok: true });
+        }
+        if (url.pathname === "/api/step1/release") {
+          const t = String(b.ticket ?? "");
+          if (!deps.release || releasing) return send(res, 409, { ok: false, why: releasing ? "A release is already on its way." : "Letting a held result go is not set up here." });
+          if (!view(t)?.canRelease) return send(res, 409, { ok: false, why: "This ticket has no held result that can be let go from here." });
+          releasing = true;
+          try { const r = await deps.release(t); if (r.ok) tell(); return send(res, r.ok ? 200 : 409, r); } finally { releasing = false; }
+        }
         if (url.pathname === "/api/step1/undo") {
           if (!deps.undo || undoing) return send(res, 409, { ok: false, why: undoing ? "An undo is already on its way." : "Undo is not set up here." });
           undoing = true;

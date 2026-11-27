@@ -108,6 +108,13 @@ ol.steps .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; cl
 ol.steps details.facts { margin-top: 2px; font-size: 14px; }
 ol.steps details.facts ul { margin: 4px 0 0; padding-left: 18px; color: var(--soft); overflow-wrap: anywhere; }
 ol.story { list-style: none; margin: 8px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font: 13.5px/1.55 var(--mono); max-height: 420px; overflow: auto; }
+#since { border: 1px solid var(--line); border-radius: 10px; padding: 4px 16px 12px; margin: 0 0 18px; background: var(--card, transparent); }
+#since h3 { font-size: 14px; margin: 12px 0 4px; }
+ul.since button.link { border: 0; background: none; padding: 0; font-weight: 700; color: inherit; text-decoration: underline; cursor: pointer; }
+ul.since { margin: 0; padding-left: 20px; line-height: 1.5; }
+ul.since .why { display: block; color: var(--soft); font-size: 14px; }
+ul.stops { margin: 4px 0 8px; padding-left: 20px; font-size: 14px; line-height: 1.5; }
+ul.stops code { font-family: var(--mono); overflow-wrap: anywhere; }
 ol.story li { display: grid; grid-template-columns: 5.2em 6.2em 1fr; gap: 0 8px; }
 ol.story .t, ol.story .w { color: var(--soft); }
 ol.story .x { overflow-wrap: anywhere; min-width: 0; }
@@ -149,7 +156,14 @@ ol.story li.flag .x { color: var(--bad); }
     <div class="row"><button class="stop" id="stop" type="button">Stop</button><span class="hint">Ends everything the run started, inside the room.</span></div>
   </section>
 
+  <section id="since" hidden>
+    <h2 id="since-title">Since you last looked</h2>
+    <div id="since-body"></div>
+    <div class="row"><button id="since-ok" type="button">Got it</button><span class="hint" id="since-hint"></span></div>
+  </section>
+
   <h2 id="tickets-title">Tickets</h2>
+  <p class="hint" id="limits-line"></p>
   <div class="row" id="queue-row"><button id="hold" type="button">Hold the queue</button><span class="hint" id="queue-hint"></span><button id="show-removed" type="button" hidden></button><button id="issues-now" type="button" hidden>Look at GitHub now</button><span class="hint" id="issues-hint"></span></div>
   <section class="card" aria-labelledby="tickets-title"><div id="tickets"><p class="empty">No tickets yet. Your first sentence starts one.</p></div></section>
 
@@ -162,10 +176,26 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-turns">Most turns in a run</label><input id="s-turns" type="number" min="1" max="500"></div>
       <div><label for="s-minutes">Time limit, minutes</label><input id="s-minutes" type="number" min="1" max="600"></div>
       <div><label for="s-stuck">Call a run silent after, minutes</label><input id="s-stuck" type="number" min="1" max="240"></div>
+      <div><label for="s-ladder">When a run does not finish</label><select id="s-ladder"><option value="yes">Climb the ladder by itself, then wait for me</option><option value="no">Wait for me</option></select></div>
+      <div><label for="s-ladder-again">Tries once more <span class="hint">told what went wrong</span></label><input id="s-ladder-again" type="number" min="0" max="5"></div>
+      <div><label for="s-ladder-other">Then tries another way <span class="hint">told not to repeat itself</span></label><input id="s-ladder-other" type="number" min="0" max="5"></div>
+      <div><label for="s-ladder-model">Model for another way <span class="hint">empty: the same model</span></label><input id="s-ladder-model" autocomplete="off" spellcheck="false"></div>
+      <div><label for="s-ladder-split">Then</label><select id="s-ladder-split"><option value="yes">Split it once into smaller tickets</option><option value="no">Do not split</option></select></div>
+      <div><label for="s-ladder-shared">Tries the smaller tickets share</label><input id="s-ladder-shared" type="number" min="0" max="5"></div>
+      <div><label for="s-ladder-split-model">Model that splits a ticket</label><input id="s-ladder-split-model" autocomplete="off" spellcheck="false"></div>
+      <div><label for="s-ladder-split-min">Do not split a ticket shorter than <span class="hint">characters</span></label><input id="s-ladder-split-min" type="number" min="0" max="10000"></div>
+      <div><label for="s-ladder-within">Only a run that ended in the last <span class="hint">minutes climbs; an older one waits for you</span></label><input id="s-ladder-within" type="number" min="1" max="10080"></div>
       <div><label for="s-gate">Before a run</label><select id="s-gate"><option value="yes">Write the test of done, ask once if unclear</option><option value="no">Start right away</option></select></div>
       <div><label for="s-gate-model">Model that reads the ticket</label><input id="s-gate-model" autocomplete="off" spellcheck="false"></div>
       <div><label for="s-park-wait">Rest after the plan limit, minutes</label><input id="s-park-wait" type="number" min="1" max="1440"></div>
       <div><label for="s-park-returns">A parked ticket comes back by itself, times <span class="hint">0: it waits for you</span></label><input id="s-park-returns" type="number" min="0" max="20"></div>
+      <div><label for="s-limit-period">The limits are counted per</label><select id="s-limit-period"><option value="day">day</option><option value="week">week</option><option value="month">month</option></select></div>
+      <div><label for="s-limit-you">Limit 1: work you sent <span class="hint">dollars per period, as Claude Code counts each run</span></label><input id="s-limit-you" type="number" min="0" step="1"></div>
+      <div><label for="s-limit-alone">Limit 2: what SoftwareFactory does by itself <span class="hint">tickets it brings back, and its own work</span></label><input id="s-limit-alone" type="number" min="0" step="1"></div>
+      <div><label for="s-own-share">SoftwareFactory's own share of limit 2 <span class="hint">percent</span></label><input id="s-own-share" type="number" min="0" max="100"></div>
+      <div><label for="s-run-limit">The most one run may use <span class="hint">dollars; at it the run is parked and its work is kept</span></label><input id="s-run-limit" type="number" min="0" step="0.5"></div>
+      <div><label for="s-run-floor">Do not start a run with less than <span class="hint">dollars left of its limit; the ticket waits for the new period instead</span></label><input id="s-run-floor" type="number" min="0" step="0.1"></div>
+      <div><label for="s-since-show">The panel "since you last looked" names up to <span class="hint">tickets of each group</span></label><input id="s-since-show" type="number" min="1" max="100"></div>
       <div><label for="s-slots">Runs at once <span class="hint">1 is the proven way; with 2 each run gets its own cell in the room</span></label><input id="s-slots" type="number" min="1" max="4"></div>
       <div><label for="s-cut-returns">A cut-off ticket comes back by itself, times <span class="hint">cut off: SoftwareFactory closed or the computer restarted mid-run</span></label><input id="s-cut-returns" type="number" min="0" max="20"></div>
       <div><label for="s-cut-hours">Only when cut off within, hours</label><input id="s-cut-hours" type="number" min="1" max="720"></div>
@@ -176,6 +206,7 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-phone">Lines to your phone</label><select id="s-phone"><option value="none">None, the home screen only</option><option value="ntfy">The ntfy app</option></select></div>
       <div class="wide"><label for="s-topic">ntfy channel name <span class="hint">16 or more letters and digits; whoever knows it can read the lines</span></label><input id="s-topic" autocomplete="off" spellcheck="false"></div>
       <div class="wide"><label for="s-prepare">The run does these first <span class="hint">one per line; they fetch what the checks need</span></label><textarea id="s-prepare" spellcheck="false"></textarea></div>
+      <div class="wide"><label for="s-stop-paths">More on the stop list <span class="hint">one per line; a result that changes a file whose path holds one of these waits for your look. The built-in list (security, going live, money and live data, what runs by itself, new packages) always holds</span></label><textarea id="s-stop-paths" spellcheck="false"></textarea></div>
       <div class="wide"><label for="s-checks">Checks SoftwareFactory runs on the result <span class="hint">leave empty and SoftwareFactory finds them in the project; or one per line, in this order</span></label><textarea id="s-checks" spellcheck="false"></textarea></div>
     </div>
     <div class="row"><button id="save" type="button">Save settings</button><button id="phone-test" type="button">Send a test line to the phone</button><span class="hint" id="save-hint"></span></div>
@@ -194,10 +225,39 @@ ol.story li.flag .x { color: var(--bad); }
   function clock(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }); }
   function day(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString([], { day: "numeric", month: "short" }) + ", " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); }
   function money(n) { return "$" + Number(n || 0).toFixed(2); }
+  var sinceSig = "", sinceUpTo = 0;
+  function drawSince(sn) {
+    var box = $("since");
+    if (!sn || (!sn.items.length && !sn.cameBack)) { box.hidden = true; sinceSig = ""; return; }
+    sinceUpTo = sn.upTo;
+    var sig = JSON.stringify(sn); if (sig === sinceSig) return; sinceSig = sig;
+    box.hidden = false;
+    $("since-title").textContent = sn.seenAt ? "Since you last looked (" + day(sn.seenAt) + ")" : "What happened so far";
+    var body = $("since-body"); body.textContent = "";
+    var names = { yours: "Waits for your word", ready: "Finished and checked, ready for you", unfinished: "Did not finish" };
+    ["yours", "ready", "unfinished"].forEach(function (g) {
+      var mine = sn.items.filter(function (x) { return x.group === g; });
+      if (!mine.length) return;
+      body.appendChild(el("h3", "since-" + g, names[g] + " (" + sn.counts[g] + ")"));
+      var ul = el("ul", "since");
+      mine.forEach(function (x) {
+        var li = el("li");
+        var go = el("button", "link", x.ticket); go.type = "button"; go.onclick = function () { var n = nodes[x.ticket] && nodes[x.ticket].node; if (n && n.scrollIntoView) n.scrollIntoView({ behavior: "smooth", block: "center" }); };
+        li.appendChild(go); li.appendChild(document.createTextNode(" " + x.sentence));
+        li.appendChild(el("span", "why", x.says));
+        if (x.url) { var a = el("a", "", "Open on GitHub"); a.href = x.url; a.target = "_blank"; a.rel = "noopener noreferrer"; li.appendChild(document.createTextNode(" ")); li.appendChild(a); }
+        ul.appendChild(li);
+      });
+      body.appendChild(ul);
+      if (sn.counts[g] > mine.length) body.appendChild(el("p", "hint", "And " + (sn.counts[g] - mine.length) + " more like these on the list below."));
+    });
+    $("since-hint").textContent = (sn.cameBack ? sn.cameBack + (sn.cameBack === 1 ? " ticket was" : " tickets were") + " brought back to the queue by SoftwareFactory. " : "") + "All work in this time used " + money(sn.costUsd) + ". Got it clears this panel; the tickets stay below.";
+  }
+  $("since-ok").onclick = function () { $("since-ok").disabled = true; post("/api/step1/seen", { upTo: sinceUpTo }).then(function (r) { $("since-ok").disabled = false; if (r && r.ok === false) { sinceSig = ""; $("since-hint").textContent = "That did not go through: " + (r.why || "SoftwareFactory did not answer") + "."; return; } load(); }); };
   function lines(v) { return String(v || "").split(/\\r?\\n/).map(function (x) { return x.trim(); }).filter(Boolean); }
   var KINDS = { request: "Request", bug: "Bug", task: "Task", idea: "Idea", plan: "Plan", question: "Question" };
   var editing = null, draft = {}, showRemoved = false, answers = {};
-  var CHIP = { waiting: ["Waiting", ""], asked: ["A question for you", "proposed"], kept: ["Kept", ""], working: ["Working", "working"], proposed: ["Waiting for you", "proposed"], accepted: ["Accepted", "accepted"], undone: ["Undone", ""], held: ["Held here", "proposed"], passed: ["Passed", ""], "failed its checks": ["Failed its checks", "bad"], parked: ["Parked", ""], stopped: ["Stopped", ""], crashed: ["Crashed", "bad"], "not started": ["Not started", "bad"], interrupted: ["Interrupted", ""] };
+  var CHIP = { waiting: ["Waiting", ""], asked: ["A question for you", "proposed"], kept: ["Kept", ""], working: ["Working", "working"], proposed: ["Waiting for you", "proposed"], accepted: ["Accepted", "accepted"], undone: ["Undone", ""], held: ["Held here", "proposed"], split: ["Split", ""], passed: ["Passed", ""], "failed its checks": ["Failed its checks", "bad"], parked: ["Parked", ""], stopped: ["Stopped", ""], crashed: ["Crashed", "bad"], "not started": ["Not started", "bad"], interrupted: ["Interrupted", ""] };
 
   function post(path, body) {
     return fetch(path, { method: "POST", headers: { "content-type": "application/json", "x-sf-key": KEY }, body: JSON.stringify(body || {}) })
@@ -232,6 +292,16 @@ ol.story li.flag .x { color: var(--bad); }
     } else box.appendChild(el("p", "sentence", t.sentence));
     box.appendChild(el("p", t.state === "asked" ? "sentence" : "says", (t.state === "asked" ? "SoftwareFactory asks before it starts: " : "") + t.says));
     if (t.issue) { var ip = el("p", "says"); if (t.issue.url) { var ia = el("a", "", "Issue #" + t.issue.number + " on GitHub"); ia.href = t.issue.url; ia.target = "_blank"; ia.rel = "noopener noreferrer"; ip.appendChild(ia); } else ip.textContent = "Issue #" + t.issue.number + " on GitHub"; box.appendChild(ip); }
+    if (t.stops && t.stops.length) {
+      box.appendChild(el("p", "says", "Nothing failed. These changes always wait for your own look before they leave this computer:"));
+      var sl = el("ul", "stops");
+      t.stops.forEach(function (x) { var li = el("li"); li.appendChild(el("b", "", x.family + ": ")); li.appendChild(el("code", "", x.file)); li.appendChild(document.createTextNode(" " + x.why)); sl.appendChild(li); });
+      box.appendChild(sl);
+    }
+    if (t.parent) box.appendChild(el("p", "says", "A smaller piece of " + t.parent + ", cut by SoftwareFactory when that one did not get done whole."));
+    if (t.ladder && (t.state === "waiting" || t.state === "working")) box.appendChild(el("p", "says", "SoftwareFactory sent it again by itself: " + t.ladder + (t.lastFail ? ", after its run ended as " + t.lastFail.state + "." : ".")));
+    else if (t.ladderUsed && ["failed its checks", "crashed", "parked"].indexOf(t.state) >= 0) box.appendChild(el("p", "says", "SoftwareFactory already tried it " + t.ladderUsed + (t.ladderUsed === 1 ? " more time" : " more times") + " by itself."));
+    if (t.limitUntil) box.appendChild(el("p", "says", (t.bucket === "you" ? "Limit 1 (work you sent)" : "Limit 2 (what SoftwareFactory does by itself)") + " is used up, so this waits until " + day(t.limitUntil) + ". Other work goes on. The limits are in Settings."));
     if (t.returnsAt) box.appendChild(el("p", "says", "It comes back to the queue by itself at " + clock(t.returnsAt) + "."));
     else if (t.state === "parked" && t.parkedFor === "limit") box.appendChild(el("p", "says", "It came back by itself " + t.returns + (t.returns === 1 ? " time" : " times") + " already. Now it waits for you: Work it again sends it."));
     if (t.state === "asked" && !t.removed) {
@@ -261,9 +331,22 @@ ol.story li.flag .x { color: var(--bad); }
         b.onclick = function () { b.disabled = true; post("/api/step1/ticket/" + path, { ticket: t.ticket }).then(function (r) { confirming = null; if (!r.ok) { acceptError[t.ticket] = r.why; } else { delete acceptError[t.ticket]; } load(); render(last); }); };
         return b;
       };
-      if (t.canAgain) row.appendChild(act("again", "Work it again"));
+      if (t.canAgain) row.appendChild(act("again", t.keptWork ? "Go on from the kept work" : "Work it again"));
+      if (t.canAgain && t.keptWork) { var cl = el("button", "", "Start clean"); cl.type = "button"; cl.onclick = function () { cl.disabled = true; post("/api/step1/ticket/again", { ticket: t.ticket, clean: true }).then(function (r) { if (!r.ok) { acceptError[t.ticket] = r.why; } else { delete acceptError[t.ticket]; } load(); render(last); }); }; row.appendChild(cl); }
       if (t.canEdit && editing !== t.ticket) { var ch = el("button", "", "Change"); ch.type = "button"; ch.onclick = function () { editing = t.ticket; render(last); }; row.appendChild(ch); }
       if (t.removed) row.appendChild(act("restore", "Put it back"));
+      if (t.canRelease) {
+        if (confirming === "release " + t.ticket) {
+          var ryes = el("button", "good", "Yes, send it to GitHub as a draft"); ryes.type = "button";
+          ryes.onclick = function () { busy = true; ryes.disabled = true; post("/api/step1/release", { ticket: t.ticket }).then(function (r) { busy = false; confirming = null; if (!r.ok) { acceptError[t.ticket] = r.why; } else { delete acceptError[t.ticket]; } load(); }); };
+          var rno = el("button", "", "Not now"); rno.type = "button"; rno.onclick = function () { confirming = null; render(last); };
+          row.appendChild(rno); row.appendChild(ryes);
+        } else {
+          var rel = el("button", "", "I looked: let it go to GitHub"); rel.type = "button";
+          rel.onclick = function () { confirming = "release " + t.ticket; render(last); };
+          row.appendChild(rel);
+        }
+      }
       if (t.canAccept) {
         if (confirming === t.ticket) {
           var yes = el("button", "good", "Yes, put it in the project");
@@ -396,6 +479,8 @@ ol.story li.flag .x { color: var(--bad); }
     $("issues-now").hidden = s.settings.issues === "off";
     $("issues-hint").textContent = s.settings.issues === "off" || !s.issuesSeen ? "" : s.issuesSeen.ok ? "GitHub issues looked at " + clock(s.issuesSeen.at) + "." : "GitHub issues could not be read: " + s.issuesSeen.why;
     $("hold").textContent = s.settings.hold ? "Let the queue go" : "Hold the queue";
+    drawSince(s.since);
+    if (s.limits) $("limits-line").textContent = "This " + s.limits.period + ": you sent " + money(s.limits.used.you) + " of " + money(s.limits.limit.you) + "; by itself " + money(s.limits.used.alone + s.limits.used.own) + " of " + money(s.limits.limit.alone) + ". New on " + day(s.limits.until) + ".";
     $("queue-hint").textContent = s.settings.hold ? "The queue is held. " + waiting + " waiting; nothing new starts until you let it go." : s.resting ? "The queue rests until " + clock(s.resting.until) + ": " + s.resting.why + ". Work it again on a ticket starts sooner." : (waiting ? waiting + " waiting for a turn." : "");
     $("show-removed").hidden = !gone;
     $("show-removed").textContent = showRemoved ? "Hide removed" : "Show removed (" + gone + ")";
@@ -423,7 +508,7 @@ ol.story li.flag .x { color: var(--bad); }
         if (!shown.length) list.appendChild(el("p", "empty", "No tickets yet. Your first sentence starts one."));
       }
       shown.forEach(function (t) {
-        var sig = JSON.stringify(t) + "|" + (confirming === t.ticket || confirming === "undo " + t.ticket || confirming === "remove " + t.ticket) + "|" + (editing === t.ticket) + "|" + (acceptError[t.ticket] || "");
+        var sig = JSON.stringify(t) + "|" + (confirming === t.ticket || confirming === "undo " + t.ticket || confirming === "remove " + t.ticket || confirming === "release " + t.ticket) + "|" + (editing === t.ticket) + "|" + (acceptError[t.ticket] || "");
         var had = nodes[t.ticket];
         if (had && had.sig === sig) return;
         var fresh = ticketNode(t);
@@ -439,8 +524,8 @@ ol.story li.flag .x { color: var(--bad); }
       settingsLoaded = true;
       $("s-repo").value = s.settings.repo; $("s-base").value = s.settings.base; $("s-model").value = s.settings.model;
       $("s-turns").value = s.settings.maxTurns; $("s-minutes").value = s.settings.timeLimitMinutes;
-      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-slots").value = s.settings.slots; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
-      $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n");
+      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-ladder").value = s.settings.ladder ? "yes" : "no"; $("s-ladder-again").value = s.settings.ladderAgain; $("s-ladder-other").value = s.settings.ladderOtherWay; $("s-ladder-model").value = s.settings.ladderModel; $("s-ladder-split").value = s.settings.ladderSplit ? "yes" : "no"; $("s-ladder-shared").value = s.settings.ladderSharedTries; $("s-ladder-split-model").value = s.settings.ladderSplitModel; $("s-ladder-within").value = s.settings.ladderWithinMinutes; $("s-ladder-split-min").value = s.settings.ladderSplitMinChars; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-slots").value = s.settings.slots; $("s-limit-period").value = s.settings.limitPeriod; $("s-limit-you").value = s.settings.limitYou; $("s-limit-alone").value = s.settings.limitAlone; $("s-own-share").value = s.settings.ownSharePercent; $("s-run-limit").value = s.settings.runLimit; $("s-run-floor").value = s.settings.runFloor; $("s-since-show").value = s.settings.sinceShow; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
+      $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n"); $("s-stop-paths").value = (s.settings.stopPaths || []).join("\\n");
     }
     // Settings stay folded when everything a run needs is set; they open by themselves only when the project is missing.
     $("settings-hint").textContent = s.settings.repo ? "Already set. Nothing to fill in." : "Choose the project first.";
@@ -467,7 +552,7 @@ ol.story li.flag .x { color: var(--bad); }
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
-    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value) })
+    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, ladder: $("s-ladder").value === "yes", ladderAgain: Number($("s-ladder-again").value), ladderOtherWay: Number($("s-ladder-other").value), ladderModel: $("s-ladder-model").value, ladderSplit: $("s-ladder-split").value === "yes", ladderSharedTries: Number($("s-ladder-shared").value), ladderSplitModel: $("s-ladder-split-model").value, ladderWithinMinutes: Number($("s-ladder-within").value), ladderSplitMinChars: Number($("s-ladder-split-min").value), parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), limitPeriod: $("s-limit-period").value, limitYou: Number($("s-limit-you").value), limitAlone: Number($("s-limit-alone").value), ownSharePercent: Number($("s-own-share").value), runLimit: Number($("s-run-limit").value), runFloor: Number($("s-run-floor").value), sinceShow: Number($("s-since-show").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value), stopPaths: lines($("s-stop-paths").value) })
       .then(function (r) { if (r.ok) { $("save-hint").textContent = "Saved."; settingsLoaded = false; load(); } else { $("set-msg").textContent = r.why; } });
   };
 

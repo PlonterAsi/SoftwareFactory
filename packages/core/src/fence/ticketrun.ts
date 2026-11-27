@@ -4,7 +4,8 @@ import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { GitHub, GitHubRepo } from "../tickets/github.js";
+import { type GitHub, type GitHubRepo, parseGitHubRepo } from "../tickets/github.js";
+import { stopSentence, stopsFor } from "./stoplist.js";
 import { type RunResult, runInRoom } from "./door.js";
 import type { FenceReport, RoomExec, RoomFiles } from "./fencetest.js";
 import type { FenceSettings } from "./room.js";
@@ -34,6 +35,12 @@ export interface TicketSettings {
   issue?: number;
   /** More than one run may work at once (Settings, slots): this run gets its own cell in the room. */
   ownCell?: boolean;
+  /** More paths on the stop list (Settings). They add to the fixed list and never take from it. */
+  stopPaths?: string[];
+  /** What the run is told about an earlier run of this ticket that did not finish (the stuck ladder). */
+  hint?: string;
+  /** The most this run may use, in dollars (the two limits). Left out: no ceiling of its own. */
+  budgetUsd?: number;
   model: string;
   maxTurns: number;
   timeLimitMinutes: number;
@@ -65,7 +72,7 @@ export interface TicketOutcome {
 }
 
 /** Paths in a result that SoftwareFactory does not send on by itself: they change what runs by itself on GitHub. */
-export const HELD_PATHS = [/^\.github\//, /(^|\/)\.gitmodules$/, /(^|\/)\.gitattributes$/];
+export const HELD_PATHS = [/^\.github(\/|$)/i, /(^|\/)\.gitmodules$/i, /(^|\/)\.gitattributes$/i];
 
 /**
  * A run's own words go into a pull request as words only: they call nobody (@name), close or link no issue
@@ -99,17 +106,61 @@ export function history(deps: Pick<TicketDeps, "github">, st: Pick<TicketSetting
   return { dir, base };
 }
 
+/** Out: the branch, and a draft pull request (or, with no token for the API, the page that starts one). */
+async function sendOut(github: GitHub, repo: GitHubRepo, dir: string, branch: string, base: string, title: string, body: string): Promise<{ url: string; number: number | null }> {
+  if (!github.hasToken()) {
+    await github.pushBranch({ repo, dir, branch, base });
+    return { url: github.compareUrl(repo, base, branch), number: null };
+  }
+  // openPr pushes HEAD, so HEAD of the bare history points at the ticket's branch for the length of the call.
+  plainGit(dir, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
+  try { const pr = await github.openPr({ repo, dir, branch, base, title, body }); return { url: pr.url, number: pr.number }; }
+  finally { plainGit(dir, "symbolic-ref", "HEAD", `refs/heads/${base}`); }
+}
+
+export type ReleaseResult = { ok: true; url: string; number: number | null } | { ok: false; why: string };
+
+/**
+ * The owner looked at a result the stop list held, and lets it go: it is sent to GitHub as the same draft pull
+ * request it would have been. Only a stop-list hold can be let go. A result held for a secret, for what runs by
+ * itself on GitHub, or for a check it rewrote stays where it is.
+ */
+export async function releaseHeld(deps: { record: TheRecord; github: GitHub; workDir: string }, ticket: string): Promise<ReleaseResult> {
+  const { record, github } = deps;
+  const lines = record.story(ticket);
+  const p = [...lines].reverse().find((l) => l.kind === "result.proposed");
+  const d = (p?.data ?? {}) as Record<string, any>;
+  const no = "This ticket has no held result that can be let go from here.";
+  if (!p || !d.held || !Array.isArray(d.stop) || !d.stop.length) return { ok: false, why: no };
+  if (lines.some((l) => l.id > p.id && (l.kind === "ticket.queued" || l.kind === "run.started"))) return { ok: false, why: "This ticket was sent to be worked again since, so the held result is no longer its latest." };
+  const sha = (x: unknown) => typeof x === "string" && /^[0-9a-f]{40}$/.test(x);
+  const repo = parseGitHubRepo(p.project ?? "");
+  if (!repo || !sha(d.headSha) || !sha(d.baseSha) || typeof d.branch !== "string" || !/^sf\/[a-z0-9-]+$/.test(d.branch) || typeof d.base !== "string" || !d.base || typeof d.title !== "string" || typeof d.body !== "string") return { ok: false, why: no };
+  try {
+    const dir = join(deps.workDir, "projects", `${repo.owner}-${repo.name}.git`.replace(/[^A-Za-z0-9._-]/g, "-"));
+    let at = "";
+    try { at = plainGit(dir, "rev-parse", "--verify", "-q", `refs/heads/${d.branch}`); } catch { /* not there */ }
+    if (at !== d.headSha) return { ok: false, why: "The held result is no longer on this computer as it was checked. Use Work it again." };
+    // Looked at once more as data before it leaves: a secret never goes, whoever says so.
+    if (cleanText(plainGit(dir, "diff", "--no-renames", "--no-ext-diff", "--no-textconv", `${d.baseSha}..${d.headSha}`)).hit) return { ok: false, why: "A secret was found in the result, so it does not leave this computer." };
+    const { url, number } = await sendOut(github, repo, dir, d.branch, d.base, d.title, d.body);
+    record.append({ kind: "result.proposed", who: "you", run: p.run, ticket, project: p.project, data: { url, number, branch: d.branch, base: d.base, files: d.files ?? [], baseSha: d.baseSha, headSha: d.headSha, released: true, stop: d.stop, ...(Array.isArray(d.unchecked) ? { unchecked: d.unchecked } : {}) } });
+    return { ok: true, url, number };
+  } catch (e) { return { ok: false, why: `It could not be sent to GitHub: ${(e as Error).message.slice(0, 200)}` }; }
+}
+
 /** The kinds of ticket (leg 2). The door takes one sentence; the kind is "request" until someone says otherwise. */
 export const TICKET_KINDS = ["request", "bug", "task", "idea", "plan", "question"] as const;
 export type TicketKind = (typeof TICKET_KINDS)[number];
 
 /** Open a ticket: it gets its name and its first line in the record. Nothing runs yet. */
-export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | null = null): string {
+export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | { parent: string } | null = null): string {
   // Counting and writing happen under one lock, so two SoftwareFactory windows cannot give two tickets one name.
   record.db.exec("BEGIN IMMEDIATE");
   try {
     const ticket = `T${record.all().filter((l) => l.kind === "ticket.opened").length + 1}`;
-    record.append({ kind: "ticket.opened", who: "you", ticket, project, data: { sentence: sentence.trim(), kind, ...(from ?? {}) } });
+    // A smaller ticket cut from another by the stuck ladder is SoftwareFactory's own doing, and the record says so.
+    record.append({ kind: "ticket.opened", who: from && "parent" in from ? "SF itself" : "you", ticket, project, data: { sentence: sentence.trim(), kind, ...(from ?? {}) } });
     record.db.exec("COMMIT");
     return ticket;
   } catch (e) { record.db.exec("ROLLBACK"); throw e; }
@@ -144,7 +195,23 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
   try {
     mkdirSync(tmp, { recursive: true });
     const h = history(deps, st);
-    plainGit(h.dir, "bundle", "create", inFile, `refs/heads/${h.base}`);
+    // Unfinished work of this ticket, kept when an earlier run met a limit: the new run goes on from it. It is in
+    // SoftwareFactory's own history as a branch that was never sent anywhere.
+    let resume: string | null = null;
+    const story = record.story(ticket), lastOut = [...story].reverse().find((l) => l.kind === "result.proposed")?.id ?? 0;
+    // Only the latest run of the ticket counts: a later run that failed, crashed or was stopped ends the kept work,
+    // and so does the owner's "start clean".
+    const keptLine = [...story].reverse().find((l) => l.kind === "run.ended" && l.run);
+    const sentClean = !!(([...story].reverse().find((l) => l.kind === "ticket.queued")?.data as any)?.clean);
+    const k = ((keptLine && keptLine.id > lastOut && !sentClean ? (keptLine.data as any)?.kept : null) ?? {}) as Record<string, unknown>;
+    if (typeof k.branch === "string" && /^sf\/[a-z0-9-]+$/.test(k.branch) && typeof k.headSha === "string" && typeof k.baseSha === "string" && /^[0-9a-f]{40}$/.test(k.baseSha)) {
+      try {
+        // It must still stand on this project's starting branch: kept work from another base would drag that base in.
+        plainGit(h.dir, "merge-base", "--is-ancestor", k.baseSha, `refs/heads/${h.base}`);
+        if (plainGit(h.dir, "rev-parse", "--verify", "-q", `refs/heads/${k.branch}`) === k.headSha) resume = k.branch;
+      } catch { /* not here any more, or from another starting point: the run starts clean */ }
+    }
+    plainGit(h.dir, "bundle", "create", inFile, `refs/heads/${h.base}`, ...(resume ? [`refs/heads/${resume}`] : []));
     // Checks written in Settings win. With none written, the project tells its own, read from the starting point
     // before the run touched anything.
     let checks = st.checks, prepare = st.prepare ?? [], checksFound: string[] | undefined, watch: FoundChecks["watch"] = [], covers: string[] | null = null, workspaces = false;
@@ -156,8 +223,19 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     }
     const result = await runInRoom(deps.exec, deps.files, record, {
       run, ticket, project, sentence, bundle: readFileSync(inFile), base: h.base, branch,
-      model: st.model, maxTurns: st.maxTurns, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, ownCell: !!st.ownCell, signal: deps.signal,
+      model: st.model, maxTurns: st.maxTurns, budgetUsd: st.budgetUsd, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, ownCell: !!st.ownCell, ...(st.hint ? { hint: st.hint } : {}), ...(resume ? { resume } : {}), signal: deps.signal,
     }, deps.fence);
+    // Parked at a limit with work done: the work comes in as data and stays here, unchecked, for the next run of this ticket.
+    if (result.end === "parked" && result.kept && result.bundle && result.headSha) {
+      try {
+        if (deps.signal?.aborted) throw new Error("stop was pressed");
+        writeFileSync(outFile, result.bundle);
+        plainGit(h.dir, "bundle", "verify", "-q", outFile);
+        plainGit(h.dir, "-c", "fetch.fsckObjects=true", "fetch", "-q", "--no-tags", outFile, `+refs/heads/${branch}:refs/heads/${branch}`);
+        if (plainGit(h.dir, "rev-parse", `refs/heads/${branch}`) !== result.headSha) plainGit(h.dir, "update-ref", "-d", `refs/heads/${branch}`);
+        plainGit(h.dir, "rev-parse", "--verify", "-q", `refs/heads/${branch}`);
+      } catch { record.append({ kind: "run.step", who: "SF itself", run, ticket, project, data: { did: "the unfinished work could not be kept on this computer after all, so the next run starts clean" } }); }
+    }
     if (result.end !== "passed" || !result.bundle || !result.baseSha || !result.headSha) return out({ run, end: result.end, reason: result.reason, costUsd: result.costUsd });
 
     // The result comes in as data. It is fetched into the bare history: no file of it is written out, no hook of it can run.
@@ -195,16 +273,25 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     const title = `${ticket}: ${quiet(sentence.trim().split("\n")[0]!).slice(0, 120)}`;
     if (deps.signal?.aborted) return hold("you pressed stop before the result left this computer");
     const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", ...(Number.isInteger(st.issue) && st.issue! > 0 ? [`Closes #${st.issue}`, ""] : []), `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", ...(st.done?.length ? ["Done when (written by SoftwareFactory before the run, from the request):", "", ...st.done.map((x) => `- ${quiet(x)}`), ""] : []), "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.${checksFound ? " It found them in the project as it was before the run." : ""}${unchecked.length ? ` These changed files lie outside what those checks look at, so nothing checked them: ${unchecked.slice(0, 10).map((f) => `\`${quiet(f)}\``).join(", ")}${unchecked.length > 10 ? " and more" : ""}.` : ""}` : checksFound ? "SoftwareFactory found no build or type check in this project, so nothing was checked." : "No checks were set for this project."].join("\n");
-    let url: string, number: number | null = null;
-    if (deps.github.hasToken()) {
-      // openPr pushes HEAD, so HEAD of the bare history points at the ticket's branch for the length of the call.
-      plainGit(h.dir, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
-      try { const pr = await deps.github.openPr({ repo: st.repo, dir: h.dir, branch, base: h.base, title, body }); url = pr.url; number = pr.number; }
-      finally { plainGit(h.dir, "symbolic-ref", "HEAD", `refs/heads/${h.base}`); }
-    } else {
-      await deps.github.pushBranch({ repo: st.repo, dir: h.dir, branch, base: h.base });
-      url = deps.github.compareUrl(st.repo, h.base, branch);
+    // The stop list: these kinds of change wait for the owner's own look, whatever the checks said. The result
+    // stays whole in SoftwareFactory's own history, and the record keeps what is needed to send it on later.
+    // Each changed entry with its kind, exactly as git holds it: a link (120000) or another project (160000) is named,
+    // and a file that is there but cannot be read is held, not taken for a deleted one.
+    const raw = plainGit(h.dir, "-c", "core.quotePath=false", "diff", "--raw", "--no-renames", "--no-ext-diff", "--no-abbrev", "-z", `${result.baseSha}..${branch}`).split("\0");
+    const kinds = new Map<string, { mode: string; status: string }>();
+    for (let i = 0; i + 1 < raw.length; i += 2) { const m = /^:\d+ (\d+) [0-9a-f]+ [0-9a-f]+ ([A-Z])/.exec(raw[i]!); if (m) kinds.set(raw[i + 1]!, { mode: m[1]!, status: m[2]! }); }
+    const links = changed.filter((f) => { const k = kinds.get(f); return !k || k.mode === "120000" || k.mode === "160000"; });
+    const stops = stopsFor(changed, (file, when) => {
+      const k = kinds.get(file);
+      if (k && ((when === "before" && k.status === "A") || (when === "after" && k.status === "D"))) return null;
+      return plainGit(h.dir, "show", `${when === "before" ? result.baseSha : `refs/heads/${branch}`}:${file}`);
+    }, st.stopPaths ?? [], links);
+    if (stops.length) {
+      const reason = stopSentence(stops);
+      record.append({ kind: "result.proposed", who: "SF itself", run, ticket, project, data: { held: true, reason, stop: stops, branch, base: h.base, baseSha: result.baseSha, headSha: result.headSha, files: changed.slice(0, 50), title, body, ...(unchecked.length ? { unchecked: unchecked.slice(0, 50) } : {}) } });
+      return out({ run, end: "parked", reason, branch, costUsd: result.costUsd });
     }
+    const { url, number } = await sendOut(deps.github, st.repo, h.dir, branch, h.base, title, body);
     record.append({ kind: "result.proposed", who: "SF itself", run, ticket, project, data: { url, number, branch, base: h.base, files: changed.slice(0, 50), baseSha: result.baseSha, headSha: result.headSha, ...(unchecked.length ? { unchecked: unchecked.slice(0, 50) } : {}) } });
     return out({ run, end: "passed", reason: result.reason, url, branch, costUsd: result.costUsd });
   } catch (e) {
@@ -220,10 +307,12 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
 export function storyLine(l: RecordLine): string {
     const d = l.data as any;
     const what =
+      l.kind === "ticket.opened" && l.who !== "you" ? `SoftwareFactory opened it${d.parent ? `, a smaller piece cut from ${d.parent}` : ""}: ${d.sentence}` :
       l.kind === "ticket.opened" ? `you asked${d.from === "github" ? ` (issue #${d.issue} on GitHub)` : ""}: ${d.sentence}` :
       l.kind === "issue.linked" ? (d.direction === "in" ? `taken from issue #${d.number} on GitHub` : `issue #${d.number} opened on GitHub for it`) :
+      l.kind === "ticket.split" ? (Array.isArray(d.into) && d.into.length ? `SoftwareFactory split it into ${d.into.join(", ")}` : `it could not be split: ${d.why ?? ""}`) :
       l.kind === "ticket.edited" ? `you changed it${d.sentence ? ` to: ${d.sentence}` : ""}${d.kind ? ` (kind: ${d.kind})` : ""}` :
-      l.kind === "ticket.queued" ? (d.returned ? `it came back to the queue by itself: ${d.why ?? "the wait is over"}` : "you sent it to be worked again") :
+      l.kind === "ticket.queued" ? (d.ladder ? `SoftwareFactory sent it again by itself (the stuck ladder: ${d.ladder})` : d.returned ? `it came back to the queue by itself: ${d.why ?? "the wait is over"}` : "you sent it to be worked again") :
       l.kind === "ticket.removed" ? (d.from === "github" ? `it left the list: ${d.why}` : l.who === "you" ? "you removed it from the list" : "it was removed from the list") :
       l.kind === "ticket.restored" ? "you put it back on the list" :
       l.kind === "gate.asked" ? `before starting, SoftwareFactory asks: ${d.question}` :
@@ -234,7 +323,7 @@ export function storyLine(l: RecordLine): string {
       l.kind === "run.step" ? (d.did ?? d.says?.split("\n")[0]?.slice(0, 140) ?? (d.tools ? `used ${d.tools.map((x: any) => x.tool).join(", ")}` : d.toolErrors ? `a command or tool ended with an error: ${String(d.toolErrors[0]).split("\n")[0]!.slice(0, 100)}` : "finished")) :
       l.kind === "run.checked" ? `check ${d.ok ? "passed" : "FAILED"}: ${d.command}` :
       l.kind === "run.ended" ? `the run ended: ${d.end} (${d.reason})` :
-      l.kind === "result.proposed" ? (d.held ? `the result is held: ${d.reason}` : `proposed on GitHub: ${d.url}`) :
+      l.kind === "result.proposed" ? (d.held ? `the result is held: ${d.reason}` : d.released ? `you looked and let it go to GitHub: ${d.url}` : `proposed on GitHub: ${d.url}`) :
       l.kind === "result.accepted" ? (d.foundMerged ? "found already put into the project on GitHub" : "you accepted it: it is in the project now") :
       l.kind === "result.undone" ? (d.url && !d.sha ? `the undo is ready on GitHub, waiting to be put in: ${d.url}` : "you undid it: the project is as it was before, and its history keeps both steps") :
       l.kind === "stop.pressed" ? "you pressed stop" :

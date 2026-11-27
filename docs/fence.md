@@ -230,3 +230,108 @@ With more, each run gets a cell of its own (`fence/cell.ts`): a cgroup made by r
 - Two copies do not see each other: the agent's shell sees only its own copy, and the Read and Edit tools refuse the other (tried the same day).
 - What two runs still share: the one worker account, its home and `/tmp`, and the one sign-in. SoftwareFactory's own steps run as that account too.
 - The home screen shows every run that works, with a Stop for each. The watchdog still ends the whole room when SoftwareFactory itself goes away.
+
+## The stop list
+
+Inside the fence a run is free. Five kinds of change still wait for your own look before they leave this
+computer, whatever the checks said (`packages/core/src/fence/stoplist.ts`):
+
+| Family | What holds a result |
+| --- | --- |
+| security | settings for AI agents and editors (`.claude`, `.cursor`, `.vscode`, `.mcp.json`), `CLAUDE.md` and its like, `.env` files, key files, `.npmrc` and its like, `CODEOWNERS`, any name with a word for sign-in, rights or secrets, and any link or project placed inside the project |
+| leaves the computer | Dockerfile, compose files, hosting files (Vercel, Netlify, Fly, Render, Wrangler and others), deploy scripts, Terraform, deploy and infra folders |
+| live data and money | migrations, `.sql` files, any name with a word for payments, payouts, billing, checkout, a wallet or a ledger |
+| runs by itself | git hook folders, other CI files, Makefile and its like, a package.json script that npm runs by itself (`postinstall`, `prepare` and others) |
+| new package | a new or moved package in package.json, anything new in go.mod, every lockfile, vendored packages, and the package lists of other languages |
+
+Names are matched whatever their case, and by whole words: `PaymentForm.tsx` is held, `StripedTable.tsx` is not.
+A file that is there and cannot be read is held, never taken for a deleted one. The list errs on the side of
+holding: `.env.example` and a test of the sign-in code wait for your look too.
+
+How it behaves:
+
+- The stop blocks that one result, not the factory. The run ends, the ticket shows **Held here** with each
+  file and its reason, and the queue goes on with the next ticket.
+- The result stays whole in SoftwareFactory's own history. The record line (`result.proposed`, `held`, `stop`)
+  keeps the branch, the two commits, the title and the words of the proposal.
+- Only you let it go: **I looked: let it go to GitHub**, then **Yes**. The result is checked for secrets once
+  more, sent as the same draft pull request, and the record says you released it (`released`, who: you). It still
+  needs your accept like any other.
+- A hold for a secret, for `.github/`, or for a check the result rewrote is not on this list and is never let go
+  from the screen. Work it again instead.
+- The list is closed. Settings can add paths (**More on the stop list**, `stopPaths`, plain text matched anywhere
+  in a file's path) and can never take one away. Nothing of the result is run to decide any of this.
+
+## Two limits
+
+SoftwareFactory counts what runs use, in the dollars Claude Code reports for each run, from the record alone
+(`packages/core/src/fence/limits.ts`). With a plan sign-in these are not a bill; they are the measure.
+
+| Limit | What counts under it | Setting |
+| --- | --- | --- |
+| Limit 1 | work you sent: a ticket you opened (an issue of yours counts) or sent again | `limitYou`, 100 a month |
+| Limit 2 | what SoftwareFactory does by itself: a ticket it brought back, and its own work | `limitAlone`, 50 a month |
+| Own share | the most of limit 2 SoftwareFactory's own work may use | `ownSharePercent`, 20 |
+| One run | the most a single run may use | `runLimit`, 5 |
+| Floor | a run is not started with less than this left of its limit | `runFloor`, 0.5 |
+
+The period is a day, a week (from Sunday) or a month (`limitPeriod`), by this computer's calendar.
+
+At a limit nothing is asked for:
+
+- Work of a kind whose limit is used up does not start. The ticket stays waiting and says until when. The other
+  kind goes on.
+- Each run is started with its own ceiling (`--max-budget-usd`): the run limit, or what is left of its limit if
+  that is less. A run at work holds its ceiling back from the limit, so two runs cannot spend the same room.
+- A run that meets its ceiling, its turns or its time limit is parked and **its work is kept**: committed in the
+  room, brought out as data, and held as a branch in SoftwareFactory's own history. It was not checked and is
+  sent nowhere. The next run of that ticket starts with those changes already in its files, and the result is
+  checked whole as always. If the kept work no longer fits the project, the run starts clean and says so.
+- The plan limit met in the middle of work keeps the work the same way.
+- Only the ticket's latest run counts. A later run that failed, crashed or was stopped ends the kept work, and so
+  does **Start clean** on the ticket. Kept work from another starting branch is not used.
+- A run that was cut off, stopped or timed out never says what it used. It is counted at its ceiling
+  (`costAssumed` on its last line), so the limits cannot be passed by runs that end without a word.
+- Kept branches stay in SoftwareFactory's own history; nothing removes them yet.
+- Claude Code counts the ceiling by its own estimate and may pass it a little.
+
+Nothing uses the own share yet: no work of SoftwareFactory's own exists before step 5. The share is counted so
+that work has its ceiling from its first day.
+
+
+## Since you left
+
+At the top of the home screen one panel says what SoftwareFactory did by itself since you last pressed
+**Got it** (`packages/core/src/fence/since.ts`). It is read from the record and from where each ticket stands
+now, in three groups:
+
+- **Waits for your word**: a question at the gate, a result the stop list holds.
+- **Finished and checked, ready for you**: a draft pull request to accept.
+- **Did not finish**: failed its checks, parked, crashed, cut off; each with its reason in one sentence.
+
+A ticket shows once, as it stands: one that failed and was then worked again and finished is under "ready".
+What you did yourself is not news and is left out. The panel also says how many tickets SoftwareFactory brought
+back by itself and what the time used. **Got it** writes one line in the record (`home.seen`, by you) and the
+panel starts anew from there; no ticket is hidden or changed by it.
+
+## The stuck ladder
+
+A ticket whose run did not finish is not left lying, and is not tried forever
+(`packages/core/src/fence/ladder.ts`). It climbs by itself, one rung at a time:
+
+1. **Once more.** The next run is told how the earlier one ended and the end of the failed check's output.
+2. **Another way.** The run is told not to repeat the approach; a different model can be set for this rung.
+3. **Split.** A reader in the room (no tools, one turn) cuts the ticket once into two or three smaller tickets.
+   They are opened by SoftwareFactory, say which ticket they came from, and are worked in its place. Between
+   them they share a small number of further tries, and they are never split again.
+4. **Parked.** The ticket waits for you, with everything that was tried in its story.
+
+The ladder is for a run that failed its checks, crashed in the room, or was parked at its ceiling, turns or
+time. It is not for a stop you pressed, a held result, the plan limit (that has its own return) or a fence that
+did not hold. Only a run that ended while this SoftwareFactory was open, and within the last hour, climbs: opening the screen
+never starts paid work on a failure from before. A ticket of one short sentence is not sent to the split reader. Every climb is a line in the record by SoftwareFactory and counts under limit 2.
+"Work it again" by you starts the ladder anew for that ticket.
+
+Settings: `ladder` (on), `ladderAgain` 1, `ladderOtherWay` 1, `ladderModel` (empty: the same model),
+`ladderSplit` (on), `ladderSharedTries` 2, `ladderSplitModel` haiku, `ladderSplitMinChars` 120,
+`ladderWithinMinutes` 60.

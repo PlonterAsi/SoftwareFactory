@@ -32,7 +32,7 @@ function fakeGitHub(pr: Record<string, unknown> = {}) {
 
 function home(record: TheRecord, over: Partial<HomeDeps> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
-  return createHome({ record, github: fakeGitHub().gh, settings: settingsFileIn(dir, { repo: "o/p" }), hosts: ["127.0.0.1:1"], key: "k".repeat(48), work: async () => { throw new Error("not used"); }, ...over });
+  return createHome({ record, github: fakeGitHub().gh, settings: settingsFileIn(dir, { repo: "o/p", ladder: false }), hosts: ["127.0.0.1:1"], key: "k".repeat(48), work: async () => { throw new Error("not used"); }, ...over });
 }
 
 describe("the home screen's settings", () => {
@@ -89,10 +89,31 @@ describe("tickets, drawn from the record alone", () => {
     expect(ticketsFrom(r.all(), null).find((x) => x.ticket === "T5")).toMatchObject({ state: "waiting" });
   });
 
+  it("does not climb the ladder after a stop the owner pressed, however the run wrote its end", () => {
+    const r = new TheRecord();
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "X.", kind: "request" } });
+    r.append({ kind: "run.started", who: "SF itself", run: "T1-a", ticket: "T1", project: "o/p", data: {} });
+    r.append({ kind: "run.ended", who: "SF itself", run: "T1-a", ticket: "T1", project: "o/p", data: { end: "failed its checks", reason: "a check failed" } });
+    expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ climbable: true });
+    const r2 = new TheRecord();
+    r2.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "X.", kind: "request" } });
+    r2.append({ kind: "run.started", who: "SF itself", run: "T1-a", ticket: "T1", project: "o/p", data: {} });
+    r2.append({ kind: "stop.pressed", who: "you", ticket: "T1", project: "o/p", data: {} });
+    r2.append({ kind: "run.ended", who: "SF itself", run: "T1-a", ticket: "T1", project: "o/p", data: { end: "failed its checks", reason: "a check failed" } });
+    expect(ticketsFrom(r2.all(), null)[0]).toMatchObject({ climbable: false });
+  });
+
   it("a held result cannot be accepted, an accepted one says so", () => {
     const r = new TheRecord();
     proposed(r, "T1", { held: true, reason: "a secret was found", url: undefined, number: undefined });
     expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ state: "held", canAccept: false });
+    expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ canRelease: false, stops: [] });
+    // The stop list holds too, and that one the owner can let go; once let go it is an ordinary proposal.
+    const r3 = new TheRecord();
+    proposed(r3, "T1", { held: true, reason: "it waits for your look", stop: [{ family: "new package", file: "package.json", why: "a new package: left-pad" }], url: undefined, number: undefined });
+    expect(ticketsFrom(r3.all(), null)[0]).toMatchObject({ state: "held", canAccept: false, canRelease: true, stops: [{ family: "new package", file: "package.json" }] });
+    r3.append({ kind: "result.proposed", who: "you", ticket: "T1", project: "o/p", data: { url: "https://github.com/o/p/pull/9", number: 9, released: true } });
+    expect(ticketsFrom(r3.all(), null)[0]).toMatchObject({ state: "proposed", canAccept: true, canRelease: false, stops: [] });
     const r2 = new TheRecord();
     proposed(r2, "T1");
     r2.append({ kind: "result.accepted", who: "you", ticket: "T1", project: "o/p", data: {} });
@@ -250,6 +271,128 @@ describe("the page and its door", () => {
     expect((await post("ticket/edit", { ticket: "T9", sentence: "x" })).status).toBe(409);
   });
 
+  it("starts nothing of a kind whose limit is used up, says until when, and hands each run its own ceiling", async () => {
+    const r = new TheRecord();
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "Old.", kind: "request" } });
+    r.append({ kind: "run.step", who: "worker", ticket: "T1", project: "o/p", costUsd: 3, data: { finished: true } });
+    r.append({ kind: "run.ended", who: "SF itself", ticket: "T1", project: "o/p", data: { end: "failed its checks", reason: "x" } });
+    const seen: { ticket: string; budget: number | undefined }[] = [];
+    const { url, h } = await serve(r, { work: async (st, ticket) => { seen.push({ ticket, budget: st.budgetUsd }); r.append({ kind: "run.ended", who: "SF itself", ticket, project: "o/p", data: { end: "parked", reason: "x" } }); return {} as any; } });
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    expect((await post("settings", { gate: false, limitYou: 2, limitAlone: 4, runLimit: 5 })).status).toBe(200);
+    await post("work", { sentence: "New." });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual([]);
+    const st = h.state();
+    expect(st.tickets.find((t) => t.ticket === "T2")).toMatchObject({ state: "waiting", bucket: "you" });
+    expect(st.tickets.find((t) => t.ticket === "T2")!.limitUntil).toBe(st.limits.until);
+    expect(st.limits).toMatchObject({ used: { you: 3, alone: 0 }, room: { you: 0, alone: 4 } });
+    // What SoftwareFactory brings back by itself counts under limit 2, which has room: it goes on.
+    r.append({ kind: "ticket.queued", who: "SF itself", ticket: "T1", project: "o/p", data: { returned: true } });
+    h.pump();
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual([{ ticket: "T1", budget: 4 }]);
+    expect((await post("settings", { limitYou: 10 })).status).toBe(200);
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen[1]).toEqual({ ticket: "T2", budget: 5 });
+    expect((await post("settings", { limitYou: -3 })).status).toBe(400);
+    h.close();
+  });
+
+  it("says what happened since the owner last looked, in three groups, and Got it starts the count anew", async () => {
+    const r = new TheRecord();
+    proposed(r, "T1");
+    proposed(r, "T2", { held: true, reason: "it waits for your look", stop: [{ family: "security", file: ".env.example", why: "x" }], url: undefined, number: undefined });
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T3", project: "o/p", data: { sentence: "Fix it.", kind: "request" } });
+    r.append({ kind: "run.ended", who: "SF itself", ticket: "T3", project: "o/p", data: { end: "failed its checks", reason: "a check failed: npm run build" } });
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T4", project: "o/q", data: { sentence: "Only waiting.", kind: "request" } });
+    const { url, h } = await serve(r, { work: async () => new Promise(() => undefined) });
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    const a = h.state().since;
+    expect(a.seenAt).toBeNull();
+    expect(a.items.map((x) => `${x.group} ${x.ticket}`)).toEqual(["yours T2", "ready T1", "unfinished T3"]);
+    expect(a.items[2]!.says).toBe("a check failed: npm run build");
+    expect(a.costUsd).toBeGreaterThan(0);
+    expect((await post("seen", {})).status).toBe(200);
+    expect(h.state().since).toMatchObject({ items: [], costUsd: 0, counts: { yours: 0, ready: 0, unfinished: 0 } });
+    expect(h.state().since.seenAt).not.toBeNull();
+    expect(h.state().tickets.filter((t) => !t.removed)).toHaveLength(4);
+    // News after that: only what SoftwareFactory did, not what the owner did.
+    r.append({ kind: "ticket.queued", who: "you", ticket: "T3", project: "o/p", data: {} });
+    expect(h.state().since.items).toEqual([]);
+    const n = r.all().filter((l) => l.kind === "home.seen").length;
+    await post("seen", {});
+    expect(r.all().filter((l) => l.kind === "home.seen")).toHaveLength(n);
+    // News that came while the press was on its way is not waved off: Got it names the last line the page had read.
+    const read = h.state().since.upTo;
+    proposed(r, "T5");
+    r.append({ kind: "run.ended", who: "SF itself", ticket: "T5", project: "o/p", data: { end: "crashed", reason: "x" } });
+    r.append({ kind: "issue.linked", who: "SF itself", ticket: "T1", project: "o/p", data: { number: 3 } });
+    await post("seen", { upTo: read });
+    expect(h.state().since.items.map((x) => x.ticket)).toEqual(["T5"]);
+    // Each group is cut by itself, and says how many it holds.
+    for (let i = 6; i < 20; i++) proposed(r, `T${i}`);
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T30", project: "o/p", data: { sentence: "Fails.", kind: "request" } });
+    r.append({ kind: "run.ended", who: "SF itself", ticket: "T30", project: "o/p", data: { end: "crashed", reason: "boom" } });
+    const big = h.state().since;
+    expect(big.counts).toMatchObject({ ready: 15, unfinished: 1 });
+    expect(big.items.filter((x) => x.group === "ready")).toHaveLength(10);
+    expect(big.items.some((x) => x.ticket === "T30")).toBe(true);
+    h.close();
+  });
+
+  it("climbs the stuck ladder by itself: once more, another way, split, a few shared tries, then waits for the owner", async () => {
+    const r = new TheRecord();
+    const seen: { ticket: string; model: string; hint: string }[] = [];
+    let n = 0;
+    const { url, h } = await serve(r, {
+      settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, ladderModel: "opus", ladderSplitMinChars: 0 }),
+      work: async (st, ticket) => {
+        const run = `${ticket}-${++n}`;
+        seen.push({ ticket, model: st.model, hint: st.hint ?? "" });
+        r.append({ kind: "run.started", who: "SF itself", run, ticket, project: "o/p", data: {} });
+        r.append({ kind: "run.checked", who: "SF itself", run, ticket, project: "o/p", data: { command: "npm run build", ok: false, tail: "TS2304 boom" } });
+        r.append({ kind: "run.ended", who: "SF itself", run, ticket, project: "o/p", data: { end: "failed its checks", reason: "a check failed: npm run build" } });
+        return {} as any;
+      },
+      split: async (q) => { expect(q.failed).toContain("TS2304 boom"); return { ok: true, parts: ["First half.", "Second half."], costUsd: 0.02 }; },
+    });
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    await post("work", { sentence: "A big thing." });
+    for (let i = 0; i < 40; i++) await new Promise((ok) => setTimeout(ok, 10));
+    expect(seen.map((x) => x.ticket)).toEqual(["T1", "T1", "T1", "T2", "T3", "T2", "T3"]);
+    expect(seen[0]).toMatchObject({ model: "sonnet", hint: "" });
+    expect(seen[1]!.hint).toMatch(/did not finish[\s\S]*TS2304 boom/);
+    expect(seen[2]).toMatchObject({ model: "opus" });
+    expect(seen[2]!.hint).toMatch(/a different way/);
+    const st = h.state();
+    const of = (t: string) => st.tickets.find((x) => x.ticket === t)!;
+    expect(of("T1")).toMatchObject({ state: "split", splitInto: ["T2", "T3"], canAgain: false, wasSplit: true });
+    expect(of("T2")).toMatchObject({ state: "failed its checks", parent: "T1", bucket: "alone", sentence: "First half.", ladderUsed: 1 });
+    expect(r.all().filter((l) => l.kind === "ticket.split")).toHaveLength(1);
+    expect(r.all().filter((l) => l.kind === "ticket.queued").map((l) => (l.data as any).ladder)).toEqual(["once more", "another way", "once more", "once more"]);
+    // Everything SoftwareFactory did here by itself counts under limit 2; only the first run was the owner's.
+    expect(st.since.counts.unfinished).toBe(3);
+    expect(st.since.cameBack).toBe(3);
+    h.close();
+  });
+
+  it("lets a held result go only by the owner's own press, and only a stop-list hold", async () => {
+    const r = new TheRecord();
+    proposed(r, "T1", { held: true, reason: "a secret was found", url: undefined, number: undefined });
+    proposed(r, "T2", { held: true, reason: "it waits for your look", stop: [{ family: "security", file: ".env.example", why: "a file that usually holds keys and passwords" }], url: undefined, number: undefined });
+    const asked: string[] = [];
+    const { url, h } = await serve(r, { release: async (ticket) => { asked.push(ticket); r.append({ kind: "result.proposed", who: "you", ticket, project: "o/p", data: { url: "https://github.com/o/p/pull/9", number: 9, released: true } }); return { ok: true, url: "https://github.com/o/p/pull/9", number: 9 }; } });
+    const post = (path: string, body: unknown, key = h.key) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(key), body: JSON.stringify(body) });
+    expect((await post("release", { ticket: "T2" }, "x".repeat(48))).status).not.toBe(200);
+    expect((await post("release", { ticket: "T1" })).status).toBe(409);
+    expect(asked).toEqual([]);
+    expect((await post("release", { ticket: "T2" })).status).toBe(200);
+    expect((await post("release", { ticket: "T2" })).status).toBe(409);
+    expect(asked).toEqual(["T2"]);
+    h.close();
+  });
+
   it("starts nothing new once it is closing, and leaves another project's ticket waiting", async () => {
     const r = new TheRecord();
     const seen: string[] = [];
@@ -261,7 +404,7 @@ describe("the page and its door", () => {
     expect(seen).toEqual(["T1"]);
     expect(ticketsFrom(r.all(), null).find((t) => t.ticket === "T2")).toMatchObject({ state: "waiting" });
     // A fresh start on the same record, with Settings on another project: T2 stays where it is.
-    const other = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/other" }), work: async (_s, ticket) => { seen.push(`other ${ticket}`); return {} as any; } });
+    const other = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/other", ladder: false }), work: async (_s, ticket) => { seen.push(`other ${ticket}`); return {} as any; } });
     other.h.pump();
     await new Promise((ok) => setTimeout(ok, 20));
     expect(seen).toEqual(["T1"]);
@@ -327,7 +470,7 @@ describe("the page and its door", () => {
       const r = new TheRecord();
       const seen: string[] = [];
       let limit = true;
-      const { url, h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, parkedWaitMinutes: 10, parkedReturns: 1 }), work: async (_s, ticket) => {
+      const { url, h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, ladder: false, parkedWaitMinutes: 10, parkedReturns: 1 }), work: async (_s, ticket) => {
         seen.push(ticket);
         r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-${seen.length}`, ticket, project: "o/p", data: {} });
         r.append({ kind: "run.ended", who: "SF itself", run: `${ticket}-${seen.length}`, ticket, project: "o/p", data: limit ? { end: "parked", reason: "the plan limit was reached", parkedFor: "limit" } : { end: "crashed", reason: "done for the test" } });
@@ -368,7 +511,7 @@ describe("the page and its door", () => {
   it("works two tickets at once when Settings give two slots, and stops one without touching the other", async () => {
     const r = new TheRecord();
     const live = new Map<string, boolean | undefined>();
-    const { url, h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, slots: 2 }), work: async (st, ticket, _t, signal) => {
+    const { url, h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, ladder: false, slots: 2 }), work: async (st, ticket, _t, signal) => {
       live.set(ticket, st.ownCell);
       r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-a`, ticket, project: "o/p", data: {} });
       await new Promise<void>((ok) => signal.addEventListener("abort", () => ok()));
@@ -405,7 +548,7 @@ describe("the page and its door", () => {
     expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ state: "interrupted", cutOff: true, cutOffReturns: 0 });
     const seen: string[] = [];
     // The run is cut off again each time: it leaves a start and no end.
-    const { h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false }), work: async (_s, ticket) => { seen.push(ticket); r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-b`, ticket, project: "o/p", data: {} }); return {} as any; } });
+    const { h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, ladder: false }), work: async (_s, ticket) => { seen.push(ticket); r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-b`, ticket, project: "o/p", data: {} }); return {} as any; } });
     h.pump();
     await new Promise((ok) => setTimeout(ok, 30));
     expect(seen).toEqual(["T1"]);

@@ -1,6 +1,6 @@
 import type { GitHub, GitHubRepo, Issue } from "../tickets/github.js";
 import type { RecordLine, TheRecord } from "./record.js";
-import { type TicketKind, openTicket } from "./ticketrun.js";
+import { type TicketKind, openTicket, quiet } from "./ticketrun.js";
 
 /**
  * GitHub in step, both ways (docs/fence.md, "GitHub issues").
@@ -91,8 +91,9 @@ export async function syncIssues(deps: IssueDeps, repo: GitHubRepo, o: { mode: I
         if (!t) continue;
         // Only a ticket that still waits gets an issue: switching this on never fills GitHub with issues for old tickets.
         if (links.has(t.ticket) || t.removed || !t.untouched || out.in.includes(t.ticket)) continue;
-        const first = t.sentence.trim().split("\n")[0]!.slice(0, 120);
-        const made = await github.createIssue(repo, { title: first, body: `${t.sentence.trim()}\n\nOpened in SoftwareFactory as ticket ${t.ticket}.\n${markOf(t.ticket)}`, labels: [o.label, ...(t.kind === "bug" ? ["bug"] : [])].filter(Boolean) });
+        // Words that go out call nobody and link nothing: a ticket's words may come from a reader, not from the owner.
+        const first = quiet(t.sentence.trim().split("\n")[0]!).slice(0, 120);
+        const made = await github.createIssue(repo, { title: first, body: `${quiet(t.sentence.trim())}\n\nOpened in SoftwareFactory as ticket ${t.ticket}.\n${markOf(t.ticket)}`, labels: [o.label, ...(t.kind === "bug" ? ["bug"] : [])].filter(Boolean) });
         record.append({ kind: "issue.linked", who: "SF itself", ticket: t.ticket, project, data: { number: made.number, url: made.url, direction: "out" } });
         links.set(t.ticket, { number: made.number, url: made.url, direction: "out" });
         out.out.push(t.ticket);

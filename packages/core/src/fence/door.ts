@@ -48,6 +48,12 @@ export interface RunRequest {
   done?: string[];
   /** More than one run may work at once: this run gets a cell of its own, and ending it touches no other run. */
   ownCell?: boolean;
+  /** The most this run may use, in dollars. Claude Code stops the agent near it; the work so far is kept. */
+  budgetUsd?: number;
+  /** What SoftwareFactory tells the run about an earlier run of this ticket that did not finish (the stuck ladder). */
+  hint?: string;
+  /** A branch in the bundle with this ticket's unfinished work from an earlier run that met a limit: the run goes on from it. */
+  resume?: string;
   signal?: AbortSignal;
 }
 
@@ -56,8 +62,10 @@ export interface CheckResult { command: string; ok: boolean; exit: number | null
 export interface RunResult {
   end: RunEnd;
   reason: string;
-  /** The new commits as a git bundle, when the run passed. */
+  /** The new commits as a git bundle: when the run passed, and when it was parked at a limit with unfinished work (`kept`). */
   bundle: Buffer | null;
+  /** The bundle is unfinished work, kept so a later run can go on from it. It was not checked and never leaves by itself. */
+  kept?: boolean;
   baseSha: string | null;
   headSha: string | null;
   costUsd: number;
@@ -69,9 +77,11 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/;
 
 /** What the agent is told. The sentence is the person's; the rest is fixed. */
-export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare" | "done">): string {
+export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare" | "done" | "hint">, resumed = false): string {
   return [
     "You are working on a copy of a real project. Do what the owner asks below, completely and with care, and nothing beyond it.",
+    ...(r.hint ? ["", "From SoftwareFactory, about an earlier try:", r.hint.slice(0, 2500)] : []),
+    ...(resumed ? ["", "An earlier run on this same request stopped at a limit before it finished. Its unfinished changes are already in your files (see `git status`). Look at them first, keep what is right, and finish the request from there."] : []),
     "",
     "The owner's request:",
     r.sentence.trim(),
@@ -120,7 +130,7 @@ agent_env() { export ${env}; export PATH=/usr/local/go/bin:$PATH; ${AGENT_ENV}; 
 }
 
 
-interface AgentEnd { isError: boolean; outOfTurns: boolean; text: string; costUsd: number; turns: number }
+interface AgentEnd { isError: boolean; outOfTurns: boolean; outOfBudget: boolean; text: string; costUsd: number; turns: number }
 
 /** One line of Claude Code's stream becomes at most one line of the record. Content only: the stamps are ours. */
 export function stepOf(line: string): { data: Record<string, unknown>; end?: AgentEnd; outside?: string[]; started?: boolean } | null {
@@ -153,7 +163,7 @@ export function stepOf(line: string): { data: Record<string, unknown>; end?: Age
   }
   if (j.type === "result") {
     const sub = typeof j.subtype === "string" ? j.subtype : "";
-    const end: AgentEnd = { isError: !!j.is_error || (!!sub && sub !== "success"), outOfTurns: sub === "error_max_turns", text: cut(j.result ?? sub, 4000), costUsd: Number(j.total_cost_usd ?? 0) || 0, turns: Number(j.num_turns ?? 0) || 0 };
+    const end: AgentEnd = { isError: !!j.is_error || (!!sub && sub !== "success"), outOfTurns: sub === "error_max_turns", outOfBudget: sub === "error_max_budget_usd", text: cut(j.result ?? sub, 4000), costUsd: Number(j.total_cost_usd ?? 0) || 0, turns: Number(j.num_turns ?? 0) || 0 };
     return { data: { finished: true, turns: end.turns, denials: Array.isArray(j.permission_denials) ? j.permission_denials.length : 0 }, end };
   }
   return null;
@@ -176,7 +186,10 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
   const copyDir = `${s.copies}/run-${req.run}`, scratchDir = `${copyDir}.sf`;
   const inFile = `${scratchDir}/in.bundle`, outFile = `${scratchDir}/out.bundle`;
   const tag = randomBytes(6).toString("hex");
+  const resume = req.resume && BRANCH.test(req.resume) && !req.resume.includes("..") && req.resume !== req.branch ? req.resume : null;
+  const budget = Number.isFinite(req.budgetUsd) && req.budgetUsd! > 0 ? Math.max(0.01, req.budgetUsd!) : null;
   const checks: CheckResult[] = [];
+  let agentRan = false, costKnown = false;
   let costUsd = 0, summary = "", baseSha: string | null = null, headSha: string | null = null;
 
   // Stop always works: whatever the run is doing, everything of the worker's is killed inside the room.
@@ -187,15 +200,19 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
   const onAbort = () => { void killAll(); };
   req.signal?.addEventListener("abort", onAbort, { once: true });
 
-  const finish = async (end: RunEnd, reason: string, bundle: Buffer | null = null): Promise<RunResult> => {
+  const finish = async (end: RunEnd, reason: string, bundle: Buffer | null = null, parkedFor?: string): Promise<RunResult> => {
     req.signal?.removeEventListener("abort", onAbort);
     const clear = await killAll();
     // The copy does not stay: a later run must not find an earlier one's files, and the disk must not fill.
     // Go writes its package folders read-only, so they are made writable first or they would stay behind.
     await exec("worker", `chmod -R u+rwX ${copyDir} ${scratchDir} 2>/dev/null; rm -rf ${copyDir} ${scratchDir}`, s.stepTimeoutMs).catch(() => undefined);
     await cell.close();
-    record.append({ kind: "run.ended", who: "SF itself", ...stamp, costUsd: null, data: { end, reason, costUsd, nothingLeftRunning: clear, ...(end === "parked" && /^the plan limit was reached/.test(reason) ? { parkedFor: "limit" } : {}) } });
-    return { end, reason, bundle, baseSha, headSha, costUsd, summary, checks };
+    // A run that was cut off never said what it used. It is counted at its ceiling, so the limits cannot be passed
+    // by runs that end without a word.
+    const assumed = agentRan && !costKnown && budget ? budget : null;
+    if (assumed) costUsd = assumed;
+    record.append({ kind: "run.ended", who: "SF itself", ...stamp, costUsd: assumed, data: { end, reason, costUsd, ...(assumed ? { costAssumed: true } : {}), nothingLeftRunning: clear, ...(end === "parked" && /^the plan limit was reached/.test(reason) ? { parkedFor: "limit" } : end === "parked" && parkedFor ? { parkedFor } : {}), ...(end === "parked" && bundle && headSha ? { kept: { branch: req.branch, headSha, baseSha } } : {}) } });
+    return { end, reason, bundle, baseSha, headSha, costUsd, summary, checks, ...(end === "parked" && bundle ? { kept: true } : {}) };
   };
   const step = async (user: "worker" | "root", script: string, timeoutMs = s.stepTimeoutMs, onLine?: (l: string) => void): Promise<ExecResult> => (user === "worker" ? cell.run(script, timeoutMs, onLine) : exec(user, script, timeoutMs, onLine));
 
@@ -218,21 +235,27 @@ fenced git clone -q -b ${req.base} ${inFile} "$copy/.sf-unpack" || exit 2
 rm -f ${inFile}
 ourgit checkout -q -b ${req.branch} || exit 4
 echo "SFBASE $(ourgit rev-parse HEAD)"
+${resume ? `# Unfinished work of an earlier run on this ticket: its changes are laid into the files, uncommitted. If they no longer fit the project, the run starts clean.
+if ourgit merge --squash -q "origin/${resume}" >/dev/null 2>&1 && ourgit reset -q; then echo "SFRESUMED-${tag}"; else ourgit reset -q --hard; ourgit clean -fdq; echo "SFFRESH-${tag}"; fi` : ""}
 `);
     baseSha = /^SFBASE ([0-9a-f]{40})$/m.exec(unpack.stdout)?.[1] ?? null;
     if (!baseSha) return await finish("crashed", `the copy could not be unpacked (exit ${unpack.code}): ${unpack.stderr.slice(0, 300)}`);
     note("run.step", { did: "copy unpacked in the room", baseSha });
+    const resumed = !!resume && unpack.stdout.includes(`SFRESUMED-${tag}`);
+    if (resume && !resumed && !unpack.stdout.includes(`SFFRESH-${tag}`)) return await finish("crashed", "the kept work of the earlier run could not be laid into the copy, and the copy could not be made clean again");
+    if (resume) note("run.step", { did: resumed ? "the unfinished work of the earlier run is in the files; this run goes on from it" : "the unfinished work of the earlier run no longer fits the project, so this run starts clean" });
     if (stopped()) return await finish("stopped", "you pressed stop");
 
     // 2. The agent works, under Claude Code's sandbox and the managed rules. Each of its lines is stamped by us.
     let agentEnd: AgentEnd | null = null;
     let sawStart = false;
+    agentRan = true;
     const agent = await step("worker", `${pre}
 cd "$copy" || exit 97
 agent_env
 unset ANTHROPIC_API_KEY
-claude -p --output-format stream-json --verbose --model ${req.model} --max-turns ${Math.max(1, Math.floor(req.maxTurns))} ${AGENT_FLAGS} --permission-mode dontAsk <<'SF_PROMPT_${tag}'
-${runPrompt(req).split(`SF_PROMPT_${tag}`).join("")}
+claude -p --output-format stream-json --verbose --model ${req.model} --max-turns ${Math.max(1, Math.floor(req.maxTurns))}${budget ? ` --max-budget-usd ${budget.toFixed(2)}` : ""} ${AGENT_FLAGS} --permission-mode dontAsk <<'SF_PROMPT_${tag}'
+${runPrompt(req, resumed).split(`SF_PROMPT_${tag}`).join("")}
 SF_PROMPT_${tag}
 `, req.timeLimitMs, (line) => {
       const st = stepOf(line);
@@ -241,7 +264,7 @@ SF_PROMPT_${tag}
       // the alarm for the day they do not, and nothing of such a run is kept.
       if (st.started) sawStart = true;
       if (st.outside?.length && !outside.length) { outside = st.outside; void killAll(); }
-      if (st.end) { agentEnd = st.end; costUsd = st.end.costUsd; summary = st.end.text; }
+      if (st.end) { agentEnd = st.end; costUsd = st.end.costUsd; costKnown = true; summary = st.end.text; }
       record.append({ kind: "run.step", who: "worker", ...stamp, costUsd: st.end ? st.end.costUsd : null, data: st.data });
     });
     // Whatever the agent left running is ended now: nothing of its may work on while we commit and check.
@@ -250,10 +273,17 @@ SF_PROMPT_${tag}
     if (outside.length) return await finish("crashed", OUTSIDE(outside));
     if (stopped()) return await finish("stopped", "you pressed stop");
     if (!quiet) return await finish("crashed", "something the run started could not be ended, so its work is not trusted");
-    if (agent.timedOut) return await finish("parked", `the time limit of ${Math.round(req.timeLimitMs / 60_000)} minutes was reached`);
-    if (!done) return await finish(looksLikeLimit(agent.stdout + agent.stderr) ? "parked" : "crashed", looksLikeLimit(agent.stdout + agent.stderr) ? "the plan limit was reached" : `the agent ended without an answer (exit ${agent.code}): ${(agent.stderr || agent.stdout).slice(-300)}`);
-    if (done.outOfTurns) return await finish("parked", `the run used all its ${req.maxTurns} turns before finishing`);
-    if (done.isError) return await finish(looksLikeLimit(done.text) ? "parked" : "crashed", looksLikeLimit(done.text) ? `the plan limit was reached: ${done.text.slice(0, 200)}` : `the agent stopped with an error: ${done.text.slice(0, 300)}`);
+    // An end at a limit keeps the work so far: it is committed and brought out unchecked, for a later run to go on from.
+    let parkedAt: { reason: string; parkedFor?: string } | null = null;
+    if (agent.timedOut) parkedAt = { reason: `the time limit of ${Math.round(req.timeLimitMs / 60_000)} minutes was reached` };
+    else if (!done && looksLikeLimit(agent.stdout + agent.stderr)) parkedAt = { reason: "the plan limit was reached" };
+    else if (!done) return await finish("crashed", `the agent ended without an answer (exit ${agent.code}): ${(agent.stderr || agent.stdout).slice(-300)}`);
+    else if (done.outOfTurns) parkedAt = { reason: `the run used all its ${req.maxTurns} turns before finishing` };
+    else if (done.outOfBudget) parkedAt = { reason: `the run reached its limit of $${(budget ?? 0).toFixed(2)}`, parkedFor: "budget" };
+    else if (done.isError && looksLikeLimit(done.text)) parkedAt = { reason: `the plan limit was reached: ${done.text.slice(0, 200)}` };
+    else if (done.isError) return await finish("crashed", `the agent stopped with an error: ${done.text.slice(0, 300)}`);
+    // A limit met before the agent even said which tools it had: nothing was worked, so there is nothing to keep.
+    if (parkedAt && !sawStart) return await finish("parked", parkedAt.reason, null, parkedAt.parkedFor);
     // Nothing is kept of a run whose first line never told which tools it had.
     if (!sawStart) return await finish("crashed", "the agent never said which tools it had, so its work is not trusted");
 
@@ -272,10 +302,18 @@ if ourgit diff --cached --quiet; then echo SFNOCHANGE; else
   echo "SFHEAD $(ourgit rev-parse HEAD)"
 fi
 `);
-    if (/SFNOCHANGE/.test(commit.stdout)) return await finish("parked", "the run changed nothing in the project");
+    if (/SFNOCHANGE/.test(commit.stdout)) return await finish("parked", parkedAt ? parkedAt.reason : "the run changed nothing in the project", null, parkedAt?.parkedFor);
     headSha = /^SFHEAD ([0-9a-f]{40})$/m.exec(commit.stdout)?.[1] ?? null;
     if (!headSha) return await finish("crashed", `the work could not be committed (exit ${commit.code}): ${commit.stderr.slice(0, 300)}`);
     note("run.step", { did: "work committed in the room", headSha });
+    if (parkedAt) {
+      const keep = await step("worker", `${pre}
+ourgit bundle create - ${baseSha}..${req.branch} > ${outFile} 2>/dev/null && echo "SFPACKED-${tag} $(ourgit rev-parse ${req.branch})"
+`);
+      const kept = new RegExp(`^SFPACKED-${tag} ([0-9a-f]{40})$`, "m").exec(keep.stdout)?.[1] === headSha ? await files.get(outFile, s.stepTimeoutMs).catch(() => null) : null;
+      if (stopped()) return await finish("stopped", "you pressed stop");
+      return await finish("parked", kept ? `${parkedAt.reason}. Its unfinished work is kept on this computer, and the next run of this ticket goes on from it` : parkedAt.reason, kept, parkedAt.parkedFor);
+    }
 
     // 4. The project's own checks, run by us without network. The script and its log are in our scratch folder;
     //    the exit code is read by us, on a line the check itself cannot write (its output goes to the log).
