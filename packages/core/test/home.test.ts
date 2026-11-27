@@ -285,6 +285,33 @@ describe("the page and its door", () => {
     h.close();
   });
 
+  it("says what happened since the owner last looked, in three groups, and Got it starts the count anew", async () => {
+    const r = new TheRecord();
+    proposed(r, "T1");
+    proposed(r, "T2", { held: true, reason: "it waits for your look", stop: [{ family: "security", file: ".env.example", why: "x" }], url: undefined, number: undefined });
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T3", project: "o/p", data: { sentence: "Fix it.", kind: "request" } });
+    r.append({ kind: "run.ended", who: "SF itself", ticket: "T3", project: "o/p", data: { end: "failed its checks", reason: "a check failed: npm run build" } });
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T4", project: "o/q", data: { sentence: "Only waiting.", kind: "request" } });
+    const { url, h } = await serve(r, { work: async () => new Promise(() => undefined) });
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    const a = h.state().since;
+    expect(a.seenAt).toBeNull();
+    expect(a.items.map((x) => `${x.group} ${x.ticket}`)).toEqual(["yours T2", "ready T1", "unfinished T3"]);
+    expect(a.items[2]!.says).toBe("a check failed: npm run build");
+    expect(a.costUsd).toBeGreaterThan(0);
+    expect((await post("seen", {})).status).toBe(200);
+    expect(h.state().since).toMatchObject({ items: [], costUsd: 0 });
+    expect(h.state().since.seenAt).not.toBeNull();
+    expect(h.state().tickets.filter((t) => !t.removed)).toHaveLength(4);
+    // News after that: only what SoftwareFactory did, not what the owner did.
+    r.append({ kind: "ticket.queued", who: "you", ticket: "T3", project: "o/p", data: {} });
+    expect(h.state().since.items).toEqual([]);
+    const n = r.all().filter((l) => l.kind === "home.seen").length;
+    await post("seen", {});
+    expect(r.all().filter((l) => l.kind === "home.seen")).toHaveLength(n);
+    h.close();
+  });
+
   it("lets a held result go only by the owner's own press, and only a stop-list hold", async () => {
     const r = new TheRecord();
     proposed(r, "T1", { held: true, reason: "a secret was found", url: undefined, number: undefined });

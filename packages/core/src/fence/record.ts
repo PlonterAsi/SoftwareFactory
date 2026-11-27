@@ -32,6 +32,7 @@ export const RECORD_KINDS = [
   "stop.pressed",
   "watchdog.spoke",
   "setting.changed",
+  "home.seen",
 ] as const;
 export type RecordKind = (typeof RECORD_KINDS)[number];
 

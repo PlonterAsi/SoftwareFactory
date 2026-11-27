@@ -298,3 +298,18 @@ At a limit nothing is asked for:
 Nothing uses the own share yet: no work of SoftwareFactory's own exists before step 5. The share is counted so
 that work has its ceiling from its first day.
 
+
+## Since you left
+
+At the top of the home screen one panel says what SoftwareFactory did by itself since you last pressed
+**Got it** (`packages/core/src/fence/since.ts`). It is read from the record and from where each ticket stands
+now, in three groups:
+
+- **Waits for your word**: a question at the gate, a result the stop list holds.
+- **Finished and checked, ready for you**: a draft pull request to accept.
+- **Did not finish**: failed its checks, parked, crashed, cut off; each with its reason in one sentence.
+
+A ticket shows once, as it stands: one that failed and was then worked again and finished is under "ready".
+What you did yourself is not news and is left out. The panel also says how many tickets SoftwareFactory brought
+back by itself and what the time used. **Got it** writes one line in the record (`home.seen`, by you) and the
+panel starts anew from there; no ticket is hidden or changed by it.

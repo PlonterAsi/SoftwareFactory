@@ -108,6 +108,10 @@ ol.steps .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; cl
 ol.steps details.facts { margin-top: 2px; font-size: 14px; }
 ol.steps details.facts ul { margin: 4px 0 0; padding-left: 18px; color: var(--soft); overflow-wrap: anywhere; }
 ol.story { list-style: none; margin: 8px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font: 13.5px/1.55 var(--mono); max-height: 420px; overflow: auto; }
+#since { border: 1px solid var(--line); border-radius: 10px; padding: 4px 16px 12px; margin: 0 0 18px; background: var(--card, transparent); }
+#since h3 { font-size: 14px; margin: 12px 0 4px; }
+ul.since { margin: 0; padding-left: 20px; line-height: 1.5; }
+ul.since .why { display: block; color: var(--soft); font-size: 14px; }
 ul.stops { margin: 4px 0 8px; padding-left: 20px; font-size: 14px; line-height: 1.5; }
 ul.stops code { font-family: var(--mono); overflow-wrap: anywhere; }
 ol.story li { display: grid; grid-template-columns: 5.2em 6.2em 1fr; gap: 0 8px; }
@@ -149,6 +153,12 @@ ol.story li.flag .x { color: var(--bad); }
     </div>
     <p class="live" id="now-line"></p>
     <div class="row"><button class="stop" id="stop" type="button">Stop</button><span class="hint">Ends everything the run started, inside the room.</span></div>
+  </section>
+
+  <section id="since" hidden>
+    <h2 id="since-title">Since you last looked</h2>
+    <div id="since-body"></div>
+    <div class="row"><button id="since-ok" type="button">Got it</button><span class="hint" id="since-hint"></span></div>
   </section>
 
   <h2 id="tickets-title">Tickets</h2>
@@ -204,6 +214,33 @@ ol.story li.flag .x { color: var(--bad); }
   function clock(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }); }
   function day(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString([], { day: "numeric", month: "short" }) + ", " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); }
   function money(n) { return "$" + Number(n || 0).toFixed(2); }
+  var sinceSig = "";
+  function drawSince(sn) {
+    var box = $("since");
+    if (!sn || (!sn.items.length && !sn.cameBack)) { box.hidden = true; sinceSig = ""; return; }
+    var sig = JSON.stringify(sn); if (sig === sinceSig) return; sinceSig = sig;
+    box.hidden = false;
+    $("since-title").textContent = sn.seenAt ? "Since you last looked (" + day(sn.seenAt) + ")" : "What happened so far";
+    var body = $("since-body"); body.textContent = "";
+    var names = { yours: "Waits for your word", ready: "Finished and checked, ready for you", unfinished: "Did not finish" };
+    ["yours", "ready", "unfinished"].forEach(function (g) {
+      var mine = sn.items.filter(function (x) { return x.group === g; });
+      if (!mine.length) return;
+      body.appendChild(el("h3", "since-" + g, names[g] + " (" + mine.length + ")"));
+      var ul = el("ul", "since");
+      mine.forEach(function (x) {
+        var li = el("li");
+        var go = el("a", "", x.ticket); go.href = "#t-" + x.ticket; go.onclick = function () { var n = nodes[x.ticket] && nodes[x.ticket].node; if (n && n.scrollIntoView) { n.scrollIntoView({ behavior: "smooth", block: "center" }); return false; } };
+        li.appendChild(go); li.appendChild(document.createTextNode(" " + x.sentence));
+        li.appendChild(el("span", "why", x.says));
+        if (x.url) { var a = el("a", "", "Open on GitHub"); a.href = x.url; a.target = "_blank"; a.rel = "noopener noreferrer"; li.appendChild(document.createTextNode(" ")); li.appendChild(a); }
+        ul.appendChild(li);
+      });
+      body.appendChild(ul);
+    });
+    $("since-hint").textContent = (sn.more ? "And " + sn.more + " more on the list below. " : "") + (sn.cameBack ? sn.cameBack + (sn.cameBack === 1 ? " ticket was" : " tickets were") + " brought back to the queue by SoftwareFactory. " : "") + "This used " + money(sn.costUsd) + ". Got it clears this panel; the tickets stay below.";
+  }
+  $("since-ok").onclick = function () { $("since-ok").disabled = true; post("/api/step1/seen", {}).then(function () { $("since-ok").disabled = false; load(); }); };
   function lines(v) { return String(v || "").split(/\\r?\\n/).map(function (x) { return x.trim(); }).filter(Boolean); }
   var KINDS = { request: "Request", bug: "Bug", task: "Task", idea: "Idea", plan: "Plan", question: "Question" };
   var editing = null, draft = {}, showRemoved = false, answers = {};
@@ -426,6 +463,7 @@ ol.story li.flag .x { color: var(--bad); }
     $("issues-now").hidden = s.settings.issues === "off";
     $("issues-hint").textContent = s.settings.issues === "off" || !s.issuesSeen ? "" : s.issuesSeen.ok ? "GitHub issues looked at " + clock(s.issuesSeen.at) + "." : "GitHub issues could not be read: " + s.issuesSeen.why;
     $("hold").textContent = s.settings.hold ? "Let the queue go" : "Hold the queue";
+    drawSince(s.since);
     if (s.limits) $("limits-line").textContent = "This " + s.limits.period + ": you sent " + money(s.limits.used.you) + " of " + money(s.limits.limit.you) + "; by itself " + money(s.limits.used.alone + s.limits.used.own) + " of " + money(s.limits.limit.alone) + ". New on " + day(s.limits.until) + ".";
     $("queue-hint").textContent = s.settings.hold ? "The queue is held. " + waiting + " waiting; nothing new starts until you let it go." : s.resting ? "The queue rests until " + clock(s.resting.until) + ": " + s.resting.why + ". Work it again on a ticket starts sooner." : (waiting ? waiting + " waiting for a turn." : "");
     $("show-removed").hidden = !gone;

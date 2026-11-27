@@ -7,6 +7,7 @@ import type { GateResult } from "./gate.js";
 import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
 import { type Bucket, type LimitPeriod, type LimitSettings, LIMIT_DEFAULTS, bucketOfSend, checkLimits, periodEnd, periodStart, roomLeft, runBudget, spendOf } from "./limits.js";
+import { sinceYouLeft } from "./since.js";
 import { type Sender, type WatchSettings, WATCH_DEFAULTS, cleanWatch, speak } from "./watchdog.js";
 import { type IssueSync, type IssuesMode, syncIssues } from "./issues.js";
 import { type StoryStep, stepsOf } from "./story.js";
@@ -330,7 +331,7 @@ export function createHome(deps: HomeDeps) {
     const tickets = ticketsFrom(all = record.all(), working());
     const limits = limitsNow(settings, all);
     for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, roomLeft(settings, limits.used), t.bucket) <= 0) t.limitUntil = limits.until; }
-    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits };
+    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, since: sinceYouLeft(all, tickets) };
   };
   const stateOf = (settings: HomeSettings, tickets: TicketView[]) => ({
     settings,
@@ -642,6 +643,11 @@ export function createHome(deps: HomeDeps) {
         if (url.pathname === "/api/step1/stop") { const r = stopNow(typeof b.ticket === "string" && b.ticket ? b.ticket : undefined); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/look") { const r = await look(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/accept") { const r = await accept(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/seen") {
+          // "Got it": from here on the panel shows only what happens after this line. Nothing is hidden or removed.
+          if (state().since.items.length || state().since.cameBack) { record.append({ kind: "home.seen", who: "you", data: {} }); tell(); }
+          return send(res, 200, { ok: true });
+        }
         if (url.pathname === "/api/step1/release") {
           const t = String(b.ticket ?? "");
           if (!deps.release || releasing) return send(res, 409, { ok: false, why: releasing ? "A release is already on its way." : "Letting a held result go is not set up here." });
