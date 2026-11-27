@@ -68,7 +68,7 @@ export interface TicketOutcome {
 }
 
 /** Paths in a result that SoftwareFactory does not send on by itself: they change what runs by itself on GitHub. */
-export const HELD_PATHS = [/^\.github\//, /(^|\/)\.gitmodules$/, /(^|\/)\.gitattributes$/];
+export const HELD_PATHS = [/^\.github(\/|$)/i, /(^|\/)\.gitmodules$/i, /(^|\/)\.gitattributes$/i];
 
 /**
  * A run's own words go into a pull request as words only: they call nobody (@name), close or link no issue
@@ -243,7 +243,17 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", ...(Number.isInteger(st.issue) && st.issue! > 0 ? [`Closes #${st.issue}`, ""] : []), `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", ...(st.done?.length ? ["Done when (written by SoftwareFactory before the run, from the request):", "", ...st.done.map((x) => `- ${quiet(x)}`), ""] : []), "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.${checksFound ? " It found them in the project as it was before the run." : ""}${unchecked.length ? ` These changed files lie outside what those checks look at, so nothing checked them: ${unchecked.slice(0, 10).map((f) => `\`${quiet(f)}\``).join(", ")}${unchecked.length > 10 ? " and more" : ""}.` : ""}` : checksFound ? "SoftwareFactory found no build or type check in this project, so nothing was checked." : "No checks were set for this project."].join("\n");
     // The stop list: these kinds of change wait for the owner's own look, whatever the checks said. The result
     // stays whole in SoftwareFactory's own history, and the record keeps what is needed to send it on later.
-    const stops = stopsFor(changed, (file, when) => { try { return plainGit(h.dir, "show", `${when === "before" ? result.baseSha : `refs/heads/${branch}`}:${file}`); } catch { return null; } }, st.stopPaths ?? []);
+    // Each changed entry with its kind, exactly as git holds it: a link (120000) or another project (160000) is named,
+    // and a file that is there but cannot be read is held, not taken for a deleted one.
+    const raw = plainGit(h.dir, "-c", "core.quotePath=false", "diff", "--raw", "--no-renames", "--no-ext-diff", "--no-abbrev", "-z", `${result.baseSha}..${branch}`).split("\0");
+    const kinds = new Map<string, { mode: string; status: string }>();
+    for (let i = 0; i + 1 < raw.length; i += 2) { const m = /^:\d+ (\d+) [0-9a-f]+ [0-9a-f]+ ([A-Z])/.exec(raw[i]!); if (m) kinds.set(raw[i + 1]!, { mode: m[1]!, status: m[2]! }); }
+    const links = changed.filter((f) => { const k = kinds.get(f); return !k || k.mode === "120000" || k.mode === "160000"; });
+    const stops = stopsFor(changed, (file, when) => {
+      const k = kinds.get(file);
+      if (k && ((when === "before" && k.status === "A") || (when === "after" && k.status === "D"))) return null;
+      return plainGit(h.dir, "show", `${when === "before" ? result.baseSha : `refs/heads/${branch}`}:${file}`);
+    }, st.stopPaths ?? [], links);
     if (stops.length) {
       const reason = stopSentence(stops);
       record.append({ kind: "result.proposed", who: "SF itself", run, ticket, project, data: { held: true, reason, stop: stops, branch, base: h.base, baseSha: result.baseSha, headSha: result.headSha, files: changed.slice(0, 50), title, body, ...(unchecked.length ? { unchecked: unchecked.slice(0, 50) } : {}) } });

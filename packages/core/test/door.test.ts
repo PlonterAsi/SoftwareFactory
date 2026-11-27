@@ -141,6 +141,7 @@ case "$m" in
   hook) echo "hello from the room" > hello.txt; echo "you see me" > kept-out.txt; mkdir -p .git/hooks .git/info; printf '#!/bin/sh\\necho pwned > hello.txt\\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit; echo kept-out.txt > .git/info/exclude;;
   late) echo hi > hello.txt; say '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__claude_ai_Google_Drive__search_files","input":{}}]}}';;
   docker) echo "FROM node:22" > Dockerfile; echo hi > hello.txt;;
+  link) mkdir -p tools/cfg && echo '{}' > tools/cfg/settings.json && ln -s tools/cfg .claude; echo hi > hello.txt;;
   secret) echo "token = ghp_abcdefghijklmnopqrstuvwxyz0123456789" > hello.txt;;
   *) echo "hello from the room" > hello.txt;;
 esac
@@ -318,6 +319,10 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     const b = await workTicket(d2, settings({ stopPaths: ["HELLO"] }), "Add a hello file.");
     expect(b.end).toBe("parked");
     expect(b.reason).toMatch(/your own stop list/);
+    mode("link");
+    const r4 = new TheRecord();
+    expect((await workTicket(deps(r4), settings(), "Add a hello file.")).end).toBe("parked");
+    expect((r4.all().at(-1)!.data as any).stop).toMatchObject([{ family: "security", file: ".claude", why: "a link to another place, or another project inside this one" }, { file: ".claude" }]);
     mode("workflow");
     const r3 = new TheRecord(), d3 = deps(r3);
     await workTicket(d3, settings(), "Add a hello file.");

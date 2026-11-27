@@ -32,7 +32,24 @@ describe("the stop list", () => {
   it("reads a changed go.mod", () => {
     const was = "module x\n\ngo 1.23\n\nrequire (\n\tgithub.com/jackc/pgx/v5 v5.6.0\n)\n";
     const now = "module x\n\ngo 1.23\n\nrequire (\n\tgithub.com/jackc/pgx/v5 v5.7.0\n\tgithub.com/evil/pkg v0.0.1 // indirect\n)\nreplace github.com/a/b => ../b\n";
-    expect(goModStops("backend/go.mod", was, now).map((s) => s.why)).toEqual(["a new or moved package: github.com/jackc/pgx/v5", "a new or moved package: github.com/evil/pkg", "a package taken from another place: replace github.com/a/b => ../b"]);
+    expect(goModStops("backend/go.mod", was, now).map((s) => s.why)).toEqual(["a new line in the module list: github.com/jackc/pgx/v5 v5.7.0", "a new line in the module list: github.com/evil/pkg v0.0.1", "a new line in the module list: replace github.com/a/b => ../b"]);
+    // Inside a block that was already there, and the newer words of the file.
+    const block = "module x\nreplace (\n\tgithub.com/a/b => ../b\n)\n";
+    expect(goModStops("go.mod", block, block.replace(")\n", "\tgithub.com/c/d => github.com/evil/d v1.0.0\n)\ntoolchain go1.99.0\n"))).toHaveLength(2);
     expect(goModStops("backend/go.mod", was, was)).toEqual([]);
+  });
+  it("is not fooled by case, a link, a lockfile, a word inside a word, or a file it cannot read", () => {
+    expect(fam([".Claude/settings.json", ".ENV", "Package.JSON5", ".mcp.json", ".vscode/tasks.json"]).map((x) => x.split(":")[0])).toEqual(["security", "security", "new package", "security", "security"]);
+    // A link standing where the folder would be.
+    expect(fam([".claude", ".husky", "migrations"])).toHaveLength(3);
+    expect(stopsFor(["tools/cfg"], none, [], ["tools/cfg"])).toMatchObject([{ family: "security", file: "tools/cfg" }]);
+    expect(fam(["web/package-lock.json", "pnpm-lock.yaml", "go.work", "vendor/modules.txt", ".pnpmfile.cjs"])).toHaveLength(5);
+    expect(fam(["web/src/components/StripedTable.tsx", "web/src/authorList.ts"])).toEqual([]);
+    expect(fam(["web/src/PaymentForm.tsx", "backend/internal/authService.go", "src/login.go"])).toHaveLength(3);
+    const now = JSON.stringify({ packageManager: "yarn@https://evil.example/yarn.tgz", scripts: { dependencies: "node x.js" } });
+    expect(packageStops("package.json", "{}", now).map((s) => s.family)).toEqual(["new package", "runs by itself"]);
+    expect(stopsFor(["packages/x/package.json"], () => { throw new Error("cannot read"); })).toMatchObject([{ family: "new package", why: "it could not be read, so what it pulls in is not known" }]);
+    const long = stopsFor(["package.json"], (_f, when) => (when === "before" ? "{}" : JSON.stringify({ dependencies: { ["a".repeat(100000)]: "1" } })));
+    expect(long[0]!.why.length).toBeLessThanOrEqual(200);
   });
 });

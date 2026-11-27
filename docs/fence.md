@@ -238,11 +238,15 @@ computer, whatever the checks said (`packages/core/src/fence/stoplist.ts`):
 
 | Family | What holds a result |
 | --- | --- |
-| security | `.claude/`, `CLAUDE.md` and its like, `.env` files, key files, `.npmrc` and its like, `CODEOWNERS`, files named for sign-in, rights or secrets |
-| leaves the computer | Dockerfile, compose files, hosting files (Vercel, Netlify, Fly, Render, Wrangler and others), Terraform, deploy and infra folders |
-| live data and money | migrations, `.sql` files, any path named for payments, payouts, billing, checkout, a wallet or a ledger |
+| security | settings for AI agents and editors (`.claude`, `.cursor`, `.vscode`, `.mcp.json`), `CLAUDE.md` and its like, `.env` files, key files, `.npmrc` and its like, `CODEOWNERS`, any name with a word for sign-in, rights or secrets, and any link or project placed inside the project |
+| leaves the computer | Dockerfile, compose files, hosting files (Vercel, Netlify, Fly, Render, Wrangler and others), deploy scripts, Terraform, deploy and infra folders |
+| live data and money | migrations, `.sql` files, any name with a word for payments, payouts, billing, checkout, a wallet or a ledger |
 | runs by itself | git hook folders, other CI files, Makefile and its like, a package.json script that npm runs by itself (`postinstall`, `prepare` and others) |
-| new package | a new or moved package in package.json or go.mod, and any change to the package lists of other languages |
+| new package | a new or moved package in package.json, anything new in go.mod, every lockfile, vendored packages, and the package lists of other languages |
+
+Names are matched whatever their case, and by whole words: `PaymentForm.tsx` is held, `StripedTable.tsx` is not.
+A file that is there and cannot be read is held, never taken for a deleted one. The list errs on the side of
+holding: `.env.example` and a test of the sign-in code wait for your look too.
 
 How it behaves:
 
