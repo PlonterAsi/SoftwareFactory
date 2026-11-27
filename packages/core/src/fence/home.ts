@@ -63,7 +63,7 @@ export class SettingsFile {
 }
 export const settingsFileIn = (workDir: string, start: Partial<HomeSettings> = {}) => new SettingsFile(join(workDir, "settings.json"), start);
 
-export type TicketState = "working" | "proposed" | "accepted" | "held" | "passed" | "failed its checks" | "parked" | "stopped" | "crashed" | "not started" | "interrupted";
+export type TicketState = "working" | "proposed" | "accepted" | "undone" | "held" | "passed" | "failed its checks" | "parked" | "stopped" | "crashed" | "not started" | "interrupted";
 
 export interface TicketView {
   ticket: string;
@@ -77,6 +77,7 @@ export interface TicketView {
   number: number | null;
   costUsd: number;
   canAccept: boolean;
+  canUndo: boolean;
   story: { id: number; at: string; who: string; what: string; flagged: boolean }[];
 }
 
@@ -89,10 +90,11 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
     const opened = ls.find((l) => l.kind === "ticket.opened");
     if (!opened) continue;
     const last = <K extends RecordLine["kind"]>(k: K) => [...ls].reverse().find((l) => l.kind === k);
-    const ended = last("run.ended"), proposed = last("result.proposed"), accepted = last("result.accepted"), fence = last("fence.tested");
+    const ended = last("run.ended"), proposed = last("result.proposed"), accepted = last("result.accepted"), undone = last("result.undone"), fence = last("fence.tested");
     const d = (l?: RecordLine) => (l?.data ?? {}) as Record<string, any>;
     let state: TicketState, says: string;
-    if (accepted) { state = "accepted"; says = d(accepted).foundMerged ? `It was already put into the project on GitHub${d(accepted).notTheCheckedCommit ? ", with changes made after SoftwareFactory checked it" : ""}.` : "You accepted it. It is in the project."; }
+    if (undone) { state = "undone"; says = d(undone).sha ? "You undid it. The project is as it was before, and its history keeps both steps." : "The undo is on GitHub and still has to be put in there."; }
+    else if (accepted) { state = "accepted"; says = d(accepted).foundMerged ? `It was already put into the project on GitHub${d(accepted).notTheCheckedCommit ? ", with changes made after SoftwareFactory checked it" : ""}.` : "You accepted it. It is in the project."; }
     else if (running === ticket) { state = "working"; says = "A run is working on it now."; }
     else if (proposed && d(proposed).held) { state = "held"; says = `Held on this computer: ${d(proposed).reason}`; }
     else if (proposed) { state = "proposed"; says = "Done and checked. Waiting for you to accept."; }
@@ -106,6 +108,7 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
       url: proposed && typeof d(proposed).url === "string" ? d(proposed).url : null, number,
       costUsd: Math.round(ls.reduce((a, l) => a + (l.costUsd ?? 0), 0) * 10000) / 10000,
       canAccept: state === "proposed" && number !== null,
+      canUndo: state === "accepted" && typeof d(accepted).sha === "string" && !!d(accepted).sha,
       story: ls.map((l) => ({ id: l.id, at: l.ts, who: l.who, what: storyLine(l), flagged: l.flagged })),
     });
   }
@@ -124,6 +127,8 @@ export interface HomeDeps {
   key?: string;
   /** The pass in the address SoftwareFactory opens. Made fresh at every start when not given. */
   pass?: string;
+  /** Takes an accepted change back. Left out: the page offers no undo. */
+  undo?: (ticket: string) => Promise<{ ok: true; sha: string | null; url: string } | { ok: false; why: string }>;
   /** Shown on the page: which room, and what a run may reach. Read-only here; the fence is changed by hand. */
   fence?: { room: string; netList: string[] };
 }
@@ -138,7 +143,7 @@ export function createHome(deps: HomeDeps) {
   let running: { ticket: string | null; stop: AbortController; startedAt: string; before: number } | null = null;
   // The ticket's name is known from its first line in the record.
   const nameIt = () => { if (running && !running.ticket) running.ticket = record.since(running.before).find((l) => l.kind === "ticket.opened")?.ticket ?? null; };
-  let accepting = false;
+  let accepting = false, undoing = false;
   const streams = new Set<ServerResponse>();
   record.onLine((l) => { nameIt(); for (const s of streams) s.write(`data: ${JSON.stringify({ id: l.id })}\n\n`); });
 
@@ -281,6 +286,11 @@ export function createHome(deps: HomeDeps) {
         if (url.pathname === "/api/step1/stop") { const r = stopNow(); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/look") { const r = await look(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/accept") { const r = await accept(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/undo") {
+          if (!deps.undo || undoing) return send(res, 409, { ok: false, why: undoing ? "An undo is already on its way." : "Undo is not set up here." });
+          undoing = true;
+          try { const r = await deps.undo(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); } finally { undoing = false; }
+        }
         if (url.pathname === "/api/step1/settings") { const r = saveSettings(b); return send(res, r.ok ? 200 : 400, r); }
       }
       send(res, 404, { ok: false, why: "no such thing here" });

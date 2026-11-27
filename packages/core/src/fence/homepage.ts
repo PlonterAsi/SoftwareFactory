@@ -138,7 +138,7 @@ ol.story li.flag .x { color: var(--bad); }
   function day(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString([], { day: "numeric", month: "short" }) + ", " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); }
   function money(n) { return "$" + Number(n || 0).toFixed(2); }
   function lines(v) { return String(v || "").split(/\\r?\\n/).map(function (x) { return x.trim(); }).filter(Boolean); }
-  var CHIP = { working: ["Working", "working"], proposed: ["Waiting for you", "proposed"], accepted: ["Accepted", "accepted"], held: ["Held here", "proposed"], passed: ["Passed", ""], "failed its checks": ["Failed its checks", "bad"], parked: ["Parked", ""], stopped: ["Stopped", ""], crashed: ["Crashed", "bad"], "not started": ["Not started", "bad"], interrupted: ["Interrupted", ""] };
+  var CHIP = { working: ["Working", "working"], proposed: ["Waiting for you", "proposed"], accepted: ["Accepted", "accepted"], undone: ["Undone", ""], held: ["Held here", "proposed"], passed: ["Passed", ""], "failed its checks": ["Failed its checks", "bad"], parked: ["Parked", ""], stopped: ["Stopped", ""], crashed: ["Crashed", "bad"], "not started": ["Not started", "bad"], interrupted: ["Interrupted", ""] };
 
   function post(path, body) {
     return fetch(path, { method: "POST", headers: { "content-type": "application/json", "x-sf-key": KEY }, body: JSON.stringify(body || {}) })
@@ -156,7 +156,7 @@ ol.story li.flag .x { color: var(--bad); }
     box.appendChild(top);
     box.appendChild(el("p", "sentence", t.sentence));
     box.appendChild(el("p", "says", t.says));
-    if (t.url || t.canAccept) {
+    if (t.url || t.canAccept || t.canUndo) {
       var row = el("div", "row");
       if (t.canAccept) {
         if (confirming === t.ticket) {
@@ -180,6 +180,26 @@ ol.story li.flag .x { color: var(--bad); }
             post("/api/step1/look", { ticket: t.ticket }).then(function (r) { looked[t.ticket] = r.ok ? r.githubChecks : ""; if (!r.ok) acceptError[t.ticket] = r.why; confirming = r.ok ? t.ticket : null; render(last); });
           };
           row.appendChild(acc);
+        }
+      }
+      if (t.canUndo) {
+        if (confirming === "undo " + t.ticket) {
+          var uyes = el("button", "stop", "Yes, take it back");
+          uyes.type = "button";
+          uyes.onclick = function () { busy = true; uyes.disabled = true; post("/api/step1/undo", { ticket: t.ticket }).then(function (r) { busy = false; confirming = null; if (!r.ok) { acceptError[t.ticket] = r.why; } else { delete acceptError[t.ticket]; } load(); }); };
+          var uno = el("button", "", "Not now");
+          uno.type = "button";
+          uno.onclick = function () { confirming = null; render(last); };
+          uyes.disabled = true;
+          setTimeout(function () { uyes.disabled = false; }, 800);
+          setTimeout(function () { uno.focus(); }, 0);
+          row.appendChild(uno); row.appendChild(uyes);
+          box.appendChild(el("p", "says", "Undo makes a new change that takes this one back. Nothing is erased: the project's history keeps both."));
+        } else {
+          var und = el("button", "", "Undo");
+          und.type = "button";
+          und.onclick = function () { confirming = "undo " + t.ticket; render(last); };
+          row.appendChild(und);
         }
       }
       if (t.url && /^https:\\/\\/github\\.com\\//.test(t.url)) { var a = el("a", "btn", "Open the proposal on GitHub"); a.href = t.url; a.target = "_blank"; a.rel = "noopener noreferrer"; row.appendChild(a); }
@@ -229,7 +249,7 @@ ol.story li.flag .x { color: var(--bad); }
         if (!s.tickets.length) list.appendChild(el("p", "empty", "No tickets yet. Your first sentence starts one."));
       }
       s.tickets.forEach(function (t) {
-        var sig = JSON.stringify(t) + "|" + (confirming === t.ticket) + "|" + (acceptError[t.ticket] || "");
+        var sig = JSON.stringify(t) + "|" + (confirming === t.ticket || confirming === "undo " + t.ticket) + "|" + (acceptError[t.ticket] || "");
         var had = nodes[t.ticket];
         if (had && had.sig === sig) return;
         var fresh = ticketNode(t);

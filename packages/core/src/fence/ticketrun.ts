@@ -66,12 +66,12 @@ export function quiet(text: string): string {
   return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "").replace(/@(?=[A-Za-z0-9])/g, "@\u200b").replace(/#(?=\d)/g, "#\u200b").replace(/<!--/g, "<\u200b!--").slice(0, 4000);
 }
 
-function plainGit(dir: string, ...args: string[]): string {
+export function plainGit(dir: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd: dir, encoding: "utf8", windowsHide: true, timeout: 300_000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }).trim();
 }
 
 /** SoftwareFactory's own bare copy of the project's history. Nothing in it is ever checked out or run. */
-function history(deps: TicketDeps, st: TicketSettings): { dir: string; base: string } {
+export function history(deps: Pick<TicketDeps, "github">, st: Pick<TicketSettings, "repo" | "base" | "workDir">): { dir: string; base: string } {
   const dir = join(st.workDir, "projects", `${st.repo.owner}-${st.repo.name}.git`.replace(/[^A-Za-z0-9._-]/g, "-"));
   const url = deps.github.remote(st.repo);
   const git = (...args: string[]) => (deps.github.hasToken() ? deps.github.git(dir, ...args) : plainGit(dir, ...args));
@@ -181,7 +181,7 @@ export function storyLine(l: RecordLine): string {
       l.kind === "run.ended" ? `the run ended: ${d.end} (${d.reason})` :
       l.kind === "result.proposed" ? (d.held ? `the result is held: ${d.reason}` : `proposed on GitHub: ${d.url}`) :
       l.kind === "result.accepted" ? (d.foundMerged ? "found already put into the project on GitHub" : "you accepted it: it is in the project now") :
-      l.kind === "result.undone" ? "the change was undone" :
+      l.kind === "result.undone" ? (d.url && !d.sha ? `the undo is ready on GitHub, waiting to be put in: ${d.url}` : "you undid it: the project is as it was before, and its history keeps both steps") :
       l.kind === "stop.pressed" ? "you pressed stop" :
       l.kind === "setting.changed" ? `settings changed: ${Object.keys(d.changed ?? {}).join(", ")}` : l.kind;
     return String(what).replace(/[\u0000-\u0008\u000b-\u001f\u007f\u009b]/g, "");

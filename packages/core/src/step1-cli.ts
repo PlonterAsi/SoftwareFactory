@@ -10,6 +10,7 @@ import { TheRecord } from "./fence/record.js";
 import { storyText, workTicket, type TicketSettings } from "./fence/ticketrun.js";
 import { windowsProbe } from "./fence-cli.js";
 import { createHome, settingsFileIn } from "./fence/home.js";
+import { undoTicket } from "./fence/undo.js";
 
 /**
  * Build step 1 from the command line, on the Windows side, until the home screen exists (slice 3):
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
     const home = createHome({
       record, github, settings: settingsFileIn(workDir, { ...start, ...(raw.repo ? { repo: raw.repo } : {}) }),
       hosts: [`127.0.0.1:${port}`, `localhost:${port}`], fence: { room: fence.room, netList: fence.netList },
+      undo: (ticket) => undoTicket({ record, github, workDir }, ticket),
       work: (st, sentence, signal) => workTicket({ exec, files, record, fence, signal, github, fenceTest: () => runFenceTest(exec, fence, windowsProbe()) }, { ...st, workDir }, sentence),
     });
     const server = createServer((req, res) => { void home.handler(req, res); });

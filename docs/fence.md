@@ -60,6 +60,12 @@ Double-click `SoftwareFactory-Step1.cmd`, or run `npm run step1 -- home`. One pa
 - Accept refuses a proposal that no longer fits on the project as it is today. If the project moved on but the proposal still fits, GitHub puts the checked commit on top of today's project; the checks were run on the project as it was when the run started.
 - While SoftwareFactory talks to GitHub (fetching the project, pushing the proposal) the page waits, up to five minutes at the worst. Stop is taken as soon as that step ends.
 
+## Stop and undo (slice 4)
+
+- Stop is on the home screen while a run works. It ends everything the run started inside the room, the ticket ends as "stopped", and nothing leaves the computer. Closing SoftwareFactory's window does the same.
+- Undo is on every accepted ticket. SoftwareFactory makes a new change that takes back exactly what the accept put in, on top of the project as it is today, and puts it into the project. Nothing is erased: the project's history and the record keep both steps. Later work elsewhere in the project stays.
+- When later work was built on the very lines the change touched, undo refuses and says so. That case needs your hand, or a new ticket.
+
 ## Known limits, said plainly
 
 - Seen on the laptop (27 Nov 2026): inside its own sandbox the agent could not use what its own `npm ci` had just installed (`tsc: not found`), while SoftwareFactory's check seconds later found it and built. Not understood yet. Until it is, a run cannot test a web build itself; SoftwareFactory's checks still do.
