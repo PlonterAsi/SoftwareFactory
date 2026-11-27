@@ -86,14 +86,14 @@
         {
           "id": "ready-gate",
           "title": "Ready gate: SoftwareFactory fills the test of done and asks once when a sentence is unclear",
-          "status": "built",
+          "status": "proven",
           "from": "leg 2",
           "done": "An unclear sentence is asked about before any run; a clear one is not."
         },
         {
           "id": "story",
           "title": "Ticket story with proof at every step",
-          "status": "built",
+          "status": "proven",
           "from": "leg 3",
           "done": "A finished ticket shows each step with its proof."
         },
