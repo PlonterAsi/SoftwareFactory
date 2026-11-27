@@ -50,7 +50,8 @@ describe("the home screen's settings", () => {
     const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
     const f = settingsFileIn(dir, { repo: "o/p" });
     f.write({ ...f.read(), hold: true });
-    expect(JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"))).toEqual({ hold: true });
+    // What differs from the defaults, and always the protected settings: a default that changes later must not move what the owner set.
+    expect(JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"))).toEqual({ hold: true, limitPeriod: "month", limitYou: 100, limitAlone: 50, ownSharePercent: 20, runLimit: 5, runFloor: 0.5, stopPaths: [] });
     expect(f.read()).toMatchObject({ repo: "o/p", hold: true, slots: 1 });
   });
 
@@ -61,7 +62,7 @@ describe("the home screen's settings", () => {
     expect(h.state().settings).toMatchObject({ model: "opus", checks: ["npm test"] });
     expect(r.all().at(-1)).toMatchObject({ kind: "setting.changed", who: "you", data: { changed: { model: { from: "sonnet", to: "opus" } } } });
     h.saveSettings({ model: "opus" });
-    expect(r.all()).toHaveLength(1);
+    expect(r.all().filter((l) => l.who === "you")).toHaveLength(1);
     expect(h.saveSettings({ maxTurns: -1 })).toMatchObject({ ok: false });
   });
 });
@@ -214,7 +215,7 @@ describe("the page and its door", () => {
     expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "application/json", cookie }, body: "{}" })).status).toBe(403);
     expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "text/plain", "x-sf-key": h.key, cookie }, body: "{}" })).status).toBe(403);
     expect((await fetch(`${url}/api/step1/settings`, { method: "POST", headers: json("wrong"), body: "{}" })).status).toBe(403);
-    expect(r.all()).toHaveLength(0);
+    expect(r.all().filter((l) => l.who !== "SF itself")).toHaveLength(0);
   });
 
   it("is a queue: tickets wait their turn, one is worked at a time, and stop reaches only the run", async () => {
@@ -281,7 +282,14 @@ describe("the page and its door", () => {
     const seen: { ticket: string; budget: number | undefined }[] = [];
     const { url, h } = await serve(r, { work: async (st, ticket) => { seen.push({ ticket, budget: st.budgetUsd }); r.append({ kind: "run.ended", who: "SF itself", ticket, project: "o/p", data: { end: "parked", reason: "x" } }); return {} as any; } });
     const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
-    expect((await post("settings", { gate: false, limitYou: 2, limitAlone: 4, runLimit: 5 })).status).toBe(200);
+    // The limits are protected: a save that changes them is refused until each change is named by hand, and nothing is saved meanwhile.
+    const first = await post("settings", { gate: false, limitYou: 2, limitAlone: 4, runLimit: 5 });
+    expect(first.status).toBe(400);
+    expect(((await first.json()) as any).needsHand.map((c: any) => c.key)).toEqual(["limitYou", "limitAlone"]);
+    expect(h.state().settings).toMatchObject({ gate: true, limitYou: 100 });
+    expect((await post("settings", { gate: false, limitYou: 2, limitAlone: 4, runLimit: 5, byHand: ["limitYou"] })).status).toBe(400);
+    expect((await post("settings", { gate: false, limitYou: 2, limitAlone: 4, runLimit: 5, byHand: ["limitYou", "limitAlone"] })).status).toBe(200);
+    expect((r.all().filter((l) => l.kind === "setting.changed").at(-1)!.data as any).byHand).toEqual(["limitYou", "limitAlone"]);
     await post("work", { sentence: "New." });
     await new Promise((ok) => setTimeout(ok, 20));
     expect(seen).toEqual([]);
@@ -294,7 +302,7 @@ describe("the page and its door", () => {
     h.pump();
     await new Promise((ok) => setTimeout(ok, 20));
     expect(seen).toEqual([{ ticket: "T1", budget: 4 }]);
-    expect((await post("settings", { limitYou: 10 })).status).toBe(200);
+    expect((await post("settings", { limitYou: 10, byHand: ["limitYou"] })).status).toBe(200);
     await new Promise((ok) => setTimeout(ok, 20));
     expect(seen[1]).toEqual({ ticket: "T2", budget: 5 });
     expect((await post("settings", { limitYou: -3 })).status).toBe(400);
@@ -541,6 +549,62 @@ describe("the page and its door", () => {
     expect((await post("stop", {})).status).toBe(200);
     await tick();
     expect(live.size).toBe(0);
+  });
+
+  it("shows what the watchdog said only while it is still the news", () => {
+    const r = new TheRecord();
+    const h = home(r);
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "One.", kind: "request" } });
+    r.append({ kind: "watchdog.spoke", who: "watchdog", ticket: "T1", data: { line: "T1 is parked: a limit of the run was reached.", why: "parked", phone: "not set" } });
+    r.append({ kind: "watchdog.spoke", who: "watchdog", ticket: null, data: { line: "SoftwareFactory went away.", why: "gone", phone: "not set" } });
+    expect(h.state().spoke.map((w) => w.line)).toEqual(["T1 is parked: a limit of the run was reached.", "SoftwareFactory went away."]);
+    // Brought back by SoftwareFactory itself: the owner has not seen the line yet, so it stays. A new run moves it on.
+    r.append({ kind: "ticket.queued", who: "SF itself", ticket: "T1", project: "o/p", data: { returned: true } });
+    expect(h.state().spoke).toHaveLength(2);
+    r.append({ kind: "run.started", who: "SF itself", ticket: "T1", run: "R1", project: "o/p", data: {} });
+    expect(h.state().spoke.map((w) => w.line)).toEqual(["SoftwareFactory went away."]);
+    // "Got it" covers only what the page had read.
+    r.append({ kind: "home.seen", who: "you", data: { upTo: 1 } });
+    expect(h.state().spoke).toHaveLength(1);
+    r.append({ kind: "home.seen", who: "you", data: {} });
+    expect(h.state().spoke).toEqual([]);
+  });
+
+  it("starts nothing while a protected setting is not what you set, and goes on when you keep it by hand", async () => {
+    const r = new TheRecord();
+    const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
+    const file = settingsFileIn(dir, { repo: "o/p", ladder: false, gate: false });
+    const seen: string[] = [];
+    const { url, h } = await serve(r, { settings: file, work: async (_st, ticket) => { seen.push(ticket); r.append({ kind: "run.ended", who: "SF itself", ticket, project: "o/p", data: { end: "parked", reason: "x" } }); return {} as any; } });
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    // Something that is not the screen writes a bigger limit into the settings file.
+    file.write({ ...file.read(), limitAlone: 5000 });
+    expect(h.state().settingsDoubt.map((c) => c.key)).toEqual(["limitAlone"]);
+    expect(h.state().limits.limit.alone).toBe(50);
+    await post("work", { sentence: "New." });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual([]);
+    // Putting back what was set clears it, and the file says the owner's value again.
+    expect((await post("settings", { limitAlone: h.state().settingsDoubt[0]!.set, byHand: ["limitAlone"] })).status).toBe(200);
+    expect(h.state()).toMatchObject({ settingsDoubt: [], settings: { limitAlone: 50 } });
+    expect((r.all().filter((l) => l.kind === "setting.changed").at(-1)!.data as any).changed.limitAlone).toEqual({ from: 50, to: 50, fileSaid: 5000 });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual(["T1"]);
+    file.write({ ...file.read(), limitAlone: 5000 });
+    await post("work", { sentence: "Newer." });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual(["T1"]);
+    // Naming another setting by hand does not clear it; keeping it by hand does.
+    expect((await post("settings", { byHand: ["limitYou"] })).status).toBe(200);
+    expect(h.state().settingsDoubt).toHaveLength(1);
+    // Keeping is a yes to the value the screen showed, not to whatever the file says by then.
+    expect((await post("settings", { byHand: ["limitAlone"], shown: { limitAlone: 500 } })).status).toBe(400);
+    expect(h.state().settingsDoubt).toHaveLength(1);
+    expect((await post("settings", { byHand: ["limitAlone"], shown: { limitAlone: 5000 } })).status).toBe(200);
+    expect(h.state().settingsDoubt).toEqual([]);
+    expect((r.all().filter((l) => l.kind === "setting.changed").at(-1)!.data as any).changed.limitAlone).toEqual({ from: 50, to: 5000, fileSaid: 5000 });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual(["T1", "T2"]);
   });
 
   it("brings a ticket that was cut off in the middle back by itself, once", async () => {

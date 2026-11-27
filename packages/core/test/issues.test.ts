@@ -96,7 +96,7 @@ describe("GitHub issues, both ways", () => {
     const mk = (issues: string) => createHome({ record: r, github: f.gh as unknown as HomeDeps["github"], settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-iss-")), { repo: "o/p", gate: false, issues: issues as any }), hosts: ["127.0.0.1:1"], key: "k".repeat(48),
       work: async (st, ticket) => { got.push([ticket, st.issue]); r.append({ kind: "run.ended", who: "SF itself", ticket, project: "o/p", data: { end: "crashed", reason: "enough for the test" } }); return {} as any; } });
     expect(await mk("off").issues()).toMatchObject({ in: [] });
-    expect(r.all()).toEqual([]);
+    expect(r.all().filter((l) => l.who !== "SF itself")).toEqual([]);
     const h = mk("in");
     expect(await h.issues()).toMatchObject({ ok: true, in: ["T1"] });
     await new Promise((ok) => setTimeout(ok, 20));

@@ -328,6 +328,7 @@ export function storyLine(l: RecordLine): string {
       l.kind === "result.undone" ? (d.url && !d.sha ? `the undo is ready on GitHub, waiting to be put in: ${d.url}` : "you undid it: the project is as it was before, and its history keeps both steps") :
       l.kind === "stop.pressed" ? "you pressed stop" :
       l.kind === "watchdog.spoke" ? `said${d.phone === "sent" ? " to your phone" : ""}: ${d.line}` :
+      l.kind === "setting.changed" && d.baseline ? "the protected settings were written down as they stood" :
       l.kind === "setting.changed" ? `settings changed: ${Object.keys(d.changed ?? {}).join(", ")}` : l.kind;
     return String(what).replace(/[\u0000-\u0008\u000b-\u001f\u007f\u009b]/g, "");
 }

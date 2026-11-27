@@ -51,7 +51,7 @@
         {
           "id": "window",
           "title": "One real window: the safe path inside the installed app",
-          "status": "built",
+          "status": "proven",
           "from": "step 1 plan",
           "done": "The installed app opens the home screen; no black window, no starter file."
         },
@@ -163,7 +163,7 @@
         {
           "id": "settings",
           "title": "Every number and switch is a setting; the protected core only by your hand",
-          "status": "now",
+          "status": "built",
           "from": "rules",
           "done": "You change a limit from the screen; an agent cannot."
         }
@@ -177,7 +177,7 @@
         {
           "id": "project-home",
           "title": "Project home and all projects on one screen",
-          "status": "later",
+          "status": "now",
           "from": "leg 5",
           "done": "RoadToMill and a second product each show one colour and one sentence."
         },
