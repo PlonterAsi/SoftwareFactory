@@ -135,6 +135,7 @@ ol.story li.flag .x { color: var(--bad); }
   </header>
 
   <section class="card spoke" id="spoke" aria-live="polite"></section>
+  <div class="msg" id="doubt" role="alert" hidden><p id="doubt-say"></p><ul id="doubt-list"></ul><div class="row"><button id="doubt-back" type="button">Put back what stood</button><button id="doubt-keep" type="button">The file is right: keep it by my hand</button></div></div>
 
   <section class="card" aria-labelledby="ask-label">
     <label id="ask-label" for="sentence">What should be done? <span class="hint">One ticket, in your own words. Add as many as you like: they are worked one after another.</span></label>
@@ -164,7 +165,6 @@ ol.story li.flag .x { color: var(--bad); }
 
   <h2 id="tickets-title">Tickets</h2>
   <p class="hint" id="limits-line"></p>
-  <div class="msg" id="doubt" role="alert" hidden><p id="doubt-say"></p><ul id="doubt-list"></ul><div class="row"><button id="doubt-back" type="button">Put back what I set</button><button id="doubt-keep" type="button">The file is right: keep it by my hand</button></div></div>
   <div class="row" id="queue-row"><button id="hold" type="button">Hold the queue</button><span class="hint" id="queue-hint"></span><button id="show-removed" type="button" hidden></button><button id="issues-now" type="button" hidden>Look at GitHub now</button><span class="hint" id="issues-hint"></span></div>
   <section class="card" aria-labelledby="tickets-title"><div id="tickets"><p class="empty">No tickets yet. Your first sentence starts one.</p></div></section>
 
@@ -484,7 +484,7 @@ ol.story li.flag .x { color: var(--bad); }
     drawSince(s.since);
     var db = s.settingsDoubt || [];
     $("doubt").hidden = !db.length;
-    if (db.length) { $("doubt-say").textContent = "Nothing starts for now: these protected settings are not what you set on this screen. Something else changed the settings file."; $("doubt-list").textContent = ""; db.forEach(function (c) { $("doubt-list").appendChild(el("li", "", c.says + (c.setAt ? " (since " + day(c.setAt) + ")" : ""))); }); }
+    if (db.length) { $("doubt-say").textContent = "Nothing starts for now. These protected settings in the settings file are not what stands in the record, so something that is not this screen changed the file."; $("doubt-list").textContent = ""; db.forEach(function (c) { $("doubt-list").appendChild(el("li", "", c.says + (c.setAt ? " (since " + day(c.setAt) + ")" : ""))); }); }
     if (s.limits) $("limits-line").textContent = "This " + s.limits.period + ": you sent " + money(s.limits.used.you) + " of " + money(s.limits.limit.you) + "; by itself " + money(s.limits.used.alone + s.limits.used.own) + " of " + money(s.limits.limit.alone) + ". New on " + day(s.limits.until) + ".";
     $("queue-hint").textContent = s.settings.hold ? "The queue is held. " + waiting + " waiting; nothing new starts until you let it go." : s.resting ? "The queue rests until " + clock(s.resting.until) + ": " + s.resting.why + ". Work it again on a ticket starts sooner." : (waiting ? waiting + " waiting for a turn." : "");
     $("show-removed").hidden = !gone;

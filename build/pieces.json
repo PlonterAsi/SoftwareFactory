@@ -163,7 +163,7 @@
         {
           "id": "settings",
           "title": "Every number and switch is a setting; the protected core only by your hand",
-          "status": "now",
+          "status": "built",
           "from": "rules",
           "done": "You change a limit from the screen; an agent cannot."
         }
@@ -177,7 +177,7 @@
         {
           "id": "project-home",
           "title": "Project home and all projects on one screen",
-          "status": "later",
+          "status": "now",
           "from": "leg 5",
           "done": "RoadToMill and a second product each show one colour and one sentence."
         },

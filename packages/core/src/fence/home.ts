@@ -370,9 +370,11 @@ export function createHome(deps: HomeDeps) {
   const state = () => {
     const settings = deps.settings.read();
     const tickets = ticketsFrom(all = record.all(), working());
-    const limits = limitsNow(settings, all);
+    // While a protected value is in doubt, the limits shown are the ones that stand in the record, not the file's.
+    const doubt = settingsInDoubt(all, settings, HOME_DEFAULTS);
+    const limits = limitsNow(doubt.length ? { ...settings, ...Object.fromEntries(doubt.map((c) => [c.key, c.set])) } as HomeSettings : settings, all);
     for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, roomLeft(settings, limits.used), t.bucket) <= 0) { t.limitUntil = limits.until; t.says = `Waiting: ${t.bucket === "you" ? "limit 1 (work you sent)" : "limit 2 (what SoftwareFactory does by itself)"} is used up for this ${limits.period}.`; } }
-    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, settingsDoubt: settingsInDoubt(all, settings, HOME_DEFAULTS), since: sinceYouLeft(all, tickets, settings.sinceShow) };
+    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, settingsDoubt: doubt, since: sinceYouLeft(all, tickets, settings.sinceShow) };
   };
   // A line the watchdog said stays on the screen while it is still the news: not once "Got it" covered it, and not
   // once its ticket moved on (the owner sent it again, a new run started, a result came). One pass from the end.
@@ -701,7 +703,7 @@ export function createHome(deps: HomeDeps) {
     if (changed.length || kept.length) {
       deps.settings.write(now);
       const hand = [...changed.filter(isProtected), ...kept];
-      record.append({ kind: "setting.changed", who: "you", data: { changed: Object.fromEntries([...changed.map((k) => [k, k === "ntfyTopic" ? { changed: true } : { from: isProtected(k) ? set[k].value : was[k], to: now[k] }]), ...kept.map((k) => [k, { from: set[k].value, to: now[k] }])]), ...(hand.length ? { byHand: hand } : {}) } });
+      record.append({ kind: "setting.changed", who: "you", data: { changed: Object.fromEntries([...changed.map((k) => [k, k === "ntfyTopic" ? { changed: true } : { from: isProtected(k) ? set[k].value : was[k], to: now[k], ...(doubt.some((c) => c.key === k) ? { fileSaid: was[k] } : {}) }]), ...kept.map((k) => [k, { from: set[k].value, to: now[k], fileSaid: was[k] }])]), ...(hand.length ? { byHand: hand } : {}) } });
     }
     // A queue that was held and is let go starts at once.
     pump();

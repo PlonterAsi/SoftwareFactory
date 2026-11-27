@@ -580,12 +580,14 @@ describe("the page and its door", () => {
     // Something that is not the screen writes a bigger limit into the settings file.
     file.write({ ...file.read(), limitAlone: 5000 });
     expect(h.state().settingsDoubt.map((c) => c.key)).toEqual(["limitAlone"]);
+    expect(h.state().limits.limit.alone).toBe(50);
     await post("work", { sentence: "New." });
     await new Promise((ok) => setTimeout(ok, 20));
     expect(seen).toEqual([]);
     // Putting back what was set clears it, and the file says the owner's value again.
     expect((await post("settings", { limitAlone: h.state().settingsDoubt[0]!.set, byHand: ["limitAlone"] })).status).toBe(200);
     expect(h.state()).toMatchObject({ settingsDoubt: [], settings: { limitAlone: 50 } });
+    expect((r.all().filter((l) => l.kind === "setting.changed").at(-1)!.data as any).changed.limitAlone).toEqual({ from: 50, to: 50, fileSaid: 5000 });
     await new Promise((ok) => setTimeout(ok, 20));
     expect(seen).toEqual(["T1"]);
     file.write({ ...file.read(), limitAlone: 5000 });
@@ -600,7 +602,7 @@ describe("the page and its door", () => {
     expect(h.state().settingsDoubt).toHaveLength(1);
     expect((await post("settings", { byHand: ["limitAlone"], shown: { limitAlone: 5000 } })).status).toBe(200);
     expect(h.state().settingsDoubt).toEqual([]);
-    expect((r.all().filter((l) => l.kind === "setting.changed").at(-1)!.data as any).changed.limitAlone).toEqual({ from: 50, to: 5000 });
+    expect((r.all().filter((l) => l.kind === "setting.changed").at(-1)!.data as any).changed.limitAlone).toEqual({ from: 50, to: 5000, fileSaid: 5000 });
     await new Promise((ok) => setTimeout(ok, 20));
     expect(seen).toEqual(["T1", "T2"]);
   });
