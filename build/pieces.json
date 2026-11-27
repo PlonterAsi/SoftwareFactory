@@ -107,7 +107,7 @@
         {
           "id": "github-both-ways",
           "title": "GitHub in step, both ways",
-          "status": "now",
+          "status": "built",
           "from": "leg 2",
           "done": "An issue opened on GitHub appears as a ticket, and the other way round."
         }
@@ -121,7 +121,7 @@
         {
           "id": "go-default",
           "title": "Go by default: two runs at once, sleep is not run time",
-          "status": "later",
+          "status": "now",
           "from": "leg 4",
           "done": "Tickets finish while you are away."
         },
