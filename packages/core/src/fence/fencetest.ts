@@ -59,12 +59,14 @@ export function wallOneScript(s: FenceSettings): string {
 out() { echo "SFLINE $1 $2 $3"; }
 # 1. Windows drives: already there, attachable by hand, or any other shared folder from the Windows side.
 #    WSL's own harmless mounts (its drivers, its library folder) are not your drives.
+#    Window and clipboard sharing is judged by a live socket or mount: WSL leaves an empty /mnt/wslg folder
+#    behind even when sharing is off (seen on the laptop, 27 Nov 2026), and an empty /mnt/c folder too.
 shared=$(awk '$3 ~ "^(9p|drvfs|virtiofs)$" && $2 !~ "^(/usr/lib/wsl|/mnt/wsl$|/init$)" {print $2}' /proc/mounts | tr '\\n' ',')
 d=$(mktemp -d) ; mount -t drvfs C: "$d" >/dev/null 2>&1
 if [ -d /mnt/c/Windows ] || [ -d /mnt/c/Users ]; then out attach-drive THROUGH already-mounted
 elif [ -d "$d/Windows" ] || [ -d "$d/Users" ]; then out attach-drive THROUGH mounted-by-hand
 elif [ -n "$shared" ]; then out attach-drive THROUGH "shared:$shared"
-elif [ -e /mnt/wslg ] || [ -S /tmp/.X11-unix/X0 ]; then out attach-drive THROUGH "window-and-clipboard-sharing-is-on"
+elif [ -S /tmp/.X11-unix/X0 ] || [ -S /mnt/wslg/runtime-dir/wayland-0 ] || [ -S /mnt/wslg/PulseServer ] || grep -qs ' /mnt/wslg' /proc/mounts || [ -n "$(ls -A /mnt/wslg/runtime-dir 2>/dev/null)" ]; then out attach-drive THROUGH "window-and-clipboard-sharing-is-on"
 else out attach-drive REFUSED no-drive; fi
 umount "$d" >/dev/null 2>&1; rmdir "$d" >/dev/null 2>&1
 # 2. Root, by any of the usual ways, and no group but the worker's own.
