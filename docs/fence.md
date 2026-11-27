@@ -66,8 +66,20 @@ Double-click `SoftwareFactory-Step1.cmd`, or run `npm run step1 -- home`. One pa
 - Undo is on every accepted ticket. SoftwareFactory makes a new change that takes back exactly what the accept put in, on top of the project as it is today, and puts it into the project. Nothing is erased: the project's history and the record keep both steps. Later work elsewhere in the project stays.
 - When later work was built on the very lines the change touched, undo refuses and says so. That case needs your hand, or a new ticket.
 
+## The watchdog and the phone line (slice 5)
+
+`SoftwareFactory-Step1.cmd` starts two things: SoftwareFactory, and beside it a small watchdog in its own minimised window. SoftwareFactory writes a sign of life every five seconds; the watchdog only reads it.
+
+- SoftwareFactory went away in the middle of a run (it crashed, or was killed): the watchdog ends everything the run left working in the room, and says one line.
+- A run wrote nothing for longer than "call a run silent after": the watchdog says one line, once. The run goes on; Stop is yours.
+- SoftwareFactory itself says one line when the fence did not hold, and when a ticket was parked because a limit was reached.
+- Every line is written in the record and shown on top of the home screen. With a phone set, it also goes to your phone.
+- The phone: the free ntfy app, no account. In Settings choose "The ntfy app", give the channel a long random name, save, subscribe to the same name in the app, and press "Send a test line". A line to the phone names the ticket and what happened; it never carries your sentence, the project's name or code. Whoever knows the channel name can read the lines, which is why it is long and random.
+- Closing SoftwareFactory on purpose sends the watchdog home quietly.
+
 ## Known limits, said plainly
 
+- The watchdog lives on the same computer. When the laptop is off or asleep, it is silent too.
 - Seen on the laptop (27 Nov 2026): inside its own sandbox the agent could not use what its own `npm ci` had just installed (`tsc: not found`), while SoftwareFactory's check seconds later found it and built. Not understood yet. Until it is, a run cannot test a web build itself; SoftwareFactory's checks still do.
 - Checks run in the order they are set, in the same copy. RoadToMill's Go check needs the web build's output, so the web check must come first.
 - Some long chained shell commands are refused inside the room without a reason given. The run is told to fall back to plain single commands.
