@@ -359,7 +359,7 @@ export function createHome(deps: HomeDeps) {
     const settings = deps.settings.read();
     const tickets = ticketsFrom(all = record.all(), working());
     const limits = limitsNow(settings, all);
-    for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, roomLeft(settings, limits.used), t.bucket) <= 0) t.limitUntil = limits.until; }
+    for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, roomLeft(settings, limits.used), t.bucket) <= 0) { t.limitUntil = limits.until; t.says = `Waiting: ${t.bucket === "you" ? "limit 1 (work you sent)" : "limit 2 (what SoftwareFactory does by itself)"} is used up for this ${limits.period}.`; } }
     return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, since: sinceYouLeft(all, tickets, settings.sinceShow) };
   };
   const stateOf = (settings: HomeSettings, tickets: TicketView[]) => ({

@@ -135,7 +135,7 @@
         {
           "id": "limits",
           "title": "Two limits and SoftwareFactory's own share",
-          "status": "built",
+          "status": "proven",
           "from": "leg 1",
           "done": "A run parks at the limit and keeps its work."
         },
