@@ -49,6 +49,8 @@ async function main(): Promise<void> {
     ...(existsSync(whoami) ? { windowsProgram: readFileSync(whoami) } : {}),
   });
   console.log(fenceReportText(report));
+  // `fence test --details` adds the fact behind every line, also the ones that passed.
+  if (process.argv.includes("--details")) for (const l of report.lines) console.log(`   ${l.n}. ${l.verdict}: ${l.detail}`);
   process.exit(report.ok ? 0 : 1);
 }
 
