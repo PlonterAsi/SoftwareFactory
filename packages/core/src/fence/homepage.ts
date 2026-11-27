@@ -194,7 +194,7 @@ ol.story li.flag .x { color: var(--bad); }
           setTimeout(function () { uyes.disabled = false; }, 800);
           setTimeout(function () { uno.focus(); }, 0);
           row.appendChild(uno); row.appendChild(uyes);
-          box.appendChild(el("p", "says", "Undo makes a new change that takes this one back. Nothing is erased: the project's history keeps both."));
+          box.appendChild(el("p", "says", "Undo makes a new change that takes this one back and puts it into the project right away, without waiting for GitHub's own checks. Nothing is erased: the project's history keeps both."));
         } else {
           var und = el("button", "", "Undo");
           und.type = "button";

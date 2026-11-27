@@ -31,12 +31,21 @@ export async function undoTicket(deps: UndoDeps, ticket: string): Promise<UndoRe
     const tip = plainGit(h.dir, "rev-parse", `refs/remotes/origin/${base}`);
     try { plainGit(h.dir, "merge-base", "--is-ancestor", sha, tip); } catch { return { ok: false, why: "The accepted change is not in the project any more, so there is nothing to undo." }; }
     // The project as it is today, minus exactly what that one commit brought in.
+    // Git is asked to merge today's project with "the project just before the change, as a step after the change".
+    // That step is a commit made here, never pushed; with it the change itself is where the two sides part, so what
+    // comes out is today's project without the change. (Works on Git 2.38 and newer.)
+    const who = ["-c", "user.name=SoftwareFactory", "-c", "user.email=softwarefactory@softwarefactory.invalid"];
     let tree: string;
-    try { tree = plainGit(h.dir, "merge-tree", "--write-tree", `--merge-base=${sha}`, tip, `${sha}^`).split("\n")[0]!.trim(); }
-    catch { return { ok: false, why: "Later work was built on top of this change, so it cannot be taken back by itself. Undo it by hand on GitHub, or ask for a ticket that removes it." }; }
+    try {
+      const back = plainGit(h.dir, ...who, "commit-tree", plainGit(h.dir, "rev-parse", `${sha}^^{tree}`), "-p", sha, "-m", "the step back");
+      tree = plainGit(h.dir, "merge-tree", "--write-tree", tip, back).split("\n")[0]!.trim();
+    } catch (e) {
+      // Exit 1 is git saying the two sides touch the same lines. Anything else is a failure of the tool, and is said as one.
+      if ((e as { status?: number }).status === 1) return { ok: false, why: "Later work was built on top of this change, so it cannot be taken back by itself. Undo it by hand on GitHub, or ask for a ticket that removes it." };
+      return { ok: false, why: `Git on this computer could not work out the undo (it needs Git 2.38 or newer): ${String((e as Error).message).split("\n")[0]!.slice(0, 160)}` };
+    }
     if (!/^[0-9a-f]{40}$/.test(tree)) return { ok: false, why: "The undo could not be worked out." };
     if (tree === plainGit(h.dir, "rev-parse", `${tip}^{tree}`)) return { ok: false, why: "The project already looks as if this change was never made." };
-    const who = ["-c", "user.name=SoftwareFactory", "-c", "user.email=softwarefactory@softwarefactory.invalid"];
     const message = `Undo ${ticket}: ${quiet(sentence)}\n\nTakes back ${sha.slice(0, 12)}, on your press of Undo in SoftwareFactory.`;
     const commit = plainGit(h.dir, ...who, "commit-tree", tree, "-p", tip, "-m", message);
     const branch = `sf/undo-${ticket.toLowerCase()}-${randomBytes(4).toString("hex")}`;
@@ -54,8 +63,15 @@ export async function undoTicket(deps: UndoDeps, ticket: string): Promise<UndoRe
     finally { plainGit(h.dir, "symbolic-ref", "HEAD", `refs/heads/${base}`); }
     const detail = await github.prDetail(repo, pr.number);
     if (detail.headSha !== commit) return { ok: false, why: "The undo on GitHub is not the one SoftwareFactory made, so it was not put in." };
-    if (detail.draft) await github.markReady(detail.nodeId);
-    const merged = await github.mergePr(repo, pr.number, commit, detail.title);
+    let merged: { sha: string };
+    try {
+      if (detail.draft) await github.markReady(detail.nodeId);
+      merged = await github.mergePr(repo, pr.number, commit, detail.title);
+    } catch (e) {
+      // The undo exists on GitHub but was not put in. The record says so, so a second press cannot make a second one.
+      record.append({ kind: "result.undone", ...stamp, data: { url: pr.url, number: pr.number, branch, base, takesBack: sha, notPutIn: (e as Error).message.slice(0, 200) } });
+      return { ok: false, why: `The undo is ready on GitHub but GitHub did not put it in: ${(e as Error).message.slice(0, 160)}` };
+    }
     record.append({ kind: "result.undone", ...stamp, data: { url: pr.url, number: pr.number, sha: merged.sha, branch, base, takesBack: sha } });
     return { ok: true, sha: merged.sha, url: pr.url };
   } catch (e) {
