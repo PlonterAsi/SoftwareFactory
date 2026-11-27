@@ -103,7 +103,7 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
     else if (ended) { state = d(ended).end as TicketState; says = String(d(ended).reason ?? ""); }
     else if (ls.some((l) => l.kind === "stop.pressed")) { state = "stopped"; says = "You pressed stop."; }
     else if (fence && d(fence).ok === false) { state = "not started"; says = "The fence did not hold, so no run started."; }
-    else { state = "interrupted"; says = "SoftwareFactory was closed while this ticket was open."; }
+    else { state = "interrupted"; says = ls.some((l) => l.kind === "watchdog.spoke" && d(l).why === "gone") ? "SoftwareFactory went away while this was being worked. The watchdog ended the run; nothing left the computer." : "SoftwareFactory was closed while this ticket was open."; }
     const number = proposed && typeof d(proposed).number === "number" ? (d(proposed).number as number) : null;
     out.push({
       ticket, project: opened.project, sentence: String(d(opened).sentence ?? ""), openedAt: opened.ts, state, says,

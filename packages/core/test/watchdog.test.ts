@@ -12,7 +12,8 @@ const run = (lastLineAgo = 5) => ({ ticket: "T4", startedAt: at(600), lastLineAt
 describe("the watchdog's one look", () => {
   it("says nothing while SoftwareFactory is alive and the run talks, and goes home when it was closed on purpose", () => {
     expect(look({ pid: 1, at: at(3), running: run() }, WATCH_DEFAULTS, { spoke: {} }, NOW)).toEqual({ say: null, endRoom: false, done: false });
-    expect(look({ pid: 1, at: at(3), closed: true, running: null }, WATCH_DEFAULTS, { spoke: {} }, NOW).done).toBe(true);
+    expect(look({ pid: 1, at: at(3), closed: true, running: null }, WATCH_DEFAULTS, { spoke: {} }, NOW)).toEqual({ say: null, endRoom: false, done: true });
+    expect(look({ pid: 1, at: at(3), closed: true, running: run() }, WATCH_DEFAULTS, { spoke: {} }, NOW)).toEqual({ say: null, endRoom: true, done: true });
     expect(look(null, WATCH_DEFAULTS, { spoke: {} }, NOW)).toEqual({ say: null, endRoom: false, done: false });
   });
 
@@ -65,6 +66,26 @@ describe("speaking", () => {
 });
 
 describe("the watchdog as a program of its own", () => {
+  it("goes home when SoftwareFactory never shows up, and leaves another SoftwareFactory's run alone", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sf-watch-"));
+    const r = new TheRecord();
+    let ended = 0, clock = Date.now();
+    const deps = { record: r, workDir: dir, settings: () => ({ ...WATCH_DEFAULTS, goneSeconds: 15 }), endRoom: async () => { ended++; }, now: () => new Date(clock), giveUpMs: 50 };
+    const idle = runWatchdog(deps, 10);
+    clock += 1000;
+    await idle;
+    expect(ended).toBe(0);
+    // A dies mid-run; before the watchdog acts, B has started and beats.
+    const w = runWatchdog({ ...deps, giveUpMs: 600_000, endRoom: async () => { ended++; } }, 10);
+    const running = { ticket: "T4", startedAt: new Date(clock).toISOString(), lastLineAt: new Date(clock).toISOString() };
+    writeAlive(dir, { pid: 10, at: new Date(clock).toISOString(), running });
+    await new Promise((ok) => setTimeout(ok, 30));
+    writeAlive(dir, { pid: 11, at: new Date(clock).toISOString(), closed: true, running: null });
+    await w;
+    expect(ended).toBe(0);
+    expect(r.all()).toHaveLength(0);
+  });
+
   it("ignores an old sign of life, then speaks, ends the room and goes home when SoftwareFactory dies mid-run", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sf-watch-"));
     const r = new TheRecord();

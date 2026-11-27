@@ -22,7 +22,7 @@ export interface Alive {
 
 export const aliveFile = (workDir: string) => join(workDir, "alive.json");
 export function writeAlive(workDir: string, a: Alive): void {
-  const tmp = `${aliveFile(workDir)}.tmp`;
+  const tmp = `${aliveFile(workDir)}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(a));
   renameSync(tmp, aliveFile(workDir));
 }
@@ -95,7 +95,9 @@ export interface WatchVerdict { say: { key: string; line: string; ticket: string
  */
 export function look(alive: Alive | null, s: WatchSettings, state: WatchState, now: Date): WatchVerdict {
   if (!alive) return { say: null, endRoom: false, done: false };
-  if (alive.closed) return { say: null, endRoom: false, done: true };
+  // Closed on purpose. If a run was working at that moment, the room is ended quietly, in case the window closed
+  // faster than SoftwareFactory could end it itself.
+  if (alive.closed) return { say: null, endRoom: !!alive.running, done: true };
   const age = (iso: string) => (now.getTime() - new Date(iso).getTime()) / 1000;
   const name = alive.running?.ticket ?? "a ticket";
   if (age(alive.at) > s.goneSeconds) {
@@ -116,6 +118,8 @@ export interface WatchdogDeps extends SpeakDeps {
   /** Ends everything of the worker's in the room. */
   endRoom: () => Promise<void>;
   now?: () => Date;
+  /** How long to wait for SoftwareFactory's first sign of life before going home. */
+  giveUpMs?: number;
 }
 
 /** The loop. Looks every `everyMs` until there is nothing left to watch. */
@@ -124,10 +128,21 @@ export async function runWatchdog(deps: WatchdogDeps, everyMs = 5000, signal?: A
   const now = deps.now ?? (() => new Date());
   // A sign of life from before the watchdog started belongs to an earlier SoftwareFactory: it is not looked at.
   const born = now().getTime() - 2000;
+  let everSeen = false;
   while (!signal?.aborted) {
     const seen = readAlive(deps.workDir);
-    const v = look(seen && new Date(seen.at).getTime() >= born ? seen : null, deps.settings(), state, now());
-    if (v.endRoom) await deps.endRoom().catch(() => undefined);
+    const fresh = seen && new Date(seen.at).getTime() >= born ? seen : null;
+    if (fresh) everSeen = true;
+    // SoftwareFactory never showed up (it did not start): nothing to watch, so the watchdog does not sit there for good.
+    if (!everSeen && now().getTime() - born > (deps.giveUpMs ?? 120_000)) return;
+    const v = look(fresh, deps.settings(), state, now());
+    if (v.endRoom) {
+      // One more look right before ending the room: if another SoftwareFactory has started meanwhile, its run is not ours to end.
+      const again = readAlive(deps.workDir);
+      const other = again && fresh && again.pid !== fresh.pid && !again.closed && (now().getTime() - new Date(again.at).getTime()) / 1000 <= deps.settings().goneSeconds;
+      if (other) continue;
+      await deps.endRoom().catch(() => undefined);
+    }
     if (v.say) { state.spoke[v.say.key] = true; await speak(deps, v.say); }
     if (v.done) return;
     await new Promise((ok) => setTimeout(ok, everyMs));

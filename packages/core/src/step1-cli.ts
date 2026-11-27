@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -35,6 +35,11 @@ async function main(): Promise<void> {
     const fence: FenceSettings = fenceSettings(JSON.parse(process.env.SF_FENCE ?? "{}") as Partial<FenceSettings>);
     const exec = wslExec(fence);
     const settings = settingsFileIn(workDir);
+    // One watchdog at a time: a second one would say everything twice.
+    const lock = join(workDir, "watchdog.pid");
+    const other = existsSync(lock) ? Number(readFileSync(lock, "utf8")) : 0;
+    if (other > 0 && other !== process.pid) { try { process.kill(other, 0); console.log("A watchdog is watching already."); return; } catch { /* that one is gone */ } }
+    writeFileSync(lock, String(process.pid));
     console.log("SoftwareFactory's watchdog is watching. It closes by itself when SoftwareFactory is closed.");
     await runWatchdog({
       record, workDir, settings: () => cleanWatch(settings.read()),
@@ -76,8 +81,9 @@ async function main(): Promise<void> {
     });
     // Closing the window while a run works is a stop: nothing is left running in the room.
     // (Windows sends SIGHUP when the console window is closed, and gives a few seconds.)
-    const closed = () => { try { writeAlive(workDir, { ...home.alive(), closed: true, running: null }); } catch { /* the watchdog then speaks, which is the safe side */ } };
-    const bye = () => { clearInterval(beat); if (home.isRunning()) { home.stop(); setTimeout(() => { closed(); process.exit(0); }, 4000); } else { closed(); process.exit(0); } };
+    // Said first, before anything slow: Windows gives a closing window only a few seconds.
+    const closed = () => { try { writeAlive(workDir, { ...home.alive(), closed: true }); } catch { /* the watchdog then speaks, which is the safe side */ } };
+    const bye = () => { clearInterval(beat); closed(); if (home.isRunning()) { home.stop(); setTimeout(() => process.exit(0), 4000); } else process.exit(0); };
     for (const sig of ["SIGINT", "SIGHUP", "SIGBREAK", "SIGTERM"] as const) process.once(sig, bye);
     return;
   }
