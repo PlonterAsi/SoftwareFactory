@@ -131,7 +131,7 @@ ol.story li.flag .x { color: var(--bad); }
   "use strict";
   var KEY = "__SF_KEY__";
   var $ = function (id) { return document.getElementById(id); };
-  var open = {}, drawn = "", confirming = null, settingsLoaded = false, last = null, busy = false;
+  var open = {}, nodes = {}, drawn = null, confirming = null, settingsLoaded = false, last = null, busy = false;
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
   function clock(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }); }
@@ -166,7 +166,11 @@ ol.story li.flag .x { color: var(--bad); }
           var no = el("button", "", "Not now");
           no.type = "button";
           no.onclick = function () { confirming = null; render(last); };
-          row.appendChild(yes); row.appendChild(no);
+          // A second click of a double-click lands where Accept was: on "Not now". And Yes wakes up a moment later.
+          yes.disabled = true;
+          setTimeout(function () { yes.disabled = false; }, 800);
+          setTimeout(function () { no.focus(); }, 0);
+          row.appendChild(no); row.appendChild(yes);
         } else {
           var acc = el("button", "good", "Accept");
           acc.type = "button";
@@ -212,12 +216,26 @@ ol.story li.flag .x { color: var(--bad); }
       $("now-time").textContent = Math.floor(secs / 60) + " min " + (secs % 60) + " s";
     }
     var list = $("tickets");
-    var sig = JSON.stringify(s.tickets) + "|" + confirming + "|" + JSON.stringify(acceptError);
-    if (sig !== drawn && !busy) {
-      drawn = sig;
-      while (list.firstChild) list.removeChild(list.firstChild);
-      if (!s.tickets.length) list.appendChild(el("p", "empty", "No tickets yet. Your first sentence starts one."));
-      s.tickets.forEach(function (t) { list.appendChild(ticketNode(t)); });
+    if (!busy) {
+      // Only a ticket that changed is drawn again, so an open story keeps its place and a focused button stays focused.
+      var order = s.tickets.map(function (t) { return t.ticket; }).join(",");
+      if (order !== drawn) {
+        drawn = order; nodes = {};
+        while (list.firstChild) list.removeChild(list.firstChild);
+        if (!s.tickets.length) list.appendChild(el("p", "empty", "No tickets yet. Your first sentence starts one."));
+      }
+      s.tickets.forEach(function (t) {
+        var sig = JSON.stringify(t) + "|" + (confirming === t.ticket) + "|" + (acceptError[t.ticket] || "");
+        var had = nodes[t.ticket];
+        if (had && had.sig === sig) return;
+        var fresh = ticketNode(t);
+        if (had) {
+          var story = had.node.querySelector("ol.story"), top = story ? story.scrollTop : 0;
+          list.replaceChild(fresh, had.node);
+          var again = fresh.querySelector("ol.story"); if (again) again.scrollTop = top;
+        } else list.appendChild(fresh);
+        nodes[t.ticket] = { sig: sig, node: fresh };
+      });
     }
     if (!settingsLoaded) {
       settingsLoaded = true;
@@ -228,10 +246,10 @@ ol.story li.flag .x { color: var(--bad); }
     $("fence").textContent = s.fence ? "The room is " + s.fence.room + ". A run may reach only: " + s.fence.netList.join(", ") + ". The fence is tested before every run." : "";
   }
 
-  var pending = false;
+  var pending = false, GONE = "SoftwareFactory is not answering. Is it still open?";
   function load() {
     if (pending) return; pending = true;
-    fetch("/api/step1/state").then(function (r) { return r.json(); }).then(function (s) { pending = false; render(s); }).catch(function () { pending = false; $("ask-msg").textContent = "SoftwareFactory is not answering. Is it still open?"; });
+    fetch("/api/step1/state").then(function (r) { return r.json(); }).then(function (s) { pending = false; if ($("ask-msg").textContent === GONE) $("ask-msg").textContent = ""; render(s); }).catch(function () { pending = false; $("ask-msg").textContent = GONE; });
   }
 
   $("start").onclick = function () {
@@ -239,7 +257,7 @@ ol.story li.flag .x { color: var(--bad); }
     $("ask-msg").textContent = "";
     if (!text.trim()) { $("ask-msg").textContent = "Write what you want first."; $("sentence").focus(); return; }
     $("start").disabled = true;
-    post("/api/step1/work", { sentence: text }).then(function (r) { if (r.ok) { $("sentence").value = ""; } else { $("ask-msg").textContent = r.why; } load(); });
+    post("/api/step1/work", { sentence: text }).then(function (r) { if (r.ok) { $("sentence").value = ""; } else { $("ask-msg").textContent = r.why; $("start").disabled = false; } load(); });
   };
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
@@ -250,8 +268,9 @@ ol.story li.flag .x { color: var(--bad); }
 
   load();
   try { var es = new EventSource("/api/step1/events"); es.onmessage = load; } catch (e) { /* the timer below still keeps the page fresh */ }
-  setInterval(function () { if (last && last.running) load(); }, 1000);
-  setInterval(load, 15000);
+  // The clock of a working run ticks here; what the run did arrives by itself, and a slow look keeps the page honest.
+  setInterval(function () { if (last && last.running) { var secs = Math.max(0, Math.round((Date.now() - new Date(last.running.startedAt).getTime()) / 1000)); $("now-time").textContent = Math.floor(secs / 60) + " min " + (secs % 60) + " s"; } }, 1000);
+  setInterval(load, 10000);
 })();
 </script>
 </body>

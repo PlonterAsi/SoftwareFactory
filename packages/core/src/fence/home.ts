@@ -50,7 +50,8 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
 export class SettingsFile {
   constructor(private path: string, private start: Partial<HomeSettings> = {}) {}
   read(): HomeSettings {
-    const base = cleanSettings(this.start);
+    let base = HOME_DEFAULTS;
+    try { base = cleanSettings(this.start); } catch { /* a bad starting value never breaks the page; the defaults stand */ }
     if (!existsSync(this.path)) return base;
     try { return cleanSettings(JSON.parse(readFileSync(this.path, "utf8")), base); } catch { return base; }
   }
@@ -96,6 +97,7 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
     else if (proposed && d(proposed).held) { state = "held"; says = `Held on this computer: ${d(proposed).reason}`; }
     else if (proposed) { state = "proposed"; says = "Done and checked. Waiting for you to accept."; }
     else if (ended) { state = d(ended).end as TicketState; says = String(d(ended).reason ?? ""); }
+    else if (ls.some((l) => l.kind === "stop.pressed")) { state = "stopped"; says = "You pressed stop."; }
     else if (fence && d(fence).ok === false) { state = "not started"; says = "The fence did not hold, so no run started."; }
     else { state = "interrupted"; says = "SoftwareFactory was closed while this ticket was open."; }
     const number = proposed && typeof d(proposed).number === "number" ? (d(proposed).number as number) : null;
@@ -120,6 +122,8 @@ export interface HomeDeps {
   hosts: string[];
   /** The page's key. Made fresh at every start when not given. */
   key?: string;
+  /** The pass in the address SoftwareFactory opens. Made fresh at every start when not given. */
+  pass?: string;
   /** Shown on the page: which room, and what a run may reach. Read-only here; the fence is changed by hand. */
   fence?: { room: string; netList: string[] };
 }
@@ -127,6 +131,7 @@ export interface HomeDeps {
 export function createHome(deps: HomeDeps) {
   const { record, github } = deps;
   const key = deps.key ?? randomBytes(24).toString("hex");
+  const pass = deps.pass ?? randomBytes(24).toString("hex"), cookie = randomBytes(24).toString("hex");
   let running: { ticket: string | null; stop: AbortController; startedAt: string; before: number } | null = null;
   // The ticket's name is known from its first line in the record.
   const nameIt = () => { if (running && !running.ticket) running.ticket = record.since(running.before).find((l) => l.kind === "ticket.opened")?.ticket ?? null; };
@@ -139,7 +144,6 @@ export function createHome(deps: HomeDeps) {
     fence: deps.fence ?? null,
     running: running ? { ticket: running.ticket, startedAt: running.startedAt } : null,
     tickets: ticketsFrom(record.all(), running?.ticket ?? null),
-    lastId: record.all().at(-1)?.id ?? 0,
   });
 
   /** Start one run. One at a time in step 1. */
@@ -154,7 +158,7 @@ export function createHome(deps: HomeDeps) {
     const mine = { ticket: null as string | null, stop, startedAt: new Date().toISOString(), before: record.all().at(-1)?.id ?? 0 };
     running = mine;
     void deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes }, sentence, stop.signal)
-      .catch(() => undefined)
+      .catch((e) => { nameIt(); if (mine.ticket) record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, data: { end: "crashed", reason: String((e as Error)?.message ?? e).slice(0, 300), where: "before the run" } }); })
       .finally(() => { if (running === mine) running = null; for (const st of streams) st.write(`data: {"id":0}\n\n`); });
     return { ok: true };
   }
@@ -181,10 +185,15 @@ export function createHome(deps: HomeDeps) {
       if (!repo) return { ok: false, why: "The record does not say which project this was." };
       if (!github.hasToken()) return { ok: false, why: "This computer has no GitHub sign-in that can accept. Open the proposal on GitHub instead." };
       const pr = await github.prDetail(repo, d.number);
-      if (pr.merged) { record.append({ kind: "result.accepted", who: "you", run: p.run, ticket, project: p.project, data: { number: d.number, sha: pr.mergeSha, where: "on GitHub" } }); return { ok: true, sha: pr.mergeSha ?? "" }; }
+      if (pr.merged) {
+        // Somebody merged it on GitHub. The record says so, and says when it was not the commit that was checked.
+        record.append({ kind: "result.accepted", who: "you", run: p.run, ticket, project: p.project, data: { number: d.number, sha: pr.mergeSha, where: "on GitHub", ...(pr.headSha !== d.headSha ? { notTheCheckedCommit: true } : {}) } });
+        return { ok: true, sha: pr.mergeSha ?? "" };
+      }
       if (pr.state !== "open") return { ok: false, why: "The proposal was closed on GitHub." };
       if (pr.headSha !== d.headSha) return { ok: false, why: "The proposal changed on GitHub after SoftwareFactory checked it, so it is not accepted from here. Look at it on GitHub." };
       if (pr.base !== d.base) return { ok: false, why: "The proposal now points at another branch than the one it was made for." };
+      if (pr.mergeable === false) return { ok: false, why: "The project moved on and this proposal no longer fits on top of it. Start the ticket again." };
       if (pr.draft) await github.markReady(pr.nodeId);
       const merged = await github.mergePr(repo, d.number, d.headSha, pr.title);
       record.append({ kind: "result.accepted", who: "you", run: p.run, ticket, project: p.project, data: { number: d.number, sha: merged.sha, base: d.base } });
@@ -206,7 +215,8 @@ export function createHome(deps: HomeDeps) {
     return { ok: true, settings: now };
   }
 
-  const sameKey = (got: string | undefined) => { const a = Buffer.from(got ?? ""), b = Buffer.from(key); return a.length === b.length && timingSafeEqual(a, b); };
+  const same = (got: string, want: string) => { const a = Buffer.from(got), b = Buffer.from(want); return a.length === b.length && timingSafeEqual(a, b); };
+  const sameKey = (got: string | undefined) => same(got ?? "", key);
   const send = (res: ServerResponse, code: number, body: unknown) => { const t = JSON.stringify(body); res.writeHead(code, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }); res.end(t); };
   const body = (req: IncomingMessage) => new Promise<any>((resolve, reject) => {
     let t = ""; req.setEncoding("utf8");
@@ -219,6 +229,16 @@ export function createHome(deps: HomeDeps) {
     try {
       if (!deps.hosts.includes(String(req.headers.host ?? "").toLowerCase())) { res.writeHead(403).end("not this computer's own page"); return; }
       const url = new URL(req.url ?? "/", "http://x");
+      // The way in: the address SoftwareFactory itself opened or printed carries a pass. It is swapped for a cookie
+      // that scripts cannot read, and nothing here is shown or told to a caller without that cookie. So another
+      // account on this computer, or anything that merely reaches the port, gets no page, no key and no state.
+      if (req.method === "GET" && url.pathname === "/" && url.searchParams.has("pass")) {
+        if (!same(url.searchParams.get("pass") ?? "", pass)) { res.writeHead(403).end("this pass is not the one SoftwareFactory printed"); return; }
+        res.writeHead(303, { location: "/", "set-cookie": `sf=${cookie}; HttpOnly; SameSite=Strict; Path=/`, "cache-control": "no-store", "referrer-policy": "no-referrer" }).end();
+        return;
+      }
+      const got = /(?:^|;\s*)sf=([A-Za-z0-9]+)/.exec(String(req.headers.cookie ?? ""))?.[1] ?? "";
+      if (!same(got, cookie)) { res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("Open SoftwareFactory from its own window: the address printed there lets you in."); return; }
       if (req.method === "GET" && url.pathname === "/") {
         res.writeHead(200, {
           "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "x-frame-options": "DENY", "referrer-policy": "no-referrer",
@@ -251,5 +271,5 @@ export function createHome(deps: HomeDeps) {
     }
   }
 
-  return { handler, state, start, stop: stopNow, accept, saveSettings, key, isRunning: () => !!running };
+  return { handler, state, start, stop: stopNow, accept, saveSettings, key, pass, cookie, isRunning: () => !!running };
 }

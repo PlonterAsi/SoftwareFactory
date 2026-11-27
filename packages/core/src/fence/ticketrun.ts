@@ -67,7 +67,7 @@ export function quiet(text: string): string {
 }
 
 function plainGit(dir: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd: dir, encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }).trim();
+  return execFileSync("git", args, { cwd: dir, encoding: "utf8", windowsHide: true, timeout: 300_000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }).trim();
 }
 
 /** SoftwareFactory's own bare copy of the project's history. Nothing in it is ever checked out or run. */
@@ -93,9 +93,14 @@ function history(deps: TicketDeps, st: TicketSettings): { dir: string; base: str
 export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence: string): Promise<TicketOutcome> {
   const { record } = deps;
   const project = `${st.repo.owner}/${st.repo.name}`;
-  const n = record.all().filter((l) => l.kind === "ticket.opened").length + 1;
-  const ticket = `T${n}`;
-  record.append({ kind: "ticket.opened", who: "you", ticket, project, data: { sentence: sentence.trim() } });
+  // Counting and writing happen under one lock, so two SoftwareFactory windows cannot give two tickets one name.
+  record.db.exec("BEGIN IMMEDIATE");
+  let ticket: string;
+  try {
+    ticket = `T${record.all().filter((l) => l.kind === "ticket.opened").length + 1}`;
+    record.append({ kind: "ticket.opened", who: "you", ticket, project, data: { sentence: sentence.trim() } });
+    record.db.exec("COMMIT");
+  } catch (e) { record.db.exec("ROLLBACK"); throw e; }
   const out = (o: Partial<TicketOutcome> & Pick<TicketOutcome, "end" | "reason">): TicketOutcome => ({ ticket, run: null, url: null, branch: null, costUsd: 0, ...o });
   if (deps.signal?.aborted) return out({ end: "stopped", reason: "you pressed stop" });
 
@@ -110,9 +115,9 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
   const run = `${ticket}-${randomBytes(4).toString("hex")}`;
   const branch = `sf/${ticket.toLowerCase()}-${run.slice(-8)}`;
   const tmp = join(st.workDir, "tmp");
-  mkdirSync(tmp, { recursive: true });
   const inFile = join(tmp, `${run}.in.bundle`), outFile = join(tmp, `${run}.out.bundle`);
   try {
+    mkdirSync(tmp, { recursive: true });
     const h = history(deps, st);
     plainGit(h.dir, "bundle", "create", inFile, h.base);
     const result = await runInRoom(deps.exec, deps.files, record, {

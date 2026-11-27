@@ -31,7 +31,10 @@ async function main(): Promise<void> {
   if (cmd === "home") {
     const args = process.argv.slice(3);
     const port = Number(args[args.indexOf("--port") + 1]) > 0 && args.includes("--port") ? Number(args[args.indexOf("--port") + 1]) : 4517;
-    const fence: FenceSettings = fenceSettings(JSON.parse(process.env.SF_FENCE ?? "{}") as Partial<FenceSettings>);
+    const asked: FenceSettings = fenceSettings(JSON.parse(process.env.SF_FENCE ?? "{}") as Partial<FenceSettings>);
+    // The home screen's own port joins the ports the fence test tries from the room: if a run could reach
+    // this page, the test fails and no run starts.
+    const fence: FenceSettings = { ...asked, hostPorts: [...new Set([...asked.hostPorts, port])] };
     const exec = wslExec(fence), files = wslFiles(fence);
     const github = new GitHub({ dataDir: workDir, cli: ghCliToken });
     const { repo: _r, workDir: _w, ...start } = raw;
@@ -42,12 +45,14 @@ async function main(): Promise<void> {
     });
     const server = createServer((req, res) => { void home.handler(req, res); });
     server.listen(port, "127.0.0.1", () => {
-      const url = `http://127.0.0.1:${port}/`;
+      const url = `http://127.0.0.1:${port}/?pass=${home.pass}`;
       console.log(`SoftwareFactory home screen: ${url}\nClose this window to close SoftwareFactory.`);
       if (process.platform === "win32" && !args.includes("--no-open")) spawn("cmd.exe", ["/c", "start", "", url], { stdio: "ignore", windowsHide: true, detached: true }).unref();
     });
     // Closing the window while a run works is a stop: nothing is left running in the room.
-    process.once("SIGINT", () => { if (home.isRunning()) { home.stop(); setTimeout(() => process.exit(0), 8000); } else process.exit(0); });
+    // (Windows sends SIGHUP when the console window is closed, and gives a few seconds.)
+    const bye = () => { if (home.isRunning()) { home.stop(); setTimeout(() => process.exit(0), 4000); } else process.exit(0); };
+    for (const sig of ["SIGINT", "SIGHUP", "SIGBREAK", "SIGTERM"] as const) process.once(sig, bye);
     return;
   }
   if (cmd !== "work" || !arg?.trim()) { console.error('usage: step1 work "<one sentence>" | step1 story <ticket> | step1 home'); process.exit(2); }

@@ -70,6 +70,8 @@ describe("tickets, drawn from the record alone", () => {
     expect(t.T1!.story.map((s) => s.what).join("\n")).toMatch(/you asked: Add a footer\.[\s\S]*proposed on GitHub/);
     expect(t.T2).toMatchObject({ state: "failed its checks", says: "a check failed: npm test", canAccept: false });
     expect(t.T3).toMatchObject({ state: "interrupted" });
+    r.append({ kind: "stop.pressed", who: "you", ticket: "T3", data: {} });
+    expect(ticketsFrom(r.all(), null).find((x) => x.ticket === "T3")).toMatchObject({ state: "stopped" });
     expect(t.T4).toMatchObject({ state: "working" });
   });
 
@@ -104,6 +106,7 @@ describe("accept", () => {
     expect(moved.calls).toEqual([]);
     expect(await home(r, { github: fakeGitHub({ state: "closed" }).gh }).accept("T1")).toMatchObject({ ok: false, why: expect.stringMatching(/closed/) });
     expect(await home(r, { github: fakeGitHub({ base: "other" }).gh }).accept("T1")).toMatchObject({ ok: false });
+    expect(await home(r, { github: fakeGitHub({ mergeable: false }).gh }).accept("T1")).toMatchObject({ ok: false, why: expect.stringMatching(/moved on/) });
     expect(await home(r).accept("T9")).toMatchObject({ ok: false });
     expect(r.all().filter((l) => l.kind === "result.accepted")).toHaveLength(0);
   });
@@ -118,21 +121,36 @@ describe("the page and its door", () => {
     await new Promise<void>((ok) => server!.listen(0, "127.0.0.1", ok));
     const port = (server.address() as AddressInfo).port;
     h = home(record, { hosts: [`127.0.0.1:${port}`], ...over });
+    cookie = `sf=${h.cookie}`;
     return { h, url: `http://127.0.0.1:${port}`, port };
   }
-  const json = (key: string) => ({ "content-type": "application/json", "x-sf-key": key });
+  let cookie = "";
+  const json = (key: string) => ({ "content-type": "application/json", "x-sf-key": key, cookie });
+  const get = (u: string) => fetch(u, { headers: { cookie } });
+
+  it("lets nobody in without the pass from SoftwareFactory's own window", async () => {
+    const r = new TheRecord();
+    proposed(r);
+    const { url, h } = await serve(r);
+    for (const path of ["/", "/api/step1/state", "/api/step1/events"]) expect((await fetch(`${url}${path}`)).status).toBe(403);
+    expect((await fetch(`${url}/?pass=wrong`, { redirect: "manual" })).status).toBe(403);
+    const inn = await fetch(`${url}/?pass=${h.pass}`, { redirect: "manual" });
+    expect(inn.status).toBe(303);
+    expect(inn.headers.get("set-cookie")).toMatch(/^sf=[a-f0-9]+; HttpOnly; SameSite=Strict/);
+    expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "application/json", "x-sf-key": h.key }, body: "{}" })).status).toBe(403);
+  });
 
   it("serves one page that fetches nothing from elsewhere, and state as data", async () => {
     const r = new TheRecord();
     proposed(r);
     const { url } = await serve(r);
-    const page = await fetch(`${url}/`);
+    const page = await get(`${url}/`);
     expect(page.headers.get("content-security-policy")).toMatch(/default-src 'none'/);
     const html = await page.text();
     expect(html).toContain("What should be done?");
     expect(html).not.toMatch(/src="http|href="http|@import|url\(/);
     expect(html).not.toContain("__SF_KEY__");
-    const s = await (await fetch(`${url}/api/step1/state`)).json() as any;
+    const s = await (await get(`${url}/api/step1/state`)).json() as any;
     expect(s.tickets[0]).toMatchObject({ ticket: "T1", state: "proposed" });
     expect(JSON.stringify(s)).not.toContain("k".repeat(48));
   });
@@ -141,10 +159,10 @@ describe("the page and its door", () => {
     const r = new TheRecord();
     const { url, port, h } = await serve(r);
     const { request } = await import("node:http");
-    const foreign = await new Promise<number>((ok) => { request({ host: "127.0.0.1", port, path: "/api/step1/state", headers: { host: "evil.example" } }, (res) => { res.resume(); ok(res.statusCode ?? 0); }).end(); });
+    const foreign = await new Promise<number>((ok) => { request({ host: "127.0.0.1", port, path: "/api/step1/state", headers: { host: "evil.example", cookie } }, (res) => { res.resume(); ok(res.statusCode ?? 0); }).end(); });
     expect(foreign).toBe(403);
-    expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(403);
-    expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "text/plain", "x-sf-key": h.key }, body: "{}" })).status).toBe(403);
+    expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "application/json", cookie }, body: "{}" })).status).toBe(403);
+    expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "text/plain", "x-sf-key": h.key, cookie }, body: "{}" })).status).toBe(403);
     expect((await fetch(`${url}/api/step1/settings`, { method: "POST", headers: json("wrong"), body: "{}" })).status).toBe(403);
     expect(r.all()).toHaveLength(0);
   });
@@ -162,7 +180,7 @@ describe("the page and its door", () => {
     expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: json(h.key), body: JSON.stringify({ sentence: "  " }) })).status).toBe(409);
     expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: json(h.key), body: JSON.stringify({ sentence: "Add a footer." }) })).status).toBe(200);
     expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: json(h.key), body: JSON.stringify({ sentence: "Another." }) })).status).toBe(409);
-    const s = await (await fetch(`${url}/api/step1/state`)).json() as any;
+    const s = await (await get(`${url}/api/step1/state`)).json() as any;
     expect(s.running).toMatchObject({ ticket: "T1" });
     expect(s.tickets[0]).toMatchObject({ ticket: "T1", state: "working", sentence: "Add a footer." });
     expect((await fetch(`${url}/api/step1/stop`, { method: "POST", headers: json(h.key), body: "{}" })).status).toBe(200);
