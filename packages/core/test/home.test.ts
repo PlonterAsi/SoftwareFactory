@@ -300,7 +300,7 @@ describe("the page and its door", () => {
     expect(a.items[2]!.says).toBe("a check failed: npm run build");
     expect(a.costUsd).toBeGreaterThan(0);
     expect((await post("seen", {})).status).toBe(200);
-    expect(h.state().since).toMatchObject({ items: [], costUsd: 0 });
+    expect(h.state().since).toMatchObject({ items: [], costUsd: 0, counts: { yours: 0, ready: 0, unfinished: 0 } });
     expect(h.state().since.seenAt).not.toBeNull();
     expect(h.state().tickets.filter((t) => !t.removed)).toHaveLength(4);
     // News after that: only what SoftwareFactory did, not what the owner did.
@@ -309,6 +309,21 @@ describe("the page and its door", () => {
     const n = r.all().filter((l) => l.kind === "home.seen").length;
     await post("seen", {});
     expect(r.all().filter((l) => l.kind === "home.seen")).toHaveLength(n);
+    // News that came while the press was on its way is not waved off: Got it names the last line the page had read.
+    const read = h.state().since.upTo;
+    proposed(r, "T5");
+    r.append({ kind: "run.ended", who: "SF itself", ticket: "T5", project: "o/p", data: { end: "crashed", reason: "x" } });
+    r.append({ kind: "issue.linked", who: "SF itself", ticket: "T1", project: "o/p", data: { number: 3 } });
+    await post("seen", { upTo: read });
+    expect(h.state().since.items.map((x) => x.ticket)).toEqual(["T5"]);
+    // Each group is cut by itself, and says how many it holds.
+    for (let i = 6; i < 20; i++) proposed(r, `T${i}`);
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T30", project: "o/p", data: { sentence: "Fails.", kind: "request" } });
+    r.append({ kind: "run.ended", who: "SF itself", ticket: "T30", project: "o/p", data: { end: "crashed", reason: "boom" } });
+    const big = h.state().since;
+    expect(big.counts).toMatchObject({ ready: 15, unfinished: 1 });
+    expect(big.items.filter((x) => x.group === "ready")).toHaveLength(10);
+    expect(big.items.some((x) => x.ticket === "T30")).toBe(true);
     h.close();
   });
 

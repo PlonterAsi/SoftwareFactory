@@ -110,6 +110,7 @@ ol.steps details.facts ul { margin: 4px 0 0; padding-left: 18px; color: var(--so
 ol.story { list-style: none; margin: 8px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font: 13.5px/1.55 var(--mono); max-height: 420px; overflow: auto; }
 #since { border: 1px solid var(--line); border-radius: 10px; padding: 4px 16px 12px; margin: 0 0 18px; background: var(--card, transparent); }
 #since h3 { font-size: 14px; margin: 12px 0 4px; }
+ul.since button.link { border: 0; background: none; padding: 0; font-weight: 700; color: inherit; text-decoration: underline; cursor: pointer; }
 ul.since { margin: 0; padding-left: 20px; line-height: 1.5; }
 ul.since .why { display: block; color: var(--soft); font-size: 14px; }
 ul.stops { margin: 4px 0 8px; padding-left: 20px; font-size: 14px; line-height: 1.5; }
@@ -185,6 +186,7 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-own-share">SoftwareFactory's own share of limit 2 <span class="hint">percent</span></label><input id="s-own-share" type="number" min="0" max="100"></div>
       <div><label for="s-run-limit">The most one run may use <span class="hint">dollars; at it the run is parked and its work is kept</span></label><input id="s-run-limit" type="number" min="0" step="0.5"></div>
       <div><label for="s-run-floor">Do not start a run with less than <span class="hint">dollars left of its limit; the ticket waits for the new period instead</span></label><input id="s-run-floor" type="number" min="0" step="0.1"></div>
+      <div><label for="s-since-show">The panel "since you last looked" names up to <span class="hint">tickets of each group</span></label><input id="s-since-show" type="number" min="1" max="100"></div>
       <div><label for="s-slots">Runs at once <span class="hint">1 is the proven way; with 2 each run gets its own cell in the room</span></label><input id="s-slots" type="number" min="1" max="4"></div>
       <div><label for="s-cut-returns">A cut-off ticket comes back by itself, times <span class="hint">cut off: SoftwareFactory closed or the computer restarted mid-run</span></label><input id="s-cut-returns" type="number" min="0" max="20"></div>
       <div><label for="s-cut-hours">Only when cut off within, hours</label><input id="s-cut-hours" type="number" min="1" max="720"></div>
@@ -214,10 +216,11 @@ ol.story li.flag .x { color: var(--bad); }
   function clock(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }); }
   function day(iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString([], { day: "numeric", month: "short" }) + ", " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); }
   function money(n) { return "$" + Number(n || 0).toFixed(2); }
-  var sinceSig = "";
+  var sinceSig = "", sinceUpTo = 0;
   function drawSince(sn) {
     var box = $("since");
     if (!sn || (!sn.items.length && !sn.cameBack)) { box.hidden = true; sinceSig = ""; return; }
+    sinceUpTo = sn.upTo;
     var sig = JSON.stringify(sn); if (sig === sinceSig) return; sinceSig = sig;
     box.hidden = false;
     $("since-title").textContent = sn.seenAt ? "Since you last looked (" + day(sn.seenAt) + ")" : "What happened so far";
@@ -226,21 +229,22 @@ ol.story li.flag .x { color: var(--bad); }
     ["yours", "ready", "unfinished"].forEach(function (g) {
       var mine = sn.items.filter(function (x) { return x.group === g; });
       if (!mine.length) return;
-      body.appendChild(el("h3", "since-" + g, names[g] + " (" + mine.length + ")"));
+      body.appendChild(el("h3", "since-" + g, names[g] + " (" + sn.counts[g] + ")"));
       var ul = el("ul", "since");
       mine.forEach(function (x) {
         var li = el("li");
-        var go = el("a", "", x.ticket); go.href = "#t-" + x.ticket; go.onclick = function () { var n = nodes[x.ticket] && nodes[x.ticket].node; if (n && n.scrollIntoView) { n.scrollIntoView({ behavior: "smooth", block: "center" }); return false; } };
+        var go = el("button", "link", x.ticket); go.type = "button"; go.onclick = function () { var n = nodes[x.ticket] && nodes[x.ticket].node; if (n && n.scrollIntoView) n.scrollIntoView({ behavior: "smooth", block: "center" }); };
         li.appendChild(go); li.appendChild(document.createTextNode(" " + x.sentence));
         li.appendChild(el("span", "why", x.says));
         if (x.url) { var a = el("a", "", "Open on GitHub"); a.href = x.url; a.target = "_blank"; a.rel = "noopener noreferrer"; li.appendChild(document.createTextNode(" ")); li.appendChild(a); }
         ul.appendChild(li);
       });
       body.appendChild(ul);
+      if (sn.counts[g] > mine.length) body.appendChild(el("p", "hint", "And " + (sn.counts[g] - mine.length) + " more like these on the list below."));
     });
-    $("since-hint").textContent = (sn.more ? "And " + sn.more + " more on the list below. " : "") + (sn.cameBack ? sn.cameBack + (sn.cameBack === 1 ? " ticket was" : " tickets were") + " brought back to the queue by SoftwareFactory. " : "") + "This used " + money(sn.costUsd) + ". Got it clears this panel; the tickets stay below.";
+    $("since-hint").textContent = (sn.cameBack ? sn.cameBack + (sn.cameBack === 1 ? " ticket was" : " tickets were") + " brought back to the queue by SoftwareFactory. " : "") + "All work in this time used " + money(sn.costUsd) + ". Got it clears this panel; the tickets stay below.";
   }
-  $("since-ok").onclick = function () { $("since-ok").disabled = true; post("/api/step1/seen", {}).then(function () { $("since-ok").disabled = false; load(); }); };
+  $("since-ok").onclick = function () { $("since-ok").disabled = true; post("/api/step1/seen", { upTo: sinceUpTo }).then(function (r) { $("since-ok").disabled = false; if (r && r.ok === false) { sinceSig = ""; $("since-hint").textContent = "That did not go through: " + (r.why || "SoftwareFactory did not answer") + "."; return; } load(); }); };
   function lines(v) { return String(v || "").split(/\\r?\\n/).map(function (x) { return x.trim(); }).filter(Boolean); }
   var KINDS = { request: "Request", bug: "Bug", task: "Task", idea: "Idea", plan: "Plan", question: "Question" };
   var editing = null, draft = {}, showRemoved = false, answers = {};
@@ -508,7 +512,7 @@ ol.story li.flag .x { color: var(--bad); }
       settingsLoaded = true;
       $("s-repo").value = s.settings.repo; $("s-base").value = s.settings.base; $("s-model").value = s.settings.model;
       $("s-turns").value = s.settings.maxTurns; $("s-minutes").value = s.settings.timeLimitMinutes;
-      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-slots").value = s.settings.slots; $("s-limit-period").value = s.settings.limitPeriod; $("s-limit-you").value = s.settings.limitYou; $("s-limit-alone").value = s.settings.limitAlone; $("s-own-share").value = s.settings.ownSharePercent; $("s-run-limit").value = s.settings.runLimit; $("s-run-floor").value = s.settings.runFloor; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
+      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-park-wait").value = s.settings.parkedWaitMinutes; $("s-park-returns").value = s.settings.parkedReturns; $("s-slots").value = s.settings.slots; $("s-limit-period").value = s.settings.limitPeriod; $("s-limit-you").value = s.settings.limitYou; $("s-limit-alone").value = s.settings.limitAlone; $("s-own-share").value = s.settings.ownSharePercent; $("s-run-limit").value = s.settings.runLimit; $("s-run-floor").value = s.settings.runFloor; $("s-since-show").value = s.settings.sinceShow; $("s-cut-returns").value = s.settings.cutOffReturns; $("s-cut-hours").value = s.settings.cutOffWithinHours; $("s-issues").value = s.settings.issues; $("s-issues-label").value = s.settings.issuesLabel; $("s-issues-every").value = s.settings.issuesEveryMinutes; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
       $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n"); $("s-stop-paths").value = (s.settings.stopPaths || []).join("\\n");
     }
     // Settings stay folded when everything a run needs is set; they open by themselves only when the project is missing.
@@ -536,7 +540,7 @@ ol.story li.flag .x { color: var(--bad); }
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
-    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), limitPeriod: $("s-limit-period").value, limitYou: Number($("s-limit-you").value), limitAlone: Number($("s-limit-alone").value), ownSharePercent: Number($("s-own-share").value), runLimit: Number($("s-run-limit").value), runFloor: Number($("s-run-floor").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value), stopPaths: lines($("s-stop-paths").value) })
+    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), limitPeriod: $("s-limit-period").value, limitYou: Number($("s-limit-you").value), limitAlone: Number($("s-limit-alone").value), ownSharePercent: Number($("s-own-share").value), runLimit: Number($("s-run-limit").value), runFloor: Number($("s-run-floor").value), sinceShow: Number($("s-since-show").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value), stopPaths: lines($("s-stop-paths").value) })
       .then(function (r) { if (r.ok) { $("save-hint").textContent = "Saved."; settingsLoaded = false; load(); } else { $("set-msg").textContent = r.why; } });
   };
 
