@@ -179,3 +179,12 @@ The agent is started with `--setting-sources user --strict-mcp-config` and with 
 - The project's own Claude settings (`.claude/settings.json` in the copy) do not count inside the room. They could deny reads (which hid `node_modules` from the run) and name hooks and plugins; only the room's managed rules and the worker's sign-in apply.
 - The room is signed in with the owner's account, so that account's connectors (mail, files, documents) would otherwise be offered to the run as tools, and those do not pass the room's network list. They are switched off, and SF reads the first line of the agent's stream: if any `mcp__` tool or connected server is listed, the run is ended at once and nothing of it is kept.
 - The ready gate's reader is started the same way, with no tools at all.
+
+## The story in steps
+
+Each worked ticket shows a fixed road: Asked, Ready, Fence held, Worked, Checked, Proposed, Accepted (and Undone when it happened). `fence/story.ts` reads it from the record each time; nothing about it is stored.
+
+- Every step says its state (done, failed, now, skipped, not reached), one sentence of proof, the facts behind it (each line of the test of done, each of the nine fence lines, each check, each changed file, the commit) and the numbers of the record lines it was read from.
+- A step that failed stops the road: what follows is "not reached", never guessed.
+- A ticket sent again shows its latest go; the count of goes is a fact on the first step.
+- On the home screen the road is one line of marks per ticket and opens into the steps. Every line of the record stays below it. `npm run step1 -- story T1` prints the steps first, then every line.

@@ -7,6 +7,7 @@ import type { GateResult } from "./gate.js";
 import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
 import { type Sender, type WatchSettings, WATCH_DEFAULTS, cleanWatch, speak } from "./watchdog.js";
+import { type StoryStep, stepsOf } from "./story.js";
 import { type TicketKind, type TicketOutcome, type TicketSettings, TICKET_KINDS, openTicket, storyLine } from "./ticketrun.js";
 
 /**
@@ -112,6 +113,8 @@ export interface TicketView {
   asked: { question: string; answer: string } | null;
   /** The record line that made it wait (the order of the queue). */
   waitingSince: number;
+  /** Where it stands on the fixed road, each step with what proves it. */
+  steps: StoryStep[];
   story: { id: number; at: string; who: string; what: string; flagged: boolean }[];
 }
 
@@ -168,6 +171,7 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
       canAgain: !removed && ["proposed", "failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held"].includes(state),
       removed, place: null, question: state === "asked" ? question : null, done: Array.isArray(d(gPassed).done) ? (d(gPassed).done as unknown[]).map(String) : [],
       asked: gAsked && gAnswered ? { question: String(d(gAsked).question ?? ""), answer: String(d(gAnswered).answer ?? "") } : null, gatePassed: !!gPassed && !d(gPassed).skipped, waitingSince: Math.max(sent.id, lastOf(ls, "ticket.restored")?.id ?? 0),
+      steps: WORKED.includes(kindNow) ? stepsOf(ls, running === ticket) : [],
       story: ls.map((l) => ({ id: l.id, at: l.ts, who: l.who, what: storyLine(l), flagged: l.flagged })),
     });
   }

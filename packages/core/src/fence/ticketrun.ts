@@ -1,3 +1,4 @@
+import { stepsOf, stepsText } from "./story.js";
 import { type FoundChecks, findChecks, scriptsOf } from "./projectchecks.js";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -232,5 +233,6 @@ export function storyLine(l: RecordLine): string {
 
 /** The story of a ticket, as lines a person reads. */
 export function storyText(record: TheRecord, ticket: string): string {
-  return record.story(ticket).map((l) => `${l.ts.slice(11, 19)}  ${l.who.padEnd(9)} ${storyLine(l)}`).join("\n");
+  const lines = record.story(ticket), steps = stepsText(stepsOf(lines));
+  return `${steps ? `${steps}\n\n` : ""}${lines.map((l) => `${l.ts.slice(11, 19)}  ${l.who.padEnd(9)} ${storyLine(l)}`).join("\n")}`;
 }

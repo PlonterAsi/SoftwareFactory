@@ -79,6 +79,34 @@ details.settings { margin-top: 34px; }
 details.settings > summary { font-size: 15px; width: auto; }
 details.settings[open] > summary { margin-bottom: 14px; }
 summary { cursor: pointer; color: var(--soft); font-size: 14px; font-weight: 600; width: fit-content; border-radius: 6px; }
+details.road { margin: 10px 0 4px; }
+details.road > summary { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; cursor: pointer; list-style: none; padding: 4px 0; }
+details.road > summary::-webkit-details-marker { display: none; }
+details.road .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 14px; color: var(--soft); }
+details.road .chip .mk { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; border: 2px solid var(--line); background: var(--card); }
+details.road .chip.st-done { color: var(--ink); } details.road .chip.st-done .mk { background: var(--good-bg); border-color: var(--good); color: var(--good); }
+details.road .chip.st-failed { color: var(--bad); font-weight: 600; } details.road .chip.st-failed .mk { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+details.road .chip.st-now { color: var(--accent); font-weight: 600; } details.road .chip.st-now .mk { background: var(--work-bg); border-color: var(--accent); color: var(--accent); }
+details.road .chip.st-skipped .mk { background: var(--wait-bg); border-color: var(--wait); color: var(--wait); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+ol.steps { list-style: none; margin: 12px 0 4px; padding: 0; }
+ol.steps > li { display: grid; grid-template-columns: 26px 1fr; gap: 0 10px; position: relative; padding-bottom: 10px; }
+ol.steps > li:not(:last-child)::before { content: ""; position: absolute; left: 12px; top: 26px; bottom: 0; width: 2px; background: var(--line); }
+ol.steps .mk { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14px; border: 2px solid var(--line); background: var(--card); color: var(--soft); }
+ol.steps .st-done .mk { background: var(--good-bg); border-color: var(--good); color: var(--good); }
+ol.steps .st-failed .mk { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+ol.steps .st-now .mk { background: var(--work-bg); border-color: var(--accent); color: var(--accent); }
+ol.steps .st-skipped .mk { background: var(--wait-bg); border-color: var(--wait); color: var(--wait); }
+ol.steps .bd { min-width: 0; }
+ol.steps p { margin: 0; overflow-wrap: anywhere; }
+ol.steps .hd { line-height: 26px; }
+ol.steps .hd .t { color: var(--soft); font-size: 13.5px; margin-left: 8px; }
+ol.steps .pf { font-size: 15px; }
+ol.steps .st-not-reached .hd, ol.steps .st-not-reached .pf { color: var(--soft); }
+ol.steps .st-failed .pf { color: var(--bad); }
+ol.steps .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+ol.steps details.facts { margin-top: 2px; font-size: 14px; }
+ol.steps details.facts ul { margin: 4px 0 0; padding-left: 18px; color: var(--soft); overflow-wrap: anywhere; }
 ol.story { list-style: none; margin: 8px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font: 13.5px/1.55 var(--mono); max-height: 420px; overflow: auto; }
 ol.story li { display: grid; grid-template-columns: 5.2em 6.2em 1fr; gap: 0 8px; }
 ol.story .t, ol.story .w { color: var(--soft); }
@@ -276,10 +304,55 @@ ol.story li.flag .x { color: var(--bad); }
     var msg = el("p", "msg", acceptError[t.ticket] || "");
     msg.setAttribute("role", "alert");
     if (acceptError[t.ticket]) box.appendChild(msg);
+    if (t.steps && t.steps.length) {
+      var road = el("ol", "steps");
+      road.setAttribute("aria-label", "The steps of this ticket, each with its proof");
+      t.steps.forEach(function (s) {
+        var li = el("li", "st-" + s.state.replace(" ", "-"));
+        li.appendChild(el("span", "mk", MARK[s.state] || ""));
+        var body = el("div", "bd");
+        var head = el("p", "hd");
+        head.appendChild(el("b", "", s.title));
+        head.appendChild(el("span", "sr", " (" + s.state + ") "));
+        if (s.at) head.appendChild(el("span", "t", clock(s.at)));
+        body.appendChild(head);
+        var pr = el("p", "pf", s.proof);
+        if (s.url) { pr.appendChild(document.createTextNode(" ")); var a = el("a", "", "Open it on GitHub"); a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer"; pr.appendChild(a); }
+        body.appendChild(pr);
+        if (s.facts.length || s.lines.length) {
+          var key = t.ticket + "/" + s.id, more = el("details", "facts");
+          more.open = !!open[key];
+          more.ontoggle = function () { open[key] = more.open; };
+          more.appendChild(el("summary", "", "The proof" + (s.facts.length ? ", " + s.facts.length + (s.facts.length === 1 ? " fact" : " facts") : "")));
+          var ul = el("ul");
+          s.facts.forEach(function (f) { ul.appendChild(el("li", "", f)); });
+          if (s.lines.length) ul.appendChild(el("li", "rec", "Read from the record, " + (s.lines.length === 1 ? "line " : "lines ") + s.lines.join(", ")));
+          more.appendChild(ul);
+          body.appendChild(more);
+        }
+        li.appendChild(body);
+        road.appendChild(li);
+      });
+      var rk = t.ticket + "/steps", fold = el("details", "road");
+      fold.open = !!open[rk];
+      fold.ontoggle = function () { open[rk] = fold.open; };
+      var sum = el("summary");
+      sum.appendChild(el("span", "sr", "The steps with their proof: "));
+      t.steps.forEach(function (s) {
+        var c = el("span", "chip st-" + s.state.replace(" ", "-"));
+        c.appendChild(el("span", "mk", MARK[s.state] || ""));
+        c.appendChild(el("span", "", s.title));
+        c.appendChild(el("span", "sr", " (" + s.state + "), "));
+        sum.appendChild(c);
+      });
+      fold.appendChild(sum);
+      fold.appendChild(road);
+      box.appendChild(fold);
+    }
     var det = el("details");
     det.open = !!open[t.ticket];
     det.ontoggle = function () { open[t.ticket] = det.open; };
-    det.appendChild(el("summary", "", "The story, " + t.story.length + (t.story.length === 1 ? " line" : " lines")));
+    det.appendChild(el("summary", "", "Every line of the record, " + t.story.length + (t.story.length === 1 ? " line" : " lines")));
     var ol = el("ol", "story");
     t.story.forEach(function (s) {
       var li = el("li", s.flagged ? "flag" : "");
@@ -291,6 +364,7 @@ ol.story li.flag .x { color: var(--bad); }
     return box;
   }
   var acceptError = {}, looked = {};
+  var MARK = { "done": "\u2713", "failed": "!", "now": "\u25B8", "skipped": "\u2013", "not reached": "" };
 
   function render(s) {
     if (!s) return;
