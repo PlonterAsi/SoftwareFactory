@@ -149,21 +149,21 @@
         {
           "id": "stuck-ladder",
           "title": "Stuck ladder: once more, another way, split, park",
-          "status": "now",
+          "status": "built",
           "from": "leg 4",
           "done": "A failing ticket climbs the ladder by itself."
         },
         {
           "id": "phone",
           "title": "Phone, two ways: told, and can stop",
-          "status": "later",
+          "status": "parked",
           "from": "leg 3",
           "done": "You stop a run from the phone."
         },
         {
           "id": "settings",
           "title": "Every number and switch is a setting; the protected core only by your hand",
-          "status": "later",
+          "status": "now",
           "from": "rules",
           "done": "You change a limit from the screen; an agent cannot."
         }

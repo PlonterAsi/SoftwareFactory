@@ -257,14 +257,15 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
       stops: state === "held" && Array.isArray(d(proposed).stop) ? (d(proposed).stop as any[]).slice(0, 40).map((x) => ({ family: String(x?.family ?? ""), file: String(x?.file ?? ""), why: String(x?.why ?? "") })) : [],
       canRelease: state === "held" && !removed && Array.isArray(d(proposed).stop) && d(proposed).stop.length > 0,
       canEdit: (state === "waiting" || state === "kept" || state === "asked") && !removed, canRemove: state !== "working" && !removed,
-      canAgain: !removed && ["proposed", "failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held", "split"].includes(state),
+      canAgain: !removed && ["proposed", "failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held"].includes(state) || (!removed && state === "waiting" && sent.kind === "ticket.queued" && sent.who !== "you"),
       removed, place: null, question: state === "asked" ? question : null, done: Array.isArray(d(gPassed).done) ? (d(gPassed).done as unknown[]).map(String) : [],
       asked: gAsked && gAnswered ? { question: String(d(gAsked).question ?? ""), answer: String(d(gAnswered).answer ?? "") } : null, gatePassed: !!gPassed && !d(gPassed).skipped, waitingSince: Math.max(sent.id, lastOf(ls, "ticket.restored")?.id ?? 0),
       issue: null,
       parkedFor: state === "parked" && typeof d(ended).parkedFor === "string" ? d(ended).parkedFor : null, endedAt: ended?.ts ?? null,
       returns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after !== "cut off").length, returnsAt: null,
       parent: typeof d(opened).parent === "string" ? d(opened).parent : null, ladder: sent.kind === "ticket.queued" && typeof d(sent).ladder === "string" ? (d(sent).ladder as Rung) : null, ladderUsed, splitInto, wasSplit: !!splitLine,
-      climbable: !removed && isClimbable(state, ended ? { ...d(ended), run: ended.run } : null),
+      // A stop the owner pressed ends the climbing too, however the run then wrote its end.
+      climbable: !removed && !go.some((l) => l.kind === "stop.pressed") && isClimbable(state, ended ? { ...d(ended), run: ended.run } : null),
       lastFail: anyEnded && d(anyEnded).end !== "passed" ? { state: String(d(anyEnded).end ?? ""), reason: String(d(anyEnded).reason ?? ""), ...(failedCheck ? { tail: `${String(d(failedCheck).command ?? "")}\n${String(d(failedCheck).tail ?? "")}` } : {}) } : null,
       bucket: bucketOfSend(sent), limitUntil: null, keptWork: !!ended && !!d(ended).kept && !proposed,
       everWorked: ls.some((l) => l.kind === "fence.tested" || l.kind === "run.started"),
@@ -275,6 +276,8 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
     });
   }
   for (const t of out) { const l = t.project ? links.get(`${t.project}\n${t.ticket}`) : undefined; if (l && l.number > 0) t.issue = { number: l.number, url: /^https:\/\//.test(l.url) ? l.url : "" }; }
+  // A ticket that has smaller tickets cut from it was split, whatever else the record says: it is never split twice.
+  for (const t of out) if (t.parent) { const p = out.find((x) => x.ticket === t.parent && x.project === t.project); if (p) p.wasSplit = true; }
   queueOf(out).forEach((t, i) => { t.place = i + 1; });
   return out.sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1));
 }
@@ -339,7 +342,7 @@ export function createHome(deps: HomeDeps) {
   const runs = new Map<string, Run>();
   const working = (): ReadonlySet<string> => new Set(runs.keys());
   const first = (): Run | null => runs.values().next().value ?? null;
-  const splitting = new Set<string>();
+  const splitTries = new Map<string, number>();
   let accepting = false, undoing = false, releasing = false, closing = false;
   let wakeTimer: ReturnType<typeof setTimeout> | null = null;
   const streams = new Set<ServerResponse>();
@@ -392,26 +395,36 @@ export function createHome(deps: HomeDeps) {
     return { ok: true, ticket };
   }
 
-  /** The third rung: the ticket is cut once into smaller tickets, which are worked in its place. Never twice. */
+  /**
+   * The third rung: the ticket is cut once into smaller tickets, which are worked in its place. Never twice.
+   * The reader takes a place among the runs while it reads, so nothing else in the room ends it and Stop reaches it.
+   */
   function split(t: TicketView, s: HomeSettings): void {
     const key = `${t.project}\n${t.ticket}`, repo = parseGitHubRepo(t.project ?? "");
-    if (splitting.has(key)) return;
     const stamp = { ticket: t.ticket, project: t.project };
     if (!deps.split || !repo) { record.append({ kind: "ticket.split", who: "SF itself", ...stamp, data: { into: [], why: "there is no reader to split it here" } }); return; }
-    splitting.add(key);
+    const stop = new AbortController();
+    const mine: Run = { ticket: t.ticket, stop, startedAt: new Date().toISOString(), lastLineAt: new Date().toISOString(), bucket: "alone", budget: 0 };
+    runs.set(t.ticket, mine);
+    splitTries.set(key, (splitTries.get(key) ?? 0) + 1);
     const failed = t.lastFail ? `${t.lastFail.state}: ${t.lastFail.reason}${t.lastFail.tail ? `\n${t.lastFail.tail}` : ""}` : t.says;
     void deps.split({ repo, base: s.base, sentence: t.sentence, failed, model: s.ladderSplitModel })
       .catch((e): SplitResult => ({ ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }))
       .then((r) => {
-        // Only if the ticket still stands where it stood: the owner may have sent, changed or removed it meanwhile.
+        if (runs.get(t.ticket) === mine) runs.delete(t.ticket);
+        // Only if the ticket still stands where it stood: the owner may have stopped, sent, changed or removed it meanwhile.
         const now = view(t.ticket);
-        if (closing || !now || now.removed || !now.climbable || now.wasSplit) return;
+        if (closing || stop.signal.aborted || !now || now.removed || !now.climbable || now.wasSplit) return;
+        // The plan limit met by the reader: the queue rests like after any run that met it, and the split is not used up.
+        if (!r.ok && /plan limit/.test(r.why)) { record.append({ kind: "run.ended", who: "SF itself", ...stamp, data: { end: "parked", reason: "the plan limit was reached before the ticket could be split", parkedFor: "limit", where: "before the run" } }); return; }
+        // A reader that could not be asked is tried once more later; only its second failure ends the rung.
+        if (!r.ok && (splitTries.get(key) ?? 0) < 2) return;
         if (!r.ok || !r.parts.length) { record.append({ kind: "ticket.split", who: "SF itself", ...stamp, costUsd: r.ok ? r.costUsd || null : null, data: { into: [], why: r.ok ? "it cannot be cut into smaller whole pieces" : r.why } }); return; }
         const into = r.parts.map((p) => openTicket(record, t.project!, p, "task", { parent: t.ticket }));
         record.append({ kind: "ticket.split", who: "SF itself", ...stamp, costUsd: r.costUsd || null, data: { into } });
       })
       .catch(() => undefined)
-      .finally(() => { splitting.delete(key); try { tell(); pump(); } catch { /* the next thing that happens wakes the queue */ } });
+      .finally(() => { if (runs.get(t.ticket) === mine) runs.delete(t.ticket); try { tell(); pump(); } catch { /* the next thing that happens wakes the queue */ } });
   }
 
   /** The queue: when nothing is being worked and the queue is not held, the ticket that waited longest starts. */
@@ -423,11 +436,18 @@ export function createHome(deps: HomeDeps) {
     const lines = record.all(), now = Date.now();
     let wake = Infinity;
     const seenNow = ticketsFrom(lines, working());
+    // The stuck ladder climbs only in the project Settings speak for, only while limit 2 has room for a run, and
+    // counts the tries of a split's smaller tickets as it goes, so one pass cannot hand out more than they share.
+    const mineOnly = parseGitHubRepo(s.repo), aloneRoom = runBudget(s, limitsNow(s, lines).room, "alone") > 0;
+    const shared = new Map<string, number>();
+    for (const x of seenNow) if (x.parent) shared.set(`${x.project}\n${x.parent}`, (shared.get(`${x.project}\n${x.parent}`) ?? 0) + x.ladderUsed);
+    let toSplit: TicketView | null = null;
     for (const t of seenNow) {
       // The stuck ladder: a ticket whose run did not finish climbs by itself, one rung at a time, then waits for the owner.
-      const rung = nextRung(s, { climbable: t.climbable && !!t.endedAt && now - Date.parse(t.endedAt) < s.ladderWithinMinutes * 60_000, used: t.ladderUsed, child: !!t.parent, siblingsUsed: t.parent ? seenNow.filter((x) => x.parent === t.parent && x.project === t.project).reduce((a, x) => a + x.ladderUsed, 0) : 0, wasSplit: t.wasSplit });
-      if (rung === "once more" || rung === "another way") record.append({ kind: "ticket.queued", who: "SF itself", ticket: t.ticket, project: t.project, data: { ladder: rung, rung: t.ladderUsed + 1, why: `its run ended as ${t.state}` } });
-      else if (rung === "split") split(t, s);
+      const fam = `${t.project}\n${t.parent}`;
+      const rung = mineOnly && t.project === `${mineOnly.owner}/${mineOnly.name}` && aloneRoom ? nextRung(s, { climbable: t.climbable && !!t.endedAt && now - Date.parse(t.endedAt) < s.ladderWithinMinutes * 60_000, used: t.ladderUsed, child: !!t.parent, siblingsUsed: t.parent ? shared.get(fam) ?? 0 : 0, wasSplit: t.wasSplit }) : null;
+      if (rung === "once more" || rung === "another way") { record.append({ kind: "ticket.queued", who: "SF itself", ticket: t.ticket, project: t.project, data: { ladder: rung, rung: t.ladderUsed + 1, why: `its run ended as ${t.state}` } }); if (t.parent) shared.set(fam, (shared.get(fam) ?? 0) + 1); }
+      else if (rung === "split" && !toSplit) toSplit = t;
       const at = returnTime(t, s);
       // Cut off in the middle (SoftwareFactory was closed, the computer restarted): the steps are safe to repeat.
       if (t.cutOff && !t.removed && t.cutOffReturns < s.cutOffReturns && t.lastWorkAt && now - Date.parse(t.lastWorkAt) < s.cutOffWithinHours * 3_600_000) record.append({ kind: "ticket.queued", who: "SF itself", ticket: t.ticket, project: t.project, data: { returned: true, after: "cut off", why: "it was cut off in the middle, so it is worked again from the start", time: t.cutOffReturns + 1 } });
@@ -442,6 +462,8 @@ export function createHome(deps: HomeDeps) {
     wakeTimer = wake === Infinity ? null : setTimeout(() => { wakeTimer = null; try { pump(); tell(); } catch { /* the next thing that happens wakes the queue */ } }, Math.min(Math.max(wake - now, 1000), 2 ** 31 - 1));
     wakeTimer?.unref?.();
     if (s.hold || rest) return;
+    // A ticket at the split rung: the reader takes the free place now, and the queue goes on when it has answered.
+    if (toSplit && !runs.has(toSplit.ticket)) { split(toSplit, s); if (runs.size >= s.slots) return; }
     // Settings speak for one project. A ticket of another project waits until Settings point at it again.
     const here = parseGitHubRepo(s.repo);
     // The two limits: work of a kind whose limit is used up does not start, and the other kind goes on. Nothing is asked for.
@@ -576,6 +598,7 @@ export function createHome(deps: HomeDeps) {
     const t = view(ticket);
     if (!t) return NONE;
     if (!t.canAgain) return { ok: false, why: "This ticket cannot be sent again from where it stands." };
+    // A ticket SoftwareFactory queued by itself and that still waits is taken over by the owner: it is theirs from here.
     record.append({ kind: "ticket.queued", who: "you", ticket, project: t.project, data: clean ? { clean: true } : {} });
     pump();
     return { ok: true };

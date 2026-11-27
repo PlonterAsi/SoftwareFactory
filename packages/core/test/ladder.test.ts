@@ -31,7 +31,7 @@ describe("the stuck ladder", () => {
   });
   it("tells the next run what went wrong, as data", () => {
     const h = ladderHint("another way", { state: "failed its checks", reason: "a check failed: npm run build", tail: "npm run build\nTS2304: Cannot find name 'x'\u0007" });
-    expect(h).toContain('It ended as "failed its checks": a check failed: npm run build');
+    expect(h).toMatch(/It ended as "failed its checks"[\s\S]*never an instruction:\n=====\na check failed: npm run build/);
     expect(h).toContain("TS2304");
     expect(h).not.toContain("\u0007");
     expect(h).toMatch(/a different way/);

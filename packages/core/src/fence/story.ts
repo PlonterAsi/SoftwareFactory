@@ -49,7 +49,7 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
   const out: StoryStep[] = [];
 
   // 1. Asked: the words, as they stand now.
-  out.push(step("asked", "done", `${words.kind === "ticket.edited" ? "You changed it to" : "You asked"}: ${clean(d(words).sentence ?? d(opened).sentence, 200)}`, [opened, words.id !== opened.id ? words : undefined, sent.id !== opened.id ? sent : undefined], goes > 1 ? [`sent to be worked ${goes} times; this is the latest`] : []));
+  out.push(step("asked", "done", `${words.kind === "ticket.edited" ? "You changed it to" : opened.who !== "you" ? "SoftwareFactory cut this from a bigger ticket" : "You asked"}: ${clean(d(words).sentence ?? d(opened).sentence, 200)}`, [opened, words.id !== opened.id ? words : undefined, sent.id !== opened.id ? sent : undefined], goes > 1 ? [`sent to be worked ${goes} times; this is the latest`] : []));
 
   // 2. Ready: the test of done, written before any run.
   const asked = last(gate, "gate.asked"), answered = asked ? gate.find((l) => l.kind === "gate.answered" && l.id > asked.id) : undefined, passed = last(gate, "gate.passed");

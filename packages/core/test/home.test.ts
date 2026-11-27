@@ -89,6 +89,20 @@ describe("tickets, drawn from the record alone", () => {
     expect(ticketsFrom(r.all(), null).find((x) => x.ticket === "T5")).toMatchObject({ state: "waiting" });
   });
 
+  it("does not climb the ladder after a stop the owner pressed, however the run wrote its end", () => {
+    const r = new TheRecord();
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "X.", kind: "request" } });
+    r.append({ kind: "run.started", who: "SF itself", run: "T1-a", ticket: "T1", project: "o/p", data: {} });
+    r.append({ kind: "run.ended", who: "SF itself", run: "T1-a", ticket: "T1", project: "o/p", data: { end: "failed its checks", reason: "a check failed" } });
+    expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ climbable: true });
+    const r2 = new TheRecord();
+    r2.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "X.", kind: "request" } });
+    r2.append({ kind: "run.started", who: "SF itself", run: "T1-a", ticket: "T1", project: "o/p", data: {} });
+    r2.append({ kind: "stop.pressed", who: "you", ticket: "T1", project: "o/p", data: {} });
+    r2.append({ kind: "run.ended", who: "SF itself", run: "T1-a", ticket: "T1", project: "o/p", data: { end: "failed its checks", reason: "a check failed" } });
+    expect(ticketsFrom(r2.all(), null)[0]).toMatchObject({ climbable: false });
+  });
+
   it("a held result cannot be accepted, an accepted one says so", () => {
     const r = new TheRecord();
     proposed(r, "T1", { held: true, reason: "a secret was found", url: undefined, number: undefined });
@@ -353,12 +367,13 @@ describe("the page and its door", () => {
     expect(seen[2]!.hint).toMatch(/a different way/);
     const st = h.state();
     const of = (t: string) => st.tickets.find((x) => x.ticket === t)!;
-    expect(of("T1")).toMatchObject({ state: "split", splitInto: ["T2", "T3"], canAgain: true });
+    expect(of("T1")).toMatchObject({ state: "split", splitInto: ["T2", "T3"], canAgain: false, wasSplit: true });
     expect(of("T2")).toMatchObject({ state: "failed its checks", parent: "T1", bucket: "alone", sentence: "First half.", ladderUsed: 1 });
     expect(r.all().filter((l) => l.kind === "ticket.split")).toHaveLength(1);
     expect(r.all().filter((l) => l.kind === "ticket.queued").map((l) => (l.data as any).ladder)).toEqual(["once more", "another way", "once more", "once more"]);
     // Everything SoftwareFactory did here by itself counts under limit 2; only the first run was the owner's.
-    expect(st.since.counts.unfinished).toBe(2);
+    expect(st.since.counts.unfinished).toBe(3);
+    expect(st.since.cameBack).toBe(3);
     h.close();
   });
 

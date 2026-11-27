@@ -42,11 +42,12 @@ export interface SinceTicket { ticket: string; project: string | null; sentence:
 const GROUP: Record<string, SinceGroup> = {
   proposed: "ready",
   asked: "yours", held: "yours",
+  split: "unfinished",
   "failed its checks": "unfinished", parked: "unfinished", crashed: "unfinished", "not started": "unfinished", interrupted: "unfinished",
 };
 const ORDER: SinceGroup[] = ["yours", "ready", "unfinished"];
 /** Lines that change where a ticket stands. A link to an issue or a word from the watchdog is not news about the ticket. */
-const NEWS = new Set(["gate.asked", "fence.tested", "run.started", "run.step", "run.checked", "run.ended", "result.proposed", "ticket.removed"]);
+const NEWS = new Set(["gate.asked", "fence.tested", "run.started", "run.step", "run.checked", "run.ended", "result.proposed", "ticket.removed", "ticket.split"]);
 
 /** `show`: how many of each group the panel names. No group is ever left out whole. */
 export function sinceYouLeft(lines: RecordLine[], tickets: SinceTicket[], show = 10): Since {
@@ -62,7 +63,7 @@ export function sinceYouLeft(lines: RecordLine[], tickets: SinceTicket[], show =
     if (l.id <= after) continue;
     costUsd += Number(l.costUsd ?? 0) || 0;
     if (!l.ticket || l.who === "you") continue;
-    if (l.kind === "ticket.queued" && (l.data as any)?.returned) back.add(l.ticket);
+    if (l.kind === "ticket.queued" && ((l.data as any)?.returned || (l.data as any)?.ladder)) back.add(l.ticket);
     if (NEWS.has(l.kind)) last.set(l.ticket, l);
   }
   const all: SinceItem[] = [];

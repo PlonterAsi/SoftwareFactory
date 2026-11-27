@@ -307,6 +307,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
 export function storyLine(l: RecordLine): string {
     const d = l.data as any;
     const what =
+      l.kind === "ticket.opened" && l.who !== "you" ? `SoftwareFactory opened it${d.parent ? `, a smaller piece cut from ${d.parent}` : ""}: ${d.sentence}` :
       l.kind === "ticket.opened" ? `you asked${d.from === "github" ? ` (issue #${d.issue} on GitHub)` : ""}: ${d.sentence}` :
       l.kind === "issue.linked" ? (d.direction === "in" ? `taken from issue #${d.number} on GitHub` : `issue #${d.number} opened on GitHub for it`) :
       l.kind === "ticket.split" ? (Array.isArray(d.into) && d.into.length ? `SoftwareFactory split it into ${d.into.join(", ")}` : `it could not be split: ${d.why ?? ""}`) :
