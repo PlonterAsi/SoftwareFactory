@@ -83,6 +83,7 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
   let broke = false; // a step failed: what comes after was not reached
   if (!started) {
     if (ended && !broke) { out.push(step("worked", "failed", `No run: ${reason}`, [ended])); broke = true; }
+    else if (stoppedBy) { out.push(step("worked", "failed", "No run: you pressed stop.", [stoppedBy])); broke = true; }
     else out.push(step("worked", "not reached", fence && d(fence).ok === false ? "No run started." : "A run works it in the room when its turn comes."));
     if (fence && d(fence).ok === false) broke = true;
   } else {
@@ -96,13 +97,18 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
   // 5. Checked: SoftwareFactory's own checks, in a box with no network.
   const found = Array.isArray(d(started).checksFound) ? (d(started).checksFound as unknown[]).map(String) : null;
   if (broke || !committed) out.push(step("checked", "not reached", "The checks run after the work is committed."));
-  else if (checks.length) {
-    const bad = checks.filter((l) => !d(l).ok);
-    out.push(step("checked", bad.length ? "failed" : (ended || proposed) ? "done" : "now", bad.length ? `${bad.length} of ${checks.length} checks failed: ${d(bad[0]).command}` : `${checks.length} of ${checks.length} checks passed, run by SoftwareFactory with no network.`, checks, [...checks.map((l) => `${d(l).ok ? "passed" : "FAILED"}: ${d(l).command}`), ...(found ? [`found in the project: ${found.join(", ") || "nothing"}`] : [])]));
-    if (bad.length) broke = true;
-  } else if (!ended && !proposed) out.push(step("checked", working ? "now" : "not reached", "The checks are running.", []));
-  else if (ended && !["passed", ""].includes(end) && !proposed) { out.push(step("checked", "failed", `The run ended as ${end}: ${reason}`, [ended])); broke = true; }
-  else out.push(step("checked", "skipped", found ? "No build or type check was found in the project, so nothing was checked." : "No checks are set for this project, so nothing was checked.", [started]));
+  else {
+    const planned = Array.isArray(d(started).checks) ? d(started).checks.length : 0, bad = checks.filter((l) => !d(l).ok);
+    const facts = [...checks.map((l) => `${d(l).ok ? "passed" : "FAILED"}: ${d(l).command}`), ...(found ? [`found in the project: ${found.join(", ") || "nothing"}`] : [])];
+    const all = Math.max(planned, checks.length);
+    if (bad.length) { out.push(step("checked", "failed", `${bad.length} of ${all} checks failed: ${d(bad[0]).command}`, checks, facts)); broke = true; }
+    // The checks passed but the end says otherwise: what was checked is not what would leave.
+    else if (end === "failed its checks") { out.push(step("checked", "failed", `The checks did not count: ${reason}`, [...checks, ended], facts)); broke = true; }
+    else if (!all && (ended || proposed)) out.push(step("checked", "skipped", found ? "No build or type check was found in the project, so nothing was checked." : "No checks are set for this project, so nothing was checked.", [started]));
+    else if (checks.length >= all && all && (ended || proposed)) out.push(step("checked", "done", `${checks.length} of ${all} checks passed, run by SoftwareFactory with no network.`, checks, facts));
+    else if (!ended && !proposed && working) out.push(step("checked", "now", all ? `The checks are running: ${checks.length} of ${all} so far.` : "The work is being packed.", checks, facts));
+    else { out.push(step("checked", "failed", ended ? `Only ${checks.length} of ${all} checks ran. The run ended as ${end}: ${reason}` : `Only ${checks.length} of ${all} checks ran before the run was cut off.`, [...checks, stoppedBy, ended], facts)); broke = true; }
+  }
 
   // 6. Proposed: on GitHub, or held on this computer.
   if (proposed && d(proposed).held) { out.push(step("proposed", "failed", `Held on this computer: ${d(proposed).reason}`, [proposed])); broke = true; }

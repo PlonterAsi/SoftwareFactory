@@ -66,6 +66,31 @@ describe("the story in steps", () => {
     expect(states(d)).toMatchObject({ checked: "done", proposed: "failed", accepted: "not reached" });
   });
 
+  it("never calls the checks done when the end says otherwise, when not all ran, or when nothing is running", () => {
+    const two = (t: ReturnType<typeof ticket>) => t.r.append({ kind: "run.started", who: "SF itself", run: "r1", ticket: "T1", project: "o/p", data: { model: "sonnet", checks: ["npm run build", "go vet"] } });
+    // The files changed while the checks ran: every check passed, the end did not.
+    const a = ticket(); a.open(); a.fence(); a.start(); a.agent(); a.commit(); a.check(); a.end("failed its checks", "the project's files changed while the checks ran");
+    expect(a.steps()[4]).toMatchObject({ state: "failed", proof: "The checks did not count: the project's files changed while the checks ran" });
+    // Stop after the first of two checks.
+    const b = ticket(); b.open(); b.fence(); two(b); b.agent(); b.commit(); b.check(); b.end("stopped", "you pressed stop");
+    expect(b.steps()[4]).toMatchObject({ state: "failed" });
+    expect(b.steps()[4]!.proof).toMatch(/^Only 1 of 2 checks ran/);
+    // SoftwareFactory was closed after one check: nothing is running, so nothing is "now".
+    const c = ticket(); c.open(); c.fence(); two(c); c.agent(); c.commit(); c.check();
+    expect(states(c, false).checked).toBe("failed");
+    expect(states(c, true).checked).toBe("now");
+    // No checks at all, and the proposal failed outside the room: the blame is on Proposed, not on Checked.
+    const d = ticket(); d.open(); d.fence();
+    d.r.append({ kind: "run.started", who: "SF itself", run: "r1", ticket: "T1", project: "o/p", data: { model: "sonnet", checks: [], checksFound: [] } });
+    d.agent(); d.commit(); d.end("passed", "ok");
+    d.r.append({ kind: "run.ended", who: "SF itself", run: "r1", ticket: "T1", project: "o/p", data: { end: "crashed", reason: "push refused", where: "outside the room" } });
+    expect(states(d)).toMatchObject({ checked: "skipped", proposed: "failed" });
+    // Stop pressed while the fence was being tested: no run, and the road says why.
+    const e = ticket(); e.open(); e.fence();
+    e.r.append({ kind: "stop.pressed", who: "you", ticket: "T1", data: {} });
+    expect(e.steps()[3]).toMatchObject({ state: "failed", proof: "No run: you pressed stop." });
+  });
+
   it("says what it waits for: your answer at the gate, a run at work, a run cut off", () => {
     const a = ticket(); a.open();
     a.r.append({ kind: "gate.asked", who: "SF itself", ticket: "T1", project: "o/p", data: { question: "Which page?" } });

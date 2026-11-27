@@ -37,8 +37,11 @@ describe("the ready gate", () => {
     const r = await askGate(exec, fenceSettings(), q);
     expect(r).toEqual({ ok: true, answer: { clear: true, kind: "request", done: ["A footer is on every page."], guesses: [], question: null, costUsd: 0.002 } });
     expect(script).toMatch(/^worker\n/);
+    // A reader that was handed a tool from outside the room is not listened to.
+    const bad: RoomExec = async () => ({ code: 0, timedOut: false, stderr: "", stdout: '{"type":"system","subtype":"init","tools":["mcp__claude_ai_Gmail__send_message"]}\n{"type":"result","is_error":false,"result":"{}"}' });
+    expect(await askGate(bad, fenceSettings(), q)).toMatchObject({ ok: false, why: expect.stringMatching(/tools from outside the room/) });
     expect(script).toContain('--tools "" --setting-sources user --strict-mcp-config --permission-mode dontAsk'); expect(script).toContain("ENABLE_CLAUDEAI_MCP_SERVERS=false");
-    expect(script).toContain("--max-turns 1");
+    expect(script).toContain("--max-turns 1"); expect(script).toContain("--output-format stream-json --verbose");
     expect(script).toContain("unset ANTHROPIC_API_KEY");
   });
   it("says why when the reader cannot be asked", async () => {

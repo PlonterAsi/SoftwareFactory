@@ -121,7 +121,7 @@ export const AGENT_FLAGS = "--setting-sources user --strict-mcp-config";
 interface AgentEnd { isError: boolean; outOfTurns: boolean; text: string; costUsd: number; turns: number }
 
 /** One line of Claude Code's stream becomes at most one line of the record. Content only: the stamps are ours. */
-export function stepOf(line: string): { data: Record<string, unknown>; end?: AgentEnd; outside?: string[] } | null {
+export function stepOf(line: string): { data: Record<string, unknown>; end?: AgentEnd; outside?: string[]; started?: boolean } | null {
   let j: any;
   try { j = JSON.parse(line); } catch { return null; }
   if (!j || typeof j !== "object") return null;
@@ -130,7 +130,9 @@ export function stepOf(line: string): { data: Record<string, unknown>; end?: Age
     const says = j.message.content.filter((c: any) => c.type === "text" && c.text?.trim()).map((c: any) => c.text.trim()).join("\n");
     const tools = j.message.content.filter((c: any) => c.type === "tool_use").map((c: any) => ({ tool: String(c.name), input: cut(c.input, 400) }));
     if (!says && !tools.length) return null;
-    return { data: { ...(says ? { says: cut(says, 2000) } : {}), ...(tools.length ? { tools } : {}) } };
+    // A tool from outside the room in the agent's hands, even one that was not listed at the start.
+    const reached = tools.map((x: { tool: string }) => x.tool).filter((n: string) => n.startsWith("mcp__"));
+    return { data: { ...(says ? { says: cut(says, 2000) } : {}), ...(tools.length ? { tools } : {}) }, ...(reached.length ? { outside: reached } : {}) };
   }
   if (j.type === "user" && Array.isArray(j.message?.content)) {
     const errors = j.message.content.filter((c: any) => c.type === "tool_result" && c.is_error).map((c: any) => cut(c.content, 1500));
@@ -138,10 +140,13 @@ export function stepOf(line: string): { data: Record<string, unknown>; end?: Age
   }
   if (j.type === "system" && j.subtype === "init") {
     // Tools from outside the room (mail, files, documents of the signed-in account) must not be there at all.
-    const tools: string[] = Array.isArray(j.tools) ? j.tools.map((x: unknown) => String(x)) : [];
-    const servers: string[] = Array.isArray(j.mcp_servers) ? j.mcp_servers.filter((m: any) => !m?.status || m.status === "connected").map((m: any) => String(m?.name ?? m)) : [];
+    // A first line that does not list its tools proves nothing, so it does not count as seen.
+    if (!Array.isArray(j.tools)) return null;
+    const tools: string[] = j.tools.map((x: unknown) => String(x));
+    // Every listed server counts, whatever its state: one that connects late brings its tools after this line.
+    const servers: string[] = Array.isArray(j.mcp_servers) ? j.mcp_servers.map((m: any) => String(m?.name ?? m)) : [];
     const outside = [...new Set([...tools.filter((n) => n.startsWith("mcp__")), ...servers.map((n) => `server ${n}`)])];
-    return { data: { did: "agent started", toolCount: tools.length, ...(outside.length ? { outsideTools: outside.slice(0, 20) } : {}) }, ...(outside.length ? { outside } : {}) };
+    return { data: { did: "agent started", toolCount: tools.length, ...(outside.length ? { outsideTools: outside.slice(0, 20) } : {}) }, started: true, ...(outside.length ? { outside } : {}) };
   }
   if (j.type === "result") {
     const sub = typeof j.subtype === "string" ? j.subtype : "";
@@ -194,6 +199,9 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
   const step = async (user: "worker" | "root", script: string, timeoutMs = s.stepTimeoutMs, onLine?: (l: string) => void): Promise<ExecResult> => exec(user, script, timeoutMs, onLine);
 
   record.append({ kind: "run.started", who: "SF itself", ...stamp, data: { branch: req.branch, base: req.base, model: req.model, timeLimitMinutes: Math.round(req.timeLimitMs / 60_000), checks: req.checks, prepare: req.prepare ?? [], ...(req.checksFound ? { checksFound: req.checksFound } : {}), ...(req.done?.length ? { done: req.done } : {}) } });
+  // Tools from outside the room seen in this run. Once any is seen, that is how the run ends, whatever else happened.
+  let outside: string[] = [];
+  const OUTSIDE = (names: string[]) => `the run was ended: it had tools from outside the room (${names.slice(0, 5).join(", ")}), which must never be there`;
   try {
     if (stopped()) return await finish("stopped", "you pressed stop");
     // 1. The copy goes in as data and is unpacked by git inside the no-network box.
@@ -216,7 +224,7 @@ echo "SFBASE $(ourgit rev-parse HEAD)"
 
     // 2. The agent works, under Claude Code's sandbox and the managed rules. Each of its lines is stamped by us.
     let agentEnd: AgentEnd | null = null;
-    let outside: string[] = [];
+    let sawStart = false;
     const agent = await step("worker", `${pre}
 cd "$copy" || exit 97
 agent_env
@@ -227,7 +235,9 @@ SF_PROMPT_${tag}
 `, req.timeLimitMs, (line) => {
       const st = stepOf(line);
       if (!st) return;
-      // An outside tool in the agent's hands ends the run at once, before it can use one.
+      // An outside tool in the agent's hands ends the run. The start flags are what keeps such tools away; this is
+      // the alarm for the day they do not, and nothing of such a run is kept.
+      if (st.started) sawStart = true;
       if (st.outside?.length && !outside.length) { outside = st.outside; void killAll(); }
       if (st.end) { agentEnd = st.end; costUsd = st.end.costUsd; summary = st.end.text; }
       record.append({ kind: "run.step", who: "worker", ...stamp, costUsd: st.end ? st.end.costUsd : null, data: st.data });
@@ -235,13 +245,15 @@ SF_PROMPT_${tag}
     // Whatever the agent left running is ended now: nothing of its may work on while we commit and check.
     const quiet = await killAll();
     const done = agentEnd as AgentEnd | null;
+    if (outside.length) return await finish("crashed", OUTSIDE(outside));
     if (stopped()) return await finish("stopped", "you pressed stop");
-    if (outside.length) return await finish("crashed", `the run was ended at its start: it was handed tools from outside the room (${outside.slice(0, 5).join(", ")}), which must never be there`);
     if (!quiet) return await finish("crashed", "something the run started could not be ended, so its work is not trusted");
     if (agent.timedOut) return await finish("parked", `the time limit of ${Math.round(req.timeLimitMs / 60_000)} minutes was reached`);
     if (!done) return await finish(looksLikeLimit(agent.stdout + agent.stderr) ? "parked" : "crashed", looksLikeLimit(agent.stdout + agent.stderr) ? "the plan limit was reached" : `the agent ended without an answer (exit ${agent.code}): ${(agent.stderr || agent.stdout).slice(-300)}`);
     if (done.outOfTurns) return await finish("parked", `the run used all its ${req.maxTurns} turns before finishing`);
     if (done.isError) return await finish(looksLikeLimit(done.text) ? "parked" : "crashed", looksLikeLimit(done.text) ? `the plan limit was reached: ${done.text.slice(0, 200)}` : `the agent stopped with an error: ${done.text.slice(0, 300)}`);
+    // Nothing is kept of a run whose first line never told which tools it had.
+    if (!sawStart) return await finish("crashed", "the agent never said which tools it had, so its work is not trusted");
 
     // 3. Ours again. Git's own files in the copy are made ours first (settings, hooks, hidden-file lists), then
     //    the work is committed from a fresh list of files, so nothing can be kept out of the commit quietly.
@@ -300,6 +312,7 @@ ourgit bundle create - ${baseSha}..${req.branch} > ${outFile} 2>/dev/null && ech
     if (stopped()) return await finish("stopped", "you pressed stop");
     return await finish("passed", "the work is done and its checks passed", bundle);
   } catch (e) {
+    if (outside.length) return await finish("crashed", OUTSIDE(outside));
     return await finish(stopped() ? "stopped" : "crashed", stopped() ? "you pressed stop" : (e as Error).message.slice(0, 300));
   }
 }

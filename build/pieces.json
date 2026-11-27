@@ -93,21 +93,21 @@
         {
           "id": "story",
           "title": "Ticket story with proof at every step",
-          "status": "now",
+          "status": "built",
           "from": "leg 3",
           "done": "A finished ticket shows each step with its proof."
         },
         {
           "id": "parked",
           "title": "Parked with a reason, and back to the gate",
-          "status": "next",
+          "status": "built",
           "from": "leg 2",
           "done": "A parked ticket returns and finishes."
         },
         {
           "id": "github-both-ways",
           "title": "GitHub in step, both ways",
-          "status": "later",
+          "status": "now",
           "from": "leg 2",
           "done": "An issue opened on GitHub appears as a ticket, and the other way round."
         }

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { RoomExec } from "./fencetest.js";
 import type { FenceSettings } from "./room.js";
-import { looksLikeLimit } from "./door.js";
+import { looksLikeLimit, stepOf } from "./door.js";
 
 /**
  * The ready gate (build list: ready-gate; leg 2). Before a ticket is worked, SoftwareFactory reads the sentence once
@@ -92,7 +92,7 @@ d=$(mktemp -d ${s.copies}/gate-XXXXXXXX) || exit 97
 cd "$d" || exit 97
 unset ANTHROPIC_API_KEY
 export ENABLE_CLAUDEAI_MCP_SERVERS=false
-claude -p --output-format json --model ${q.model} --max-turns 1 --tools "" --setting-sources user --strict-mcp-config --permission-mode dontAsk <<'SF_GATE_${tag}'
+claude -p --output-format stream-json --verbose --model ${q.model} --max-turns 1 --tools "" --setting-sources user --strict-mcp-config --permission-mode dontAsk <<'SF_GATE_${tag}'
 ${gatePrompt(q).split(`SF_GATE_${tag}`).join("")}
 SF_GATE_${tag}
 code=$?
@@ -101,6 +101,9 @@ exit $code
 `, q.timeoutMs ?? 90_000);
   } catch (e) { return { ok: false, why: `the room could not be reached: ${(e as Error).message.slice(0, 200)}` }; }
   if (r.timedOut) return { ok: false, why: "the reader did not answer in time" };
+  // The reader has no tools at all. If its stream names one from outside the room, its answer is not used.
+  const outside = r.stdout.split(/\r?\n/).flatMap((line) => stepOf(line)?.outside ?? []);
+  if (outside.length) return { ok: false, why: `the reader had tools from outside the room (${outside.slice(0, 3).join(", ")}), so it was not listened to` };
   let out: any = null;
   for (const line of r.stdout.split(/\r?\n/).reverse()) { try { const j = JSON.parse(line); if (j && j.type === "result") { out = j; break; } } catch { /* not the line */ } }
   if (!out) return { ok: false, why: looksLikeLimit(r.stdout + r.stderr) ? "the plan limit was reached" : `the reader gave no answer (exit ${r.code}): ${(r.stderr || r.stdout).slice(-200)}` };

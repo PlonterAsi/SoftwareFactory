@@ -52,8 +52,10 @@ describe("the record", () => {
 describe("the door's small parts", () => {
   it("reads Claude Code's stream into content only", () => {
     expect(stepOf("not json")).toBeNull();
-    expect(stepOf(JSON.stringify({ type: "system", subtype: "init", tools: ["Bash", "Read"] }))).toEqual({ data: { did: "agent started", toolCount: 2 } });
-    expect(stepOf(JSON.stringify({ type: "system", subtype: "init", tools: ["Bash", "mcp__claude_ai_Gmail__send_message"], mcp_servers: [{ name: "claude.ai Gmail", status: "connected" }, { name: "off", status: "disabled" }] }))!.outside).toEqual(["mcp__claude_ai_Gmail__send_message", "server claude.ai Gmail"]);
+    expect(stepOf(JSON.stringify({ type: "system", subtype: "init", tools: ["Bash", "Read"] }))).toEqual({ data: { did: "agent started", toolCount: 2 }, started: true });
+    expect(stepOf(JSON.stringify({ type: "system", subtype: "init", tools: ["Bash", "mcp__claude_ai_Gmail__send_message"], mcp_servers: [{ name: "claude.ai Gmail", status: "connected" }, { name: "late", status: "pending" }] }))!.outside).toEqual(["mcp__claude_ai_Gmail__send_message", "server claude.ai Gmail", "server late"]);
+    expect(stepOf(JSON.stringify({ type: "system", subtype: "init" }))).toBeNull();
+    expect(stepOf(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__x__y", input: {} }] } }))!.outside).toEqual(["mcp__x__y"]);
     expect(stepOf(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Reading the code." }, { type: "tool_use", name: "Bash", input: { command: "ls" } }] } }))!.data).toEqual({ says: "Reading the code.", tools: [{ tool: "Bash", input: '{"command":"ls"}' }] });
     expect(stepOf(JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", is_error: true, content: "denied" }] } }))!.data).toEqual({ toolErrors: ["denied"] });
     const end = stepOf(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "All done.", total_cost_usd: 0.42, num_turns: 7 }))!.end!;
@@ -129,13 +131,14 @@ cat > /dev/null
 m=$(cat "$(dirname "$0")/mode")
 echo "$* connectors=$ENABLE_CLAUDEAI_MCP_SERVERS" > "$(dirname "$0")/args"
 say() { printf '%s\\n' "$1"; }
-if [ "$m" = mail ]; then say '{"type":"system","subtype":"init","tools":["Bash","mcp__claude_ai_Gmail__send_message"]}'; else say '{"type":"system","subtype":"init","tools":["Bash","Read"]}'; fi
+if [ "$m" = mail ]; then say '{"type":"system","subtype":"init","tools":["Bash","mcp__claude_ai_Gmail__send_message"]}'; elif [ "$m" = blind ]; then say '{"type":"system","subtype":"init"}'; else say '{"type":"system","subtype":"init","tools":["Bash","Read"]}'; fi
 case "$m" in
   limit) say '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude usage limit reached. Your limit will reset at 3pm.","total_cost_usd":0,"num_turns":0}'; exit 1;;
   nothing) ;;
   script) echo '{"scripts":{"build":"exit 0"}}' > package.json; echo hi > hello.txt;;
   workflow) mkdir -p .github/workflows && echo "on: push" > .github/workflows/x.yml; echo hi > hello.txt;;
   hook) echo "hello from the room" > hello.txt; echo "you see me" > kept-out.txt; mkdir -p .git/hooks .git/info; printf '#!/bin/sh\\necho pwned > hello.txt\\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit; echo kept-out.txt > .git/info/exclude;;
+  late) echo hi > hello.txt; say '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__claude_ai_Google_Drive__search_files","input":{}}]}}';;
   secret) echo "token = ghp_abcdefghijklmnopqrstuvwxyz0123456789" > hello.txt;;
   *) echo "hello from the room" > hello.txt;;
 esac
@@ -220,6 +223,15 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     const args = readFileSync(join(shim, "args"), "utf8");
     expect(args).toMatch(/--setting-sources user --strict-mcp-config/);
     expect(args).toMatch(/connectors=false/);
+    // A tool from outside that was not listed at the start but is used later ends the run the same way.
+    mode("late");
+    const b = await workTicket(deps(new TheRecord()), settings(), "Add a hello file.");
+    expect(b).toMatchObject({ end: "crashed" });
+    expect(b.reason).toMatch(/tools from outside the room.*mcp__claude_ai_Google_Drive__search_files/);
+    // A run whose first line never listed its tools is not trusted either.
+    mode("blind");
+    const c = await workTicket(deps(new TheRecord()), settings(), "Add a hello file.");
+    expect(c).toMatchObject({ end: "crashed", reason: "the agent never said which tools it had, so its work is not trusted" });
   });
 
   it("ignores a hook and a hidden-file list the agent planted, and fails a check that rewrites the work", async () => {

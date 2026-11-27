@@ -233,6 +233,9 @@ export function storyLine(l: RecordLine): string {
 
 /** The story of a ticket, as lines a person reads. */
 export function storyText(record: TheRecord, ticket: string): string {
-  const lines = record.story(ticket), steps = stepsText(stepsOf(lines));
+  const lines = record.story(ticket);
+  // Ideas, plans and questions are kept, not worked: they have no road.
+  const kind = [...lines].reverse().map((l) => (l.kind === "ticket.opened" || l.kind === "ticket.edited" ? (l.data as any).kind : undefined)).find((k) => typeof k === "string") ?? "request";
+  const steps = ["idea", "plan", "question"].includes(kind) ? "" : stepsText(stepsOf(lines));
   return `${steps ? `${steps}\n\n` : ""}${lines.map((l) => `${l.ts.slice(11, 19)}  ${l.who.padEnd(9)} ${storyLine(l)}`).join("\n")}`;
 }
