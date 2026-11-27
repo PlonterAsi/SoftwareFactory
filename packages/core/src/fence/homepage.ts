@@ -263,7 +263,8 @@ ol.story li.flag .x { color: var(--bad); }
       var ul = el("ul", "since");
       mine.forEach(function (x) {
         var li = el("li");
-        var go = el("button", "link", x.ticket); go.type = "button"; go.onclick = function () { var n = nodes[x.ticket] && nodes[x.ticket].node; if (n && n.scrollIntoView) n.scrollIntoView({ behavior: "smooth", block: "center" }); };
+        var go = el("button", "link", x.ticket); go.type = "button"; go.onclick = function () { var n = nodes[x.ticket] && nodes[x.ticket].node; if (n && n.scrollIntoView) { n.scrollIntoView({ behavior: "smooth", block: "center" }); return; } if (x.project && last && (last.settings.repo || "").toLowerCase() !== x.project.toLowerCase()) project({ repo: x.project, choose: true }, $("ask-msg")); };
+        if (x.project && last && (last.projects || []).length > 1 && (last.settings.repo || "").toLowerCase() !== x.project.toLowerCase()) li.appendChild(el("small", "", nameOf(last, x.project) + " "));
         li.appendChild(go); li.appendChild(document.createTextNode(" " + x.sentence));
         li.appendChild(el("span", "why", x.says));
         if (x.url) { var a = el("a", "", "Open on GitHub"); a.href = x.url; a.target = "_blank"; a.rel = "noopener noreferrer"; li.appendChild(document.createTextNode(" ")); li.appendChild(a); }
@@ -488,7 +489,7 @@ ol.story li.flag .x { color: var(--bad); }
   var acceptError = {}, looked = {};
   var MARK = { "done": "\u2713", "failed": "!", "now": "\u25B8", "skipped": "\u2013", "not reached": "" };
 
-  function nameOf(s, repo) { var n = repo; (s.projects || []).forEach(function (p) { if (p.repo === repo && p.name) n = p.name; }); return n; }
+  function nameOf(s, repo) { var n = repo; (s.projects || []).forEach(function (p) { if (p.repo.toLowerCase() === String(repo).toLowerCase() && p.name) n = p.name; }); return n; }
   var projSig = "";
   function project(body, msg) { return post("/api/step1/project", body).then(function (r) { if (msg) msg.textContent = r && r.ok === false ? r.why : ""; settingsLoaded = false; projSig = ""; load(); return r; }); }
   function drawProjects(s) {
@@ -496,7 +497,9 @@ ol.story li.flag .x { color: var(--bad); }
     if (sig === projSig) return;
     projSig = sig;
     var top = $("projects"); top.textContent = ""; top.hidden = ps.length < 2;
-    var list = $("plist"); list.textContent = "";
+    // The list in Settings is left alone while a name is being typed in it.
+    var list = $("plist"), typing = list.contains(document.activeElement) && document.activeElement.tagName === "INPUT";
+    if (typing) projSig = ""; else list.textContent = "";
     var words = { red: "waits for you", amber: "did not finish", green: "ready", blue: "working", grey: "quiet" };
     ps.forEach(function (p) {
       var li = el("li"), b = el("button"); b.type = "button"; b.setAttribute("aria-pressed", p.chosen ? "true" : "false");
@@ -504,6 +507,7 @@ ol.story li.flag .x { color: var(--bad); }
       b.appendChild(dot); b.appendChild(el("b", "", p.name || p.repo)); b.appendChild(el("span", "says", p.says + (p.chosen ? " Chosen: new tickets go here." : "")));
       b.onclick = function () { if (!p.chosen) project({ repo: p.repo, choose: true }, $("ask-msg")); };
       li.appendChild(b); top.appendChild(li);
+      if (typing || !p.listed) return;
       var row = el("li"); row.appendChild(el("b", "", p.repo));
       var name = el("input"); name.value = p.name; name.maxLength = 60; name.placeholder = "Your own name for it"; name.setAttribute("aria-label", "Your own name for " + p.repo); row.appendChild(name);
       var bt = function (text, body) { var x = el("button", "", text); x.type = "button"; x.onclick = function () { x.disabled = true; project(body(), $("p-msg")); }; row.appendChild(x); };
@@ -521,7 +525,9 @@ ol.story li.flag .x { color: var(--bad); }
     var run = s.running;
     $("now").className = "card now" + (run ? " on" : "");
     $("start").disabled = !s.settings.repo;
-    var waiting = 0, gone = 0; s.tickets.forEach(function (x) { if (x.removed) gone++; else if (x.state === "waiting") waiting++; });
+    var here = (s.settings.repo || "").toLowerCase(), many = (s.projects || []).length > 1;
+    var inHere = function (x) { return !many || !here || (x.project || "").toLowerCase() === here; };
+    var waiting = 0, gone = 0; s.tickets.forEach(function (x) { if (!inHere(x)) return; if (x.removed) gone++; else if (x.state === "waiting") waiting++; });
     $("start-hint").textContent = !s.settings.repo ? "Choose the project in Settings first." : (run || waiting ? "It will wait for its turn." : "");
     $("issues-now").hidden = s.settings.issues === "off";
     $("issues-hint").textContent = s.settings.issues === "off" || !s.issuesSeen ? "" : s.issuesSeen.ok ? "GitHub issues looked at " + clock(s.issuesSeen.at) + "." : "GitHub issues could not be read: " + s.issuesSeen.why;
@@ -536,13 +542,12 @@ ol.story li.flag .x { color: var(--bad); }
     $("show-removed").textContent = showRemoved ? "Hide removed" : "Show removed (" + gone + ")";
     drawProjects(s);
     // The list below is the chosen project's. The others are one line each at the top.
-    var here = (s.settings.repo || "").toLowerCase(), many = (s.projects || []).length > 1;
-    var shown = s.tickets.filter(function (x) { return (showRemoved || !x.removed) && (!many || !here || (x.project || "").toLowerCase() === here); });
+    var shown = s.tickets.filter(function (x) { return (showRemoved || !x.removed) && inHere(x); });
     $("tickets-title").textContent = many && s.settings.repo ? "Tickets of " + nameOf(s, s.settings.repo) : "Tickets";
     if (run) {
       var t = null; s.tickets.forEach(function (x) { if (x.ticket === run.ticket) t = x; });
       var names = (s.runs || []).map(function (x) { return x.ticket; });
-      $("now-title").textContent = "Working on " + (names.length > 1 ? names.join(" and ") : (run.ticket || "a new ticket"));
+      $("now-title").textContent = "Working on " + (names.length > 1 ? names.join(" and ") : (run.ticket || "a new ticket")) + (many && t && !inHere(t) ? " of " + nameOf(s, t.project) : "");
       $("stop").textContent = names.length > 1 ? "Stop all " + names.length : "Stop";
       $("now-line").textContent = t && t.story.length ? t.story[t.story.length - 1].what : "Testing the fence first.";
       var secs = Math.max(0, Math.round((Date.now() - new Date(run.startedAt).getTime()) / 1000));

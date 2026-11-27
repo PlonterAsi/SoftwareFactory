@@ -76,11 +76,14 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   const watch = cleanWatch(r, from);
   const maxProjects = r.maxProjects === undefined ? from.maxProjects : Number(r.maxProjects);
   if (!Number.isInteger(maxProjects) || maxProjects < 1 || maxProjects > 200) throw new Error("The most projects must be a whole number from 1 to 200.");
+  if (r.projects === undefined && from.projects.length > maxProjects) throw new Error(`There are ${from.projects.length} projects on the list. The most cannot be less than that.`);
   const s: HomeSettings = { ...watch, maxProjects, projects: cleanProjects(r.projects, from.projects, maxProjects), repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths"), limitPeriod: (r.limitPeriod === undefined ? from.limitPeriod : r.limitPeriod) as LimitPeriod, limitYou: num("limitYou"), limitAlone: num("limitAlone"), ownSharePercent: num("ownSharePercent"), runLimit: num("runLimit"), runFloor: num("runFloor"), sinceShow: num("sinceShow"), ladder: typeof r.ladder === "boolean" ? r.ladder : from.ladder, ladderAgain: num("ladderAgain"), ladderOtherWay: num("ladderOtherWay"), ladderSplit: typeof r.ladderSplit === "boolean" ? r.ladderSplit : from.ladderSplit, ladderSharedTries: num("ladderSharedTries"), ladderWithinMinutes: num("ladderWithinMinutes"), ladderSplitMinChars: num("ladderSplitMinChars"), ladderModel: text("ladderModel"), ladderSplitModel: text("ladderSplitModel") };
   checkLadder(s);
   if (!Number.isInteger(s.sinceShow) || s.sinceShow < 1 || s.sinceShow > 100) throw new Error("The panel names from 1 to 100 tickets of each group.");
   checkLimits(s);
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
+  // Kept as owner/name, however it was written: tickets name their project that way.
+  if (s.repo) { const g = parseGitHubRepo(s.repo)!; s.repo = `${g.owner}/${g.name}`; }
   if (/^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)$/.test(s.base)) throw new Error(`"${s.base}" is not a branch name.`);
   if (s.base && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(s.base) || s.base.includes(".."))) throw new Error(`"${s.base}" is not a branch name.`);
   if (!/^[a-z0-9][a-z0-9.-]{0,60}$/.test(s.model)) throw new Error(`"${s.model}" is not a model name.`);
@@ -720,7 +723,12 @@ export function createHome(deps: HomeDeps) {
   function saveSettings(raw: unknown): { ok: true; settings: HomeSettings } | { ok: false; why: string; needsHand?: HandChange[] } {
     const was = deps.settings.read();
     // The project named in Settings is changed by hand: the one that was chosen keeps its card.
-    if (raw && typeof raw === "object" && (raw as any).projects === undefined && typeof (raw as any).repo === "string" && (raw as any).repo.trim().toLowerCase() !== was.repo.toLowerCase()) raw = { ...(raw as object), projects: projectList(was) };
+    if (raw && typeof raw === "object" && (raw as any).projects === undefined && typeof (raw as any).repo === "string" && (raw as any).repo.trim().toLowerCase() !== was.repo.toLowerCase()) {
+      const cards = projectList(was), typed = parseGitHubRepo((raw as any).repo.trim());
+      // Naming a project that has a card chooses it: the branch, prepare lines and checks are its own, not the form's.
+      const other = typed ? cards.find((c) => c.repo.toLowerCase() === `${typed.owner}/${typed.name}`.toLowerCase()) : undefined;
+      raw = { ...(raw as object), projects: cards, ...(other ? { base: other.base, checks: other.checks, prepare: other.prepare } : {}) };
+    }
     let now: HomeSettings;
     try { now = cleanSettings(raw, was); } catch (e) { return { ok: false, why: (e as Error).message }; }
     const changed = (Object.keys(now) as (keyof HomeSettings)[]).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(was[k]));

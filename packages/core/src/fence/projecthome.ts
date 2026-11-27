@@ -49,7 +49,7 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /** Every project there is: the cards, with the chosen one's fields taken from Settings, where they are edited. */
 export function projectList(s: Chosen & ProjectSettings): ProjectCard[] {
-  const chosen = parseGitHubRepo(s.repo) ? s.repo : "";
+  const got = parseGitHubRepo(s.repo), chosen = got ? `${got.owner}/${got.name}` : "";
   const out = s.projects.map((c) => (chosen && same(c.repo, chosen) ? { ...c, base: s.base, checks: s.checks, prepare: s.prepare } : c));
   if (chosen && !out.some((c) => same(c.repo, chosen))) out.unshift({ repo: chosen, name: "", base: s.base, checks: s.checks, prepare: s.prepare, asleep: false });
   return out;
@@ -57,7 +57,7 @@ export function projectList(s: Chosen & ProjectSettings): ProjectCard[] {
 export const cardOf = (s: Chosen & ProjectSettings, project: string | null): ProjectCard | null => projectList(s).find((c) => same(c.repo, project ?? "")) ?? null;
 
 export type Colour = "red" | "amber" | "green" | "blue" | "grey";
-export interface ProjectLight { repo: string; name: string; chosen: boolean; asleep: boolean; colour: Colour; says: string; open: number }
+export interface ProjectLight { repo: string; name: string; chosen: boolean; asleep: boolean; /** False: it has tickets in the record and no card. */ listed: boolean; colour: Colour; says: string; open: number }
 export interface LightTicket { project: string | null; state: string; removed: boolean; canRelease?: boolean }
 
 const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
@@ -66,12 +66,15 @@ const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many
  * One colour and one sentence for each project. What waits for the owner comes first, then what did not finish,
  * then what is ready, then what is being worked. The sentence names the first of these and counts the rest.
  */
-export function projectLights(cards: ProjectCard[], chosen: string, tickets: LightTicket[], running: string[] = []): ProjectLight[] {
-  return cards.map((c) => {
+export function projectLights(listed: ProjectCard[], chosen: string, tickets: LightTicket[], running: string[] = []): ProjectLight[] {
+  // A project with tickets and no card (taken off the list, or from before there was one) is still shown, so nothing of it hides.
+  const off = [...new Set(tickets.filter((t) => !t.removed && t.project && !listed.some((c) => same(c.repo, t.project!))).map((t) => t.project!))];
+  const cards = [...listed, ...off.map((repo) => ({ repo, name: "", base: "", checks: [], prepare: [], asleep: false }))];
+  return cards.map((c, at) => {
     const mine = tickets.filter((t) => !t.removed && same(t.project ?? "", c.repo));
     const count = (...states: string[]) => mine.filter((t) => states.includes(t.state)).length;
     const yours = count("asked") + mine.filter((t) => t.state === "held" && t.canRelease).length;
-    const unfinished = count("failed its checks", "parked", "crashed", "not started", "interrupted", "split") + mine.filter((t) => t.state === "held" && !t.canRelease).length;
+    const unfinished = count("failed its checks", "parked", "stopped", "crashed", "not started", "interrupted") + mine.filter((t) => t.state === "held" && !t.canRelease).length;
     const ready = count("proposed"), waiting = count("waiting"), working = count("working") + running.filter((r) => same(r, c.repo)).length;
     const parts: string[] = [];
     if (yours) parts.push(`${n(yours, "ticket waits", "tickets wait")} for your word`);
@@ -79,9 +82,10 @@ export function projectLights(cards: ProjectCard[], chosen: string, tickets: Lig
     if (ready) parts.push(`${n(ready, "result is", "results are")} ready for you`);
     if (working) parts.push(`${n(working, "ticket is", "tickets are")} being worked`);
     if (waiting) parts.push(`${n(waiting, "ticket waits its", "tickets wait their")} turn`);
-    const colour: Colour = c.asleep ? "grey" : yours ? "red" : unfinished ? "amber" : ready ? "green" : working || waiting ? "blue" : "grey";
+    const isListed = at < listed.length;
+    const colour: Colour = c.asleep || !isListed ? "grey" : yours ? "red" : unfinished ? "amber" : ready ? "green" : working || waiting ? "blue" : "grey";
     const open = yours + unfinished + ready + working + waiting;
-    const says = c.asleep ? `Asleep${open ? `: ${n(open, "ticket", "tickets")} kept, none is worked` : ""}.` : parts.length ? `${parts.join("; ")}.`.replace(/^./, (x) => x.toUpperCase()) : "Nothing open.";
-    return { repo: c.repo, name: c.name, chosen: same(c.repo, chosen), asleep: c.asleep, colour, says, open };
+    const says = !isListed ? `Not on the list: ${n(mine.length, "ticket", "tickets")} kept, none is worked. Choose it to bring it back.` : c.asleep ? `Asleep${open ? `: ${n(open, "ticket", "tickets")} kept, none is worked` : ""}.` : parts.length ? `${parts.join("; ")}.`.replace(/^./, (x) => x.toUpperCase()) : "Nothing open.";
+    return { repo: c.repo, name: c.name, chosen: same(c.repo, chosen), asleep: c.asleep, listed: isListed, colour, says, open };
   });
 }
