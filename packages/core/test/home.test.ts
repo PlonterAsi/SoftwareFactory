@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanSettings, createHome, settingsFileIn, ticketsFrom, type HomeDeps } from "../src/fence/home.js";
+import { cleanSettings, createHome, restOf, settingsFileIn, ticketsFrom, type HomeDeps } from "../src/fence/home.js";
 import { homePage } from "../src/fence/homepage.js";
 import { TheRecord } from "../src/fence/record.js";
 
@@ -303,6 +303,62 @@ describe("the page and its door", () => {
     await post("work", { sentence: "Make it better again." });
     await tick();
     expect(r.story("T4").map((l) => l.kind)).toEqual(["ticket.opened", "run.ended"]);
+  });
+
+  it("rests after the plan limit, then brings the parked ticket back by itself, a set number of times", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const r = new TheRecord();
+      const seen: string[] = [];
+      let limit = true;
+      const { url, h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false, parkedWaitMinutes: 10, parkedReturns: 1 }), work: async (_s, ticket) => {
+        seen.push(ticket);
+        r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-${seen.length}`, ticket, project: "o/p", data: {} });
+        r.append({ kind: "run.ended", who: "SF itself", run: `${ticket}-${seen.length}`, ticket, project: "o/p", data: limit ? { end: "parked", reason: "the plan limit was reached", parkedFor: "limit" } : { end: "crashed", reason: "done for the test" } });
+        return {} as any;
+      } });
+      const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+      const idle = () => new Promise((ok) => setImmediate(ok)).then(() => new Promise((ok) => setImmediate(ok)));
+      await post("work", { sentence: "One." }); await post("work", { sentence: "Two." });
+      await idle();
+      // T1 met the limit: T2 does not start, the queue rests, and T1 says when it comes back.
+      expect(seen).toEqual(["T1"]);
+      const s1 = await (await fetch(`${url}/api/step1/state`, { headers: json(h.key) })).json() as any;
+      expect(s1.resting).toMatchObject({ why: "the plan limit was reached" });
+      expect(s1.tickets.find((t: any) => t.ticket === "T1")).toMatchObject({ state: "parked", parkedFor: "limit", returns: 0 });
+      expect(Date.parse(s1.tickets.find((t: any) => t.ticket === "T1").returnsAt)).toBe(Date.parse(s1.resting.until));
+      h.pump(); await idle();
+      expect(seen).toEqual(["T1"]);
+      // The wait is over: T2 waited longest and goes first, then T1 comes back by itself.
+      limit = false;
+      vi.setSystemTime(Date.now() + 11 * 60_000);
+      h.pump(); await idle(); await idle();
+      expect(seen).toEqual(["T1", "T2", "T1"]);
+      expect(r.story("T1").filter((l) => l.kind === "ticket.queued").map((l) => [l.who, (l.data as any).returned, (l.data as any).time])).toEqual([["SF itself", true, 1]]);
+      // It came back once, as Settings allow. Parked again, it waits for you.
+      r.append({ kind: "ticket.queued", who: "you", ticket: "T1", project: "o/p", data: {} });
+      limit = true; h.pump(); await idle();
+      expect(seen).toEqual(["T1", "T2", "T1", "T1"]);
+      vi.setSystemTime(Date.now() + 11 * 60_000);
+      h.pump(); await idle();
+      expect(seen.length).toBe(4);
+      const s2 = await (await fetch(`${url}/api/step1/state`, { headers: json(h.key) })).json() as any;
+      expect(s2.tickets.find((t: any) => t.ticket === "T1")).toMatchObject({ state: "parked", returns: 1, returnsAt: null });
+      expect(s2.resting).toBeNull();
+      h.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("ends the rest early when a run started since or you sent a ticket again", () => {
+    const at = (m: number) => new Date(Date.UTC(2026, 10, 27, 20, m)).toISOString();
+    const park = { id: 1, ts: at(0), kind: "run.ended", who: "SF itself", run: "a", ticket: "T1", project: "o/p", costUsd: null, flagged: false, data: { end: "parked", parkedFor: "limit" } } as any;
+    expect(restOf([park], 30, Date.parse(at(10)))).toEqual({ until: at(30), why: "the plan limit was reached" });
+    expect(restOf([park], 30, Date.parse(at(31)))).toBeNull();
+    expect(restOf([park, { ...park, id: 2, kind: "ticket.queued", who: "you", data: {} }], 30, Date.parse(at(10)))).toBeNull();
+    expect(restOf([park, { ...park, id: 2, kind: "ticket.queued", who: "SF itself", data: { returned: true } }], 30, Date.parse(at(10)))).not.toBeNull();
+    expect(restOf([park, { ...park, id: 2, kind: "run.started", data: {} }], 30, Date.parse(at(10)))).toBeNull();
+    expect(() => cleanSettings({ parkedWaitMinutes: 0 })).toThrow(/1 to 1440/);
+    expect(() => cleanSettings({ parkedReturns: 21 })).toThrow(/0 to 20/);
   });
 
   it("gives an end to a go that left no trace, so the queue never spins", async () => {

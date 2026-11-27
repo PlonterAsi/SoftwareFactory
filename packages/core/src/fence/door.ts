@@ -188,7 +188,7 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
     // The copy does not stay: a later run must not find an earlier one's files, and the disk must not fill.
     // Go writes its package folders read-only, so they are made writable first or they would stay behind.
     await exec("worker", `chmod -R u+rwX ${copyDir} ${scratchDir} 2>/dev/null; rm -rf ${copyDir} ${scratchDir}`, s.stepTimeoutMs).catch(() => undefined);
-    record.append({ kind: "run.ended", who: "SF itself", ...stamp, costUsd: null, data: { end, reason, costUsd, nothingLeftRunning: clear } });
+    record.append({ kind: "run.ended", who: "SF itself", ...stamp, costUsd: null, data: { end, reason, costUsd, nothingLeftRunning: clear, ...(end === "parked" && /^the plan limit was reached/.test(reason) ? { parkedFor: "limit" } : {}) } });
     return { end, reason, bundle, baseSha, headSha, costUsd, summary, checks };
   };
   const step = async (user: "worker" | "root", script: string, timeoutMs = s.stepTimeoutMs, onLine?: (l: string) => void): Promise<ExecResult> => exec(user, script, timeoutMs, onLine);

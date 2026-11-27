@@ -211,7 +211,7 @@ export function storyLine(l: RecordLine): string {
     const what =
       l.kind === "ticket.opened" ? `you asked: ${d.sentence}` :
       l.kind === "ticket.edited" ? `you changed it${d.sentence ? ` to: ${d.sentence}` : ""}${d.kind ? ` (kind: ${d.kind})` : ""}` :
-      l.kind === "ticket.queued" ? "you sent it to be worked again" :
+      l.kind === "ticket.queued" ? (d.returned ? `it came back to the queue by itself: ${d.why ?? "the wait is over"}` : "you sent it to be worked again") :
       l.kind === "ticket.removed" ? "you removed it from the list" :
       l.kind === "ticket.restored" ? "you put it back on the list" :
       l.kind === "gate.asked" ? `before starting, SoftwareFactory asks: ${d.question}` :

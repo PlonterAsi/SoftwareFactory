@@ -188,3 +188,12 @@ Each worked ticket shows a fixed road: Asked, Ready, Fence held, Worked, Checked
 - A step that failed stops the road: what follows is "not reached", never guessed.
 - A ticket sent again shows its latest go; the count of goes is a fact on the first step.
 - On the home screen the road is one line of marks per ticket and opens into the steps. Every line of the record stays below it. `npm run step1 -- story T1` prints the steps first, then every line.
+
+## Parked, and back by itself
+
+A run that meets the plan limit is parked with `parkedFor: "limit"` in its end line. Two things follow, both read from the record, so they survive a restart.
+
+- **The queue rests.** The next run would only meet the same limit, so nothing new starts for `parkedWaitMinutes` (default 30). The screen says until when. The rest ends early when you press Work it again on any ticket.
+- **The ticket comes back.** After the wait SoftwareFactory writes `ticket.queued` in its own name and the ticket waits its turn again, behind tickets that waited longer. Its test of done stays as it was written. One ticket comes back at most `parkedReturns` times (default 2; 0 means it waits for you); after that it stays parked and says so.
+
+Parked for another reason (the time limit, all its turns, nothing changed) does not come back by itself: the same run would end the same way. Those wait for Work it again. The work of a parked run is not kept yet; that comes with the two limits in step 3.

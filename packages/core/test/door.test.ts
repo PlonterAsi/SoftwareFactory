@@ -200,9 +200,11 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
 
   it("parks a ticket when the plan limit is reached, and when the run changed nothing", async () => {
     mode("limit");
-    const a = await workTicket(deps(new TheRecord()), settings(), "Add a hello file.");
+    const limited = new TheRecord();
+    const a = await workTicket(deps(limited), settings(), "Add a hello file.");
     expect(a).toMatchObject({ end: "parked" });
     expect(a.reason).toMatch(/plan limit/);
+    expect(limited.all().find((l) => l.kind === "run.ended")!.data).toMatchObject({ parkedFor: "limit" });
     mode("nothing");
     const b = await workTicket(deps(new TheRecord()), settings({ checks: [] }), "Add a hello file.");
     expect(b).toMatchObject({ end: "parked", reason: "the run changed nothing in the project" });
