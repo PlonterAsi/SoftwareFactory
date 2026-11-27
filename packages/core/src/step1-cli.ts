@@ -7,7 +7,8 @@ import { GitHub, ghCliToken, parseGitHubRepo } from "./tickets/github.js";
 import { fenceReportText, runFenceTest, wslExec, wslFiles } from "./fence/fencetest.js";
 import { fenceSettings, type FenceSettings } from "./fence/room.js";
 import { TheRecord } from "./fence/record.js";
-import { storyText, workTicket, type TicketSettings } from "./fence/ticketrun.js";
+import { history, plainGit, storyText, workTicket, type TicketSettings } from "./fence/ticketrun.js";
+import { askGate } from "./fence/gate.js";
 import { windowsProbe } from "./fence-cli.js";
 import { createHome, settingsFileIn } from "./fence/home.js";
 import { undoTicket } from "./fence/undo.js";
@@ -68,6 +69,8 @@ async function main(): Promise<void> {
       record, github, settings: settingsFileIn(workDir, { ...start, ...(raw.repo ? { repo: raw.repo } : {}) }),
       hosts: [`127.0.0.1:${port}`, `localhost:${port}`], fence: { room: fence.room, netList: fence.netList },
       undo: (ticket) => undoTicket({ record, github, workDir }, ticket),
+      // The reader at the gate sees the sentence and the project's file names, and works in the room like every agent.
+      gate: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askGate(exec, fence, { sentence: q.sentence, files, asked: q.asked ?? undefined, model: q.model }); },
       // A run of this start waits until the room was cleared of an earlier start's leftovers.
       work: async (st, ticket, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: () => runFenceTest(exec, fence, windowsProbe()) }, { ...st, workDir }, sentence, ticket)),
     });
@@ -117,7 +120,7 @@ async function main(): Promise<void> {
     // Said first, before anything slow: Windows gives a closing window only a few seconds.
     const closed = () => { try { writeAlive(workDir, { ...home.alive(), closed: true }); } catch { /* the watchdog then speaks, which is the safe side */ } };
     let leaving = false;
-    const bye = () => { if (leaving) return; leaving = true; if (!ours) process.exit(0); if (beat) clearInterval(beat); closed(); if (home.isRunning()) { home.stop(); setTimeout(() => process.exit(0), 4000); } else process.exit(0); };
+    const bye = () => { if (leaving) return; leaving = true; if (!ours) process.exit(0); if (beat) clearInterval(beat); closed(); home.close(); if (home.isRunning()) { home.stop(); setTimeout(() => process.exit(0), 4000); } else process.exit(0); };
     for (const sig of ["SIGINT", "SIGHUP", "SIGBREAK", "SIGTERM"] as const) process.once(sig, bye);
     // Inside the installed app there is no console to close. The app holds a pipe to this process instead, and the
     // pipe ends when the app's window is closed or the app is gone for any reason: that is the same goodbye.

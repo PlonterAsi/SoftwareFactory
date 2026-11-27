@@ -1,4 +1,4 @@
-import { findChecks } from "./projectchecks.js";
+import { type FoundChecks, findChecks, scriptsOf } from "./projectchecks.js";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -27,6 +27,8 @@ export interface TicketSettings {
   checks: string[];
   /** Commands the run is told to do first, to fetch what the checks need while it still has the listed addresses. */
   prepare?: string[];
+  /** The test of done from the ready gate, when there is one. */
+  done?: string[];
   model: string;
   maxTurns: number;
   timeLimitMinutes: number;
@@ -130,18 +132,19 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
   try {
     mkdirSync(tmp, { recursive: true });
     const h = history(deps, st);
-    plainGit(h.dir, "bundle", "create", inFile, h.base);
+    plainGit(h.dir, "bundle", "create", inFile, `refs/heads/${h.base}`);
     // Checks written in Settings win. With none written, the project tells its own, read from the starting point
     // before the run touched anything.
-    let checks = st.checks, prepare = st.prepare ?? [], checksFound: string[] | undefined;
+    let checks = st.checks, prepare = st.prepare ?? [], checksFound: string[] | undefined, watch: FoundChecks["watch"] = [];
     if (!checks.length) {
-      const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", h.base).split("\0").filter(Boolean);
-      const found = findChecks(files, (path) => { try { const t = plainGit(h.dir, "show", `${h.base}:${path}`); return t.length > 1_000_000 ? null : t; } catch { return null; } });
-      checks = found.checks; prepare = [...prepare, ...found.prepare.filter((c) => !prepare.includes(c))]; checksFound = found.found;
+      // The branch by its full name: a tag that happens to carry the same name is never read instead.
+      const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean);
+      const found = findChecks(files, (path) => { try { const t = plainGit(h.dir, "show", `refs/heads/${h.base}:${path}`); return t.length > 1_000_000 ? null : t; } catch { return null; } });
+      checks = found.checks; prepare = [...prepare, ...found.prepare.filter((c) => !prepare.includes(c))]; checksFound = found.found; watch = found.watch;
     }
     const result = await runInRoom(deps.exec, deps.files, record, {
       run, ticket, project, sentence, bundle: readFileSync(inFile), base: h.base, branch,
-      model: st.model, maxTurns: st.maxTurns, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, signal: deps.signal,
+      model: st.model, maxTurns: st.maxTurns, timeLimitMs: st.timeLimitMinutes * 60_000, checks, prepare, checksFound, done: st.done, signal: deps.signal,
     }, deps.fence);
     if (result.end !== "passed" || !result.bundle || !result.baseSha || !result.headSha) return out({ run, end: result.end, reason: result.reason, costUsd: result.costUsd });
 
@@ -159,6 +162,13 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     const changed = plainGit(h.dir, "-c", "core.quotePath=false", "diff", "--no-renames", "--no-ext-diff", "-z", "--name-only", `${result.baseSha}..${branch}`).split("\0").filter(Boolean);
     const heldFile = changed.find((f) => HELD_PATHS.some((re) => re.test(f)));
     if (heldFile) return hold(`the result changes ${heldFile}, which decides what runs by itself on GitHub: that needs your look before it leaves`);
+    // A found check runs the project's own script. A result that rewrites that script has checked itself.
+    for (const w of watch.filter((x) => changed.includes(x.path))) {
+      const at = (rev: string) => { try { return scriptsOf(plainGit(h.dir, "show", `${rev}:${w.path}`))?.scripts ?? {}; } catch { return {} as Record<string, string>; } };
+      const was = at(result.baseSha), now = at(`refs/heads/${branch}`);
+      const moved = w.scripts.find((k) => was[k] !== now[k]);
+      if (moved) return hold(`the result changes the "${moved}" command in ${w.path}, which is the very check SoftwareFactory ran on it: that needs your look before it leaves`);
+    }
     // The project's own settings may not choose a program to show a file with: this side runs nothing of the result's.
     const diff = plainGit(h.dir, "diff", "--no-renames", "--no-ext-diff", "--no-textconv", `${result.baseSha}..${branch}`);
     if (cleanText(diff).hit) return hold("a secret was found in the result, so it does not leave this computer");
@@ -166,7 +176,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     // Out: the branch, and a draft pull request. Never the base branch.
     const title = `${ticket}: ${quiet(sentence.trim().split("\n")[0]!).slice(0, 120)}`;
     if (deps.signal?.aborted) return hold("you pressed stop before the result left this computer");
-    const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.${checksFound ? " It found them in the project as it was before the run." : ""}` : checksFound ? "SoftwareFactory found no build or type check in this project, so nothing was checked." : "No checks were set for this project."].join("\n");
+    const body = [`Ticket **${ticket}** from SoftwareFactory, worked inside the fence.`, "", `> ${quiet(sentence.trim()).split("\n").join("\n> ")}`, "", ...(st.done?.length ? ["Done when (written by SoftwareFactory before the run, from the request):", "", ...st.done.map((x) => `- ${quiet(x)}`), ""] : []), "What the run says it did (its own words, written before SoftwareFactory ran the checks below, and not checked):", "", `> ${quiet(result.summary).split("\n").join("\n> ")}`, "", `Changed ${changed.length} file(s).`, result.checks.length ? `SoftwareFactory then ran these checks itself, without network, and all passed: ${result.checks.map((c) => `\`${c.command}\``).join(", ")}.${checksFound ? " It found them in the project as it was before the run." : ""}` : checksFound ? "SoftwareFactory found no build or type check in this project, so nothing was checked." : "No checks were set for this project."].join("\n");
     let url: string, number: number | null = null;
     if (deps.github.hasToken()) {
       // openPr pushes HEAD, so HEAD of the bare history points at the ticket's branch for the length of the call.
@@ -197,6 +207,9 @@ export function storyLine(l: RecordLine): string {
       l.kind === "ticket.queued" ? "you sent it to be worked again" :
       l.kind === "ticket.removed" ? "you removed it from the list" :
       l.kind === "ticket.restored" ? "you put it back on the list" :
+      l.kind === "gate.asked" ? `before starting, SoftwareFactory asks: ${d.question}` :
+      l.kind === "gate.answered" ? `you answered: ${d.answer}` :
+      l.kind === "gate.passed" ? (d.skipped ? `ready, without a test of done (${d.skipped})` : `ready. Done when: ${(d.done ?? []).join("; ")}${d.guesses?.length ? `. Assumed: ${d.guesses.join("; ")}` : ""}`) :
       l.kind === "fence.tested" ? (d.ok ? "the fence held: nine lines as they should be" : `the fence did not hold${d.error ? `: ${d.error}` : ""}`) :
       l.kind === "run.started" ? `a run started on ${d.model}${Array.isArray(d.checksFound) ? (d.checks?.length ? `; checks found in the project (${d.checksFound.join(", ")})` : "; no build or type check was found in the project, so nothing will be checked") : ""}` :
       l.kind === "run.step" ? (d.did ?? d.says?.split("\n")[0]?.slice(0, 140) ?? (d.tools ? `used ${d.tools.map((x: any) => x.tool).join(", ")}` : d.toolErrors ? `a command or tool ended with an error: ${String(d.toolErrors[0]).split("\n")[0]!.slice(0, 100)}` : "finished")) :

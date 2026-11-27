@@ -152,3 +152,22 @@ start. Everything is drawn from the record, so the queue is not a second list th
   keeps waiting tickets waiting until it is let go; a run that is working goes on.
 - New lines in the record: `ticket.edited`, `ticket.queued`, `ticket.removed`, `ticket.restored`. A go that left no
   line at all is given the end `crashed`, so the queue can never start the same ticket without end.
+
+## The ready gate
+
+Before a ticket is worked, a reader (`fence/gate.ts`) reads the owner's sentence and the project's file names and
+writes the **test of done**: one to four things a person could look at when the work is finished. The run is told
+them and cannot change them; they are in the story and in the proposal on GitHub. The reader also names the kind
+(bug, task, request) of a ticket whose kind the owner did not choose, and lists what it assumed as guesses.
+
+- When the sentence can be read in two clearly different ways, the gate asks **one question** instead of starting.
+  The ticket shows "A question for you" with an answer box and holds nobody up: the next ticket takes its turn.
+  After the answer the gate passes; it never asks about the same words twice. Changing the ticket's words starts
+  the gate afresh.
+- The reader is an agent like any other: inside the room, in an empty folder, with no tools and one turn. The
+  owner's words and the file names are handed to it as data.
+- A reader that cannot be asked (the room is down, the plan limit, an answer that cannot be read) never holds a
+  ticket up: the ticket passes without a test of done and the story says why.
+- A ticket sent to be worked again keeps the test of done it has.
+- Settings: `gate` (on by default) and `gateModel` (`haiku`). Record lines: `gate.asked`, `gate.answered`,
+  `gate.passed`.

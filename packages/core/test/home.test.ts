@@ -64,7 +64,7 @@ describe("tickets, drawn from the record alone", () => {
     proposed(r, "T1");
     r.append({ kind: "ticket.opened", who: "you", ticket: "T2", project: "o/p", data: { sentence: "Second." } });
     r.append({ kind: "run.ended", who: "SF itself", run: "T2-x", ticket: "T2", project: "o/p", data: { end: "failed its checks", reason: "a check failed: npm test" } });
-    r.append({ kind: "ticket.opened", who: "you", ticket: "T3", project: "o/p", data: { sentence: "Third." } });
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T3", project: "o/p", data: { sentence: "Third.", kind: "request" } });
     r.append({ kind: "ticket.opened", who: "you", ticket: "T4", project: "o/p", data: { sentence: "Fourth." } });
     const t = Object.fromEntries(ticketsFrom(r.all(), "T4").map((x) => [x.ticket, x]));
     expect(t.T1).toMatchObject({ state: "proposed", canAccept: true, number: 7, costUsd: 0.18, url: "https://github.com/o/p/pull/7" });
@@ -74,6 +74,11 @@ describe("tickets, drawn from the record alone", () => {
     r.append({ kind: "stop.pressed", who: "you", ticket: "T3", data: {} });
     expect(ticketsFrom(r.all(), null).find((x) => x.ticket === "T3")).toMatchObject({ state: "stopped" });
     expect(t.T4).toMatchObject({ state: "working" });
+    // A ticket from before there was a queue names no kind: it is never started by itself, until it is sent again.
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T5", project: "o/p", data: { sentence: "Old." } });
+    expect(ticketsFrom(r.all(), null).find((x) => x.ticket === "T5")).toMatchObject({ state: "interrupted", canAgain: true });
+    r.append({ kind: "ticket.queued", who: "you", ticket: "T5", project: "o/p", data: {} });
+    expect(ticketsFrom(r.all(), null).find((x) => x.ticket === "T5")).toMatchObject({ state: "waiting" });
   });
 
   it("a held result cannot be accepted, an accepted one says so", () => {
@@ -224,6 +229,69 @@ describe("the page and its door", () => {
     expect(seen.at(-1)).toBe("T2: Another.");
     release(); await tick();
     expect((await post("ticket/edit", { ticket: "T9", sentence: "x" })).status).toBe(409);
+  });
+
+  it("starts nothing new once it is closing, and leaves another project's ticket waiting", async () => {
+    const r = new TheRecord();
+    const seen: string[] = [];
+    const { url, h } = await serve(r, { work: async (_s, ticket, _t, signal) => { seen.push(ticket); r.append({ kind: "run.started", who: "SF itself", ticket, project: "o/p", data: {} }); await new Promise<void>((ok) => signal.addEventListener("abort", () => ok())); r.append({ kind: "run.ended", who: "SF itself", ticket, project: "o/p", data: { end: "stopped", reason: "you pressed stop" } }); return {} as any; } });
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    await post("work", { sentence: "One." }); await post("work", { sentence: "Two." });
+    h.close(); h.stop();
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual(["T1"]);
+    expect(ticketsFrom(r.all(), null).find((t) => t.ticket === "T2")).toMatchObject({ state: "waiting" });
+    // A fresh start on the same record, with Settings on another project: T2 stays where it is.
+    const other = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/other" }), work: async (_s, ticket) => { seen.push(`other ${ticket}`); return {} as any; } });
+    other.h.pump();
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual(["T1"]);
+  });
+
+  it("passes the ready gate before a run: the test of done is written first, and an unclear sentence is asked about once", async () => {
+    const r = new TheRecord();
+    const worked: { ticket: string; done?: string[] }[] = [];
+    const asked: unknown[] = [];
+    const gate: HomeDeps["gate"] = async (q) => {
+      asked.push(q.asked);
+      if (/better/.test(q.sentence) && !q.asked) return { ok: true, answer: { clear: false, kind: "request", done: [], guesses: [], question: "Which page should be better?", costUsd: 0.001 } };
+      if (/broken reader/.test(q.sentence)) return { ok: false, why: "the plan limit was reached" };
+      return { ok: true, answer: { clear: true, kind: "bug", done: ["The footer shows the year."], guesses: ["The current year is meant."], question: null, costUsd: 0.001 } };
+    };
+    const { url, h } = await serve(r, { gate, work: async (st, ticket) => { worked.push({ ticket, done: st.done }); r.append({ kind: "run.ended", who: "SF itself", ticket, project: "o/p", data: { end: "failed its checks", reason: "x" } }); return {} as any; } });
+    const post = (path: string, body: unknown) => fetch(`${url}/api/step1/${path}`, { method: "POST", headers: json(h.key), body: JSON.stringify(body) });
+    const tick = () => new Promise((ok) => setTimeout(ok, 30));
+    const of = async (ticket: string) => ((await (await get(`${url}/api/step1/state`)).json()) as any).tickets.find((t: any) => t.ticket === ticket);
+    await post("work", { sentence: "Make it better." });
+    await post("work", { sentence: "Show the year in the footer." });
+    await tick();
+    // The unclear one waits for an answer and holds nobody up; the clear one ran with its test of done.
+    expect(await of("T1")).toMatchObject({ state: "asked", question: "Which page should be better?", says: "Which page should be better?" });
+    expect(worked).toEqual([{ ticket: "T2", done: ["The footer shows the year."] }]);
+    expect(await of("T2")).toMatchObject({ kind: "bug", done: ["The footer shows the year."] });
+    expect(r.story("T2").map((l) => l.kind)).toEqual(["ticket.opened", "gate.passed", "run.ended"]);
+    expect((await post("ticket/answer", { ticket: "T2", answer: "x" })).status).toBe(409);
+    expect((await post("ticket/answer", { ticket: "T1", answer: " " })).status).toBe(409);
+    expect((await post("ticket/answer", { ticket: "T1", answer: "The Money page." })).status).toBe(200);
+    await tick();
+    expect(asked.at(-1)).toEqual({ question: "Which page should be better?", answer: "The Money page." });
+    expect(worked.at(-1)).toEqual({ ticket: "T1", done: ["The footer shows the year."] });
+    // Sent again, the test of done stays as it was written: the gate is not asked a second time.
+    const n = asked.length;
+    await post("ticket/again", { ticket: "T1" });
+    await tick();
+    expect(asked.length).toBe(n);
+    expect(worked.at(-1)).toEqual({ ticket: "T1", done: ["The footer shows the year."] });
+    // A reader that cannot be asked holds nothing up.
+    await post("work", { sentence: "A broken reader day." });
+    await tick();
+    expect(worked.at(-1)).toEqual({ ticket: "T3", done: [] });
+    expect(r.story("T3").find((l) => l.kind === "gate.passed")!.data).toMatchObject({ skipped: expect.stringContaining("plan limit") });
+    // Switched off in Settings: no gate at all.
+    await post("settings", { gate: false });
+    await post("work", { sentence: "Make it better again." });
+    await tick();
+    expect(r.story("T4").map((l) => l.kind)).toEqual(["ticket.opened", "run.ended"]);
   });
 
   it("gives an end to a go that left no trace, so the queue never spins", async () => {

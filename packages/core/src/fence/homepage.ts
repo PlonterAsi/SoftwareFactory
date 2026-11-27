@@ -46,6 +46,7 @@ textarea:focus, input:focus, select:focus, button:focus-visible, summary:focus-v
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
 .row select { width: auto; min-height: 44px; }
 .ticket textarea { margin-top: 8px; }
+.ticket ul.done { margin: 2px 0 0; padding-left: 20px; color: var(--soft); }
 button, a.btn { font: inherit; font-weight: 600; border-radius: 8px; padding: 9px 16px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; display: inline-block; }
 button.main { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button.good { background: var(--good); color: var(--card); border-color: var(--good); }
@@ -133,6 +134,8 @@ ol.story li.flag .x { color: var(--bad); }
       <div><label for="s-turns">Most turns in a run</label><input id="s-turns" type="number" min="1" max="500"></div>
       <div><label for="s-minutes">Time limit, minutes</label><input id="s-minutes" type="number" min="1" max="600"></div>
       <div><label for="s-stuck">Call a run silent after, minutes</label><input id="s-stuck" type="number" min="1" max="240"></div>
+      <div><label for="s-gate">Before a run</label><select id="s-gate"><option value="yes">Write the test of done, ask once if unclear</option><option value="no">Start right away</option></select></div>
+      <div><label for="s-gate-model">Model that reads the ticket</label><input id="s-gate-model" autocomplete="off" spellcheck="false"></div>
       <div><label for="s-update">Updates</label><select id="s-update"><option value="yes">Install by themselves at start</option><option value="no">Never by themselves</option></select></div>
       <div><label for="s-phone">Lines to your phone</label><select id="s-phone"><option value="none">None, the home screen only</option><option value="ntfy">The ntfy app</option></select></div>
       <div class="wide"><label for="s-topic">ntfy channel name <span class="hint">16 or more letters and digits; whoever knows it can read the lines</span></label><input id="s-topic" autocomplete="off" spellcheck="false"></div>
@@ -157,8 +160,8 @@ ol.story li.flag .x { color: var(--bad); }
   function money(n) { return "$" + Number(n || 0).toFixed(2); }
   function lines(v) { return String(v || "").split(/\\r?\\n/).map(function (x) { return x.trim(); }).filter(Boolean); }
   var KINDS = { request: "Request", bug: "Bug", task: "Task", idea: "Idea", plan: "Plan", question: "Question" };
-  var editing = null, draft = {}, showRemoved = false;
-  var CHIP = { waiting: ["Waiting", ""], kept: ["Kept", ""], working: ["Working", "working"], proposed: ["Waiting for you", "proposed"], accepted: ["Accepted", "accepted"], undone: ["Undone", ""], held: ["Held here", "proposed"], passed: ["Passed", ""], "failed its checks": ["Failed its checks", "bad"], parked: ["Parked", ""], stopped: ["Stopped", ""], crashed: ["Crashed", "bad"], "not started": ["Not started", "bad"], interrupted: ["Interrupted", ""] };
+  var editing = null, draft = {}, showRemoved = false, answers = {};
+  var CHIP = { waiting: ["Waiting", ""], asked: ["A question for you", "proposed"], kept: ["Kept", ""], working: ["Working", "working"], proposed: ["Waiting for you", "proposed"], accepted: ["Accepted", "accepted"], undone: ["Undone", ""], held: ["Held here", "proposed"], passed: ["Passed", ""], "failed its checks": ["Failed its checks", "bad"], parked: ["Parked", ""], stopped: ["Stopped", ""], crashed: ["Crashed", "bad"], "not started": ["Not started", "bad"], interrupted: ["Interrupted", ""] };
 
   function post(path, body) {
     return fetch(path, { method: "POST", headers: { "content-type": "application/json", "x-sf-key": KEY }, body: JSON.stringify(body || {}) })
@@ -175,6 +178,7 @@ ol.story li.flag .x { color: var(--bad); }
     if (t.kind && t.kind !== "request") top.appendChild(el("span", "meta", KINDS[t.kind] || t.kind));
     top.appendChild(el("span", "meta", day(t.openedAt) + (t.costUsd ? "  ·  " + money(t.costUsd) : "")));
     box.appendChild(top);
+    if (editing === t.ticket && !t.canEdit) { editing = null; delete draft[t.ticket]; acceptError[t.ticket] = "It started before your change was saved."; }
     if (editing === t.ticket && t.canEdit) {
       var d0 = draft[t.ticket] || (draft[t.ticket] = { sentence: t.sentence, kind: t.kind });
       var ta = el("textarea"); ta.maxLength = 4000; ta.value = d0.sentence; ta.setAttribute("aria-label", "The ticket in your words");
@@ -190,7 +194,20 @@ ol.story li.flag .x { color: var(--bad); }
       erow.appendChild(save); erow.appendChild(ks); erow.appendChild(cancel);
       box.appendChild(ta); box.appendChild(erow);
     } else box.appendChild(el("p", "sentence", t.sentence));
-    box.appendChild(el("p", "says", t.says));
+    box.appendChild(el("p", t.state === "asked" ? "sentence" : "says", (t.state === "asked" ? "SoftwareFactory asks before it starts: " : "") + t.says));
+    if (t.state === "asked" && !t.removed) {
+      var ans = el("textarea"); ans.maxLength = 2000; ans.setAttribute("aria-label", "Your answer"); ans.value = answers[t.ticket] || "";
+      ans.oninput = function () { answers[t.ticket] = ans.value; };
+      var arow = el("div", "row");
+      var send = el("button", "main", "Answer"); send.type = "button";
+      send.onclick = function () { send.disabled = true; post("/api/step1/ticket/answer", { ticket: t.ticket, answer: ans.value }).then(function (r) { if (r.ok) { delete answers[t.ticket]; delete acceptError[t.ticket]; } else { acceptError[t.ticket] = r.why; } load(); render(last); }); };
+      arow.appendChild(send); arow.appendChild(el("span", "hint", "One answer is enough. It will not ask again."));
+      box.appendChild(ans); box.appendChild(arow);
+    } else if (t.done && t.done.length && t.state !== "asked") {
+      var dl = el("ul", "done");
+      t.done.forEach(function (x) { dl.appendChild(el("li", "", x)); });
+      box.appendChild(el("p", "says", "Done when:")); box.appendChild(dl);
+    }
     if (t.url || t.canAccept || t.canUndo || t.canEdit || t.canAgain || t.canRemove || t.removed) {
       var row = el("div", "row");
       var act = function (path, label, cls) {
@@ -326,7 +343,7 @@ ol.story li.flag .x { color: var(--bad); }
       settingsLoaded = true;
       $("s-repo").value = s.settings.repo; $("s-base").value = s.settings.base; $("s-model").value = s.settings.model;
       $("s-turns").value = s.settings.maxTurns; $("s-minutes").value = s.settings.timeLimitMinutes;
-      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
+      $("s-stuck").value = s.settings.stuckMinutes; $("s-update").value = s.settings.autoUpdate ? "yes" : "no"; $("s-gate").value = s.settings.gate ? "yes" : "no"; $("s-gate-model").value = s.settings.gateModel; $("s-phone").value = s.settings.phone; $("s-topic").value = s.settings.ntfyTopic;
       $("s-prepare").value = s.settings.prepare.join("\\n"); $("s-checks").value = s.settings.checks.join("\\n");
     }
     // Settings stay folded when everything a run needs is set; they open by themselves only when the project is missing.
@@ -353,7 +370,7 @@ ol.story li.flag .x { color: var(--bad); }
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
-    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value) })
+    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value) })
       .then(function (r) { if (r.ok) { $("save-hint").textContent = "Saved."; settingsLoaded = false; load(); } else { $("set-msg").textContent = r.why; } });
   };
 

@@ -16,7 +16,7 @@ describe("the project tells its own checks", () => {
     expect(r.checks).toEqual(["npm run typecheck", "npm run build"]);
   });
   it("takes no tests, and nothing from a project without a build", () => {
-    expect(tree({ "package.json": JSON.stringify({ scripts: { test: "vitest" } }), "package-lock.json": "{}" })).toEqual({ prepare: [], checks: [], found: [] });
+    expect(tree({ "package.json": JSON.stringify({ scripts: { test: "vitest" } }), "package-lock.json": "{}" })).toEqual({ prepare: [], checks: [], found: [], watch: [] });
   });
   it("installs without a lock file when there is none", () => {
     expect(tree({ "package.json": JSON.stringify({ scripts: { build: "x" } }) }).prepare).toEqual(["npm install --no-audit --no-fund"]);

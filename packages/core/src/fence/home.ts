@@ -2,7 +2,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
-import { type GitHub, parseGitHubRepo } from "../tickets/github.js";
+import { type GitHub, type GitHubRepo, parseGitHubRepo } from "../tickets/github.js";
+import type { GateResult } from "./gate.js";
 import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
 import { type Sender, type WatchSettings, WATCH_DEFAULTS, cleanWatch, speak } from "./watchdog.js";
@@ -30,9 +31,13 @@ export interface HomeSettings extends WatchSettings {
   autoUpdate: boolean;
   /** Hold the queue: waiting tickets stay waiting until this is switched off. A run that is working goes on. */
   hold: boolean;
+  /** The ready gate: before a run, SoftwareFactory writes the test of done and asks once when a sentence is unclear. */
+  gate: boolean;
+  /** The model that reads the ticket at the gate. */
+  gateModel: string;
 }
 
-export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false };
+export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku" };
 
 /** Check what came from the screen. Returns clean settings or says, in a sentence, what is wrong. */
 export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS): HomeSettings {
@@ -41,10 +46,12 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   const list = (k: "checks" | "prepare") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
   const num = (k: "maxTurns" | "timeLimitMinutes") => (r[k] === undefined ? from[k] : Number(r[k]));
   const watch = cleanWatch(r, from);
-  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold };
+  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel") };
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
+  if (/^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)$/.test(s.base)) throw new Error(`"${s.base}" is not a branch name.`);
   if (s.base && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(s.base) || s.base.includes(".."))) throw new Error(`"${s.base}" is not a branch name.`);
   if (!/^[a-z0-9][a-z0-9.-]{0,60}$/.test(s.model)) throw new Error(`"${s.model}" is not a model name.`);
+  if (!/^[a-z0-9][a-z0-9.-]{0,60}$/.test(s.gateModel)) throw new Error(`"${s.gateModel}" is not a model name.`);
   if (!Number.isInteger(s.maxTurns) || s.maxTurns < 1 || s.maxTurns > 500) throw new Error("Turns must be a whole number from 1 to 500.");
   if (!Number.isInteger(s.timeLimitMinutes) || s.timeLimitMinutes < 1 || s.timeLimitMinutes > 600) throw new Error("The time limit must be from 1 to 600 minutes.");
   for (const c of [...s.checks, ...s.prepare]) if (c.length > 500 || /[\r\n\0]/.test(c)) throw new Error("A check or a prepare command is one line of at most 500 characters.");
@@ -69,7 +76,7 @@ export class SettingsFile {
 }
 export const settingsFileIn = (workDir: string, start: Partial<HomeSettings> = {}) => new SettingsFile(join(workDir, "settings.json"), start);
 
-export type TicketState = "waiting" | "kept" | "working" | "proposed" | "accepted" | "undone" | "held" | "passed" | "failed its checks" | "parked" | "stopped" | "crashed" | "not started" | "interrupted";
+export type TicketState = "waiting" | "asked" | "kept" | "working" | "proposed" | "accepted" | "undone" | "held" | "passed" | "failed its checks" | "parked" | "stopped" | "crashed" | "not started" | "interrupted";
 
 export interface TicketView {
   ticket: string;
@@ -93,8 +100,16 @@ export interface TicketView {
   canAgain: boolean;
   /** Taken off the list. The record keeps it, and it can be put back. */
   removed: boolean;
+  /** The gate was passed for the words as they stand. */
+  gatePassed: boolean;
   /** Its place in the queue, from 1, while it waits. */
   place: number | null;
+  /** The question SoftwareFactory asked before starting, while it waits for the answer. */
+  question: string | null;
+  /** The test of done written at the gate, once there is one. */
+  done: string[];
+  /** The one question already asked for these words, with the answer. */
+  asked: { question: string; answer: string } | null;
   /** The record line that made it wait (the order of the queue). */
   waitingSince: number;
   story: { id: number; at: string; who: string; what: string; flagged: boolean }[];
@@ -115,22 +130,29 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
     const lastOf = <K extends RecordLine["kind"]>(from: RecordLine[], ...k: K[]) => [...from].reverse().find((l) => (k as string[]).includes(l.kind));
     // The latest go: what happened since the ticket was opened or last sent to be worked again.
     const sent = lastOf(ls, "ticket.opened", "ticket.queued")!;
-    const go = ls.filter((l) => l.id > sent.id && !l.kind.startsWith("ticket.") && l.kind !== "watchdog.spoke" && l.kind !== "setting.changed");
+    const go = ls.filter((l) => l.id > sent.id && !l.kind.startsWith("ticket.") && !l.kind.startsWith("gate.") && l.kind !== "watchdog.spoke" && l.kind !== "setting.changed");
+    // The gate. A question belongs to the words it was asked about: changed words start the gate afresh.
+    const wordsAt = lastOf(ls.filter((l) => l.kind === "ticket.opened" || typeof d(l).sentence === "string"), "ticket.opened", "ticket.edited")!.id;
+    const gate = ls.filter((l) => l.id > wordsAt && l.kind.startsWith("gate."));
+    const gAsked = lastOf(gate, "gate.asked"), gAnswered = gAsked ? gate.find((l) => l.kind === "gate.answered" && l.id > gAsked.id) : undefined, gPassed = lastOf(gate, "gate.passed");
+    const question = gAsked && !gAnswered && !gPassed ? String(d(gAsked).question ?? "") : null;
     const ended = lastOf(go, "run.ended"), fence = lastOf(go, "fence.tested");
     const accepted = lastOf(ls, "result.accepted"), undone = lastOf(ls, "result.undone");
-    const everProposed = lastOf(ls, "result.proposed");
-    const proposed = lastOf(go, "result.proposed") ?? (everProposed && !d(everProposed).held ? everProposed : undefined);
+    const proposed = lastOf(go, "result.proposed");
     const edit = lastOf(ls.filter((l) => typeof d(l).sentence === "string"), "ticket.edited"), kindEdit = lastOf(ls.filter((l) => typeof d(l).kind === "string"), "ticket.edited");
     const removed = lastOf(ls, "ticket.removed", "ticket.restored")?.kind === "ticket.removed";
-    const kindNow = String(d(kindEdit).kind ?? d(opened).kind ?? "request");
+    // The kind: what the owner chose wins; an unmarked ticket takes what the gate read.
+    const kindNow = String(d(kindEdit).kind ?? (d(opened).kind && d(opened).kind !== "request" ? d(opened).kind : d(gPassed).kind ?? d(opened).kind ?? "request"));
     let state: TicketState, says: string;
     if (undone) { state = "undone"; says = d(undone).sha ? "You undid it. The project is as it was before, and its history keeps both steps." : "The undo is on GitHub and still has to be put in there."; }
     else if (accepted) { state = "accepted"; says = d(accepted).foundMerged ? `It was already put into the project on GitHub${d(accepted).notTheCheckedCommit ? ", with changes made after SoftwareFactory checked it" : ""}.` : "You accepted it. It is in the project."; }
     else if (running === ticket) { state = "working"; says = "A run is working on it now."; }
     else if (proposed && d(proposed).held) { state = "held"; says = `Held on this computer: ${d(proposed).reason}`; }
     else if (proposed) { state = "proposed"; says = "Done and checked. Waiting for you to accept."; }
+    else if (!go.length && question) { state = "asked"; says = question; }
     else if (!go.length && !WORKED.includes(kindNow)) { state = "kept"; says = `Kept on the list as ${kindNow === "idea" ? "an idea" : `a ${kindNow}`}. Only requests, bugs and tasks are sent to a run for now.`; }
-    else if (!go.length) { state = "waiting"; says = "Waiting for its turn."; }
+    // A ticket from before there was a queue (its first line names no kind) is never started by itself.
+    else if (!go.length && (typeof d(opened).kind === "string" || sent.kind === "ticket.queued")) { state = "waiting"; says = "Waiting for its turn."; }
     else if (ended) { state = d(ended).end as TicketState; says = String(d(ended).reason ?? ""); }
     else if (go.some((l) => l.kind === "stop.pressed")) { state = "stopped"; says = "You pressed stop."; }
     else if (fence && d(fence).ok === false) { state = "not started"; says = "The fence did not hold, so no run started."; }
@@ -142,9 +164,10 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
       costUsd: Math.round(ls.reduce((a, l) => a + (l.costUsd ?? 0), 0) * 10000) / 10000,
       canAccept: state === "proposed" && number !== null,
       canUndo: state === "accepted" && typeof d(accepted).sha === "string" && !!d(accepted).sha,
-      canEdit: (state === "waiting" || state === "kept") && !removed, canRemove: state !== "working" && !removed,
-      canAgain: !removed && ["failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held"].includes(state),
-      removed, place: null, waitingSince: sent.id,
+      canEdit: (state === "waiting" || state === "kept" || state === "asked") && !removed, canRemove: state !== "working" && !removed,
+      canAgain: !removed && ["proposed", "failed its checks", "parked", "stopped", "crashed", "not started", "interrupted", "held"].includes(state),
+      removed, place: null, question: state === "asked" ? question : null, done: Array.isArray(d(gPassed).done) ? (d(gPassed).done as unknown[]).map(String) : [],
+      asked: gAsked && gAnswered ? { question: String(d(gAsked).question ?? ""), answer: String(d(gAnswered).answer ?? "") } : null, gatePassed: !!gPassed, waitingSince: Math.max(sent.id, lastOf(ls, "ticket.restored")?.id ?? 0),
       story: ls.map((l) => ({ id: l.id, at: l.ts, who: l.who, what: storyLine(l), flagged: l.flagged })),
     });
   }
@@ -163,6 +186,8 @@ export interface HomeDeps {
   settings: SettingsFile;
   /** Works one ticket to its end. The home screen starts it and never waits on it. */
   work: (st: Omit<TicketSettings, "workDir">, ticket: string, sentence: string, signal: AbortSignal) => Promise<TicketOutcome>;
+  /** The reader at the ready gate. Without it there is no gate. */
+  gate?: (q: { repo: GitHubRepo; base: string; sentence: string; asked: { question: string; answer: string } | null; model: string }) => Promise<GateResult>;
   /** host:port forms this page answers to. Anything else is refused, so a foreign name cannot be pointed here. */
   hosts: string[];
   /** The page's key. Made fresh at every start when not given. */
@@ -185,7 +210,7 @@ export function createHome(deps: HomeDeps) {
   // the first use it is worth nothing.
   let passUsed = false;
   let running: { ticket: string; stop: AbortController; startedAt: string; lastLineAt: string } | null = null;
-  let accepting = false, undoing = false;
+  let accepting = false, undoing = false, closing = false;
   const streams = new Set<ServerResponse>();
   record.onLine((l) => { if (running && l.kind !== "watchdog.spoke") running.lastLineAt = l.ts; for (const s of streams) s.write(`data: ${JSON.stringify({ id: l.id })}\n\n`); });
 
@@ -219,10 +244,12 @@ export function createHome(deps: HomeDeps) {
 
   /** The queue: when nothing is being worked and the queue is not held, the ticket that waited longest starts. */
   function pump(): void {
-    if (running) return;
+    if (running || closing) return;
     const s = deps.settings.read();
     if (s.hold) return;
-    const next = queueOf(ticketsFrom(record.all(), null))[0];
+    // Settings speak for one project. A ticket of another project waits until Settings point at it again.
+    const here = parseGitHubRepo(s.repo);
+    const next = queueOf(ticketsFrom(record.all(), null)).find((t) => !here || t.project === `${here.owner}/${here.name}`);
     if (!next) return;
     const repo = parseGitHubRepo(next.project ?? "");
     if (!repo) { record.append({ kind: "run.ended", who: "SF itself", ticket: next.ticket, project: next.project, data: { end: "crashed", reason: "the record does not say which project this ticket is for", where: "before the run" } }); return pump(); }
@@ -230,17 +257,39 @@ export function createHome(deps: HomeDeps) {
     const mine = { ticket: next.ticket, stop, startedAt: new Date().toISOString(), lastLineAt: new Date().toISOString() };
     running = mine;
     const before = record.all().at(-1)?.id ?? 0;
-    void deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes }, next.ticket, next.sentence, stop.signal)
+    const stamp = { ticket: next.ticket, project: next.project };
+    // The ready gate first: the test of done is written before the run, and an unclear sentence is asked about once.
+    const ready = async (): Promise<string[] | null> => {
+      if (next.gatePassed) return next.done;
+      if (!s.gate || !deps.gate) return [];
+      let g: GateResult;
+      try { g = await deps.gate({ repo, base: s.base, sentence: next.sentence, asked: next.asked, model: s.gateModel }); } catch (e) { g = { ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }; }
+      if (stop.signal.aborted) return null;
+      // A gate that cannot be asked never holds a ticket up: it passes without a test of done, and the story says so.
+      if (!g.ok) { record.append({ kind: "gate.passed", who: "SF itself", ...stamp, data: { skipped: `the gate could not be asked: ${g.why}`, done: [] } }); return []; }
+      const a = g.answer;
+      if (!a.clear && a.question) { record.append({ kind: "gate.asked", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { question: a.question } }); return null; }
+      record.append({ kind: "gate.passed", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { kind: a.kind, done: a.done, guesses: a.guesses } });
+      return a.done;
+    };
+    void ready().then((done) => (done === null ? undefined : deps.work({ repo, base: s.base, checks: s.checks, prepare: s.prepare, model: s.model, maxTurns: s.maxTurns, timeLimitMinutes: s.timeLimitMinutes, done }, next.ticket, next.sentence, stop.signal)))
       .catch((e) => { record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, project: next.project, data: { end: "crashed", reason: String((e as Error)?.message ?? e).slice(0, 300), where: "before the run" } }); })
+      .catch(() => undefined)
       .finally(() => {
-        // A go that left no line at all would wait again and start again without end: it is given an end.
-        if (!record.since(before).some((l) => l.ticket === mine.ticket)) { try { record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, project: next.project, data: { end: "crashed", reason: "the run left no trace", where: "before the run" } }); } catch { /* then the queue stays where it is */ return; } }
+        let again = true;
+        try {
+          // A go that left no line of work would wait again and start again without end: it is given an end.
+          const trace = record.since(before).some((l) => l.ticket === mine.ticket && !l.kind.startsWith("ticket.") && l.kind !== "gate.passed" && l.kind !== "gate.answered" && l.kind !== "watchdog.spoke");
+          if (!trace) record.append({ kind: "run.ended", who: "SF itself", ticket: mine.ticket, project: next.project, data: { end: "crashed", reason: "the run left no trace", where: "before the run" } });
+        } catch { again = false; /* the record could not be written: the queue rests until something wakes it */ }
         if (running === mine) running = null;
-        tell();
-        pump();
+        try { tell(); if (again) pump(); } catch { /* the next thing that happens wakes the queue */ }
       });
     tell();
   }
+
+  /** SoftwareFactory is closing: the run that works is stopped by the caller, and nothing new starts. */
+  function close(): void { closing = true; }
 
   function stopNow(): { ok: boolean; why?: string } {
     if (!running) return { ok: false, why: "Nothing is running." };
@@ -279,6 +328,17 @@ export function createHome(deps: HomeDeps) {
     pump();
     return { ok: true };
   }
+  /** The owner's answer to the one question the gate asked. The ticket takes its turn again. */
+  function answer(ticket: string, text: unknown): Did {
+    const t = view(ticket);
+    if (!t) return NONE;
+    if (t.state !== "asked" || t.removed) return { ok: false, why: "This ticket is not waiting for an answer." };
+    if (typeof text !== "string" || !text.trim()) return { ok: false, why: "Write your answer first." };
+    if (text.length > 2000) return { ok: false, why: "Keep the answer under 2000 characters." };
+    record.append({ kind: "gate.answered", who: "you", ticket, project: t.project, data: { answer: text.trim() } });
+    pump();
+    return { ok: true };
+  }
   /** Send a ticket to be worked again, under the same name. */
   function again(ticket: string): Did {
     const t = view(ticket);
@@ -296,6 +356,7 @@ export function createHome(deps: HomeDeps) {
     try {
       const lines = record.story(ticket);
       if (lines.some((l) => l.kind === "result.accepted")) return { ok: false, why: "You accepted this one already." };
+      if (view(ticket)?.removed) return { ok: false, why: "This ticket is off the list. Put it back first." };
       const p = [...lines].reverse().find((l) => l.kind === "result.proposed");
       const d = (p?.data ?? {}) as Record<string, any>;
       if (!p || d.held || typeof d.number !== "number" || typeof d.headSha !== "string") return { ok: false, why: "This ticket has no proposal that can be accepted from here." };
@@ -311,7 +372,7 @@ export function createHome(deps: HomeDeps) {
       if (pr.state !== "open") return { ok: false, why: "The proposal was closed on GitHub." };
       if (pr.headSha !== d.headSha) return { ok: false, why: "The proposal changed on GitHub after SoftwareFactory checked it, so it is not accepted from here. Look at it on GitHub." };
       if (pr.base !== d.base) return { ok: false, why: "The proposal now points at another branch than the one it was made for." };
-      if (pr.mergeable === false) return { ok: false, why: "The project moved on and this proposal no longer fits on top of it. Start the ticket again." };
+      if (pr.mergeable === false) return { ok: false, why: "The project moved on and this proposal no longer fits on top of it. Use Work it again." };
       if (pr.draft) await github.markReady(pr.nodeId);
       const ci = await github.ci(repo, d.headSha).catch(() => null);
       const merged = await github.mergePr(repo, d.number, d.headSha, pr.title);
@@ -398,6 +459,7 @@ export function createHome(deps: HomeDeps) {
         if (url.pathname === "/api/step1/ticket/edit") { const r = edit(String(b.ticket ?? ""), b.sentence, b.kind); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/remove") { const r = remove(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/restore") { const r = restore(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/ticket/answer") { const r = answer(String(b.ticket ?? ""), b.answer); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/again") { const r = again(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/stop") { const r = stopNow(); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/look") { const r = await look(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
@@ -420,5 +482,5 @@ export function createHome(deps: HomeDeps) {
     }
   }
 
-  return { handler, state, start, pump, edit, remove, restore, again, stop: stopNow, accept, saveSettings, key, pass, cookie, cookieName, look, alive, isRunning: () => !!running };
+  return { handler, state, start, pump, close, answer, edit, remove, restore, again, stop: stopNow, accept, saveSettings, key, pass, cookie, cookieName, look, alive, isRunning: () => !!running };
 }

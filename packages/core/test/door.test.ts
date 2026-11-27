@@ -131,6 +131,7 @@ say '{"type":"system","subtype":"init"}'
 case "$m" in
   limit) say '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude usage limit reached. Your limit will reset at 3pm.","total_cost_usd":0,"num_turns":0}'; exit 1;;
   nothing) ;;
+  script) echo '{"scripts":{"build":"exit 0"}}' > package.json; echo hi > hello.txt;;
   workflow) mkdir -p .github/workflows && echo "on: push" > .github/workflows/x.yml; echo hi > hello.txt;;
   hook) echo "hello from the room" > hello.txt; echo "you see me" > kept-out.txt; mkdir -p .git/hooks .git/info; printf '#!/bin/sh\\necho pwned > hello.txt\\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit; echo kept-out.txt > .git/info/exclude;;
   secret) echo "token = ghp_abcdefghijklmnopqrstuvwxyz0123456789" > hello.txt;;
@@ -139,6 +140,7 @@ esac
 say '{"type":"assistant","message":{"content":[{"type":"text","text":"I added hello.txt."},{"type":"tool_use","name":"Write","input":{"file_path":"hello.txt"}}]}}'
 say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello.txt as asked.","total_cost_usd":0.07,"num_turns":2}'
 `);
+    writeFileSync(join(shim, "npm"), "#!/bin/bash\nexit 0\n"); chmodSync(join(shim, "npm"), 0o755);
     chmodSync(join(shim, "bwrap"), 0o755); chmodSync(join(shim, "claude"), 0o755);
     const seed = `${root}/seed`;
     mkdirSync(seed, { recursive: true });
@@ -224,6 +226,26 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     const o = await workTicket({ ...deps(record), signal: stop.signal }, settings(), "Add a hello file.");
     expect(o.end).toBe("stopped");
     expect(record.all().filter((l) => l.kind === "result.proposed")).toHaveLength(0);
+  });
+
+  it("finds a project's build, and holds a result that rewrote the very command it was checked with", async () => {
+    const seed2 = `${root}/seed2`, origin2 = `${root}/origin2.git`;
+    mkdirSync(seed2, { recursive: true });
+    g(seed2, "init", "-q", "-b", "main"); g(seed2, "config", "user.email", "a@b.c"); g(seed2, "config", "user.name", "Owner");
+    writeFileSync(join(seed2, "package.json"), JSON.stringify({ scripts: { build: "true" } })); writeFileSync(join(seed2, "package-lock.json"), "{}");
+    g(seed2, "add", "-A"); g(seed2, "commit", "-q", "-m", "first");
+    execFileSync("git", ["clone", "-q", "--bare", seed2, origin2]);
+    const d2 = (record: TheRecord) => ({ ...deps(record), github: new GitHub({ dataDir: mkdtempSync(join(tmpdir(), "sf-gh-")), gitUrl: () => origin2 }) });
+    const st = settings({ checks: [], repo: { owner: "o", name: "p2" } });
+    mode("ok");
+    const r1 = new TheRecord();
+    const a = await workTicket(d2(r1), st, "Add a hello file.");
+    expect(a.end).toBe("passed");
+    expect(r1.story("T1").find((l) => l.kind === "run.started")!.data).toMatchObject({ checks: ["npm run build"], prepare: ["npm ci"], checksFound: ["package.json: build"] });
+    mode("script");
+    const b = await workTicket(d2(new TheRecord()), st, "Add a hello file.");
+    expect(b.end).toBe("parked");
+    expect(b.reason).toMatch(/changes the "build" command in package\.json/);
   });
 
   it("holds a result that changes what runs by itself on GitHub, or carries a secret", async () => {

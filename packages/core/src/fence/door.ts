@@ -42,6 +42,8 @@ export interface RunRequest {
   prepare?: string[];
   /** Set when the checks were found in the project itself (and not written in Settings): where each came from. */
   checksFound?: string[];
+  /** The test of done, written at the ready gate before the run. The run is told it and cannot change it. */
+  done?: string[];
   signal?: AbortSignal;
 }
 
@@ -63,12 +65,13 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/;
 
 /** What the agent is told. The sentence is the person's; the rest is fixed. */
-export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare">): string {
+export function runPrompt(r: Pick<RunRequest, "sentence" | "checks" | "prepare" | "done">): string {
   return [
     "You are working on a copy of a real project. Do what the owner asks below, completely and with care, and nothing beyond it.",
     "",
     "The owner's request:",
     r.sentence.trim(),
+    ...(r.done?.length ? ["", "The work is finished when all of these are true (written down before you started; they are fixed):", ...r.done.map((x) => `- ${x}`)] : []),
     "",
     "How to work:",
     ...(r.prepare?.length ? [
@@ -179,7 +182,7 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
   };
   const step = async (user: "worker" | "root", script: string, timeoutMs = s.stepTimeoutMs, onLine?: (l: string) => void): Promise<ExecResult> => exec(user, script, timeoutMs, onLine);
 
-  record.append({ kind: "run.started", who: "SF itself", ...stamp, data: { branch: req.branch, base: req.base, model: req.model, timeLimitMinutes: Math.round(req.timeLimitMs / 60_000), checks: req.checks, prepare: req.prepare ?? [], ...(req.checksFound ? { checksFound: req.checksFound } : {}) } });
+  record.append({ kind: "run.started", who: "SF itself", ...stamp, data: { branch: req.branch, base: req.base, model: req.model, timeLimitMinutes: Math.round(req.timeLimitMs / 60_000), checks: req.checks, prepare: req.prepare ?? [], ...(req.checksFound ? { checksFound: req.checksFound } : {}), ...(req.done?.length ? { done: req.done } : {}) } });
   try {
     if (stopped()) return await finish("stopped", "you pressed stop");
     // 1. The copy goes in as data and is unpacked by git inside the no-network box.

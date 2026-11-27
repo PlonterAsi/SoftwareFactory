@@ -2,7 +2,10 @@
  * The project tells its own checks (build list: own-checks), so nothing has to be filled in.
  *
  * SoftwareFactory reads the file list of the starting point, before any run touched it, and finds what the project
- * can be built and type-checked with. A run therefore cannot weaken its own checks by editing a file. What is found
+ * can be built and type-checked with, so a run cannot add, drop or reorder checks. The commands still run the
+ * project's own scripts as the run left them; a result that changes the script behind a found check is therefore held
+ * for the owner's look (see `watch`). A build's own settings files can still loosen a build: that limit is real, and
+ * the second pair of eyes on a result is what answers it later. What is found
  * is only the kind of check that needs nothing but the code: build, type check, vet. Tests often need a database or
  * a key; they come in when a project is brought in and SoftwareFactory has proven which of them run in the room.
  * Checks written in Settings win over anything found here.
@@ -14,13 +17,15 @@ export interface FoundChecks {
   checks: string[];
   /** Where each came from, in plain words, for the record and the story. */
   found: string[];
+  /** The script entries the found checks stand on: a result that changes one of them is held. */
+  watch: { path: string; scripts: string[] }[];
 }
 
 /** Folder names go into a command line, and a project's files are data: only plain names are used. */
 const PLAIN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
 const SKIP = new Set(["node_modules", "vendor", "dist", "build", "out", "target", "examples", "example", "testdata", "fixtures"]);
 
-function scriptsOf(text: string | null): { scripts: Record<string, string>; workspaces: boolean } | null {
+export function scriptsOf(text: string | null): { scripts: Record<string, string>; workspaces: boolean } | null {
   if (!text) return null;
   try {
     const j = JSON.parse(text) as { scripts?: unknown; workspaces?: unknown };
@@ -38,8 +43,8 @@ export function findChecks(files: string[], read: (path: string) => string | nul
   const has = new Set(files);
   const dirs = ["", ...[...new Set(files.filter((f) => f.split("/").length === 2).map((f) => f.split("/")[0]!))].filter((d) => PLAIN.test(d) && !SKIP.has(d)).sort()];
   const at = (d: string, f: string) => (d ? `${d}/${f}` : f);
-  const out: FoundChecks = { prepare: [], checks: [], found: [] };
-  const go: FoundChecks = { prepare: [], checks: [], found: [] };
+  const out: FoundChecks = { prepare: [], checks: [], found: [], watch: [] };
+  const go: FoundChecks = { prepare: [], checks: [], found: [], watch: [] };
   const root = has.has("package.json") ? scriptsOf(read("package.json")) : null;
   for (const d of dirs) {
     // Node. With workspaces the top folder speaks for the folders under it.
@@ -51,6 +56,7 @@ export function findChecks(files: string[], read: (path: string) => string | nul
         const wanted = ["typecheck", "build"].filter((k) => pkg.scripts[k]);
         if (wanted.length) {
           out.prepare.push(has.has(at(d, "package-lock.json")) ? `npm ci${where}` : `npm install --no-audit --no-fund${where}`);
+          out.watch.push({ path: at(d, "package.json"), scripts: wanted });
           for (const k of wanted) { out.checks.push(`npm run ${k}${where}`); out.found.push(`${at(d, "package.json")}: ${k}`); }
         }
       }
@@ -63,5 +69,5 @@ export function findChecks(files: string[], read: (path: string) => string | nul
       go.found.push(`${at(d, "go.mod")}: vet and build`);
     }
   }
-  return { prepare: [...out.prepare, ...go.prepare], checks: [...out.checks, ...go.checks], found: [...out.found, ...go.found] };
+  return { prepare: [...out.prepare, ...go.prepare], checks: [...out.checks, ...go.checks], found: [...out.found, ...go.found], watch: out.watch };
 }
