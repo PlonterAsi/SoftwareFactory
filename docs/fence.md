@@ -55,7 +55,8 @@ Double-click `SoftwareFactory-Step1.cmd`, or run `npm run step1 -- home`. One pa
 - Accept puts the proposal into the project: exactly the commit SoftwareFactory checked. If the proposal changed on GitHub since, or was closed, accept refuses and says so.
 - Settings (project, starting branch, model, turns, time limit, prepare commands, checks) are changed on the page, kept in `settings.json` beside the record, and each change is a line in the record. The fence's own settings are not changed from the page.
 - The page answers only to its own address, and its buttons work only with a key that the page itself carries, so another site open in your browser cannot press them.
-- The address SoftwareFactory opens carries a pass, made new at every start. Without it there is no page, no state and no button, so another account on the computer gets nothing. The page's port is also added to the ports the fence test tries from the room: if a run could reach the page, no run starts.
+- Before you confirm an accept, the page reads what GitHub's own checks say about the proposal and tells you, also when they failed or never ran. The choice stays yours.
+- The address SoftwareFactory opens carries a pass, made new at every start and good for one opening. Without it there is no page, no state and no button, so another account on the computer gets nothing. The page's port is also added to the ports the fence test tries from the room: if a run could reach the page, no run starts.
 - Accept refuses a proposal that no longer fits on the project as it is today. If the project moved on but the proposal still fits, GitHub puts the checked commit on top of today's project; the checks were run on the project as it was when the run started.
 - While SoftwareFactory talks to GitHub (fetching the project, pushing the proposal) the page waits, up to five minutes at the worst. Stop is taken as soon as that step ends.
 

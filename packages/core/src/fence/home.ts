@@ -92,7 +92,7 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
     const ended = last("run.ended"), proposed = last("result.proposed"), accepted = last("result.accepted"), fence = last("fence.tested");
     const d = (l?: RecordLine) => (l?.data ?? {}) as Record<string, any>;
     let state: TicketState, says: string;
-    if (accepted) { state = "accepted"; says = "You accepted it. It is in the project."; }
+    if (accepted) { state = "accepted"; says = d(accepted).foundMerged ? `It was already put into the project on GitHub${d(accepted).notTheCheckedCommit ? ", with changes made after SoftwareFactory checked it" : ""}.` : "You accepted it. It is in the project."; }
     else if (running === ticket) { state = "working"; says = "A run is working on it now."; }
     else if (proposed && d(proposed).held) { state = "held"; says = `Held on this computer: ${d(proposed).reason}`; }
     else if (proposed) { state = "proposed"; says = "Done and checked. Waiting for you to accept."; }
@@ -131,7 +131,10 @@ export interface HomeDeps {
 export function createHome(deps: HomeDeps) {
   const { record, github } = deps;
   const key = deps.key ?? randomBytes(24).toString("hex");
-  const pass = deps.pass ?? randomBytes(24).toString("hex"), cookie = randomBytes(24).toString("hex");
+  const pass = deps.pass ?? randomBytes(24).toString("hex"), cookie = randomBytes(24).toString("hex"), cookieName = `sf${randomBytes(4).toString("hex")}`;
+  // The pass opens the page once. The address travels through a command line and the browser's history; after
+  // the first use it is worth nothing.
+  let passUsed = false;
   let running: { ticket: string | null; stop: AbortController; startedAt: string; before: number } | null = null;
   // The ticket's name is known from its first line in the record.
   const nameIt = () => { if (running && !running.ticket) running.ticket = record.since(running.before).find((l) => l.kind === "ticket.opened")?.ticket ?? null; };
@@ -187,7 +190,7 @@ export function createHome(deps: HomeDeps) {
       const pr = await github.prDetail(repo, d.number);
       if (pr.merged) {
         // Somebody merged it on GitHub. The record says so, and says when it was not the commit that was checked.
-        record.append({ kind: "result.accepted", who: "you", run: p.run, ticket, project: p.project, data: { number: d.number, sha: pr.mergeSha, where: "on GitHub", ...(pr.headSha !== d.headSha ? { notTheCheckedCommit: true } : {}) } });
+        record.append({ kind: "result.accepted", who: "SF itself", run: p.run, ticket, project: p.project, data: { number: d.number, sha: pr.mergeSha, foundMerged: true, ...(pr.headSha !== d.headSha ? { notTheCheckedCommit: true } : {}) } });
         return { ok: true, sha: pr.mergeSha ?? "" };
       }
       if (pr.state !== "open") return { ok: false, why: "The proposal was closed on GitHub." };
@@ -195,12 +198,26 @@ export function createHome(deps: HomeDeps) {
       if (pr.base !== d.base) return { ok: false, why: "The proposal now points at another branch than the one it was made for." };
       if (pr.mergeable === false) return { ok: false, why: "The project moved on and this proposal no longer fits on top of it. Start the ticket again." };
       if (pr.draft) await github.markReady(pr.nodeId);
+      const ci = await github.ci(repo, d.headSha).catch(() => null);
       const merged = await github.mergePr(repo, d.number, d.headSha, pr.title);
-      record.append({ kind: "result.accepted", who: "you", run: p.run, ticket, project: p.project, data: { number: d.number, sha: merged.sha, base: d.base } });
+      record.append({ kind: "result.accepted", who: "you", run: p.run, ticket, project: p.project, data: { number: d.number, sha: merged.sha, base: d.base, githubChecks: ci?.state ?? "unknown" } });
       return { ok: true, sha: merged.sha };
     } catch (e) {
       return { ok: false, why: `GitHub did not take it: ${(e as Error).message.slice(0, 200)}` };
     } finally { accepting = false; }
+  }
+
+  /** Before the confirm step: what GitHub's own checks say about the proposal right now. Read-only. */
+  async function look(ticket: string): Promise<{ ok: true; githubChecks: string } | { ok: false; why: string }> {
+    const p = [...record.story(ticket)].reverse().find((l) => l.kind === "result.proposed");
+    const d = (p?.data ?? {}) as Record<string, any>;
+    const repo = parseGitHubRepo(p?.project ?? "");
+    if (!p || !repo || typeof d.headSha !== "string") return { ok: false, why: "This ticket has no proposal that can be accepted from here." };
+    try {
+      const ci = await github.ci(repo, d.headSha);
+      const says = ci.state === "green" ? "GitHub's own checks passed." : ci.state === "running" ? "GitHub's own checks are still running." : ci.state === "none" ? "GitHub ran no checks of its own on this proposal." : `GitHub's own checks FAILED (${ci.failed.slice(0, 4).join(", ") || "see the proposal"}).`;
+      return { ok: true, githubChecks: says };
+    } catch { return { ok: true, githubChecks: "GitHub's own checks could not be read just now." }; }
   }
 
   function saveSettings(raw: unknown): { ok: true; settings: HomeSettings } | { ok: false; why: string } {
@@ -233,12 +250,13 @@ export function createHome(deps: HomeDeps) {
       // that scripts cannot read, and nothing here is shown or told to a caller without that cookie. So another
       // account on this computer, or anything that merely reaches the port, gets no page, no key and no state.
       if (req.method === "GET" && url.pathname === "/" && url.searchParams.has("pass")) {
-        if (!same(url.searchParams.get("pass") ?? "", pass)) { res.writeHead(403).end("this pass is not the one SoftwareFactory printed"); return; }
-        res.writeHead(303, { location: "/", "set-cookie": `sf=${cookie}; HttpOnly; SameSite=Strict; Path=/`, "cache-control": "no-store", "referrer-policy": "no-referrer" }).end();
+        if (passUsed || !same(url.searchParams.get("pass") ?? "", pass)) { res.writeHead(403).end("this pass is not the one SoftwareFactory printed"); return; }
+        passUsed = true;
+        res.writeHead(303, { location: "/", "set-cookie": `${cookieName}=${cookie}; HttpOnly; SameSite=Strict; Path=/`, "cache-control": "no-store", "referrer-policy": "no-referrer" }).end();
         return;
       }
-      const got = /(?:^|;\s*)sf=([A-Za-z0-9]+)/.exec(String(req.headers.cookie ?? ""))?.[1] ?? "";
-      if (!same(got, cookie)) { res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("Open SoftwareFactory from its own window: the address printed there lets you in."); return; }
+      const got = new RegExp(`(?:^|;\\s*)${cookieName}=([A-Za-z0-9]+)`).exec(String(req.headers.cookie ?? ""))?.[1] ?? "";
+      if (!same(got, cookie)) { res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("This page opens once, from SoftwareFactory's own window. Close that window and start SoftwareFactory again to get back in."); return; }
       if (req.method === "GET" && url.pathname === "/") {
         res.writeHead(200, {
           "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "x-frame-options": "DENY", "referrer-policy": "no-referrer",
@@ -261,6 +279,7 @@ export function createHome(deps: HomeDeps) {
         const b = await body(req);
         if (url.pathname === "/api/step1/work") { const r = start(String(b.sentence ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/stop") { const r = stopNow(); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/look") { const r = await look(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/accept") { const r = await accept(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/settings") { const r = saveSettings(b); return send(res, r.ok ? 200 : 400, r); }
       }
@@ -271,5 +290,5 @@ export function createHome(deps: HomeDeps) {
     }
   }
 
-  return { handler, state, start, stop: stopNow, accept, saveSettings, key, pass, cookie, isRunning: () => !!running };
+  return { handler, state, start, stop: stopNow, accept, saveSettings, key, pass, cookie, cookieName, look, isRunning: () => !!running };
 }

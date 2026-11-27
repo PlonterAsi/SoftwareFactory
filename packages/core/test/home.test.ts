@@ -24,6 +24,7 @@ function fakeGitHub(pr: Record<string, unknown> = {}) {
     hasToken: () => true,
     prDetail: async () => ({ number: 7, url: "", state: "open", merged: false, draft: true, mergeSha: null, title: "T1: Add a footer.", headSha: SHA, base: "main", nodeId: "N1", ...pr }),
     markReady: async (id: string) => { calls.push(`ready ${id}`); },
+    ci: async () => ({ state: "red", failed: ["web"], total: 3 }),
     mergePr: async (_r: unknown, n: number, sha: string) => { calls.push(`merge ${n} ${sha}`); return { sha: "b".repeat(40) }; },
   };
   return { gh: gh as unknown as HomeDeps["github"], calls };
@@ -94,7 +95,8 @@ describe("accept", () => {
     const h = home(r, { github: g.gh });
     expect(await h.accept("T1")).toMatchObject({ ok: true });
     expect(g.calls).toEqual(["ready N1", `merge 7 ${SHA}`]);
-    expect(r.all().at(-1)).toMatchObject({ kind: "result.accepted", who: "you", ticket: "T1", run: "T1-x", data: { number: 7 } });
+    expect(r.all().at(-1)).toMatchObject({ kind: "result.accepted", who: "you", ticket: "T1", run: "T1-x", data: { number: 7, githubChecks: "red" } });
+    expect(await h.look("T1")).toMatchObject({ ok: true, githubChecks: expect.stringMatching(/FAILED \(web\)/) });
     expect(await h.accept("T1")).toMatchObject({ ok: false, why: expect.stringMatching(/already/) });
   });
 
@@ -121,7 +123,7 @@ describe("the page and its door", () => {
     await new Promise<void>((ok) => server!.listen(0, "127.0.0.1", ok));
     const port = (server.address() as AddressInfo).port;
     h = home(record, { hosts: [`127.0.0.1:${port}`], ...over });
-    cookie = `sf=${h.cookie}`;
+    cookie = `${h.cookieName}=${h.cookie}`;
     return { h, url: `http://127.0.0.1:${port}`, port };
   }
   let cookie = "";
@@ -136,7 +138,8 @@ describe("the page and its door", () => {
     expect((await fetch(`${url}/?pass=wrong`, { redirect: "manual" })).status).toBe(403);
     const inn = await fetch(`${url}/?pass=${h.pass}`, { redirect: "manual" });
     expect(inn.status).toBe(303);
-    expect(inn.headers.get("set-cookie")).toMatch(/^sf=[a-f0-9]+; HttpOnly; SameSite=Strict/);
+    expect(inn.headers.get("set-cookie")).toMatch(/^sf[a-f0-9]{8}=[a-f0-9]+; HttpOnly; SameSite=Strict/);
+    expect((await fetch(`${url}/?pass=${h.pass}`, { redirect: "manual" })).status).toBe(403);
     expect((await fetch(`${url}/api/step1/work`, { method: "POST", headers: { "content-type": "application/json", "x-sf-key": h.key }, body: "{}" })).status).toBe(403);
   });
 

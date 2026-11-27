@@ -180,7 +180,7 @@ export function storyLine(l: RecordLine): string {
       l.kind === "run.checked" ? `check ${d.ok ? "passed" : "FAILED"}: ${d.command}` :
       l.kind === "run.ended" ? `the run ended: ${d.end} (${d.reason})` :
       l.kind === "result.proposed" ? (d.held ? `the result is held: ${d.reason}` : `proposed on GitHub: ${d.url}`) :
-      l.kind === "result.accepted" ? "you accepted it: it is in the project now" :
+      l.kind === "result.accepted" ? (d.foundMerged ? "found already put into the project on GitHub" : "you accepted it: it is in the project now") :
       l.kind === "result.undone" ? "the change was undone" :
       l.kind === "stop.pressed" ? "you pressed stop" :
       l.kind === "setting.changed" ? `settings changed: ${Object.keys(d.changed ?? {}).join(", ")}` : l.kind;

@@ -171,10 +171,14 @@ ol.story li.flag .x { color: var(--bad); }
           setTimeout(function () { yes.disabled = false; }, 800);
           setTimeout(function () { no.focus(); }, 0);
           row.appendChild(no); row.appendChild(yes);
+          box.appendChild(el("p", "says", "SoftwareFactory's checks passed. " + (looked[t.ticket] || "") + " Accepting puts this change into the project."));
         } else {
           var acc = el("button", "good", "Accept");
           acc.type = "button";
-          acc.onclick = function () { confirming = t.ticket; render(last); };
+          acc.onclick = function () {
+            acc.disabled = true;
+            post("/api/step1/look", { ticket: t.ticket }).then(function (r) { looked[t.ticket] = r.ok ? r.githubChecks : ""; if (!r.ok) acceptError[t.ticket] = r.why; confirming = r.ok ? t.ticket : null; render(last); });
+          };
           row.appendChild(acc);
         }
       }
@@ -198,7 +202,7 @@ ol.story li.flag .x { color: var(--bad); }
     box.appendChild(det);
     return box;
   }
-  var acceptError = {};
+  var acceptError = {}, looked = {};
 
   function render(s) {
     if (!s) return;
