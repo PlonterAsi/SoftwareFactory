@@ -168,6 +168,18 @@ describe("the fence test", () => {
     expect(room.scripts.at(-1)!.script).toContain("/srv/sf-fence/probe-n0nce.exe");
   });
 
+  it("line 3 is through when a mark appears on the Windows side, whatever the room said", async () => {
+    let there = true;
+    const r = await runFenceTest(fakeRoom().exec, {}, { windowsProgram: Buffer.from("MZ"), windowsMark: { path: "C:/Users/Public/m.txt", exists: () => there, remove: () => { there = false; } } });
+    expect(r.lines.find((l) => l.id === "windows-program")!.verdict).toBe("refused");
+    there = true;
+    const marked = { path: "C:/Users/Public/m.txt", exists: () => true, remove: () => undefined };
+    const bad = await runFenceTest(fakeRoom().exec, {}, { windowsProgram: Buffer.from("MZ"), windowsMark: marked });
+    expect(bad.ok).toBe(false);
+    expect(bad.lines.find((l) => l.id === "windows-program")!.verdict).toBe("got-through");
+    expect(() => wallOneScript(FENCE_DEFAULTS, "/srv/x.exe", 'C:/x"; rm -rf /')).toThrow();
+  });
+
   it("line 3, for real on plain Linux: a file that cannot run as a Windows program is refused", () => {
     const f = join(mkdtempSync(join(tmpdir(), "sf-fence-")), "probe.exe");
     writeFileSync(f, "MZ-not-a-real-program", { mode: 0o755 });

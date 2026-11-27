@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fenceSettings, setupScript, type FenceSettings } from "./fence/room.js";
 import { fenceReportText, runFenceTest, wslExec } from "./fence/fencetest.js";
@@ -42,11 +42,13 @@ async function main(): Promise<void> {
     spawnSync("wsl.exe", ["--terminate", s.room]);
     return;
   }
-  // A harmless Windows program for line 3 to really try: it only prints who is signed in.
-  const whoami = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe");
+  // Line 3 really tries: cmd.exe is handed in and told to leave a small file in the Public folder. No file, no hole.
+  const cmdExe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
+  const markFile = join(process.env.PUBLIC ?? "C:\\Users\\Public", `sf-fence-mark-${process.pid}.txt`);
+  const usable = existsSync(cmdExe) && /^[A-Za-z]:[\\/][A-Za-z0-9\\/._-]+$/.test(markFile);
   const report = await runFenceTest(exec, s, {
     ...(process.env.CLAUDE_CODE_OAUTH_TOKEN ? { token: process.env.CLAUDE_CODE_OAUTH_TOKEN } : {}),
-    ...(existsSync(whoami) ? { windowsProgram: readFileSync(whoami) } : {}),
+    ...(usable ? { windowsProgram: readFileSync(cmdExe), windowsMark: { path: markFile.replace(/\\/g, "/"), exists: () => existsSync(markFile), remove: () => rmSync(markFile, { force: true }) } } : {}),
   });
   console.log(fenceReportText(report));
   // `fence test --details` adds the fact behind every line, also the ones that passed.

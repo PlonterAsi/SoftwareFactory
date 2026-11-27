@@ -53,8 +53,15 @@ export const TRIES: Try[] = [
   { id: "write-inside", what: "write inside the project copy", expect: "works" },
 ];
 
+/**
+ * A place on the Windows side where the handed-in program (cmd.exe) is told to leave a file. SoftwareFactory
+ * looks for it from Windows: a silent room proves little, a missing mark on Windows proves the program never ran there.
+ */
+export interface WindowsMark { path: string; exists: () => boolean; remove: () => void }
+
 /** Wall 1 is tried straight as the worker, without the sandbox in the way: the room must hold on its own. */
-export function wallOneScript(s: FenceSettings, probe?: string): string {
+export function wallOneScript(s: FenceSettings, probe?: string, mark?: string): string {
+  if (mark !== undefined && !/^[A-Za-z]:\/[A-Za-z0-9/._-]+$/.test(mark)) throw new Error("fence: the Windows mark must be a plain path with forward slashes");
   return `
 out() { echo "SFLINE $1 $2 $3"; }
 # 1. Windows drives: already there, attachable by hand, or any other shared folder from the Windows side.
@@ -86,7 +93,7 @@ elif [ -n "$probe" ] && [ -x "$probe" ]; then
   ran=""; why=""
   for door in "" /run/WSL/*_interop; do
     [ -n "$door" ] && [ ! -S "$door" ] && continue
-    o=$(WSL_INTEROP="$door" timeout 20 "$probe" </dev/null 2>/tmp/sf-probe-err.$$); rc=$?
+    o=$(WSL_INTEROP="$door" timeout 20 "$probe" ${mark ? `/c "echo sf>${mark}& echo ran"` : ""} </dev/null 2>/tmp/sf-probe-err.$$); rc=$?
     why="$why[$\{door:-plain}:rc$rc:$(head -c 80 /tmp/sf-probe-err.$$ 2>/dev/null | tr -c 'A-Za-z0-9.:\n' '-' | head -1)]"; rm -f /tmp/sf-probe-err.$$
     if [ $rc -eq 0 ] && [ -n "$o" ]; then ran="$\{door:-plain}"; break; fi
   done
@@ -143,7 +150,7 @@ function parseLines(stdout: string): Map<string, { verdict: string; detail: stri
  * Run the nine tries. `token` is the Claude sign-in for the one call the test makes; it goes in on stdin with
  * the script, is never written to the room's disk by SoftwareFactory, and never appears in the report.
  */
-export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> = {}, opts: { token?: string; nonce?: string; windowsProgram?: Buffer } = {}): Promise<FenceReport> {
+export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> = {}, opts: { token?: string; nonce?: string; windowsProgram?: Buffer; windowsMark?: WindowsMark } = {}): Promise<FenceReport> {
   const s = fenceSettings(over);
   const started = Date.now();
   const nonce = opts.nonce ?? randomBytes(8).toString("hex");
@@ -167,8 +174,12 @@ export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> 
       const put = await exec("root", `install -d -m 0755 -o root -g root /srv/sf-fence && base64 -d > ${exe} <<'SF_EXE_EOF' && chmod 0755 ${exe} && echo handed-in\n${opts.windowsProgram.toString("base64").replace(/(.{76})/g, "$1\n")}\nSF_EXE_EOF\n`, s.stepTimeoutMs);
       if (/handed-in/.test(put.stdout)) probe = exe;
     }
-    const r = await exec("worker", wallOneScript(s, probe), s.stepTimeoutMs);
+    const mark = probe ? opts.windowsMark : undefined;
+    mark?.remove();
+    const r = await exec("worker", wallOneScript(s, probe, mark?.path), s.stepTimeoutMs);
     const got = parseLines(r.stdout);
+    if (mark?.exists()) { mark.remove(); got.set("windows-program", { verdict: "THROUGH", detail: "a-mark-appeared-on-Windows" }); }
+    else if (mark && got.get("windows-program")?.verdict === "REFUSED") got.get("windows-program")!.detail += ",no-mark-on-Windows";
     for (const id of ["attach-drive", "become-root", "windows-program", "windows-side"]) {
       const g = got.get(id);
       if (!g) set(id, "could-not-judge", r.timedOut ? "timed out" : `no answer (exit ${r.code})`);
