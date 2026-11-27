@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { ExecResult, RoomExec, RoomFiles } from "./fencetest.js";
-import { AGENT_ENV, AGENT_FLAGS, AGENT_TOOLS, type FenceSettings, fenceSettings } from "./room.js";
-export { AGENT_FLAGS } from "./room.js";
+import { AGENT_ENV, AGENT_FLAGS, AGENT_TOOLS, type FenceSettings, fenceSettings, looksLikeLimit } from "./room.js";
+export { AGENT_FLAGS, looksLikeLimit } from "./room.js";
 import type { RunEnd, TheRecord } from "./record.js";
 
 /**
@@ -156,8 +156,6 @@ export function stepOf(line: string): { data: Record<string, unknown>; end?: Age
   return null;
 }
 
-/** A usage limit is not a failure of the work: the ticket is parked and returns when the limit does. */
-export const looksLikeLimit = (text: string) => /usage limit|rate limit|limit reached|out of extra usage|quota|overloaded|credit balance/i.test(text);
 
 /**
  * Work one ticket inside the room. The fence test must have passed first; this function does not run it.

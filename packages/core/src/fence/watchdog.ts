@@ -1,3 +1,4 @@
+import { type Sleeps, awakeAge, noSleeps, noteLook } from "./awake.js";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TheRecord } from "./record.js";
@@ -88,7 +89,7 @@ export async function speak(deps: SpeakDeps, what: { line: string; ticket?: stri
   return { phone };
 }
 
-export interface WatchState { spoke: Record<string, true> }
+export interface WatchState { spoke: Record<string, true>; /** Sleeps the watchdog saw: they do not count as silence or as going away. */ sleeps?: Sleeps }
 export interface WatchVerdict { say: { key: string; line: string; ticket: string | null; why: string } | null; endRoom: boolean; done: boolean }
 
 /**
@@ -100,7 +101,7 @@ export function look(alive: Alive | null, s: WatchSettings, state: WatchState, n
   // Closed on purpose. If a run was working at that moment, the room is ended quietly, in case the window closed
   // faster than SoftwareFactory could end it itself.
   if (alive.closed) return { say: null, endRoom: !!alive.running, done: true };
-  const age = (iso: string) => (now.getTime() - new Date(iso).getTime()) / 1000;
+  const age = (iso: string) => awakeAge(state.sleeps ?? noSleeps(), new Date(iso).getTime(), now.getTime()) / 1000;
   const name = alive.running?.ticket ?? "a ticket";
   if (age(alive.at) > s.goneSeconds) {
     if (!alive.running) return { say: null, endRoom: false, done: true };
@@ -128,13 +129,15 @@ export interface WatchdogDeps extends SpeakDeps {
 
 /** The loop. Looks every `everyMs` until there is nothing left to watch. */
 export async function runWatchdog(deps: WatchdogDeps, everyMs = 5000, signal?: AbortSignal): Promise<void> {
-  const state: WatchState = { spoke: {} };
+  const state: WatchState = { spoke: {}, sleeps: noSleeps() };
   const now = deps.now ?? (() => new Date());
   // A sign of life from before the watchdog started belongs to an earlier SoftwareFactory: it is not looked at.
   const born = now().getTime() - 2000;
   let everSeen = false;
   while (!signal?.aborted) {
     try { deps.tick?.(); } catch { /* the watching goes on */ }
+    // The computer slept: SoftwareFactory slept too, so its old sign of life is not a sign that it went away.
+    noteLook(state.sleeps!, now().getTime(), everyMs);
     const seen = readAlive(deps.workDir);
     const fresh = seen && new Date(seen.at).getTime() >= born ? seen : null;
     if (fresh) everSeen = true;

@@ -101,8 +101,15 @@ describe("the watchdog as a program of its own", () => {
     expect(readAlive(dir)).toMatchObject({ pid: 10 });
     await new Promise((ok) => setTimeout(ok, 40));
     expect(r.all()).toHaveLength(0);
-    clock += 60_000; // SoftwareFactory was killed: no new sign of life for a minute
+    // The computer slept for an hour: SoftwareFactory slept too. That is not going away, and not silence.
+    clock += 3_600_000;
+    await new Promise((ok) => setTimeout(ok, 60));
+    expect(ended).toBe(0);
+    expect(r.all()).toHaveLength(0);
+    // SoftwareFactory was killed: awake time passes and no new sign of life comes.
+    const tick = setInterval(() => { clock += 5_000; }, 12);
     await done;
+    clearInterval(tick);
     expect(ended).toBe(1);
     expect(r.all()).toHaveLength(1);
     expect(r.all()[0]).toMatchObject({ kind: "watchdog.spoke", ticket: "T4", data: { why: "gone" } });

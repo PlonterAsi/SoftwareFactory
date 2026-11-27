@@ -209,6 +209,11 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     expect(a).toMatchObject({ end: "parked" });
     expect(a.reason).toMatch(/plan limit/);
     expect(limited.all().find((l) => l.kind === "run.ended")!.data).toMatchObject({ parkedFor: "limit" });
+    // The limit met by the fence test's own agent parks the ticket too; it is not written down as a hole in the fence.
+    const early = new TheRecord();
+    const f = await workTicket(deps(early, async () => ({ ok: false, limit: true, room: "test", startedAt: "", ms: 1, lines: [{ n: 4, id: "write-inside", what: "x", expect: "works", verdict: "did-not-work", ok: false, detail: "the plan limit was reached, so the test's agent did not run" }] })), settings(), "Add a hello file.");
+    expect(f).toMatchObject({ end: "parked", reason: "the plan limit was reached before the run could start" });
+    expect(early.all().find((l) => l.kind === "run.ended")!.data).toMatchObject({ parkedFor: "limit", where: "before the run" });
     mode("nothing");
     const b = await workTicket(deps(new TheRecord()), settings({ checks: [] }), "Add a hello file.");
     expect(b).toMatchObject({ end: "parked", reason: "the run changed nothing in the project" });

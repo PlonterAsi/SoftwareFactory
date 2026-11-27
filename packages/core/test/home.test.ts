@@ -266,7 +266,8 @@ describe("the page and its door", () => {
     const gate: HomeDeps["gate"] = async (q) => {
       asked.push(q.asked);
       if (/better/.test(q.sentence) && !q.asked) return { ok: true, answer: { clear: false, kind: "request", done: [], guesses: [], question: "Which page should be better?", costUsd: 0.001 } };
-      if (/broken reader/.test(q.sentence)) return { ok: false, why: "the plan limit was reached" };
+      if (/broken reader/.test(q.sentence)) return { ok: false, why: "the reader gave no answer (exit 1)" };
+      if (/limit day/.test(q.sentence)) return { ok: false, why: "the plan limit was reached" };
       return { ok: true, answer: { clear: true, kind: "bug", done: ["The footer shows the year."], guesses: ["The current year is meant."], question: null, costUsd: 0.001 } };
     };
     const { url, h } = await serve(r, { gate, work: async (st, ticket) => { worked.push({ ticket, done: st.done }); r.append({ kind: "run.ended", who: "SF itself", ticket, project: "o/p", data: { end: "failed its checks", reason: "x" } }); return {} as any; } });
@@ -297,12 +298,19 @@ describe("the page and its door", () => {
     await post("work", { sentence: "A broken reader day." });
     await tick();
     expect(worked.at(-1)).toEqual({ ticket: "T3", done: [] });
-    expect(r.story("T3").find((l) => l.kind === "gate.passed")!.data).toMatchObject({ skipped: expect.stringContaining("plan limit") });
+    expect(r.story("T3").find((l) => l.kind === "gate.passed")!.data).toMatchObject({ skipped: expect.stringContaining("no answer") });
     // Switched off in Settings: no gate at all.
     await post("settings", { gate: false });
     await post("work", { sentence: "Make it better again." });
     await tick();
     expect(r.story("T4").map((l) => l.kind)).toEqual(["ticket.opened", "run.ended"]);
+    // The plan limit met at the gate is not skipped over: the ticket is parked for it and the queue rests.
+    await post("settings", { gate: true });
+    await post("work", { sentence: "A limit day." });
+    await tick();
+    expect(worked.at(-1)!.ticket).toBe("T4");
+    expect(await of("T5")).toMatchObject({ state: "parked", parkedFor: "limit" });
+    expect(((await (await get(`${url}/api/step1/state`)).json()) as any).resting).toMatchObject({ why: "the plan limit was reached" });
   });
 
   it("rests after the plan limit, then brings the parked ticket back by itself, a set number of times", async () => {
@@ -347,6 +355,24 @@ describe("the page and its door", () => {
       expect(s2.resting).toBeNull();
       h.close();
     } finally { vi.useRealTimers(); }
+  });
+
+  it("brings a ticket that was cut off in the middle back by itself, once", async () => {
+    const r = new TheRecord();
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "Add a footer.", kind: "request" } });
+    r.append({ kind: "run.started", who: "SF itself", run: "T1-a", ticket: "T1", project: "o/p", data: {} });
+    expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ state: "interrupted", cutOff: true, cutOffReturns: 0 });
+    const seen: string[] = [];
+    // The run is cut off again each time: it leaves a start and no end.
+    const { h } = await serve(r, { settings: settingsFileIn(mkdtempSync(join(tmpdir(), "sf-home-")), { repo: "o/p", gate: false }), work: async (_s, ticket) => { seen.push(ticket); r.append({ kind: "run.started", who: "SF itself", run: `${ticket}-b`, ticket, project: "o/p", data: {} }); return {} as any; } });
+    h.pump();
+    await new Promise((ok) => setTimeout(ok, 30));
+    expect(seen).toEqual(["T1"]);
+    expect(r.story("T1").filter((l) => l.kind === "ticket.queued").map((l) => [l.who, (l.data as any).after])).toEqual([["SF itself", "cut off"]]);
+    h.pump();
+    await new Promise((ok) => setTimeout(ok, 30));
+    expect(seen).toEqual(["T1"]);
+    expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ state: "interrupted", cutOffReturns: 1, returns: 0 });
   });
 
   it("ends the rest early when a run started since or you sent a ticket again", () => {

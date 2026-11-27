@@ -190,3 +190,6 @@ export const AGENT_TOOLS = ["Bash", "Read", "Edit", "Write"] as const;
 export const AGENT_FLAGS = `--tools "${AGENT_TOOLS.join(",")}" --disable-slash-commands --setting-sources user --strict-mcp-config`;
 /** The switch that keeps the signed-in account's connectors (mail, files, documents) out of an agent. */
 export const AGENT_ENV = "export ENABLE_CLAUDEAI_MCP_SERVERS=false";
+
+/** A usage limit is not a failure of the work: the ticket is parked and returns when the limit does. */
+export const looksLikeLimit = (text: string) => /usage limit|rate limit|limit reached|out of extra usage|quota|overloaded|credit balance/i.test(text);

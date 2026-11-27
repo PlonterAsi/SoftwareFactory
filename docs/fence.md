@@ -208,3 +208,11 @@ Off by default (`issues: "off"`). Settings turn it to `in` or `both`; `issuesLab
 - **Closed on GitHub** while the ticket still waits: the ticket leaves the list (it can be put back). A ticket that was already worked keeps its place.
 
 Not yet: words changed on one side after the link do not travel to the other, and nothing is written on an issue beyond opening it.
+
+## Sleep is not run time
+
+`fence/awake.ts` counts time in small steps, and a step that took far longer than it should is a sleep. A run's time limit is counted in awake time, so a laptop that slept four hours did not use four hours of a run. The watchdog writes down the sleeps it saw and takes them out of every age it judges: a sign of life from before the sleep is not "SoftwareFactory went away", and a run that was quiet only because the computer slept is not "silent".
+
+A ticket whose go was cut off in the middle (SoftwareFactory was closed, the computer restarted, the watchdog ended the run) comes back to the queue by itself, `cutOffReturns` times (default 1), and only when it was cut off within `cutOffWithinHours` (default 24): an old cut-off ticket waits for you. The run starts again from the project as it is: nothing of a cut-off run is kept.
+
+The plan limit can also be met before a run, by the gate's reader or by the fence test's own agent. Both park the ticket for the limit, the same as a run that met it: the queue rests and the ticket comes back. Neither is written down as a hole in the fence.

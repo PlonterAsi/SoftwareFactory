@@ -283,10 +283,17 @@ export class GitHub {
     try { this.git(dir, "push", "-q", "--tags", this.remote(repo)); } catch { /* no tags */ }
   }
 
-  /** Issues with one label, open and closed, the newest change first (one page of 100). Pull requests are left out. */
+  /** Issues with one label, open and closed, the newest change first. Pull requests are left out. */
   async issues(repo: GitHubRepo, label: string): Promise<Issue[]> {
-    const rows = await this.call<any[]>("GET", `/repos/${repo.owner}/${repo.name}/issues?state=all&sort=updated&direction=desc&per_page=100${label ? `&labels=${encodeURIComponent(label)}` : ""}`);
-    return (Array.isArray(rows) ? rows : []).filter((j) => !j.pull_request).map((j) => ({ number: Number(j.number), url: String(j.html_url ?? ""), title: String(j.title ?? ""), body: String(j.body ?? ""), state: j.state === "closed" ? "closed" as const : "open" as const,
+    const all: any[] = [];
+    // Up to five pages of 100: a project with more labelled issues than that is told so by the caller's count.
+    for (let page = 1; page <= 5; page++) {
+      const rows = await this.call<any[]>("GET", `/repos/${repo.owner}/${repo.name}/issues?state=all&sort=updated&direction=desc&per_page=100&page=${page}${label ? `&labels=${encodeURIComponent(label)}` : ""}`);
+      if (!Array.isArray(rows)) break;
+      all.push(...rows);
+      if (rows.length < 100) break;
+    }
+    return all.filter((j) => !j.pull_request).map((j) => ({ number: Number(j.number), url: String(j.html_url ?? ""), title: String(j.title ?? ""), body: String(j.body ?? ""), state: j.state === "closed" ? "closed" as const : "open" as const,
       author: String(j.user?.login ?? ""), association: String(j.author_association ?? ""), labels: (Array.isArray(j.labels) ? j.labels : []).map((l: any) => String(typeof l === "string" ? l : l?.name ?? "")) }));
   }
 

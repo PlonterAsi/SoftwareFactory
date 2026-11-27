@@ -41,6 +41,10 @@ export interface HomeSettings extends WatchSettings {
   parkedWaitMinutes: number;
   /** How many times one ticket may come back by itself. 0: a parked ticket waits for you. */
   parkedReturns: number;
+  /** A ticket cut off in the middle (SoftwareFactory closed, the computer restarted) comes back by itself this many times. */
+  cutOffReturns: number;
+  /** Only a ticket cut off within this many hours comes back by itself: an old one waits for you. */
+  cutOffWithinHours: number;
   /** GitHub issues: "off", "in" (your labelled issues become tickets), or "both" (tickets also get an issue). */
   issues: IssuesMode;
   /** Only issues with this label come in, and issues opened from here carry it. */
@@ -49,16 +53,16 @@ export interface HomeSettings extends WatchSettings {
   issuesEveryMinutes: number;
 }
 
-export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5 };
+export const HOME_DEFAULTS: HomeSettings = { ...WATCH_DEFAULTS, repo: "", base: "", checks: [], prepare: [], model: "sonnet", maxTurns: 80, timeLimitMinutes: 45, autoUpdate: true, hold: false, gate: true, gateModel: "haiku", parkedWaitMinutes: 30, parkedReturns: 2, cutOffReturns: 1, cutOffWithinHours: 24, issues: "off", issuesLabel: "sf", issuesEveryMinutes: 5 };
 
 /** Check what came from the screen. Returns clean settings or says, in a sentence, what is wrong. */
 export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS): HomeSettings {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const text = (k: keyof HomeSettings) => (typeof r[k] === "string" ? (r[k] as string).trim() : (from[k] as string));
   const list = (k: "checks" | "prepare") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
-  const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "issuesEveryMinutes") => (r[k] === undefined ? from[k] : Number(r[k]));
+  const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "cutOffReturns" | "cutOffWithinHours" | "issuesEveryMinutes") => (r[k] === undefined ? from[k] : Number(r[k]));
   const watch = cleanWatch(r, from);
-  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes") };
+  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes") };
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
   if (/^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)$/.test(s.base)) throw new Error(`"${s.base}" is not a branch name.`);
   if (s.base && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(s.base) || s.base.includes(".."))) throw new Error(`"${s.base}" is not a branch name.`);
@@ -68,6 +72,8 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   if (!Number.isInteger(s.timeLimitMinutes) || s.timeLimitMinutes < 1 || s.timeLimitMinutes > 600) throw new Error("The time limit must be from 1 to 600 minutes.");
   if (!Number.isInteger(s.parkedWaitMinutes) || s.parkedWaitMinutes < 1 || s.parkedWaitMinutes > 1440) throw new Error("The wait after the plan limit must be from 1 to 1440 minutes.");
   if (!Number.isInteger(s.parkedReturns) || s.parkedReturns < 0 || s.parkedReturns > 20) throw new Error("A ticket may come back by itself 0 to 20 times.");
+  if (!Number.isInteger(s.cutOffReturns) || s.cutOffReturns < 0 || s.cutOffReturns > 20) throw new Error("A cut-off ticket may come back by itself 0 to 20 times.");
+  if (!Number.isInteger(s.cutOffWithinHours) || s.cutOffWithinHours < 1 || s.cutOffWithinHours > 720) throw new Error("A cut-off ticket comes back within 1 to 720 hours.");
   if (!["off", "in", "both"].includes(s.issues)) throw new Error("GitHub issues are off, in, or both.");
   if (!/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,48}$/.test(s.issuesLabel)) throw new Error("The issue label is 1 to 49 letters, digits, spaces, dots, dashes or underscores.");
   if (!Number.isInteger(s.issuesEveryMinutes) || s.issuesEveryMinutes < 1 || s.issuesEveryMinutes > 1440) throw new Error("GitHub is looked at every 1 to 1440 minutes.");
@@ -135,8 +141,15 @@ export interface TicketView {
   parkedFor: string | null;
   /** When its latest go ended. */
   endedAt: string | null;
-  /** How many times it came back to the queue by itself. */
+  /** How many times it came back to the queue by itself after the plan limit. */
   returns: number;
+  /** A run or a fence test ever worked on it. */
+  everWorked: boolean;
+  /** Its latest go was cut off in the middle, and how many times it already came back by itself after that. */
+  cutOff: boolean;
+  cutOffReturns: number;
+  /** The last line of its latest go: when it was cut off, as near as the record knows. */
+  lastWorkAt: string | null;
   /** When it comes back by itself, if it will. Filled by the home screen from the settings. */
   returnsAt: string | null;
   /** Where it stands on the fixed road, each step with what proves it. */
@@ -201,7 +214,10 @@ export function ticketsFrom(lines: RecordLine[], running: string | null): Ticket
       asked: gAsked && gAnswered ? { question: String(d(gAsked).question ?? ""), answer: String(d(gAnswered).answer ?? "") } : null, gatePassed: !!gPassed && !d(gPassed).skipped, waitingSince: Math.max(sent.id, lastOf(ls, "ticket.restored")?.id ?? 0),
       issue: null,
       parkedFor: state === "parked" && typeof d(ended).parkedFor === "string" ? d(ended).parkedFor : null, endedAt: ended?.ts ?? null,
-      returns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned).length, returnsAt: null,
+      returns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after !== "cut off").length, returnsAt: null,
+      everWorked: ls.some((l) => l.kind === "fence.tested" || l.kind === "run.started"),
+      lastWorkAt: go.at(-1)?.ts ?? null,
+      cutOff: state === "interrupted" && go.length > 0, cutOffReturns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after === "cut off").length,
       steps: WORKED.includes(kindNow) ? stepsOf(ls, running === ticket) : [],
       story: ls.map((l) => ({ id: l.id, at: l.ts, who: l.who, what: storyLine(l), flagged: l.flagged })),
     });
@@ -311,6 +327,8 @@ export function createHome(deps: HomeDeps) {
     let wake = Infinity;
     for (const t of ticketsFrom(lines, null)) {
       const at = returnTime(t, s);
+      // Cut off in the middle (SoftwareFactory was closed, the computer restarted): the steps are safe to repeat.
+      if (t.cutOff && !t.removed && t.cutOffReturns < s.cutOffReturns && t.lastWorkAt && now - Date.parse(t.lastWorkAt) < s.cutOffWithinHours * 3_600_000) record.append({ kind: "ticket.queued", who: "SF itself", ticket: t.ticket, project: t.project, data: { returned: true, after: "cut off", why: "it was cut off in the middle, so it is worked again from the start", time: t.cutOffReturns + 1 } });
       if (at === null) continue;
       if (at <= now) record.append({ kind: "ticket.queued", who: "SF itself", ticket: t.ticket, project: t.project, data: { returned: true, why: `the wait of ${s.parkedWaitMinutes} minutes after the plan limit is over`, time: t.returns + 1 } });
       else wake = Math.min(wake, at);
@@ -343,6 +361,8 @@ export function createHome(deps: HomeDeps) {
       try { const got = await Promise.race([deps.gate({ repo, base: s.base, sentence: next.sentence, asked: next.asked, model: s.gateModel }), stopped]); if (!got) return null; g = got; } catch (e) { g = { ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }; }
       if (stop.signal.aborted) return null;
       // A gate that cannot be asked never holds a ticket up: it passes without a test of done, and the story says so.
+      // The plan limit met at the gate: the ticket is parked for it, the queue rests, and it comes back by itself.
+      if (!g.ok && /plan limit/.test(g.why)) { record.append({ kind: "run.ended", who: "SF itself", ...stamp, data: { end: "parked", reason: "the plan limit was reached before the run could start", parkedFor: "limit", where: "before the run" } }); return null; }
       if (!g.ok) { record.append({ kind: "gate.passed", who: "SF itself", ...stamp, data: { skipped: `the gate could not be asked: ${g.why}`, done: [] } }); return []; }
       const a = g.answer;
       if (!a.clear && a.question && !next.asked) { record.append({ kind: "gate.asked", who: "SF itself", ...stamp, costUsd: a.costUsd || null, data: { question: a.question } }); return null; }
@@ -371,7 +391,7 @@ export function createHome(deps: HomeDeps) {
     if (syncing) return syncing;
     const s = deps.settings.read(), repo = parseGitHubRepo(s.repo);
     if (!repo || s.issues === "off" || closing) return Promise.resolve({ ok: true, in: [], out: [], closed: [], skipped: 0 });
-    const tickets = ticketsFrom(record.all(), running?.ticket ?? null).map((t) => ({ ticket: t.ticket, project: t.project, sentence: t.sentence, kind: t.kind, removed: t.removed, untouched: ["waiting", "asked", "kept"].includes(t.state) }));
+    const tickets = () => ticketsFrom(record.all(), running?.ticket ?? null).map((t) => ({ ticket: t.ticket, project: t.project, sentence: t.sentence, kind: t.kind, removed: t.removed, untouched: ["waiting", "asked", "kept"].includes(t.state) && !t.everWorked && running?.ticket !== t.ticket }));
     syncing = syncIssues({ record, github }, repo, { mode: s.issues, label: s.issuesLabel, tickets })
       .then((r) => { lastSync = { at: new Date().toISOString(), ok: r.ok, why: r.why ?? null }; return r; })
       .finally(() => { syncing = null; try { tell(); pump(); } catch { /* the next thing that happens wakes the queue */ } });

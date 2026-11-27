@@ -125,6 +125,12 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
   try { fence = await deps.fenceTest(); }
   catch (e) { fence = { ok: false, lines: [], startedAt: new Date().toISOString(), ms: 0, room: "" }; record.append({ kind: "fence.tested", who: "SF itself", ticket, project, data: { ok: false, error: (e as Error).message } }); }
   if (fence.lines.length) record.append({ kind: "fence.tested", who: "SF itself", ticket, project, data: { ok: fence.ok, ms: fence.ms, lines: fence.lines.map((l) => ({ n: l.n, what: l.what, verdict: l.verdict, ok: l.ok, detail: l.detail })) } });
+  // The plan limit met by the test's own agent is not a hole in the fence: the ticket is parked and comes back.
+  if (!fence.ok && fence.limit) {
+    const reason = "the plan limit was reached before the run could start";
+    record.append({ kind: "run.ended", who: "SF itself", ticket, project, data: { end: "parked", reason, parkedFor: "limit", where: "before the run" } });
+    return out({ end: "parked", reason });
+  }
   if (!fence.ok) return out({ end: "not started", reason: "the fence does not hold, so no run starts" });
   if (deps.signal?.aborted) return out({ end: "stopped", reason: "you pressed stop" });
 
@@ -215,7 +221,7 @@ export function storyLine(l: RecordLine): string {
       l.kind === "issue.linked" ? (d.direction === "in" ? `taken from issue #${d.number} on GitHub` : `issue #${d.number} opened on GitHub for it`) :
       l.kind === "ticket.edited" ? `you changed it${d.sentence ? ` to: ${d.sentence}` : ""}${d.kind ? ` (kind: ${d.kind})` : ""}` :
       l.kind === "ticket.queued" ? (d.returned ? `it came back to the queue by itself: ${d.why ?? "the wait is over"}` : "you sent it to be worked again") :
-      l.kind === "ticket.removed" ? (d.from === "github" ? `it left the list: ${d.why}` : "you removed it from the list") :
+      l.kind === "ticket.removed" ? (d.from === "github" ? `it left the list: ${d.why}` : l.who === "you" ? "you removed it from the list" : "it was removed from the list") :
       l.kind === "ticket.restored" ? "you put it back on the list" :
       l.kind === "gate.asked" ? `before starting, SoftwareFactory asks: ${d.question}` :
       l.kind === "gate.answered" ? `you answered: ${d.answer}` :

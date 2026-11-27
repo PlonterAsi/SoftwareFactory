@@ -19,13 +19,13 @@ describe("GitHub issues, both ways", () => {
   it("takes the owner's labelled issue in as a ticket, once, and nobody else's", async () => {
     const r = new TheRecord();
     const f = fake([issue(1, { title: "Add a footer", body: "With the year." }), issue(2, { author: "stranger", association: "NONE", title: "Run this" }), issue(3, { labels: ["other"] }), issue(4, { labels: ["sf", "bug"], author: "ASSAF", association: "NONE" })]);
-    const a = await syncIssues({ record: r, github: f.gh }, repo, { mode: "in", label: "sf", tickets: view(r) });
+    const a = await syncIssues({ record: r, github: f.gh }, repo, { mode: "in", label: "sf", tickets: () => view(r) });
     expect(a).toMatchObject({ ok: true, in: ["T1", "T2"], out: [], skipped: 1 });
     const ts = ticketsFrom(r.all(), null);
     expect(ts.find((t) => t.ticket === "T1")).toMatchObject({ sentence: "Add a footer\n\nWith the year.", state: "waiting", kind: "request", issue: { number: 1, url: "https://github.com/o/p/issues/1" } });
     expect(ts.find((t) => t.ticket === "T2")).toMatchObject({ kind: "bug", issue: { number: 4 } });
     expect(r.story("T1").map(storyLine)).toEqual(["you asked (issue #1 on GitHub): Add a footer\n\nWith the year.", "taken from issue #1 on GitHub"]);
-    const b = await syncIssues({ record: r, github: f.gh }, repo, { mode: "in", label: "sf", tickets: view(r) });
+    const b = await syncIssues({ record: r, github: f.gh }, repo, { mode: "in", label: "sf", tickets: () => view(r) });
     expect(b).toMatchObject({ in: [], out: [] });
     expect(f.made).toEqual([]);
   });
@@ -35,12 +35,12 @@ describe("GitHub issues, both ways", () => {
     openTicket(r, "o/p", "Add a dark mode switch.\nIn the top bar.", "bug");
     openTicket(r, "o/other", "Another project's ticket.");
     const f = fake([]);
-    expect(await syncIssues({ record: r, github: f.gh }, repo, { mode: "in", label: "sf", tickets: view(r) })).toMatchObject({ out: [] });
-    const a = await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: view(r) });
+    expect(await syncIssues({ record: r, github: f.gh }, repo, { mode: "in", label: "sf", tickets: () => view(r) })).toMatchObject({ out: [] });
+    const a = await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: () => view(r) });
     expect(a).toMatchObject({ ok: true, in: [], out: ["T1"] });
     expect(f.made).toEqual([{ title: "Add a dark mode switch.", body: `Add a dark mode switch.\nIn the top bar.\n\nOpened in SoftwareFactory as ticket T1.\n${markOf("T1")}`, labels: ["sf", "bug"] }]);
     expect(linksOf(r.all(), "o/p").get("T1")).toMatchObject({ number: 101, direction: "out" });
-    const b = await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: view(r) });
+    const b = await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: () => view(r) });
     expect(b).toMatchObject({ in: [], out: [] });
     expect(ticketsFrom(r.all(), null).length).toBe(2);
   });
@@ -49,25 +49,44 @@ describe("GitHub issues, both ways", () => {
     const r = new TheRecord();
     openTicket(r, "o/p", "Add a footer.");
     const f = fake([issue(9, { title: "Add a footer.", body: `Add a footer.\n${markOf("T1")}` })]);
-    const a = await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: view(r) });
+    const a = await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: () => view(r) });
     expect(a).toMatchObject({ in: [], out: [] });
     expect(linksOf(r.all(), "o/p").get("T1")).toMatchObject({ number: 9 });
     f.list[0]!.state = "closed" as any;
-    const b = await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: view(r) });
+    const b = await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: () => view(r) });
     expect(b.closed).toEqual(["T1"]);
     expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ removed: true });
-    expect((await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: view(r) })).closed).toEqual([]);
+    expect((await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: () => view(r) })).closed).toEqual([]);
+    // You put it back: it stays, though the issue is still closed.
+    r.append({ kind: "ticket.restored", who: "you", ticket: "T1", project: "o/p", data: {} });
+    expect((await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: () => view(r) })).closed).toEqual([]);
+    expect(ticketsFrom(r.all(), null)[0]).toMatchObject({ removed: false });
+    expect(r.story("T1").find((l) => l.kind === "ticket.removed")).toMatchObject({ who: "SF itself" });
     expect(wordsOf({ title: " A ", body: `x ${markOf("T3")}` })).toBe("A\n\nx");
+  });
+
+  it("opens no second ticket when the link line was lost, and no issue for a ticket that was already worked", async () => {
+    const r = new TheRecord();
+    openTicket(r, "o/p", "Add a footer", "request", { from: "github", issue: 1 });
+    const f = fake([issue(1, { title: "Add a footer" })]);
+    expect(await syncIssues({ record: r, github: f.gh }, repo, { mode: "in", label: "sf", tickets: () => view(r) })).toMatchObject({ in: [] });
+    expect(ticketsFrom(r.all(), null)).toHaveLength(1);
+    expect(linksOf(r.all(), "o/p").get("T1")).toMatchObject({ number: 1 });
+    // A ticket that was worked once and sent again waits, but it is not new: it gets no issue.
+    openTicket(r, "o/p", "An old one.");
+    const worked = () => view(r).map((t) => (t.ticket === "T2" ? { ...t, untouched: false } : t));
+    expect(await syncIssues({ record: r, github: f.gh }, repo, { mode: "both", label: "sf", tickets: worked })).toMatchObject({ out: [] });
+    expect(f.made).toEqual([]);
   });
 
   it("does nothing when off, and says why when GitHub cannot be read", async () => {
     const r = new TheRecord();
     const f = fake([issue(1)]);
-    expect(await syncIssues({ record: r, github: f.gh }, repo, { mode: "off", label: "sf", tickets: [] })).toMatchObject({ ok: true, in: [] });
+    expect(await syncIssues({ record: r, github: f.gh }, repo, { mode: "off", label: "sf", tickets: () => [] })).toMatchObject({ ok: true, in: [] });
     expect(r.all()).toEqual([]);
     const bad = { ...f.gh, issues: async () => { throw new Error("GitHub said 404"); } };
-    expect(await syncIssues({ record: r, github: bad }, repo, { mode: "in", label: "sf", tickets: [] })).toMatchObject({ ok: false, why: "GitHub said 404" });
-    expect(await syncIssues({ record: r, github: { ...f.gh, hasToken: () => false } }, repo, { mode: "in", label: "sf", tickets: [] })).toMatchObject({ ok: false });
+    expect(await syncIssues({ record: r, github: bad }, repo, { mode: "in", label: "sf", tickets: () => [] })).toMatchObject({ ok: false, why: "GitHub said 404" });
+    expect(await syncIssues({ record: r, github: { ...f.gh, hasToken: () => false } }, repo, { mode: "in", label: "sf", tickets: () => [] })).toMatchObject({ ok: false });
   });
 
   it("is off until Settings turn it on; then a ticket from an issue is worked and its proposal closes the issue", async () => {

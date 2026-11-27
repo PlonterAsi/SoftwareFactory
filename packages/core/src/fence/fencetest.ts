@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { AGENT_ENV, AGENT_FLAGS, type FenceSettings, fenceSettings } from "./room.js";
+import { awakeTimer } from "./awake.js";
+import { AGENT_ENV, AGENT_FLAGS, type FenceSettings, fenceSettings, looksLikeLimit } from "./room.js";
 
 /**
  * The fence proves itself before every run (build step 1, slice 1).
@@ -36,7 +37,7 @@ export interface FenceLine {
   detail: string;
 }
 
-export interface FenceReport { ok: boolean; lines: FenceLine[]; startedAt: string; ms: number; room: string }
+export interface FenceReport { ok: boolean; lines: FenceLine[]; startedAt: string; ms: number; room: string; /** The test's own agent met the plan limit, so the fence could not be judged. Not a hole in the fence. */ limit?: boolean }
 
 interface Try { id: string; what: string; expect: "refused" | "works" }
 
@@ -163,6 +164,7 @@ export async function runFenceTest(exec: RoomExec, over: Partial<FenceSettings> 
   const canary = `/srv/sf-fence/canary-${nonce}`;
   const listed = s.netList[0] ?? "github.com";
   const seen = new Map<string, { verdict: Verdict; detail: string }>();
+  let limit = false;
   const set = (id: string, verdict: Verdict, detail: string) => seen.set(id, { verdict, detail: detail.slice(0, 400) });
 
   // Wall 1, straight as the worker.
@@ -231,7 +233,8 @@ echo "SFLOOK outside $( { [ -e ${home}/sf-escaped-${nonce} ] || [ -e ${s.copies}
 `, s.stepTimeoutMs);
     const saw = (k: string) => new RegExp(`^SFLOOK ${k} (yes|no)$`, "m").exec(look.stdout)?.[1];
     const ran = saw("inside") === "yes";
-    const why = /SF_NO_CLAUDE/.test(said) ? "Claude Code is not installed in the room" : call.timedOut ? "the call timed out" : `the probe did not run (exit ${call.code})`;
+    if (!ran && !/SF_NO_CLAUDE/.test(said) && looksLikeLimit(said)) limit = true;
+    const why = limit ? "the plan limit was reached, so the test's agent did not run" : /SF_NO_CLAUDE/.test(said) ? "Claude Code is not installed in the room" : call.timedOut ? "the call timed out" : `the probe did not run (exit ${call.code})`;
 
     set("write-inside", ran ? "works" : "did-not-work", ran ? "file is there" : why);
     set("listed-address", saw("listed") === "yes" ? "works" : "did-not-work", saw("listed") === "yes" ? listed : ran ? `${listed} did not answer` : why);
@@ -254,7 +257,7 @@ echo "SFLOOK outside $( { [ -e ${home}/sf-escaped-${nonce} ] || [ -e ${s.copies}
     const g = seen.get(t.id) ?? { verdict: "could-not-judge" as Verdict, detail: "not tried" };
     return { n: i + 1, id: t.id, what: t.what, expect: t.expect, verdict: g.verdict, ok: g.verdict === t.expect, detail: g.detail };
   });
-  return { ok: lines.every((l) => l.ok), lines, startedAt: new Date(started).toISOString(), ms: Date.now() - started, room: s.room };
+  return { ok: lines.every((l) => l.ok), lines, startedAt: new Date(started).toISOString(), ms: Date.now() - started, room: s.room, ...(limit ? { limit: true } : {}) };
 }
 
 /** The nine lines as the person reads them. */
@@ -284,7 +287,8 @@ export function wslExec(over: Partial<FenceSettings> = {}, command = "wsl.exe"):
     let stdout = "", stderr = "", timedOut = false, rest = "";
     // Whole characters, never half of one; and a room that talks without end cannot fill this side's memory.
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
-    const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
+    // The limit is counted in awake time: a computer that slept did not work.
+    const cancel = awakeTimer(timeoutMs, () => { timedOut = true; child.kill(); });
     child.stdout.on("data", (d: string) => {
       if (stdout.length < MAX_TEXT) stdout += d;
       if (!onLine) return;
@@ -295,8 +299,8 @@ export function wslExec(over: Partial<FenceSettings> = {}, command = "wsl.exe"):
       for (const l of parts) { try { onLine(l); } catch { /* a listener never breaks the door */ } }
     });
     child.stderr.on("data", (d: string) => { if (stderr.length < MAX_TEXT) stderr += d; });
-    child.on("error", (e) => { clearTimeout(timer); reject(e); });
-    child.on("close", (code) => { clearTimeout(timer); if (onLine && rest) { try { onLine(rest); } catch { /* same */ } } resolve({ code, stdout, stderr, timedOut }); });
+    child.on("error", (e) => { cancel(); reject(e); });
+    child.on("close", (code) => { cancel(); if (onLine && rest) { try { onLine(rest); } catch { /* same */ } } resolve({ code, stdout, stderr, timedOut }); });
     child.stdin.on("error", () => undefined);
     child.stdin.end(script.replace(/\r\n/g, "\n"));
   });
