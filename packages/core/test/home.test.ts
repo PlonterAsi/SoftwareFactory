@@ -569,7 +569,8 @@ describe("the page and its door", () => {
     h.project({ repo: "o/p", asleep: true });
     r.append({ kind: "ticket.opened", who: "you", ticket: "T1", project: "o/p", data: { sentence: "For the sleeper.", kind: "request" } });
     r.append({ kind: "ticket.opened", who: "you", ticket: "T2", project: "x/unknown", data: { sentence: "For nobody.", kind: "request" } });
-    h.start("For the second.");
+    expect(h.start("For nobody.", "request", "x/unknown")).toMatchObject({ ok: false, why: expect.stringMatching(/not on the list/) });
+    h.start("For the second.", "request", "O/Q");
     await new Promise((ok) => setTimeout(ok, 20));
     expect(seen).toEqual([{ ticket: "T3", repo: "o/q", base: "dev", checks: [] }]);
     expect(h.state().projects.filter((p) => p.listed).map((p) => [p.repo, p.colour, p.says])).toEqual([["o/p", "grey", "Asleep: 1 ticket kept, none is worked."], ["o/q", "amber", "1 ticket did not finish."]]);

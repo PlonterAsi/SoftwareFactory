@@ -55,6 +55,7 @@ button.good { background: var(--good); color: var(--card); border-color: var(--g
 .projects button { width: 100%; display: flex; gap: 10px; align-items: baseline; text-align: left; padding: 10px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); cursor: pointer; flex-wrap: wrap; }
 .projects button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .projects b { overflow-wrap: anywhere; }
+.projects small { color: var(--soft); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
 .projects .says { color: var(--soft); min-width: 0; overflow-wrap: anywhere; }
 .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; align-self: center; border: 1px solid transparent; }
 .dot.c-red { background: var(--bad); } .dot.c-amber { background: var(--wait); } .dot.c-green { background: var(--good); } .dot.c-blue { background: var(--accent); } .dot.c-grey { background: var(--calm-bg); border-color: var(--soft); }
@@ -263,8 +264,8 @@ ol.story li.flag .x { color: var(--bad); }
       var ul = el("ul", "since");
       mine.forEach(function (x) {
         var li = el("li");
-        var go = el("button", "link", x.ticket); go.type = "button"; go.onclick = function () { var n = nodes[x.ticket] && nodes[x.ticket].node; if (n && n.scrollIntoView) { n.scrollIntoView({ behavior: "smooth", block: "center" }); return; } if (x.project && last && (last.settings.repo || "").toLowerCase() !== x.project.toLowerCase()) project({ repo: x.project, choose: true }, $("ask-msg")); };
-        if (x.project && last && (last.projects || []).length > 1 && (last.settings.repo || "").toLowerCase() !== x.project.toLowerCase()) li.appendChild(el("small", "", nameOf(last, x.project) + " "));
+        var go = el("button", "link", x.ticket); go.type = "button"; go.onclick = function () { var n = nodes[x.ticket] && nodes[x.ticket].node; if (!n && x.project) { lookAt(x.project); n = nodes[x.ticket] && nodes[x.ticket].node; } if (n && n.scrollIntoView) n.scrollIntoView({ behavior: "smooth", block: "center" }); };
+        if (x.project && last && (last.projects || []).length > 1 && viewOf(last) !== x.project.toLowerCase()) li.appendChild(el("small", "", nameOf(last, x.project) + " "));
         li.appendChild(go); li.appendChild(document.createTextNode(" " + x.sentence));
         li.appendChild(el("span", "why", x.says));
         if (x.url) { var a = el("a", "", "Open on GitHub"); a.href = x.url; a.target = "_blank"; a.rel = "noopener noreferrer"; li.appendChild(document.createTextNode(" ")); li.appendChild(a); }
@@ -489,11 +490,16 @@ ol.story li.flag .x { color: var(--bad); }
   var acceptError = {}, looked = {};
   var MARK = { "done": "\u2713", "failed": "!", "now": "\u25B8", "skipped": "\u2013", "not reached": "" };
 
+  function hereRepo(s, lower) { var r = lower; (s.projects || []).forEach(function (p) { if (p.repo.toLowerCase() === lower) r = p.repo; }); return r; }
   function nameOf(s, repo) { var n = repo; (s.projects || []).forEach(function (p) { if (p.repo.toLowerCase() === String(repo).toLowerCase() && p.name) n = p.name; }); return n; }
-  var projSig = "";
+  var projSig = "", view = "", removing = "";
+  // Looking at a project is not choosing it: the strip changes what this page shows and where the next ticket goes,
+  // said in words beside the button. The chosen project (Settings) is what the page opens on.
+  function viewOf(s) { var ps = (s && s.projects) || [], ok = false; ps.forEach(function (p) { if (p.repo.toLowerCase() === view) ok = true; }); return ok ? view : ((s && s.settings.repo) || "").toLowerCase(); }
+  function lookAt(repo) { view = String(repo).toLowerCase(); projSig = ""; drawn = null; render(last); }
   function project(body, msg) { return post("/api/step1/project", body).then(function (r) { if (msg) msg.textContent = r && r.ok === false ? r.why : ""; settingsLoaded = false; projSig = ""; load(); return r; }); }
   function drawProjects(s) {
-    var ps = s.projects || [], sig = JSON.stringify(ps);
+    var ps = s.projects || [], sig = JSON.stringify(ps) + viewOf(s) + removing;
     if (sig === projSig) return;
     projSig = sig;
     var top = $("projects"); top.textContent = ""; top.hidden = ps.length < 2;
@@ -502,10 +508,10 @@ ol.story li.flag .x { color: var(--bad); }
     if (typing) projSig = ""; else list.textContent = "";
     var words = { red: "waits for you", amber: "did not finish", green: "ready", blue: "working", grey: "quiet" };
     ps.forEach(function (p) {
-      var li = el("li"), b = el("button"); b.type = "button"; b.setAttribute("aria-pressed", p.chosen ? "true" : "false");
+      var li = el("li"), b = el("button"); b.type = "button"; b.setAttribute("aria-pressed", p.repo.toLowerCase() === viewOf(s) ? "true" : "false");
       var dot = el("span", "dot c-" + p.colour); dot.setAttribute("role", "img"); dot.setAttribute("aria-label", words[p.colour] || p.colour);
-      b.appendChild(dot); b.appendChild(el("b", "", p.name || p.repo)); b.appendChild(el("span", "says", p.says + (p.chosen ? " Chosen: new tickets go here." : "")));
-      b.onclick = function () { if (!p.chosen) project({ repo: p.repo, choose: true }, $("ask-msg")); };
+      b.appendChild(dot); b.appendChild(el("b", "", p.name || p.repo)); b.appendChild(el("small", "", words[p.colour] || "")); b.appendChild(el("span", "says", p.says));
+      b.onclick = function () { lookAt(p.repo); };
       li.appendChild(b); top.appendChild(li);
       if (typing || !p.listed) return;
       var row = el("li"); row.appendChild(el("b", "", p.repo));
@@ -514,18 +520,21 @@ ol.story li.flag .x { color: var(--bad); }
       bt("Save the name", function () { return { repo: p.repo, name: name.value }; });
       if (!p.chosen) bt("Choose", function () { return { repo: p.repo, choose: true }; });
       bt(p.asleep ? "Wake" : "Put to sleep", function () { return { repo: p.repo, asleep: !p.asleep }; });
-      if (!p.chosen || ps.length === 1) bt("Take off the list", function () { return { repo: p.repo, remove: true }; });
+      if (p.chosen) row.appendChild(el("span", "hint", "The chosen one: the page opens on it and the fields below are its own."));
+      // Taking a project off the list takes two presses: its tickets stay in the record, and none is worked.
+      if (!p.chosen || ps.length === 1) { var off = el("button", "", removing === p.repo ? "Yes, take it off: its tickets stay in the record" : "Take off the list"); off.type = "button"; off.onclick = function () { if (removing !== p.repo) { removing = p.repo; projSig = ""; drawProjects(last); return; } removing = ""; off.disabled = true; project({ repo: p.repo, remove: true }, $("p-msg")); }; row.appendChild(off); }
       list.appendChild(row);
     });
   }
   function render(s) {
     if (!s) return;
     last = s;
-    $("where").textContent = s.settings.repo ? s.settings.repo : "No project chosen yet";
+    var here = viewOf(s), many = (s.projects || []).length > 1, hereName = here ? nameOf(s, hereRepo(s, here)) : "";
+    $("where").textContent = here ? hereName : "No project chosen yet";
+    $("ask-label").firstChild.nodeValue = many && here ? "What should be done in " + hereName + "? " : "What should be done? ";
     var run = s.running;
     $("now").className = "card now" + (run ? " on" : "");
     $("start").disabled = !s.settings.repo;
-    var here = (s.settings.repo || "").toLowerCase(), many = (s.projects || []).length > 1;
     var inHere = function (x) { return !many || !here || (x.project || "").toLowerCase() === here; };
     var waiting = 0, gone = 0; s.tickets.forEach(function (x) { if (!inHere(x)) return; if (x.removed) gone++; else if (x.state === "waiting") waiting++; });
     $("start-hint").textContent = !s.settings.repo ? "Choose the project in Settings first." : (run || waiting ? "It will wait for its turn." : "");
@@ -543,7 +552,7 @@ ol.story li.flag .x { color: var(--bad); }
     drawProjects(s);
     // The list below is the chosen project's. The others are one line each at the top.
     var shown = s.tickets.filter(function (x) { return (showRemoved || !x.removed) && inHere(x); });
-    $("tickets-title").textContent = many && s.settings.repo ? "Tickets of " + nameOf(s, s.settings.repo) : "Tickets";
+    $("tickets-title").textContent = many && here ? "Tickets of " + hereName : "Tickets";
     if (run) {
       var t = null; s.tickets.forEach(function (x) { if (x.ticket === run.ticket) t = x; });
       var names = (s.runs || []).map(function (x) { return x.ticket; });
@@ -603,7 +612,7 @@ ol.story li.flag .x { color: var(--bad); }
     $("ask-msg").textContent = "";
     if (!text.trim()) { $("ask-msg").textContent = "Write what you want first."; $("sentence").focus(); return; }
     $("start").disabled = true;
-    post("/api/step1/work", { sentence: text, kind: $("kind").value }).then(function (r) { if (r.ok) { $("sentence").value = ""; } else { $("ask-msg").textContent = r.why; $("start").disabled = false; } load(); });
+    post("/api/step1/work", { sentence: text, kind: $("kind").value, project: last ? hereRepo(last, viewOf(last)) : "" }).then(function (r) { if (r.ok) { $("sentence").value = ""; } else { $("ask-msg").textContent = r.why; $("start").disabled = false; } load(); });
   };
   $("issues-now").onclick = function () { $("issues-now").disabled = true; post("/api/step1/issues", {}).then(function () { $("issues-now").disabled = false; load(); }); };
   $("hold").onclick = function () { $("hold").disabled = true; post("/api/step1/settings", { hold: !(last && last.settings.hold) }).then(function () { $("hold").disabled = false; load(); }); };

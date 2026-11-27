@@ -365,8 +365,11 @@ A project is one product on GitHub that SoftwareFactory works on (`fence/project
 (`projects`): its GitHub name, a name of your own, its starting branch, what prepares it, its checks, and whether it
 sleeps. `maxProjects` (30) says how many there can be.
 
-- **One is chosen.** New tickets go to the chosen project, and the Settings fields for the branch, the prepare lines
-  and the checks speak for it. Choosing another swaps those fields; every project keeps its own card.
+- **One is chosen.** The page opens on the chosen project, and the Settings fields for the branch, the prepare lines
+  and the checks speak for it. Choosing another (in Settings) swaps those fields; every project keeps its own card.
+- **Looking is not choosing.** A press on a project's line at the top shows that project's tickets and sends the next
+  ticket there, and the sentence box says so in words ("What should be done in ...?"). It changes no setting.
+- A new project is looked up on GitHub before it gets a card, where this computer can reach GitHub.
 - **One queue.** Tickets of every project that is on the list and awake are worked from the one queue, each from its
   own card. A sleeping project keeps its tickets and none is worked. A ticket of a project that is not on the list
   waits.

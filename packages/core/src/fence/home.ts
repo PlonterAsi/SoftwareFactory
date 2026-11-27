@@ -417,11 +417,14 @@ export function createHome(deps: HomeDeps) {
   const isKind = (k: unknown): k is TicketKind => (TICKET_KINDS as readonly string[]).includes(k as string);
 
   /** A new ticket. It waits for its turn; the queue takes it from there. */
-  function start(sentence: string, kind: unknown = "request"): { ok: true; ticket: string } | { ok: false; why: string } {
+  function start(sentence: string, kind: unknown = "request", project = ""): { ok: true; ticket: string } | { ok: false; why: string } {
     const bad = words(sentence);
     if (bad) return { ok: false, why: bad };
     if (!isKind(kind)) return { ok: false, why: "That is not a kind of ticket." };
-    const repo = parseGitHubRepo(deps.settings.read().repo);
+    // A ticket goes to the project the page is looking at, when it is on the list; otherwise to the chosen one.
+    const s = deps.settings.read(), named = project ? cardOf(s, project) : null;
+    if (project && !named) return { ok: false, why: "That project is not on the list. Add it in Settings first." };
+    const repo = parseGitHubRepo(named ? named.repo : s.repo);
     if (!repo) return { ok: false, why: "Choose the project first, in Settings." };
     const ticket = openTicket(record, `${repo.owner}/${repo.name}`, sentence, kind);
     pump();
@@ -802,7 +805,7 @@ export function createHome(deps: HomeDeps) {
         // The page's own key, and a body that only a page of ours would send as JSON.
         if (!sameKey(String(req.headers["x-sf-key"] ?? "")) || !String(req.headers["content-type"] ?? "").startsWith("application/json")) return send(res, 403, { ok: false, why: "This did not come from the SoftwareFactory page. Reload the page." });
         const b = await body(req);
-        if (url.pathname === "/api/step1/work") { const r = start(String(b.sentence ?? ""), b.kind ?? "request"); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/work") { const r = start(String(b.sentence ?? ""), b.kind ?? "request", typeof b.project === "string" ? b.project : ""); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/edit") { const r = edit(String(b.ticket ?? ""), b.sentence, b.kind); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/remove") { const r = remove(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/restore") { const r = restore(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
@@ -834,7 +837,15 @@ export function createHome(deps: HomeDeps) {
           const r = await speak({ record, settings: () => deps.settings.read(), send: deps.send }, { line: "This is SoftwareFactory. Your phone line works.", why: "test" });
           return send(res, r.phone === "sent" ? 200 : 409, r.phone === "sent" ? { ok: true } : { ok: false, why: r.phone === "not set" ? "No phone is set yet. Choose ntfy and a channel name, and save first." : "The line did not reach the phone service. Check the server address and your network." });
         }
-        if (url.pathname === "/api/step1/project") { const r = project(b); if (r.ok) tell(); return send(res, r.ok ? 200 : 400, r); }
+        if (url.pathname === "/api/step1/project") {
+          // A new project is looked up on GitHub first, where that can be done here: a typing mistake never becomes a card.
+          const g = parseGitHubRepo(typeof b.repo === "string" ? b.repo.trim() : "");
+          if (g && b.remove !== true && !cardOf(deps.settings.read(), `${g.owner}/${g.name}`) && github.hasToken?.() && typeof (github as any).check === "function") {
+            let seen: { ok: boolean; why?: string };
+            try { seen = await github.check(g); } catch (e) { seen = { ok: false, why: String((e as Error)?.message ?? e).slice(0, 200) }; }
+            if (!seen.ok) return send(res, 400, { ok: false, why: `${g.owner}/${g.name} could not be reached on GitHub from this computer: ${seen.why ?? "no answer"}` });
+          }
+          const r = project(b); if (r.ok) tell(); return send(res, r.ok ? 200 : 400, r); }
         if (url.pathname === "/api/step1/settings") { const r = saveSettings(b); return send(res, r.ok ? 200 : 400, r); }
       }
       send(res, 404, { ok: false, why: "no such thing here" });
