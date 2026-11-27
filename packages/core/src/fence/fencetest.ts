@@ -83,13 +83,14 @@ probe="${probe ?? ""}"
 switch=off; grep -qs '^enabled' /proc/sys/fs/binfmt_misc/WSLInterop /proc/sys/fs/binfmt_misc/WSLInterop-late && switch=on
 if command -v cmd.exe powershell.exe wsl.exe explorer.exe >/dev/null 2>&1; then out windows-program THROUGH on-path
 elif [ -n "$probe" ] && [ -x "$probe" ]; then
-  ran=""
+  ran=""; why=""
   for door in "" /run/WSL/*_interop; do
     [ -n "$door" ] && [ ! -S "$door" ] && continue
-    o=$(WSL_INTEROP="$door" timeout 20 "$probe" </dev/null 2>/dev/null); rc=$?
+    o=$(WSL_INTEROP="$door" timeout 20 "$probe" </dev/null 2>/tmp/sf-probe-err.$$); rc=$?
+    why="$why[$\{door:-plain}:rc$rc:$(head -c 80 /tmp/sf-probe-err.$$ 2>/dev/null | tr -c 'A-Za-z0-9.:\n' '-' | head -1)]"; rm -f /tmp/sf-probe-err.$$
     if [ $rc -eq 0 ] && [ -n "$o" ]; then ran="$\{door:-plain}"; break; fi
   done
-  if [ -n "$ran" ]; then out windows-program THROUGH "a-Windows-program-ran-via-$ran"; else out windows-program REFUSED "tried-for-real,switch-$switch"; fi
+  if [ -n "$ran" ]; then out windows-program THROUGH "a-Windows-program-ran-via-$ran"; else out windows-program REFUSED "tried-for-real,switch-$switch,$why"; fi
 elif [ "$switch" = on ]; then out windows-program THROUGH interop-on
 else out windows-program REFUSED interop-off; fi
 # 4. Programs listening on the Windows side.
