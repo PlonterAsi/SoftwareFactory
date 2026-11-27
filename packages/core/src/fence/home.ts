@@ -65,9 +65,9 @@ export function cleanSettings(raw: unknown, from: HomeSettings = HOME_DEFAULTS):
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const text = (k: keyof HomeSettings) => (typeof r[k] === "string" ? (r[k] as string).trim() : (from[k] as string));
   const list = (k: "checks" | "prepare" | "stopPaths") => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean) : from[k]);
-  const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "slots" | "cutOffReturns" | "cutOffWithinHours" | "issuesEveryMinutes" | "limitYou" | "limitAlone" | "ownSharePercent" | "runLimit") => (r[k] === undefined ? from[k] : Number(r[k]));
+  const num = (k: "maxTurns" | "timeLimitMinutes" | "parkedWaitMinutes" | "parkedReturns" | "slots" | "cutOffReturns" | "cutOffWithinHours" | "issuesEveryMinutes" | "limitYou" | "limitAlone" | "ownSharePercent" | "runLimit" | "runFloor") => (r[k] === undefined ? from[k] : Number(r[k]));
   const watch = cleanWatch(r, from);
-  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths"), limitPeriod: (r.limitPeriod === undefined ? from.limitPeriod : r.limitPeriod) as LimitPeriod, limitYou: num("limitYou"), limitAlone: num("limitAlone"), ownSharePercent: num("ownSharePercent"), runLimit: num("runLimit") };
+  const s: HomeSettings = { ...watch, repo: text("repo"), base: text("base"), checks: list("checks"), prepare: list("prepare"), model: text("model"), maxTurns: num("maxTurns"), timeLimitMinutes: num("timeLimitMinutes"), autoUpdate: typeof r.autoUpdate === "boolean" ? r.autoUpdate : from.autoUpdate, hold: typeof r.hold === "boolean" ? r.hold : from.hold, gate: typeof r.gate === "boolean" ? r.gate : from.gate, gateModel: text("gateModel"), parkedWaitMinutes: num("parkedWaitMinutes"), parkedReturns: num("parkedReturns"), slots: num("slots"), cutOffReturns: num("cutOffReturns"), cutOffWithinHours: num("cutOffWithinHours"), issues: (r.issues === undefined ? from.issues : r.issues) as IssuesMode, issuesLabel: text("issuesLabel"), issuesEveryMinutes: num("issuesEveryMinutes"), stopPaths: list("stopPaths"), limitPeriod: (r.limitPeriod === undefined ? from.limitPeriod : r.limitPeriod) as LimitPeriod, limitYou: num("limitYou"), limitAlone: num("limitAlone"), ownSharePercent: num("ownSharePercent"), runLimit: num("runLimit"), runFloor: num("runFloor") };
   checkLimits(s);
   if (s.repo && !parseGitHubRepo(s.repo)) throw new Error(`"${s.repo}" is not a project on GitHub. Write it as owner/name.`);
   if (/^(HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)$/.test(s.base)) throw new Error(`"${s.base}" is not a branch name.`);
@@ -170,6 +170,8 @@ export interface TicketView {
   bucket: Bucket;
   /** It waits because its limit is used up, and until when. Filled by the home screen. */
   limitUntil: string | null;
+  /** Its latest run met a limit and its unfinished work is kept: the next run goes on from it, unless you start clean. */
+  keptWork: boolean;
   /** Where it stands on the fixed road, each step with what proves it. */
   steps: StoryStep[];
   story: { id: number; at: string; who: string; what: string; flagged: boolean }[];
@@ -237,7 +239,7 @@ export function ticketsFrom(lines: RecordLine[], working: string | null | Readon
       issue: null,
       parkedFor: state === "parked" && typeof d(ended).parkedFor === "string" ? d(ended).parkedFor : null, endedAt: ended?.ts ?? null,
       returns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after !== "cut off").length, returnsAt: null,
-      bucket: bucketOfSend(sent), limitUntil: null,
+      bucket: bucketOfSend(sent), limitUntil: null, keptWork: !!ended && !!d(ended).kept && !proposed,
       everWorked: ls.some((l) => l.kind === "fence.tested" || l.kind === "run.started"),
       lastWorkAt: go.at(-1)?.ts ?? null,
       cutOff: state === "interrupted" && go.length > 0, cutOffReturns: ls.filter((l) => l.kind === "ticket.queued" && d(l).returned && d(l).after === "cut off").length,
@@ -327,7 +329,7 @@ export function createHome(deps: HomeDeps) {
     const settings = deps.settings.read();
     const tickets = ticketsFrom(all = record.all(), working());
     const limits = limitsNow(settings, all);
-    for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, limits.room, t.bucket) <= 0) t.limitUntil = limits.until; }
+    for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, roomLeft(settings, limits.used), t.bucket) <= 0) t.limitUntil = limits.until; }
     return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits };
   };
   const stateOf = (settings: HomeSettings, tickets: TicketView[]) => ({
@@ -513,11 +515,11 @@ export function createHome(deps: HomeDeps) {
     return { ok: true };
   }
   /** Send a ticket to be worked again, under the same name. */
-  function again(ticket: string): Did {
+  function again(ticket: string, clean = false): Did {
     const t = view(ticket);
     if (!t) return NONE;
     if (!t.canAgain) return { ok: false, why: "This ticket cannot be sent again from where it stands." };
-    record.append({ kind: "ticket.queued", who: "you", ticket, project: t.project, data: {} });
+    record.append({ kind: "ticket.queued", who: "you", ticket, project: t.project, data: clean ? { clean: true } : {} });
     pump();
     return { ok: true };
   }
@@ -636,7 +638,7 @@ export function createHome(deps: HomeDeps) {
         if (url.pathname === "/api/step1/ticket/restore") { const r = restore(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/ticket/answer") { const r = answer(String(b.ticket ?? ""), b.answer); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/issues") { const r = await issues(); return send(res, r.ok ? 200 : 409, r); }
-        if (url.pathname === "/api/step1/ticket/again") { const r = again(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
+        if (url.pathname === "/api/step1/ticket/again") { const r = again(String(b.ticket ?? ""), b.clean === true); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/stop") { const r = stopNow(typeof b.ticket === "string" && b.ticket ? b.ticket : undefined); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/look") { const r = await look(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }
         if (url.pathname === "/api/step1/accept") { const r = await accept(String(b.ticket ?? "")); return send(res, r.ok ? 200 : 409, r); }

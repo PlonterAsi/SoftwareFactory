@@ -186,6 +186,7 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
   const resume = req.resume && BRANCH.test(req.resume) && !req.resume.includes("..") && req.resume !== req.branch ? req.resume : null;
   const budget = Number.isFinite(req.budgetUsd) && req.budgetUsd! > 0 ? Math.max(0.01, req.budgetUsd!) : null;
   const checks: CheckResult[] = [];
+  let agentRan = false, costKnown = false;
   let costUsd = 0, summary = "", baseSha: string | null = null, headSha: string | null = null;
 
   // Stop always works: whatever the run is doing, everything of the worker's is killed inside the room.
@@ -203,7 +204,11 @@ export async function runInRoom(exec: RoomExec, files: RoomFiles, record: TheRec
     // Go writes its package folders read-only, so they are made writable first or they would stay behind.
     await exec("worker", `chmod -R u+rwX ${copyDir} ${scratchDir} 2>/dev/null; rm -rf ${copyDir} ${scratchDir}`, s.stepTimeoutMs).catch(() => undefined);
     await cell.close();
-    record.append({ kind: "run.ended", who: "SF itself", ...stamp, costUsd: null, data: { end, reason, costUsd, nothingLeftRunning: clear, ...(end === "parked" && /^the plan limit was reached/.test(reason) ? { parkedFor: "limit" } : end === "parked" && parkedFor ? { parkedFor } : {}), ...(end === "parked" && bundle && headSha ? { kept: { branch: req.branch, headSha, baseSha } } : {}) } });
+    // A run that was cut off never said what it used. It is counted at its ceiling, so the limits cannot be passed
+    // by runs that end without a word.
+    const assumed = agentRan && !costKnown && budget ? budget : null;
+    if (assumed) costUsd = assumed;
+    record.append({ kind: "run.ended", who: "SF itself", ...stamp, costUsd: assumed, data: { end, reason, costUsd, ...(assumed ? { costAssumed: true } : {}), nothingLeftRunning: clear, ...(end === "parked" && /^the plan limit was reached/.test(reason) ? { parkedFor: "limit" } : end === "parked" && parkedFor ? { parkedFor } : {}), ...(end === "parked" && bundle && headSha ? { kept: { branch: req.branch, headSha, baseSha } } : {}) } });
     return { end, reason, bundle, baseSha, headSha, costUsd, summary, checks, ...(end === "parked" && bundle ? { kept: true } : {}) };
   };
   const step = async (user: "worker" | "root", script: string, timeoutMs = s.stepTimeoutMs, onLine?: (l: string) => void): Promise<ExecResult> => (user === "worker" ? cell.run(script, timeoutMs, onLine) : exec(user, script, timeoutMs, onLine));
@@ -234,12 +239,14 @@ if ourgit merge --squash -q "origin/${resume}" >/dev/null 2>&1 && ourgit reset -
     if (!baseSha) return await finish("crashed", `the copy could not be unpacked (exit ${unpack.code}): ${unpack.stderr.slice(0, 300)}`);
     note("run.step", { did: "copy unpacked in the room", baseSha });
     const resumed = !!resume && unpack.stdout.includes(`SFRESUMED-${tag}`);
+    if (resume && !resumed && !unpack.stdout.includes(`SFFRESH-${tag}`)) return await finish("crashed", "the kept work of the earlier run could not be laid into the copy, and the copy could not be made clean again");
     if (resume) note("run.step", { did: resumed ? "the unfinished work of the earlier run is in the files; this run goes on from it" : "the unfinished work of the earlier run no longer fits the project, so this run starts clean" });
     if (stopped()) return await finish("stopped", "you pressed stop");
 
     // 2. The agent works, under Claude Code's sandbox and the managed rules. Each of its lines is stamped by us.
     let agentEnd: AgentEnd | null = null;
     let sawStart = false;
+    agentRan = true;
     const agent = await step("worker", `${pre}
 cd "$copy" || exit 97
 agent_env
@@ -254,7 +261,7 @@ SF_PROMPT_${tag}
       // the alarm for the day they do not, and nothing of such a run is kept.
       if (st.started) sawStart = true;
       if (st.outside?.length && !outside.length) { outside = st.outside; void killAll(); }
-      if (st.end) { agentEnd = st.end; costUsd = st.end.costUsd; summary = st.end.text; }
+      if (st.end) { agentEnd = st.end; costUsd = st.end.costUsd; costKnown = true; summary = st.end.text; }
       record.append({ kind: "run.step", who: "worker", ...stamp, costUsd: st.end ? st.end.costUsd : null, data: st.data });
     });
     // Whatever the agent left running is ended now: nothing of its may work on while we commit and check.
@@ -266,10 +273,14 @@ SF_PROMPT_${tag}
     // An end at a limit keeps the work so far: it is committed and brought out unchecked, for a later run to go on from.
     let parkedAt: { reason: string; parkedFor?: string } | null = null;
     if (agent.timedOut) parkedAt = { reason: `the time limit of ${Math.round(req.timeLimitMs / 60_000)} minutes was reached` };
-    else if (!done) return await finish(looksLikeLimit(agent.stdout + agent.stderr) ? "parked" : "crashed", looksLikeLimit(agent.stdout + agent.stderr) ? "the plan limit was reached" : `the agent ended without an answer (exit ${agent.code}): ${(agent.stderr || agent.stdout).slice(-300)}`);
+    else if (!done && looksLikeLimit(agent.stdout + agent.stderr)) parkedAt = { reason: "the plan limit was reached" };
+    else if (!done) return await finish("crashed", `the agent ended without an answer (exit ${agent.code}): ${(agent.stderr || agent.stdout).slice(-300)}`);
     else if (done.outOfTurns) parkedAt = { reason: `the run used all its ${req.maxTurns} turns before finishing` };
     else if (done.outOfBudget) parkedAt = { reason: `the run reached its limit of $${(budget ?? 0).toFixed(2)}`, parkedFor: "budget" };
-    else if (done.isError) return await finish(looksLikeLimit(done.text) ? "parked" : "crashed", looksLikeLimit(done.text) ? `the plan limit was reached: ${done.text.slice(0, 200)}` : `the agent stopped with an error: ${done.text.slice(0, 300)}`);
+    else if (done.isError && looksLikeLimit(done.text)) parkedAt = { reason: `the plan limit was reached: ${done.text.slice(0, 200)}` };
+    else if (done.isError) return await finish("crashed", `the agent stopped with an error: ${done.text.slice(0, 300)}`);
+    // A limit met before the agent even said which tools it had: nothing was worked, so there is nothing to keep.
+    if (parkedAt && !sawStart) return await finish("parked", parkedAt.reason, null, parkedAt.parkedFor);
     // Nothing is kept of a run whose first line never told which tools it had.
     if (!sawStart) return await finish("crashed", "the agent never said which tools it had, so its work is not trusted");
 

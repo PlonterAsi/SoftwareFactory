@@ -344,6 +344,15 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     expect(ended.data).toMatchObject({ end: "parked", parkedFor: "budget", kept: { branch: expect.stringMatching(/^sf\/t1-/) } });
     expect(r.all().some((l) => l.kind === "result.proposed")).toBe(false);
     expect(g(origin, "branch", "--list", "sf/*").split("\n").filter(Boolean)).toHaveLength(before);
+    // Sent again with "start clean": the kept work is left out, so in this mode nothing gets made.
+    mode("resume");
+    r.append({ kind: "ticket.queued", who: "you", ticket: "T1", project: "o/p", data: { clean: true } });
+    expect((await workTicket(d, settings(), "Add a hello file.", "T1")).reason).toMatch(/changed nothing/);
+    expect(r.all().some((l) => l.kind === "run.step" && /goes on from it/.test(String((l.data as any).did)))).toBe(false);
+    // That clean run was the ticket's latest, so the kept work is over. Park at the limit once more to have some again.
+    mode("budget");
+    r.append({ kind: "ticket.queued", who: "you", ticket: "T1", project: "o/p", data: {} });
+    expect((await workTicket(d, st, "Add a hello file.", "T1")).end).toBe("parked");
     // Sent again: the half-done file is there, so the work can be finished.
     mode("resume");
     r.append({ kind: "ticket.queued", who: "you", ticket: "T1", project: "o/p", data: {} });

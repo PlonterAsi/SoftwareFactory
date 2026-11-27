@@ -269,10 +269,11 @@ SoftwareFactory counts what runs use, in the dollars Claude Code reports for eac
 
 | Limit | What counts under it | Setting |
 | --- | --- | --- |
-| Limit 1 | work you sent: a ticket you opened, answered or sent again | `limitYou`, 100 a month |
+| Limit 1 | work you sent: a ticket you opened (an issue of yours counts) or sent again | `limitYou`, 100 a month |
 | Limit 2 | what SoftwareFactory does by itself: a ticket it brought back, and its own work | `limitAlone`, 50 a month |
 | Own share | the most of limit 2 SoftwareFactory's own work may use | `ownSharePercent`, 20 |
 | One run | the most a single run may use | `runLimit`, 5 |
+| Floor | a run is not started with less than this left of its limit | `runFloor`, 0.5 |
 
 The period is a day, a week (from Sunday) or a month (`limitPeriod`), by this computer's calendar.
 
@@ -286,6 +287,12 @@ At a limit nothing is asked for:
   room, brought out as data, and held as a branch in SoftwareFactory's own history. It was not checked and is
   sent nowhere. The next run of that ticket starts with those changes already in its files, and the result is
   checked whole as always. If the kept work no longer fits the project, the run starts clean and says so.
+- The plan limit met in the middle of work keeps the work the same way.
+- Only the ticket's latest run counts. A later run that failed, crashed or was stopped ends the kept work, and so
+  does **Start clean** on the ticket. Kept work from another starting branch is not used.
+- A run that was cut off, stopped or timed out never says what it used. It is counted at its ceiling
+  (`costAssumed` on its last line), so the limits cannot be passed by runs that end without a word.
+- Kept branches stay in SoftwareFactory's own history; nothing removes them yet.
 - Claude Code counts the ceiling by its own estimate and may pass it a little.
 
 Nothing uses the own share yet: no work of SoftwareFactory's own exists before step 5. The share is counted so

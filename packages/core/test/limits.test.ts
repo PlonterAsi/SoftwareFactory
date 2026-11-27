@@ -37,6 +37,9 @@ describe("the two limits", () => {
     expect(runBudget(s, room, "you")).toBe(2);
     expect(runBudget(s, room, "alone")).toBe(5);
     expect(runBudget(s, roomLeft(s, { you: 10.2, alone: 0, own: 0 }), "you")).toBe(0);
+    // Too little left to be worth a run: it does not start, and waits for the new period.
+    expect(runBudget(s, roomLeft(s, { you: 9.93, alone: 0, own: 0 }), "you")).toBe(0);
+    expect(() => checkLimits({ ...s, runLimit: 0 })).toThrow(/hold the queue/);
     expect(() => checkLimits({ ...s, limitYou: -1 })).toThrow(/Limit 1/);
     expect(() => checkLimits({ ...s, limitPeriod: "year" as any })).toThrow();
   });

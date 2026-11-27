@@ -3,7 +3,7 @@ import type { RecordLine } from "./record.js";
 /**
  * The two limits (docs/fence.md, "Two limits").
  *
- * Limit 1 is for work the owner sent: a ticket they opened, answered or sent again. Limit 2 is for what
+ * Limit 1 is for work the owner sent: a ticket they opened or sent again. Limit 2 is for what
  * SoftwareFactory does by itself: a ticket it brought back after the plan limit or after being cut off, and its
  * own work. Of limit 2 a set share is the most SoftwareFactory's own work may use. Both are counted over one
  * period, in the dollars Claude Code reports for each run, read from the record and from nothing else.
@@ -24,9 +24,11 @@ export interface LimitSettings {
   ownSharePercent: number;
   /** The most one run may use, in dollars. */
   runLimit: number;
+  /** A run is not started with less than this left of its limit: it would only park at once. */
+  runFloor: number;
 }
 
-export const LIMIT_DEFAULTS: LimitSettings = { limitPeriod: "month", limitYou: 100, limitAlone: 50, ownSharePercent: 20, runLimit: 5 };
+export const LIMIT_DEFAULTS: LimitSettings = { limitPeriod: "month", limitYou: 100, limitAlone: 50, ownSharePercent: 20, runLimit: 5, runFloor: 0.5 };
 
 /** When the running period began, by this computer's own clock and calendar. A week begins on Sunday. */
 export function periodStart(period: LimitPeriod, now: Date): Date {
@@ -82,11 +84,15 @@ export function roomLeft(s: LimitSettings, spend: Spend): Room {
 
 /** The most one run of that kind may use now: the run limit, or what is left if that is less. 0: it may not start. */
 export function runBudget(s: LimitSettings, room: Room, bucket: Bucket): number {
-  return Math.max(0, Math.round(Math.min(s.runLimit, room[bucket]) * 100) / 100);
+  const b = Math.round(Math.min(s.runLimit, room[bucket]) * 100) / 100;
+  return b >= Math.min(s.runFloor, s.runLimit) && b >= 0.01 ? b : 0;
 }
 
 export function checkLimits(s: LimitSettings): void {
   if (!["day", "week", "month"].includes(s.limitPeriod)) throw new Error("The limits are counted per day, week or month.");
-  for (const [k, name] of [["limitYou", "Limit 1"], ["limitAlone", "Limit 2"], ["runLimit", "The limit of one run"]] as const) if (!Number.isFinite(s[k]) || s[k] < 0 || s[k] > 100000) throw new Error(`${name} must be from 0 to 100000 dollars.`);
+  for (const [k, name] of [["limitYou", "Limit 1"], ["limitAlone", "Limit 2"]] as const) if (!Number.isFinite(s[k]) || s[k] < 0 || s[k] > 100000) throw new Error(`${name} must be from 0 to 100000 dollars.`);
+  // A run limit of nothing would stop every run while the screen blamed another limit.
+  if (!Number.isFinite(s.runLimit) || s.runLimit < 0.05 || s.runLimit > 100000) throw new Error("The most one run may use must be from 0.05 to 100000 dollars. To stop all work, hold the queue.");
+  if (!Number.isFinite(s.runFloor) || s.runFloor < 0 || s.runFloor > 100000) throw new Error("The smallest amount worth starting a run with must be from 0 to 100000 dollars.");
   if (!Number.isFinite(s.ownSharePercent) || s.ownSharePercent < 0 || s.ownSharePercent > 100) throw new Error("SoftwareFactory's own share must be from 0 to 100 percent.");
 }

@@ -196,10 +196,17 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     // SoftwareFactory's own history as a branch that was never sent anywhere.
     let resume: string | null = null;
     const story = record.story(ticket), lastOut = [...story].reverse().find((l) => l.kind === "result.proposed")?.id ?? 0;
-    const keptLine = [...story].reverse().find((l) => l.kind === "run.ended" && l.id > lastOut && (l.data as any)?.kept);
-    const k = ((keptLine?.data as any)?.kept ?? {}) as Record<string, unknown>;
-    if (typeof k.branch === "string" && /^sf\/[a-z0-9-]+$/.test(k.branch) && typeof k.headSha === "string") {
-      try { if (plainGit(h.dir, "rev-parse", "--verify", "-q", `refs/heads/${k.branch}`) === k.headSha) resume = k.branch; } catch { /* not here any more: the run starts clean */ }
+    // Only the latest run of the ticket counts: a later run that failed, crashed or was stopped ends the kept work,
+    // and so does the owner's "start clean".
+    const keptLine = [...story].reverse().find((l) => l.kind === "run.ended" && l.run);
+    const sentClean = !!(([...story].reverse().find((l) => l.kind === "ticket.queued")?.data as any)?.clean);
+    const k = ((keptLine && keptLine.id > lastOut && !sentClean ? (keptLine.data as any)?.kept : null) ?? {}) as Record<string, unknown>;
+    if (typeof k.branch === "string" && /^sf\/[a-z0-9-]+$/.test(k.branch) && typeof k.headSha === "string" && typeof k.baseSha === "string" && /^[0-9a-f]{40}$/.test(k.baseSha)) {
+      try {
+        // It must still stand on this project's starting branch: kept work from another base would drag that base in.
+        plainGit(h.dir, "merge-base", "--is-ancestor", k.baseSha, `refs/heads/${h.base}`);
+        if (plainGit(h.dir, "rev-parse", "--verify", "-q", `refs/heads/${k.branch}`) === k.headSha) resume = k.branch;
+      } catch { /* not here any more, or from another starting point: the run starts clean */ }
     }
     plainGit(h.dir, "bundle", "create", inFile, `refs/heads/${h.base}`, ...(resume ? [`refs/heads/${resume}`] : []));
     // Checks written in Settings win. With none written, the project tells its own, read from the starting point
@@ -218,11 +225,13 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     // Parked at a limit with work done: the work comes in as data and stays here, unchecked, for the next run of this ticket.
     if (result.end === "parked" && result.kept && result.bundle && result.headSha) {
       try {
+        if (deps.signal?.aborted) throw new Error("stop was pressed");
         writeFileSync(outFile, result.bundle);
         plainGit(h.dir, "bundle", "verify", "-q", outFile);
         plainGit(h.dir, "-c", "fetch.fsckObjects=true", "fetch", "-q", "--no-tags", outFile, `+refs/heads/${branch}:refs/heads/${branch}`);
         if (plainGit(h.dir, "rev-parse", `refs/heads/${branch}`) !== result.headSha) plainGit(h.dir, "update-ref", "-d", `refs/heads/${branch}`);
-      } catch { /* what cannot be kept is not kept; the next run starts clean */ }
+        plainGit(h.dir, "rev-parse", "--verify", "-q", `refs/heads/${branch}`);
+      } catch { record.append({ kind: "run.step", who: "SF itself", run, ticket, project, data: { did: "the unfinished work could not be kept on this computer after all, so the next run starts clean" } }); }
     }
     if (result.end !== "passed" || !result.bundle || !result.baseSha || !result.headSha) return out({ run, end: result.end, reason: result.reason, costUsd: result.costUsd });
 
