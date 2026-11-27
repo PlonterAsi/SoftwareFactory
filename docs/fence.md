@@ -335,3 +335,22 @@ never starts paid work on a failure from before. A ticket of one short sentence 
 Settings: `ladder` (on), `ladderAgain` 1, `ladderOtherWay` 1, `ladderModel` (empty: the same model),
 `ladderSplit` (on), `ladderSharedTries` 2, `ladderSplitModel` haiku, `ladderSplitMinChars` 120,
 `ladderWithinMinutes` 60.
+
+## Settings only by your hand
+
+Every number, switch and list of the safe path is a setting on the screen with a safe default. A few of them are what
+keeps work that runs by itself inside what you allowed: the two limits (`limitPeriod`, `limitYou`, `limitAlone`,
+`ownSharePercent`, `runLimit`, `runFloor`) and what you added to the stop list (`stopPaths`). These are the protected
+settings (`fence/protected.ts`).
+
+- **Two steps.** A save that changes a protected setting saves nothing at first. The screen shows each change as a
+  sentence ("Limit 2: from 50 to 80") and asks for a yes that names them. The line in the record says which settings
+  were changed by hand (`setting.changed`, `byHand`).
+- **They count only with your line in the record.** SoftwareFactory reads what you last set from the record. When the
+  settings file says something else, something that is not the screen changed it: nothing new starts, and the screen
+  names each value in doubt with two buttons, "Put back what I set" and "The file is right: keep it by my hand".
+- **An agent cannot reach them.** The page, the settings file and the record are on the Windows side. The fence test
+  tries the page's port from the room before every run, and a run that could reach it never starts. A ticket's words,
+  an issue from GitHub and a run's output are never read as settings.
+- The fence's own settings (the room, the net list) are not changed from the page: they are written into the room by
+  `npm run fence -- setup`, by hand on this computer.

@@ -164,6 +164,7 @@ ol.story li.flag .x { color: var(--bad); }
 
   <h2 id="tickets-title">Tickets</h2>
   <p class="hint" id="limits-line"></p>
+  <div class="msg" id="doubt" role="alert" hidden><p id="doubt-say"></p><ul id="doubt-list"></ul><div class="row"><button id="doubt-back" type="button">Put back what I set</button><button id="doubt-keep" type="button">The file is right: keep it by my hand</button></div></div>
   <div class="row" id="queue-row"><button id="hold" type="button">Hold the queue</button><span class="hint" id="queue-hint"></span><button id="show-removed" type="button" hidden></button><button id="issues-now" type="button" hidden>Look at GitHub now</button><span class="hint" id="issues-hint"></span></div>
   <section class="card" aria-labelledby="tickets-title"><div id="tickets"><p class="empty">No tickets yet. Your first sentence starts one.</p></div></section>
 
@@ -211,6 +212,7 @@ ol.story li.flag .x { color: var(--bad); }
     </div>
     <div class="row"><button id="save" type="button">Save settings</button><button id="phone-test" type="button">Send a test line to the phone</button><span class="hint" id="save-hint"></span></div>
     <p class="msg" id="set-msg" role="alert"></p>
+    <div id="hand" hidden><ul id="hand-list"></ul><div class="row"><button id="hand-yes" type="button">Yes, change these by my hand</button><button id="hand-no" type="button">No, leave them</button></div></div>
     <p class="fence" id="fence"></p>
   </details>
 </main>
@@ -480,6 +482,9 @@ ol.story li.flag .x { color: var(--bad); }
     $("issues-hint").textContent = s.settings.issues === "off" || !s.issuesSeen ? "" : s.issuesSeen.ok ? "GitHub issues looked at " + clock(s.issuesSeen.at) + "." : "GitHub issues could not be read: " + s.issuesSeen.why;
     $("hold").textContent = s.settings.hold ? "Let the queue go" : "Hold the queue";
     drawSince(s.since);
+    var db = s.settingsDoubt || [];
+    $("doubt").hidden = !db.length;
+    if (db.length) { $("doubt-say").textContent = "Nothing starts for now: these protected settings are not what you set on this screen. Something else changed the settings file."; $("doubt-list").textContent = ""; db.forEach(function (c) { $("doubt-list").appendChild(el("li", "", c.says)); }); }
     if (s.limits) $("limits-line").textContent = "This " + s.limits.period + ": you sent " + money(s.limits.used.you) + " of " + money(s.limits.limit.you) + "; by itself " + money(s.limits.used.alone + s.limits.used.own) + " of " + money(s.limits.limit.alone) + ". New on " + day(s.limits.until) + ".";
     $("queue-hint").textContent = s.settings.hold ? "The queue is held. " + waiting + " waiting; nothing new starts until you let it go." : s.resting ? "The queue rests until " + clock(s.resting.until) + ": " + s.resting.why + ". Work it again on a ticket starts sooner." : (waiting ? waiting + " waiting for a turn." : "");
     $("show-removed").hidden = !gone;
@@ -552,9 +557,25 @@ ol.story li.flag .x { color: var(--bad); }
   $("stop").onclick = function () { $("stop").disabled = true; post("/api/step1/stop").then(function () { $("stop").disabled = false; load(); }); };
   $("save").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";
-    post("/api/step1/settings", { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, ladder: $("s-ladder").value === "yes", ladderAgain: Number($("s-ladder-again").value), ladderOtherWay: Number($("s-ladder-other").value), ladderModel: $("s-ladder-model").value, ladderSplit: $("s-ladder-split").value === "yes", ladderSharedTries: Number($("s-ladder-shared").value), ladderSplitModel: $("s-ladder-split-model").value, ladderWithinMinutes: Number($("s-ladder-within").value), ladderSplitMinChars: Number($("s-ladder-split-min").value), parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), limitPeriod: $("s-limit-period").value, limitYou: Number($("s-limit-you").value), limitAlone: Number($("s-limit-alone").value), ownSharePercent: Number($("s-own-share").value), runLimit: Number($("s-run-limit").value), runFloor: Number($("s-run-floor").value), sinceShow: Number($("s-since-show").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value), stopPaths: lines($("s-stop-paths").value) })
-      .then(function (r) { if (r.ok) { $("save-hint").textContent = "Saved."; settingsLoaded = false; load(); } else { $("set-msg").textContent = r.why; } });
+    post("/api/step1/settings", asked = { repo: $("s-repo").value, base: $("s-base").value, model: $("s-model").value, maxTurns: Number($("s-turns").value), timeLimitMinutes: Number($("s-minutes").value), stuckMinutes: Number($("s-stuck").value), autoUpdate: $("s-update").value === "yes", gate: $("s-gate").value === "yes", gateModel: $("s-gate-model").value, ladder: $("s-ladder").value === "yes", ladderAgain: Number($("s-ladder-again").value), ladderOtherWay: Number($("s-ladder-other").value), ladderModel: $("s-ladder-model").value, ladderSplit: $("s-ladder-split").value === "yes", ladderSharedTries: Number($("s-ladder-shared").value), ladderSplitModel: $("s-ladder-split-model").value, ladderWithinMinutes: Number($("s-ladder-within").value), ladderSplitMinChars: Number($("s-ladder-split-min").value), parkedWaitMinutes: Number($("s-park-wait").value), parkedReturns: Number($("s-park-returns").value), slots: Number($("s-slots").value), limitPeriod: $("s-limit-period").value, limitYou: Number($("s-limit-you").value), limitAlone: Number($("s-limit-alone").value), ownSharePercent: Number($("s-own-share").value), runLimit: Number($("s-run-limit").value), runFloor: Number($("s-run-floor").value), sinceShow: Number($("s-since-show").value), cutOffReturns: Number($("s-cut-returns").value), cutOffWithinHours: Number($("s-cut-hours").value), issues: $("s-issues").value, issuesLabel: $("s-issues-label").value, issuesEveryMinutes: Number($("s-issues-every").value), phone: $("s-phone").value, ntfyTopic: $("s-topic").value, prepare: lines($("s-prepare").value), checks: lines($("s-checks").value), stopPaths: lines($("s-stop-paths").value) })
+      .then(saved);
   };
+  // A protected setting is saved in two steps: the page shows each change as a sentence, and the owner says yes.
+  var asked = null;
+  function saved(r) {
+    $("hand").hidden = true;
+    if (r.ok) { asked = null; $("save-hint").textContent = "Saved."; settingsLoaded = false; load(); return; }
+    $("set-msg").textContent = r.why;
+    if (!r.needsHand || !asked) return;
+    $("hand-list").textContent = "";
+    r.needsHand.forEach(function (c) { $("hand-list").appendChild(el("li", "", c.says)); });
+    asked.byHand = r.needsHand.map(function (c) { return c.key; });
+    $("hand").hidden = false;
+  }
+  $("hand-yes").onclick = function () { if (!asked) return; $("set-msg").textContent = ""; post("/api/step1/settings", asked).then(saved); };
+  $("hand-no").onclick = function () { asked = null; $("hand").hidden = true; $("set-msg").textContent = ""; settingsLoaded = false; load(); };
+  $("doubt-back").onclick = function () { var body = { byHand: [] }; ((last && last.settingsDoubt) || []).forEach(function (c) { body[c.key] = c.set; body.byHand.push(c.key); }); $("doubt-back").disabled = true; post("/api/step1/settings", body).then(function () { $("doubt-back").disabled = false; settingsLoaded = false; load(); }); };
+  $("doubt-keep").onclick = function () { var keys = ((last && last.settingsDoubt) || []).map(function (c) { return c.key; }); $("doubt-keep").disabled = true; post("/api/step1/settings", { byHand: keys }).then(function () { $("doubt-keep").disabled = false; load(); }); };
 
   $("phone-test").onclick = function () {
     $("set-msg").textContent = ""; $("save-hint").textContent = "";

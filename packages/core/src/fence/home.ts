@@ -8,6 +8,7 @@ import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
 import { type Bucket, type LimitPeriod, type LimitSettings, LIMIT_DEFAULTS, bucketOfSend, checkLimits, periodEnd, periodStart, roomLeft, runBudget, spendOf } from "./limits.js";
 import { sinceYouLeft } from "./since.js";
+import { type HandChange, isProtected, protectedChanges, protectedOnRecord, settingsInDoubt } from "./protected.js";
 import { type LadderSettings, type Rung, LADDER_DEFAULTS, checkLadder, isClimbable, ladderHint, nextRung } from "./ladder.js";
 import type { SplitResult } from "./gate.js";
 import { type Sender, type WatchSettings, WATCH_DEFAULTS, cleanWatch, speak } from "./watchdog.js";
@@ -366,7 +367,7 @@ export function createHome(deps: HomeDeps) {
     const tickets = ticketsFrom(all = record.all(), working());
     const limits = limitsNow(settings, all);
     for (const t of tickets) { const at = returnTime(t, settings); if (at) t.returnsAt = new Date(at).toISOString(); if (t.state === "waiting" && !t.removed && runBudget(settings, roomLeft(settings, limits.used), t.bucket) <= 0) { t.limitUntil = limits.until; t.says = `Waiting: ${t.bucket === "you" ? "limit 1 (work you sent)" : "limit 2 (what SoftwareFactory does by itself)"} is used up for this ${limits.period}.`; } }
-    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, since: sinceYouLeft(all, tickets, settings.sinceShow) };
+    return { ...stateOf(settings, tickets), issuesSeen: lastSync, resting: restOf(all, settings.parkedWaitMinutes), limits, settingsDoubt: settingsInDoubt(all, settings, HOME_DEFAULTS), since: sinceYouLeft(all, tickets, settings.sinceShow) };
   };
   const stateOf = (settings: HomeSettings, tickets: TicketView[]) => ({
     settings,
@@ -374,7 +375,9 @@ export function createHome(deps: HomeDeps) {
     running: first() ? { ticket: first()!.ticket, startedAt: first()!.startedAt } : null,
     runs: [...runs.values()].map((r) => ({ ticket: r.ticket, startedAt: r.startedAt })),
     tickets,
-    spoke: all.filter((l) => l.kind === "watchdog.spoke" && (l.data as any).why !== "test").slice(-3).map((l) => ({ id: l.id, at: l.ts, line: String((l.data as any).line ?? ""), phone: String((l.data as any).phone ?? "") })),
+    // A line the watchdog said stays on the screen while it is still the news: not once "Got it" was said after it,
+    // and not once its ticket moved on (sent again, a new run, a result).
+    spoke: all.filter((l) => l.kind === "watchdog.spoke" && (l.data as any).why !== "test" && !all.some((x) => x.id > l.id && ((x.kind === "home.seen" && x.who === "you") || (!!l.ticket && x.ticket === l.ticket && ["ticket.queued", "run.started", "result.proposed", "ticket.removed"].includes(x.kind))))).slice(-3).map((l) => ({ id: l.id, at: l.ts, line: String((l.data as any).line ?? ""), phone: String((l.data as any).phone ?? "") })),
   });
   /** The sign of life the watchdog reads. */
   // The watchdog reads one run: the one that has been quiet longest speaks for all.
@@ -466,6 +469,8 @@ export function createHome(deps: HomeDeps) {
     wakeTimer = wake === Infinity ? null : setTimeout(() => { wakeTimer = null; try { pump(); tell(); } catch { /* the next thing that happens wakes the queue */ } }, Math.min(Math.max(wake - now, 1000), 2 ** 31 - 1));
     wakeTimer?.unref?.();
     if (s.hold || rest) return;
+    // A protected setting that is not what the owner set: nothing starts until they have looked.
+    if (settingsInDoubt(lines, s, HOME_DEFAULTS).length) return;
     // A ticket at the split rung: the reader takes the free place now, and the queue goes on when it has answered.
     if (toSplit && !runs.has(toSplit.ticket)) { split(toSplit, s); if (runs.size >= s.slots) return; }
     // Settings speak for one project. A ticket of another project waits until Settings point at it again.
@@ -657,14 +662,24 @@ export function createHome(deps: HomeDeps) {
     } catch { return { ok: true, githubChecks: "GitHub's own checks could not be read just now." }; }
   }
 
-  function saveSettings(raw: unknown): { ok: true; settings: HomeSettings } | { ok: false; why: string } {
+  function saveSettings(raw: unknown): { ok: true; settings: HomeSettings } | { ok: false; why: string; needsHand?: HandChange[] } {
     const was = deps.settings.read();
     let now: HomeSettings;
     try { now = cleanSettings(raw, was); } catch (e) { return { ok: false, why: (e as Error).message }; }
     const changed = (Object.keys(now) as (keyof HomeSettings)[]).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(was[k]));
-    if (changed.length) {
+    // The protected settings (the two limits, the stop list) change only with a second word that names each of them.
+    const byHand = new Set(Array.isArray((raw as any)?.byHand) ? ((raw as any).byHand as unknown[]).map(String) : []);
+    const lines = record.all();
+    const doubt = settingsInDoubt(lines, was, HOME_DEFAULTS);
+    const needs = protectedChanges(was, now).filter((c) => !byHand.has(c.key));
+    if (needs.length) return { ok: false, why: "These are protected settings. They change only when you say yes to each of them.", needsHand: needs };
+    // A value in doubt that the owner now names by hand is theirs again: the record gets their line for it.
+    const set = protectedOnRecord(lines, HOME_DEFAULTS);
+    const kept = doubt.map((c) => c.key).filter((k) => byHand.has(k) && !changed.includes(k));
+    if (changed.length || kept.length) {
       deps.settings.write(now);
-      record.append({ kind: "setting.changed", who: "you", data: { changed: Object.fromEntries(changed.map((k) => [k, k === "ntfyTopic" ? { changed: true } : { from: was[k], to: now[k] }])) } });
+      const hand = [...changed.filter(isProtected), ...kept];
+      record.append({ kind: "setting.changed", who: "you", data: { changed: Object.fromEntries([...changed.map((k) => [k, k === "ntfyTopic" ? { changed: true } : { from: isProtected(k) ? set[k] : was[k], to: now[k] }]), ...kept.map((k) => [k, { from: set[k], to: now[k] }])]), ...(hand.length ? { byHand: hand } : {}) } });
     }
     // A queue that was held and is let go starts at once.
     pump();
