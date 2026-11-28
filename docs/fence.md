@@ -407,3 +407,28 @@ Adding a project is the one action. SoftwareFactory then shows, by itself, wheth
   A sleeping project's bring-in ticket waits like its other tickets. It counts toward the limits like any run you sent.
 - What the project's own files say to an AI (CLAUDE.md, README) is told to the run as information about the project,
   not as orders. Reading them into the card, and looking through the history for keys, are the next pieces.
+
+## The live check (first depth: a change is run here)
+
+Triggered by change, not by the clock. SoftwareFactory asks GitHub now and then where each project's starting branch
+stands (Settings: how often). The asking is one small call to GitHub: nothing is fetched and it costs nothing.
+
+- **Only a project that was shown to run here at least once is watched**, and only while it is on the list and
+  awake. The commit its last try stood on is the starting point: the first look is the baseline.
+- **A change opens one ticket, by SoftwareFactory itself**: "Live check: the project's starting branch stands on
+  another commit than when it last ran here". New commits are a change, and so is naming another starting branch.
+  It is a try like bringing in: it changes nothing, proposes nothing, and counts under limit 2 (what SoftwareFactory
+  does by itself). One check for one change, also after its ticket was removed, and none while another try of the
+  project is on its way.
+- **Still runs**: the ticket says "Still runs here" and the project's proof moves to the new commit.
+- **A failure is run once more** on a fresh copy, by itself. Only a failure that shows twice is a **finding**: the
+  project's line turns red ("It stopped running here after a change on GitHub"), and the ticket keeps the proof: the
+  check that failed and what it printed, both times.
+- **You decide what happens to a finding.** "Open a ticket to fix it" makes an ordinary bug ticket with the check and
+  its output as its words (once per finding). Or remove the finding. SoftwareFactory does not start fixing by itself.
+- **Only the latest verdict is the finding.** When a later try of the project passes, or a later change is checked,
+  the older finding steps back and says which ticket speaks for the project now.
+- The words of a fix ticket carry the check's output as marked data between two lines it cannot forge, cleaned of
+  hidden characters, with the request said again after it: the output was written by whoever made the change.
+- **Settings**: the live check on or off, and how often GitHub is asked (5 to 1440 minutes).
+- Not yet: walking the main paths, free exploring, the weekly cap on findings, and saying a finding to the phone.
