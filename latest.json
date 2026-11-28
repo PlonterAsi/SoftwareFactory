@@ -1,0 +1,15 @@
+{
+  "version": "0.2.562",
+  "notes": "Build of main at 8805f06: Merge pull request #195 from PlonterAsi/claude/project-thread-jh61cb",
+  "pub_date": "2026-11-28T05:09:34Z",
+  "platforms": {
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGNzR1ExbzVncHhEczVrR1dHTW0rWUxvTFlQOE0wU0xodUJ2ZXB1VG9aMlVZTUdlcUtYMFZ0UHBsK2VWRTVCL0ZLQW9jbDBMWFVoRHdLNDhmY0U5aVNhekxwLy9SNFFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODQyMjQ2CWZpbGU6U29mdHdhcmVGYWN0b3J5XzAuMi41NjJfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMi41NjIKQ0hBSDMwRXowN0lHM1BIWWZZSWw1R2s3RUJ3OW42SDRvNE9UVGxmSTBObFFkQ1hqYzhvVFhjdFZXMFQyK3hHaHFraVlGcVZXQS82ZXFNSzZNS0F4RHc9PQo=",
+      "url": "https://api.github.com/repos/PlonterAsi/SoftwareFactory/releases/assets/803322213"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGNzR1ExbzVncHhEczVrR1dHTW0rWUxvTFlQOE0wU0xodUJ2ZXB1VG9aMlVZTUdlcUtYMFZ0UHBsK2VWRTVCL0ZLQW9jbDBMWFVoRHdLNDhmY0U5aVNhekxwLy9SNFFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODQyMjQ2CWZpbGU6U29mdHdhcmVGYWN0b3J5XzAuMi41NjJfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMi41NjIKQ0hBSDMwRXowN0lHM1BIWWZZSWw1R2s3RUJ3OW42SDRvNE9UVGxmSTBObFFkQ1hqYzhvVFhjdFZXMFQyK3hHaHFraVlGcVZXQS82ZXFNSzZNS0F4RHc9PQo=",
+      "url": "https://api.github.com/repos/PlonterAsi/SoftwareFactory/releases/assets/803322213"
+    }
+  }
+}
