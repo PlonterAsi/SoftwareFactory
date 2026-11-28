@@ -38,7 +38,7 @@ export interface Since {
 }
 
 /** What the panel needs of a ticket as it stands. */
-export interface SinceTicket { ticket: string; project: string | null; sentence: string; state: string; says: string; url: string | null; removed: boolean; canRelease?: boolean }
+export interface SinceTicket { ticket: string; project: string | null; sentence: string; state: string; says: string; url: string | null; removed: boolean; canRelease?: boolean; /** The live check found the project stopped running here: it waits for the owner's word. */ finding?: boolean }
 
 const GROUP: Record<string, SinceGroup> = {
   proposed: "ready",
@@ -80,7 +80,7 @@ export function sinceYouLeft(lines: RecordLine[], tickets: SinceTicket[], show =
     const group = GROUP[t.state];
     if (!l || !group) continue;
     // A hold only "Work it again" can clear did not finish; a hold the owner can let go waits for their word.
-    item(t.state === "held" && !t.canRelease ? "unfinished" : group, t.says, l.ts);
+    item(t.finding ? "yours" : t.state === "held" && !t.canRelease ? "unfinished" : group, t.finding ? `The live check: it stopped running here after a change on GitHub (${t.says}).` : t.says, l.ts);
   }
   all.sort((a, b) => ORDER.indexOf(a.group) - ORDER.indexOf(b.group) || (a.at < b.at ? 1 : -1));
   const counts = { yours: 0, ready: 0, unfinished: 0 } as Record<SinceGroup, number>;

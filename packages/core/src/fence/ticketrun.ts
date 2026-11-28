@@ -156,13 +156,13 @@ export const TICKET_KINDS = ["request", "bug", "task", "idea", "plan", "question
 export type TicketKind = (typeof TICKET_KINDS)[number];
 
 /** Open a ticket: it gets its name and its first line in the record. Nothing runs yet. */
-export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | { parent: string } | { bringIn: true } | null = null): string {
+export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | { parent: string } | { bringIn: true; liveCheck?: { from: string; to: string } } | { fixes: string } | null = null): string {
   // Counting and writing happen under one lock, so two SoftwareFactory windows cannot give two tickets one name.
   record.db.exec("BEGIN IMMEDIATE");
   try {
     const ticket = `T${record.all().filter((l) => l.kind === "ticket.opened").length + 1}`;
     // A smaller ticket cut from another by the stuck ladder is SoftwareFactory's own doing, and the record says so.
-    record.append({ kind: "ticket.opened", who: from && "parent" in from ? "SF itself" : "you", ticket, project, data: { sentence: sentence.trim(), kind, ...(from ?? {}) } });
+    record.append({ kind: "ticket.opened", who: from && ("parent" in from || ("liveCheck" in from && from.liveCheck)) ? "SF itself" : "you", ticket, project, data: { sentence: sentence.trim(), kind, ...(from ?? {}) } });
     record.db.exec("COMMIT");
     return ticket;
   } catch (e) { record.db.exec("ROLLBACK"); throw e; }
@@ -334,13 +334,15 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
 export function storyLine(l: RecordLine): string {
     const d = l.data as any;
     const what =
+      l.kind === "ticket.opened" && d.liveCheck ? `SoftwareFactory opened it: the project changed on GitHub (${String(d.liveCheck.from ?? "").slice(0, 8)} to ${String(d.liveCheck.to ?? "").slice(0, 8)}), so it is run here again; nothing in it is changed` :
+      l.kind === "ticket.opened" && d.fixes ? `you asked, from the finding of ${d.fixes}: ${d.sentence}` :
       l.kind === "ticket.opened" && d.bringIn ? "you brought the project in: SoftwareFactory shows whether it runs here, and changes nothing" :
       l.kind === "ticket.opened" && l.who !== "you" ? `SoftwareFactory opened it${d.parent ? `, a smaller piece cut from ${d.parent}` : ""}: ${d.sentence}` :
       l.kind === "ticket.opened" ? `you asked${d.from === "github" ? ` (issue #${d.issue} on GitHub)` : ""}: ${d.sentence}` :
       l.kind === "issue.linked" ? (d.direction === "in" ? `taken from issue #${d.number} on GitHub` : `issue #${d.number} opened on GitHub for it`) :
       l.kind === "ticket.split" ? (Array.isArray(d.into) && d.into.length ? `SoftwareFactory split it into ${d.into.join(", ")}` : `it could not be split: ${d.why ?? ""}`) :
       l.kind === "ticket.edited" ? `you changed it${d.sentence ? ` to: ${d.sentence}` : ""}${d.kind ? ` (kind: ${d.kind})` : ""}` :
-      l.kind === "ticket.queued" ? (d.ladder ? `SoftwareFactory sent it again by itself (the stuck ladder: ${d.ladder})` : d.returned ? `it came back to the queue by itself: ${d.why ?? "the wait is over"}` : "you sent it to be worked again") :
+      l.kind === "ticket.queued" ? (d.repeat ? "SoftwareFactory runs it once more on a clean copy: a finding counts only when it shows twice" : d.ladder ? `SoftwareFactory sent it again by itself (the stuck ladder: ${d.ladder})` : d.returned ? `it came back to the queue by itself: ${d.why ?? "the wait is over"}` : "you sent it to be worked again") :
       l.kind === "ticket.removed" ? (d.from === "github" ? `it left the list: ${d.why}` : l.who === "you" ? "you removed it from the list" : "it was removed from the list") :
       l.kind === "ticket.restored" ? "you put it back on the list" :
       l.kind === "gate.asked" ? `before starting, SoftwareFactory asks: ${d.question}` :

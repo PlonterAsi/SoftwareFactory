@@ -24,8 +24,12 @@ export interface ProjectSettings {
   maxProjects: number;
   /** Adding a project brings it in at once: one run that changes nothing shows whether the project runs here. */
   bringInOnAdd: boolean;
+  /** The live check: when a project that was shown to run here changes on GitHub, one run that changes nothing checks it still runs. */
+  liveCheck: boolean;
+  /** How often GitHub is asked whether a project changed, in minutes. */
+  liveCheckEveryMinutes: number;
 }
-export const PROJECT_DEFAULTS: ProjectSettings = { projects: [], maxProjects: 30, bringInOnAdd: true };
+export const PROJECT_DEFAULTS: ProjectSettings = { projects: [], maxProjects: 30, bringInOnAdd: true, liveCheck: true, liveCheckEveryMinutes: 30 };
 
 /** The words of the ticket that brings a project in. They are fixed: the run is told what to do by SoftwareFactory, not by these. */
 export const BRING_IN = "Bring this project in: show that it runs here. Nothing in it is changed.";
@@ -46,6 +50,18 @@ export function provenFrom(lines: { kind: string; run: string | null; ticket: st
     if (l.kind === "run.checked" && l.data.ok === true) ok.set(l.run, (ok.get(l.run) ?? 0) + 1);
     else if (l.kind === "run.ended" && l.data.end === "passed" && (ok.get(l.run) ?? 0) > 0) out.set(l.project.toLowerCase(), { at: l.ts, checks: ok.get(l.run)!, ticket: l.ticket });
     else if (l.kind === "run.ended" && l.data.end === "failed its checks") out.delete(l.project.toLowerCase());
+  }
+  return out;
+}
+
+export interface Tried { /** The commit of the project the run stood on. */ sha: string; end: "passed" | "failed its checks"; ticket: string | null; at: string }
+/** The latest try of each project that came to a verdict, and the commit it stood on. The live check starts from here. */
+export function lastTried(lines: { kind: string; run: string | null; ticket: string | null; project: string | null; ts: string; data: Record<string, unknown> }[]): Map<string, Tried> {
+  const sha = new Map<string, string>(), out = new Map<string, Tried>();
+  for (const l of lines) {
+    if (!l.run || !l.project) continue;
+    if (l.kind === "run.step" && l.data.tried === true && typeof l.data.baseSha === "string" && /^[0-9a-f]{40}$/.test(l.data.baseSha)) sha.set(l.run, l.data.baseSha);
+    else if (l.kind === "run.ended" && sha.has(l.run) && (l.data.end === "passed" || l.data.end === "failed its checks")) out.set(l.project.toLowerCase(), { sha: sha.get(l.run)!, end: l.data.end, ticket: l.ticket, at: l.ts });
   }
   return out;
 }
@@ -95,8 +111,10 @@ export interface ProjectLight {
   proof: Proof | null;
   /** A ticket that brings it in waits or is being worked right now. */
   bringing: boolean;
+  /** The live check found that it stopped running here after a change on GitHub. */
+  stopped: boolean;
 }
-export interface LightTicket { project: string | null; state: string; removed: boolean; canRelease?: boolean; bringIn?: boolean; parkedFor?: string | null }
+export interface LightTicket { project: string | null; state: string; removed: boolean; canRelease?: boolean; bringIn?: boolean; parkedFor?: string | null; /** A live check found, twice, that the project stopped running here. */ finding?: boolean; /** It was a finding and the project runs here again. */ healedBy?: string | null }
 
 const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
 
@@ -111,24 +129,27 @@ export function projectLights(listed: ProjectCard[], chosen: string, tickets: Li
   return cards.map((c, at) => {
     const mine = tickets.filter((t) => !t.removed && same(t.project ?? "", c.repo));
     const count = (...states: string[]) => mine.filter((t) => states.includes(t.state)).length;
+    // A finding of the live check is the owner's to look at: it is said first, and not counted again as unfinished.
+    const findings = mine.filter((t) => t.finding).length;
     const yours = count("asked") + mine.filter((t) => t.state === "held" && t.canRelease).length;
     // A bring-in that found nothing to run did not fail: the project is only not shown yet, and its line says so.
     const noChecks = mine.filter((t) => t.bringIn && t.state === "parked" && t.parkedFor === "no checks").length;
-    const unfinished = count("failed its checks", "parked", "stopped", "crashed", "not started", "interrupted") - noChecks + mine.filter((t) => t.state === "held" && !t.canRelease).length;
+    const unfinished = count("failed its checks", "parked", "stopped", "crashed", "not started", "interrupted") - noChecks - findings - mine.filter((t) => t.healedBy).length + mine.filter((t) => t.state === "held" && !t.canRelease).length;
     const ready = count("proposed"), waiting = count("waiting"), working = count("working") + running.filter((r) => same(r, c.repo)).length;
     const parts: string[] = [];
+    if (findings) parts.push("it stopped running here after a change on GitHub");
     if (yours) parts.push(`${n(yours, "ticket waits", "tickets wait")} for your word`);
     if (unfinished) parts.push(`${n(unfinished, "ticket", "tickets")} did not finish`);
     if (ready) parts.push(`${n(ready, "result is", "results are")} ready for you`);
     if (working) parts.push(`${n(working, "ticket is", "tickets are")} being worked`);
     if (waiting) parts.push(`${n(waiting, "ticket waits its", "tickets wait their")} turn`);
     const isListed = at < listed.length;
-    const colour: Colour = c.asleep || !isListed ? "grey" : yours ? "red" : unfinished ? "amber" : ready ? "green" : working || waiting ? "blue" : "grey";
-    const open = yours + unfinished + ready + working + waiting;
+    const colour: Colour = c.asleep || !isListed ? "grey" : yours || findings ? "red" : unfinished ? "amber" : ready ? "green" : working || waiting ? "blue" : "grey";
+    const open = findings + yours + unfinished + ready + working + waiting;
     const proof = proven.get(c.repo.toLowerCase()) ?? null, bringing = mine.some(isBringing);
     // Said only where nothing else is: a listed, awake project with nothing open that nothing has yet shown to run here.
     const unproven = !isListed || c.asleep || proof || bringing ? "" : noChecks ? " Not shown to run here yet: no checks were found for it. Write them in Settings." : !parts.length ? " Nothing has shown yet that it runs here." : "";
     const says = !isListed ? `Not on the list: ${n(mine.length, "ticket", "tickets")} kept, none is worked. Choose it to bring it back.` : c.asleep ? `Asleep${open ? `: ${n(open, "ticket", "tickets")} kept, none is worked` : ""}.` : parts.length ? `${parts.join("; ")}.`.replace(/^./, (x) => x.toUpperCase()) : "Nothing open.";
-    return { repo: c.repo, name: c.name, chosen: same(c.repo, chosen), asleep: c.asleep, listed: isListed, colour, says: says + unproven, open, proof, bringing };
+    return { repo: c.repo, name: c.name, chosen: same(c.repo, chosen), asleep: c.asleep, listed: isListed, colour, says: says + unproven, open, proof, bringing, stopped: findings > 0 };
   });
 }

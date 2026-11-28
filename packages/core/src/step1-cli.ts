@@ -73,6 +73,8 @@ async function main(): Promise<void> {
       hosts: [`127.0.0.1:${port}`, `localhost:${port}`], fence: { room: fence.room, netList: fence.netList },
       undo: (ticket) => undoTicket({ record, github, workDir }, ticket),
       release: (ticket) => releaseHeld({ record, github, workDir }, ticket),
+      // The live check asks GitHub where a project's starting branch stands: a fetch into SoftwareFactory's own bare history.
+      head: async (repo, base) => { const h = history({ github }, { repo, base, workDir }); return plainGit(h.dir, "rev-parse", `refs/heads/${h.base}`); },
       // The reader at the gate sees the sentence and the project's file names, and works in the room like every agent.
       split: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askSplit(many() ? celled(exec, fence, "gate") : exec, fence, { sentence: q.sentence, failed: q.failed, files, model: q.model }); },
       gate: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askGate(many() ? celled(exec, fence, "gate") : exec, fence, { sentence: q.sentence, files, asked: q.asked ?? undefined, model: q.model }); },
@@ -80,6 +82,7 @@ async function main(): Promise<void> {
       work: async (st, ticket, sentence, signal) => (await cleared, workTicket({ exec, files, record, fence, signal, github, fenceTest: (o) => runFenceTest(o?.others ? celled(exec, fence, "fence") : exec, fence, { ...windowsProbe(), ...(o?.others ? { others: true } : {}) }) }, { ...st, workDir }, sentence, ticket)),
     });
     home.watchIssues();
+    home.watchLive();
     // The two things SoftwareFactory itself says out loud.
     let beat: ReturnType<typeof setInterval> | null = null, ours = false;
     const say = (line: string, ticket: string | null, why: string) => void speak({ record, settings: () => cleanWatch(home.state().settings) }, { line, ticket, why });
