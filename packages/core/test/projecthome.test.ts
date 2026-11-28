@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardOf, cleanProjects, projectLights, projectList } from "../src/fence/projecthome.js";
+import { cardOf, cleanProjects, isBringing, projectLights, projectList, provenFrom } from "../src/fence/projecthome.js";
 
 const card = (repo: string, over = {}) => ({ repo, name: "", base: "", checks: [], prepare: [], asleep: false, ...over });
 
@@ -42,5 +42,24 @@ describe("projects", () => {
     ]);
     expect(projectLights([card("o/g")], "", [t("o/g", "stopped")])[0]).toMatchObject({ colour: "amber", says: "1 ticket did not finish.", listed: true });
     expect(lights.find((l) => l.chosen)!.repo).toBe("o/b");
+  });
+
+  it("reads from the record which projects run here: only a try counts, and a later failed try takes the proof away", () => {
+    let id = 0;
+    const l = (kind: string, run: string, project: string, data: Record<string, unknown> = {}) => ({ kind, run, ticket: run.split("-")[0]!, project, ts: `2026-11-28T00:00:${String(++id).padStart(2, "0")}Z`, data });
+    const tried = (run: string, project: string, oks: boolean[], end: string) => [l("run.started", run, project, { tryOnly: true }), ...oks.map((ok) => l("run.checked", run, project, { ok })), l("run.ended", run, project, { end })];
+    // An ordinary ticket's run checked its own changed copy: no proof. A try with no check proves nothing.
+    const lines = [l("run.started", "T1-a", "o/p"), l("run.checked", "T1-a", "o/p", { ok: true }), l("run.ended", "T1-a", "o/p", { end: "passed" }), ...tried("T2-a", "o/p", [], "passed")];
+    expect(provenFrom(lines).size).toBe(0);
+    lines.push(...tried("T3-a", "O/P", [true, true], "passed"), ...tried("T4-a", "o/other", [true, false], "failed its checks"));
+    expect([...provenFrom(lines)]).toEqual([["o/p", { at: expect.any(String), checks: 2, ticket: "T3" }]]);
+    // Parked or stopped says nothing either way; a failed check takes the proof away.
+    lines.push(...tried("T5-a", "o/p", [], "parked"));
+    expect(provenFrom(lines).has("o/p")).toBe(true);
+    lines.push(...tried("T6-a", "o/p", [false], "failed its checks"));
+    expect(provenFrom(lines).has("o/p")).toBe(false);
+    expect(isBringing({ bringIn: true, removed: false, state: "parked", parkedFor: "limit" })).toBe(true);
+    expect(isBringing({ bringIn: true, removed: false, state: "parked", parkedFor: "no checks" })).toBe(false);
+    expect(isBringing({ bringIn: false, removed: false, state: "waiting" })).toBe(false);
   });
 });

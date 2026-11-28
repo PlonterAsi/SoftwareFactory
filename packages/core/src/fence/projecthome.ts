@@ -32,19 +32,27 @@ export const BRING_IN = "Bring this project in: show that it runs here. Nothing 
 
 export interface Proof { at: string; checks: number; ticket: string | null }
 /**
- * Which projects are proven to run here, read from the record: the latest run of each that ended "passed" with at
- * least one check SoftwareFactory ran itself. A bring-in run counts, and so does every ticket whose checks passed.
+ * Which projects are proven to run here, read from the record. Only a run that brought the project in counts: it
+ * checked the project as it stands, where an ordinary ticket's run checks its own changed copy. The latest such run
+ * that came to a verdict speaks: passed with at least one check is the proof, a failed check takes the proof away.
+ * A run that was parked, stopped or crashed says nothing either way.
  */
 export function provenFrom(lines: { kind: string; run: string | null; ticket: string | null; project: string | null; ts: string; data: Record<string, unknown> }[]): Map<string, Proof> {
-  const ok = new Map<string, number>(), out = new Map<string, Proof>();
+  const tries = new Set<string>(), ok = new Map<string, number>(), out = new Map<string, Proof>();
   for (const l of lines) {
     if (!l.run || !l.project) continue;
+    if (l.kind === "run.started" && l.data.tryOnly === true) tries.add(l.run);
+    if (!tries.has(l.run)) continue;
     if (l.kind === "run.checked" && l.data.ok === true) ok.set(l.run, (ok.get(l.run) ?? 0) + 1);
-    else if (l.kind === "run.checked") ok.set(l.run, -1000);
     else if (l.kind === "run.ended" && l.data.end === "passed" && (ok.get(l.run) ?? 0) > 0) out.set(l.project.toLowerCase(), { at: l.ts, checks: ok.get(l.run)!, ticket: l.ticket });
+    else if (l.kind === "run.ended" && l.data.end === "failed its checks") out.delete(l.project.toLowerCase());
   }
   return out;
 }
+
+/** A bring-in ticket that is on its way: it waits, is worked, or comes back to the queue by itself (the plan limit, a cut-off). */
+export const isBringing = (t: { bringIn?: boolean; removed: boolean; state: string; parkedFor?: string | null }): boolean =>
+  !!t.bringIn && !t.removed && (t.state === "waiting" || t.state === "working" || t.state === "interrupted" || (t.state === "parked" && t.parkedFor === "limit"));
 
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/;
 const lines = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean).slice(0, 40) : []);
@@ -88,7 +96,7 @@ export interface ProjectLight {
   /** A ticket that brings it in waits or is being worked right now. */
   bringing: boolean;
 }
-export interface LightTicket { project: string | null; state: string; removed: boolean; canRelease?: boolean; bringIn?: boolean }
+export interface LightTicket { project: string | null; state: string; removed: boolean; canRelease?: boolean; bringIn?: boolean; parkedFor?: string | null }
 
 const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
 
@@ -115,7 +123,7 @@ export function projectLights(listed: ProjectCard[], chosen: string, tickets: Li
     const isListed = at < listed.length;
     const colour: Colour = c.asleep || !isListed ? "grey" : yours ? "red" : unfinished ? "amber" : ready ? "green" : working || waiting ? "blue" : "grey";
     const open = yours + unfinished + ready + working + waiting;
-    const proof = proven.get(c.repo.toLowerCase()) ?? null, bringing = mine.some((t) => t.bringIn && (t.state === "waiting" || t.state === "working"));
+    const proof = proven.get(c.repo.toLowerCase()) ?? null, bringing = mine.some(isBringing);
     // Said only where nothing else is: a listed, awake project with nothing open that nothing has yet shown to run here.
     const unproven = isListed && !c.asleep && !parts.length && !proof && !bringing ? " Nothing has shown yet that it runs here." : "";
     const says = !isListed ? `Not on the list: ${n(mine.length, "ticket", "tickets")} kept, none is worked. Choose it to bring it back.` : c.asleep ? `Asleep${open ? `: ${n(open, "ticket", "tickets")} kept, none is worked` : ""}.` : parts.length ? `${parts.join("; ")}.`.replace(/^./, (x) => x.toUpperCase()) : "Nothing open.";

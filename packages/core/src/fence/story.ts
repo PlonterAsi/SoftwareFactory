@@ -91,7 +91,7 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
     if (fence && d(fence).ok === false) broke = true;
   } else {
     const facts = [`model ${d(started).model}`, `${Number(d(finished).turns ?? 0) || agentSteps.length} turns, ${uses} tool uses`, money(cost), ...(short(d(committed).headSha) ? [`commit ${short(d(committed).headSha)} made by SoftwareFactory from a fresh list of files`] : [])];
-    if (tried) out.push(step("worked", "done", `The run prepared the project and kept no change${Number(d(tried).putBack) ? `: ${d(tried).putBack === 1 ? "1 file it had changed was" : `${d(tried).putBack} files it had changed were`} put back` : ""}.`, [started, finished, tried], facts));
+    if (tried) out.push(step("worked", "done", `The run prepared the project and kept no change${Number(d(tried).putBack) ? `: ${d(tried).putBack === 1 ? "1 file it had changed was" : `${d(tried).putBack} files it had changed were`} put back` : ""}${Number(d(tried).tookOut) ? `; ${d(tried).tookOut === 1 ? "1 file it had added was" : `${d(tried).tookOut} files it had added were`} taken out` : ""}.`, [started, finished, tried], facts));
     else if (committed) out.push(step("worked", "done", `The run finished its work and SoftwareFactory committed it (${short(d(committed).headSha)}).`, [started, finished, committed], facts));
     else if (ended) { out.push(step("worked", "failed", `The run ended as ${end}: ${reason}`, [started, stoppedBy, ended], facts)); broke = true; }
     else if (working) out.push(step("worked", "now", agentSteps.length ? `A run is working: ${agentSteps.length} steps so far.` : "A run is starting in the room.", [started], facts.slice(0, 3)));
@@ -108,6 +108,8 @@ export function stepsOf(lines: RecordLine[], working = false): StoryStep[] {
     if (bad.length) { out.push(step("checked", "failed", `${bad.length} of ${all} checks failed: ${d(bad[0]).command}`, checks, facts)); broke = true; }
     // The checks passed but the end says otherwise: what was checked is not what would leave.
     else if (end === "failed its checks") { out.push(step("checked", "failed", `The checks did not count: ${reason}`, [...checks, ended], facts)); broke = true; }
+    // A try that did not end as passed proved nothing, whatever its checks said before (a stop after the last check).
+    else if (trying && ended && end !== "passed") { out.push(step("checked", "failed", `The checks did not count: the run ended as ${end} (${reason})`, [...checks, ended], facts)); broke = true; }
     else if (!all && (ended || proposed)) out.push(step("checked", "skipped", found ? "No build or type check was found in the project, so nothing was checked." : "No checks are set for this project, so nothing was checked.", [started]));
     else if (checks.length >= all && all && (ended || proposed)) out.push(step("checked", "done", `${checks.length} of ${all} checks passed, run by SoftwareFactory with no network.`, checks, facts));
     else if (!ended && !proposed && working) out.push(step("checked", "now", all ? `The checks are running: ${checks.length} of ${all} so far.` : "The work is being packed.", checks, facts));

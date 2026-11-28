@@ -620,22 +620,37 @@ describe("the page and its door", () => {
     expect(seen).toHaveLength(1);
     expect(h.state().tickets[0]).toMatchObject({ ticket: "T1", bringIn: true, state: "failed its checks", canEdit: false, climbable: false, canAgain: true });
     expect(h.state().projects.find((p) => p.repo === "o/q")).toMatchObject({ colour: "amber", proof: null });
-    // Shown again by name: a new ticket, and this time its check passes.
+    expect(h.edit("T1", "Do something else.", "request")).toMatchObject({ ok: false });
+    // Shown again by name: the same ticket is sent again (no failed twin stays), still as a try, and now its check passes.
     end = "passed";
     expect(h.project({ repo: "o/q", bringIn: true })).toEqual({ ok: true });
     await new Promise((ok) => setTimeout(ok, 20));
-    expect(seen[1]).toMatchObject({ ticket: "T2", tryOnly: true });
+    expect(seen[1]).toMatchObject({ ticket: "T1", tryOnly: true });
     const q = h.state().projects.find((p) => p.repo === "o/q")!;
-    expect(q).toMatchObject({ proof: { checks: 1, ticket: "T2" }, bringing: false });
+    expect(q).toMatchObject({ proof: { checks: 1, ticket: "T1" }, bringing: false, colour: "grey" });
     expect(q.says).not.toMatch(/Nothing has shown/);
-    expect(h.state().tickets.find((t) => t.ticket === "T2")).toMatchObject({ state: "passed", bringIn: true, canAgain: false });
-    expect(h.state().tickets.find((t) => t.ticket === "T2")!.steps.map((s) => s.id)).toEqual(["asked", "ready", "fence", "worked", "checked"]);
-    // A project that is not on the list cannot be brought in by name; Settings can switch the first run off.
+    expect(h.state().tickets.find((t) => t.ticket === "T1")).toMatchObject({ state: "passed", bringIn: true, canAgain: false });
+    expect(h.state().tickets.find((t) => t.ticket === "T1")!.steps.map((s) => s.id)).toEqual(["asked", "ready", "fence", "worked", "checked"]);
+    // Once more after a pass is a new ticket; when that one fails, the proof is taken away.
+    end = "failed its checks";
+    expect(h.project({ repo: "o/q", bringIn: true })).toEqual({ ok: true });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen[2]).toMatchObject({ ticket: "T2", tryOnly: true });
+    expect(h.state().projects.find((p) => p.repo === "o/q")).toMatchObject({ proof: null, colour: "amber" });
+    // Work it again on the ticket itself stays a try.
+    expect(h.again("T2")).toEqual({ ok: true });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen[3]).toMatchObject({ ticket: "T2", tryOnly: true });
+    // A project named in the Settings field for the first time is brought in too.
+    expect(h.saveSettings({ repo: "o/typed" })).toMatchObject({ ok: true });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen[4]).toMatchObject({ repo: "o/typed", tryOnly: true });
+    // The call can say "only add it", and Settings can switch the first run off for every add.
     expect(h.project({ repo: "o/zzz", bringIn: false })).toEqual({ ok: true });
     expect(h.saveSettings({ bringInOnAdd: false })).toMatchObject({ ok: true });
     expect(h.project({ repo: "o/yyy" })).toEqual({ ok: true });
     await new Promise((ok) => setTimeout(ok, 20));
-    expect(seen).toHaveLength(2);
+    expect(seen).toHaveLength(5);
     // While one waits, a second is refused.
     h.saveSettings({ hold: true });
     expect(h.project({ repo: "o/yyy", bringIn: true })).toEqual({ ok: true });

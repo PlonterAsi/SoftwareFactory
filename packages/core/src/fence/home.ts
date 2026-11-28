@@ -8,7 +8,7 @@ import { homePage } from "./homepage.js";
 import type { RecordLine, TheRecord } from "./record.js";
 import { type Bucket, type LimitPeriod, type LimitSettings, LIMIT_DEFAULTS, bucketOfSend, checkLimits, periodEnd, periodStart, roomLeft, runBudget, spendOf } from "./limits.js";
 import { sinceYouLeft } from "./since.js";
-import { type ProjectSettings, BRING_IN, PROJECT_DEFAULTS, cardOf, cleanProjects, projectLights, projectList, provenFrom } from "./projecthome.js";
+import { type ProjectSettings, BRING_IN, PROJECT_DEFAULTS, cardOf, cleanProjects, isBringing, projectLights, projectList, provenFrom } from "./projecthome.js";
 import { type HandChange, baselineOf, hasBaseline, isProtected, protectedChanges, protectedOnRecord, settingsInDoubt } from "./protected.js";
 import { type LadderSettings, type Rung, LADDER_DEFAULTS, checkLadder, isClimbable, ladderHint, nextRung } from "./ladder.js";
 import type { SplitResult } from "./gate.js";
@@ -702,6 +702,18 @@ export function createHome(deps: HomeDeps) {
    * Projects: add one, choose the one new tickets go to, name it, put it to sleep, wake it, take it off the list.
    * Taking a project off the list removes its card only: its tickets and its story stay in the record.
    */
+  const ofProject = (repo: string) => ticketsFrom(record.all(), working()).filter((t) => t.bringIn && !t.removed && (t.project ?? "").toLowerCase() === repo.toLowerCase());
+  const bringingIn = (repo: string) => ofProject(repo).some(isBringing);
+  /** Bring a project in: its one bring-in ticket is sent (again, when an earlier one did not finish), or a new one is opened. */
+  function bringIn(repo: string): void {
+    if (bringingIn(repo)) return;
+    // An earlier one that did not finish is the same question: it is sent again, so no failed twin stays on the list.
+    const old = ofProject(repo).find((t) => t.canAgain);
+    if (old) record.append({ kind: "ticket.queued", who: "you", ticket: old.ticket, project: old.project, data: {} });
+    else openTicket(record, repo, BRING_IN, "task", { bringIn: true });
+    pump();
+  }
+
   function project(raw: unknown): { ok: true } | { ok: false; why: string } {
     const b = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
     const got = parseGitHubRepo(typeof b.repo === "string" ? b.repo.trim() : "");
@@ -725,18 +737,21 @@ export function createHome(deps: HomeDeps) {
     }
     // Proving it again: asked for by name, for a project that is on the list.
     const again = b.bringIn === true && at >= 0 && b.remove !== true;
-    const busy = () => ticketsFrom(record.all(), working()).some((t) => t.bringIn && !t.removed && (t.project ?? "").toLowerCase() === repo.toLowerCase() && (t.state === "waiting" || t.state === "working"));
+    const busy = () => bringingIn(repo);
     if (again && busy()) return { ok: false, why: "It is being brought in already. Its ticket is on the list." };
     const r = saveSettings({ ...over, projects: cards });
     if (!r.ok) return { ok: false, why: r.why };
     // A new project is brought in at once (Settings), unless this call says otherwise.
     const added = at < 0 && b.remove !== true;
-    if (again || (added && (typeof b.bringIn === "boolean" ? b.bringIn : r.settings.bringInOnAdd) && !busy())) { openTicket(record, repo, BRING_IN, "task", { bringIn: true }); pump(); }
+    if (again || (added && (typeof b.bringIn === "boolean" ? b.bringIn : r.settings.bringInOnAdd))) bringIn(repo);
     return { ok: true };
   }
 
   function saveSettings(raw: unknown): { ok: true; settings: HomeSettings } | { ok: false; why: string; needsHand?: HandChange[] } {
     const was = deps.settings.read();
+    // A project named in the Settings field for the first time is added there, and brought in like any added project.
+    const typedNew = raw && typeof raw === "object" && (raw as any).projects === undefined && typeof (raw as any).repo === "string" ? parseGitHubRepo((raw as any).repo.trim()) : null;
+    const newRepo = typedNew && !cardOf(was, `${typedNew.owner}/${typedNew.name}`) ? `${typedNew.owner}/${typedNew.name}` : null;
     // The project named in Settings is changed by hand: the one that was chosen keeps its card.
     if (raw && typeof raw === "object" && (raw as any).projects === undefined && typeof (raw as any).repo === "string" && (raw as any).repo.trim().toLowerCase() !== was.repo.toLowerCase()) {
       const cards = projectList(was), typed = parseGitHubRepo((raw as any).repo.trim());
@@ -766,6 +781,7 @@ export function createHome(deps: HomeDeps) {
     }
     // A queue that was held and is let go starts at once.
     pump();
+    if (newRepo && now.bringInOnAdd && cardOf(now, newRepo)) bringIn(newRepo);
     return { ok: true, settings: now };
   }
 

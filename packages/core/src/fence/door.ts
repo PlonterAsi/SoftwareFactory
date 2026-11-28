@@ -144,7 +144,7 @@ fenced() {
   bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --tmpfs /home/${s.worker} --bind "$copy" "$copy" --ro-bind "$scratch" "$scratch" \\
     --unshare-all --die-with-parent --new-session --chdir "$copy" \\
     /usr/bin/env -i HOME=${cache}/home USER=${s.worker} PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \\
-    ${env} GOPROXY=off npm_config_offline=true GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 "$@" </dev/null
+    ${env} GOPROXY=off npm_config_offline=true GIT_CONFIG_NOSYSTEM=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 "$@" </dev/null
 }
 # git as ours: our name, no hooks, no signing, whatever the copy's own settings say.
 ourgit() { fenced git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false -c user.name="SoftwareFactory worker" -c user.email=worker@softwarefactory.invalid "$@"; }
@@ -319,15 +319,22 @@ SF_PROMPT_${tag}
     if (tryOnly) {
       if (parkedAt) return await finish("parked", parkedAt.reason, null, parkedAt.parkedFor);
       const back = await step("worker", `${pre}
-fenced /bin/sh -c 'rm -rf .git/hooks .git/info .git/index .git/config.worktree .git/modules && mkdir -p .git/info && printf ".sf-cache/\\n" > .git/info/exclude && printf "[core]\\n\\trepositoryformatversion = 0\\n\\tfilemode = true\\n\\tbare = false\\n" > .git/config' || exit 1
+fenced /bin/sh -c 'rm -rf .git/hooks .git/info .git/index .git/config.worktree .git/modules .git/commondir .git/refs/replace .git/objects/info/alternates && mkdir -p .git/info && printf ".sf-cache/\\n" > .git/info/exclude && printf "[core]\\n\\trepositoryformatversion = 0\\n\\tfilemode = true\\n\\tbare = false\\n" > .git/config' || exit 1
 ourgit reset -q ${baseSha} || exit 2
+# Counted first: files the project keeps that the run changed, and files the run added that the project neither keeps nor ignores.
 changed=$(ourgit status --porcelain --untracked-files=no | wc -l)
+added=$(ourgit ls-files --others --exclude-standard | wc -l)
 ourgit reset -q --hard ${baseSha} || exit 3
-echo "SFASITWAS-${tag} $changed $(ourgit rev-parse HEAD)"
+# What the project ignores (fetched packages, build output) stays; anything else the run added goes.
+ourgit clean -fdq || exit 4
+left=$(ourgit status --porcelain | wc -l)
+[ "$(ourgit write-tree)" = "$(ourgit rev-parse ${baseSha}^{tree})" ] || left=tree
+echo "SFASITWAS-${tag} $changed $added $left $(ourgit rev-parse HEAD)"
 `);
-      const m = new RegExp(`^SFASITWAS-${tag} (\\d+) ([0-9a-f]{40})$`, "m").exec(back.stdout);
-      if (!m || m[2] !== baseSha) return await finish("crashed", `the project could not be put back as it stood (exit ${back.code}): ${back.stderr.slice(0, 300)}`);
-      note("run.step", { did: Number(m[1]) ? `the run had changed ${m[1]} of the project's files; all were put back as they stood before the checks` : "the run changed none of the project's files", tried: true, baseSha, putBack: Number(m[1]) });
+      const m = new RegExp(`^SFASITWAS-${tag} (\\d+) (\\d+) (\\S+) ([0-9a-f]{40})$`, "m").exec(back.stdout);
+      if (!m || m[4] !== baseSha || m[3] !== "0") return await finish("crashed", `the project could not be put back as it stood (exit ${back.code}): ${back.stderr.slice(0, 300)}`);
+      const putBack = Number(m[1]), tookOut = Number(m[2]);
+      note("run.step", { did: putBack || tookOut ? `before the checks the project was made as it stood: ${putBack} changed ${putBack === 1 ? "file" : "files"} put back, ${tookOut} added ${tookOut === 1 ? "file" : "files"} taken out` : "the run changed none of the project's files", tried: true, baseSha, putBack, tookOut });
     } else {
     // 3. Ours again. Git's own files in the copy are made ours first (settings, hooks, hidden-file lists), then
     //    the work is committed from a fresh list of files, so nothing can be kept out of the commit quietly.
@@ -337,7 +344,7 @@ ${req.ticket}: ${req.sentence.trim().split("\n")[0]!.slice(0, 100).split(`SF_MSG
 
 Worked by SoftwareFactory inside the fence. Run ${req.run}.
 SF_MSG_${tag}
-fenced /bin/sh -c 'rm -rf .git/hooks .git/info .git/index .git/config.worktree .git/modules && mkdir -p .git/info && printf ".sf-cache/\\n" > .git/info/exclude && printf "[core]\\n\\trepositoryformatversion = 0\\n\\tfilemode = true\\n\\tbare = false\\n" > .git/config' || exit 1
+fenced /bin/sh -c 'rm -rf .git/hooks .git/info .git/index .git/config.worktree .git/modules .git/commondir .git/refs/replace .git/objects/info/alternates && mkdir -p .git/info && printf ".sf-cache/\\n" > .git/info/exclude && printf "[core]\\n\\trepositoryformatversion = 0\\n\\tfilemode = true\\n\\tbare = false\\n" > .git/config' || exit 1
 ourgit add -A || exit 1
 if ourgit diff --cached --quiet; then echo SFNOCHANGE; else
   ourgit commit -q --no-verify -F "$scratch/msg" || exit 2
