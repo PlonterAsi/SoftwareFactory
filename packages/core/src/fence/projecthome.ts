@@ -54,21 +54,21 @@ export function provenFrom(lines: { kind: string; run: string | null; ticket: st
   return out;
 }
 
-export interface Tried { /** The commit of the project the run stood on. */ sha: string; end: "passed" | "failed its checks"; ticket: string | null; at: string }
+export interface Tried { /** The commit of the project the run stood on. */ sha: string; end: "passed" | "failed its checks"; ticket: string | null; at: string; /** Some try of the project passed, now or earlier: it was shown to run here once. */ everPassed: boolean }
 /** The latest try of each project that came to a verdict, and the commit it stood on. The live check starts from here. */
 export function lastTried(lines: { kind: string; run: string | null; ticket: string | null; project: string | null; ts: string; data: Record<string, unknown> }[]): Map<string, Tried> {
   const sha = new Map<string, string>(), out = new Map<string, Tried>();
   for (const l of lines) {
     if (!l.run || !l.project) continue;
     if (l.kind === "run.step" && l.data.tried === true && typeof l.data.baseSha === "string" && /^[0-9a-f]{40}$/.test(l.data.baseSha)) sha.set(l.run, l.data.baseSha);
-    else if (l.kind === "run.ended" && sha.has(l.run) && (l.data.end === "passed" || l.data.end === "failed its checks")) out.set(l.project.toLowerCase(), { sha: sha.get(l.run)!, end: l.data.end, ticket: l.ticket, at: l.ts });
+    else if (l.kind === "run.ended" && sha.has(l.run) && (l.data.end === "passed" || l.data.end === "failed its checks")) out.set(l.project.toLowerCase(), { sha: sha.get(l.run)!, end: l.data.end, ticket: l.ticket, at: l.ts, everPassed: l.data.end === "passed" || !!out.get(l.project.toLowerCase())?.everPassed });
   }
   return out;
 }
 
-/** A bring-in ticket that is on its way: it waits, is worked, or comes back to the queue by itself (the plan limit, a cut-off). */
-export const isBringing = (t: { bringIn?: boolean; removed: boolean; state: string; parkedFor?: string | null }): boolean =>
-  !!t.bringIn && !t.removed && (t.state === "waiting" || t.state === "working" || t.state === "interrupted" || (t.state === "parked" && t.parkedFor === "limit"));
+/** A try that is on its way: it waits or is being worked. One that stands still (parked, cut off) is not: it can be sent again. */
+export const isBringing = (t: { bringIn?: boolean; removed: boolean; state: string }): boolean =>
+  !!t.bringIn && !t.removed && (t.state === "waiting" || t.state === "working");
 
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/;
 const lines = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean).slice(0, 40) : []);
@@ -114,7 +114,7 @@ export interface ProjectLight {
   /** The live check found that it stopped running here after a change on GitHub. */
   stopped: boolean;
 }
-export interface LightTicket { project: string | null; state: string; removed: boolean; canRelease?: boolean; bringIn?: boolean; parkedFor?: string | null; /** A live check found, twice, that the project stopped running here. */ finding?: boolean; /** It was a finding and the project runs here again. */ healedBy?: string | null }
+export interface LightTicket { project: string | null; state: string; removed: boolean; canRelease?: boolean; bringIn?: boolean; parkedFor?: string | null; /** A live check found, twice, that the project stopped running here. */ finding?: boolean; /** It was a finding, and a later try of the project took its place. */ healedBy?: string | null }
 
 const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
 

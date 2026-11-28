@@ -661,7 +661,8 @@ describe("the page and its door", () => {
   it("the live check: a brought-in project that changed on GitHub is run here again; a failure shown twice is a finding the owner can turn into a fix ticket", async () => {
     const r = new TheRecord();
     const A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40);
-    let head = A, end = "passed", works = 0;
+    const D = "d".repeat(40), E = "e".repeat(40);
+    let head = A, end = "passed", works = 0, crash = false;
     const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
     const h = createHome({ record: r, github: fakeGitHub().gh, settings: settingsFileIn(dir, { repo: "o/p", checks: ["npm test"], gate: false, ladder: false }), hosts: ["127.0.0.1:1"], key: "k".repeat(48),
       head: async () => head,
@@ -669,51 +670,79 @@ describe("the page and its door", () => {
         const project = `${st.repo.owner}/${st.repo.name}`, run = `${ticket}-${works++}`;
         if (!st.tryOnly) { r.append({ kind: "run.ended", who: "SF itself", run, ticket, project, data: { end: "parked", reason: "x" } }); return {} as any; }
         r.append({ kind: "run.started", who: "SF itself", run, ticket, project, data: { model: "sonnet", tryOnly: true } });
+        if (crash) { r.append({ kind: "run.ended", who: "SF itself", run, ticket, project, data: { end: "crashed", reason: "x" } }); return {} as any; }
         r.append({ kind: "run.step", who: "SF itself", run, ticket, project, data: { tried: true, baseSha: head } });
         r.append({ kind: "run.checked", who: "SF itself", run, ticket, project, data: { command: "npm test", ok: end === "passed", tail: "boom at line 3" } });
         r.append({ kind: "run.ended", who: "SF itself", run, ticket, project, data: { end, reason: end === "passed" ? "the project runs here" : "a check failed: npm test" } });
         return {} as any;
       } });
     const wait = () => new Promise((ok) => setTimeout(ok, 25));
-    // A project that was never brought in is not watched.
+    // A project that was never brought in is not watched; nor is one whose bring-in failed: it never ran here.
+    expect(await h.liveLook()).toEqual({ opened: [] });
+    h.project({ repo: "o/never", bringIn: false });
+    r.append({ kind: "ticket.opened", who: "you", ticket: "T0", project: "o/never", data: { sentence: "Bring", kind: "task", bringIn: true } });
+    r.append({ kind: "run.started", who: "SF itself", run: "T0-x", ticket: "T0", project: "o/never", data: { tryOnly: true } });
+    r.append({ kind: "run.step", who: "SF itself", run: "T0-x", ticket: "T0", project: "o/never", data: { tried: true, baseSha: E } });
+    r.append({ kind: "run.ended", who: "SF itself", run: "T0-x", ticket: "T0", project: "o/never", data: { end: "failed its checks", reason: "x" } });
     expect(await h.liveLook()).toEqual({ opened: [] });
     h.project({ repo: "o/p", bringIn: true }); await wait();
-    expect(h.state().projects[0]).toMatchObject({ proof: { ticket: "T1" } });
+    const P = () => h.state().projects.find((p) => p.repo === "o/p")!, T = (n: string) => h.state().tickets.find((t) => t.ticket === n)!;
+    expect(P()).toMatchObject({ proof: { ticket: "T2" } });
     // No change on GitHub: nothing. A change: one ticket, opened by SoftwareFactory itself, counted under limit 2.
     expect(await h.liveLook()).toEqual({ opened: [] });
     head = B;
-    expect(await h.liveLook()).toEqual({ opened: ["T2"] }); await wait();
-    expect(r.story("T2")[0]).toMatchObject({ who: "SF itself", data: { bringIn: true, liveCheck: { from: A, to: B } } });
-    expect(h.state().tickets.find((t) => t.ticket === "T2")).toMatchObject({ state: "passed", liveCheck: { from: A, to: B }, finding: false, bucket: "alone" });
+    expect(await h.liveLook()).toEqual({ opened: ["T3"] }); await wait();
+    expect(r.story("T3")[0]).toMatchObject({ who: "SF itself", data: { bringIn: true, liveCheck: { from: A, to: B } } });
+    expect(T("T3")).toMatchObject({ state: "passed", liveCheck: { from: A, to: B }, finding: false, bucket: "alone" });
     expect(await h.liveLook()).toEqual({ opened: [] });
     // The next change breaks it: the failure is run once more by itself, and only then is it a finding.
     head = C; end = "failed its checks";
-    expect(await h.liveLook()).toEqual({ opened: ["T3"] }); await wait(); await wait();
-    expect(r.story("T3").filter((l) => l.kind === "run.started")).toHaveLength(2);
-    expect(r.story("T3").filter((l) => l.kind === "ticket.queued").map((l) => [l.who, (l.data as any).repeat])).toEqual([["SF itself", true]]);
-    const t3 = h.state().tickets.find((t) => t.ticket === "T3")!;
-    expect(t3).toMatchObject({ state: "failed its checks", repeated: true, finding: true, fixedBy: null, climbable: false });
-    expect(h.state().projects[0]).toMatchObject({ colour: "red", stopped: true, proof: null, says: "It stopped running here after a change on GitHub." });
+    expect(await h.liveLook()).toEqual({ opened: ["T4"] }); await wait(); await wait();
+    expect(r.story("T4").filter((l) => l.kind === "run.started")).toHaveLength(2);
+    expect(r.story("T4").filter((l) => l.kind === "ticket.queued").map((l) => [l.who, (l.data as any).repeat])).toEqual([["SF itself", true]]);
+    expect(T("T4")).toMatchObject({ state: "failed its checks", repeated: true, finding: true, fixedBy: null, climbable: false });
+    expect(P()).toMatchObject({ colour: "red", stopped: true, proof: null, says: "It stopped running here after a change on GitHub." });
+    expect(h.state().since.items.find((i) => i.ticket === "T4")).toMatchObject({ group: "yours" });
     expect(await h.liveLook()).toEqual({ opened: [] });
     // The owner turns the finding into an ordinary bug ticket, once; it is worked as a normal run, not a try.
-    expect(h.fix("T2")).toMatchObject({ ok: false });
-    const f = h.fix("T3"); await wait();
-    expect(f).toEqual({ ok: true, ticket: "T4" });
-    expect(r.story("T4")[0]).toMatchObject({ who: "you", data: { kind: "bug", fixes: "T3", sentence: expect.stringMatching(/stopped passing its own check[\s\S]*npm test[\s\S]*boom at line 3/) } });
-    expect(h.state().tickets.find((t) => t.ticket === "T4")).toMatchObject({ bringIn: false, state: "parked" });
-    expect(h.state().tickets.find((t) => t.ticket === "T3")).toMatchObject({ fixedBy: "T4" });
-    expect(h.fix("T3")).toMatchObject({ ok: false, why: expect.stringMatching(/T4 is open/) });
+    expect(h.fix("T3")).toMatchObject({ ok: false });
+    const f = h.fix("T4"); await wait();
+    expect(f).toEqual({ ok: true, ticket: "T5" });
+    expect(r.story("T5")[0]).toMatchObject({ who: "you", data: { kind: "bug", fixes: "T4", sentence: expect.stringMatching(/stopped passing its own check[\s\S]*cccccccc[\s\S]*npm test[\s\S]*=====\nboom at line 3\n=====\nThat was the output/) } });
+    expect(T("T5")).toMatchObject({ bringIn: false, state: "parked" });
+    expect(T("T4")).toMatchObject({ fixedBy: "T5" });
+    expect(h.fix("T4")).toMatchObject({ ok: false, why: expect.stringMatching(/T5 is open/) });
     // A later change passes: the finding is over, the project runs here again, and its line is quiet about it.
-    head = A; end = "passed";
-    expect(await h.liveLook()).toEqual({ opened: ["T5"] }); await wait();
-    expect(h.state().tickets.find((t) => t.ticket === "T3")).toMatchObject({ finding: false, healedBy: "T5" });
-    expect(h.state().projects[0]).toMatchObject({ stopped: false, proof: { ticket: "T5" }, colour: "amber", says: "1 ticket did not finish." });
-    expect(h.fix("T3")).toMatchObject({ ok: false, why: expect.stringMatching(/runs here again/) });
-    // Switched off in Settings, a sleeping project: no look opens anything.
-    head = B; h.saveSettings({ liveCheck: false });
+    head = D; end = "passed";
+    expect(await h.liveLook()).toEqual({ opened: ["T6"] }); await wait();
+    expect(T("T4")).toMatchObject({ finding: false, healedBy: "T6" });
+    expect(P()).toMatchObject({ stopped: false, proof: { ticket: "T6" }, colour: "amber", says: "1 ticket did not finish." });
+    expect(h.fix("T4")).toMatchObject({ ok: false });
+    // A new change fails once: the old finding does not come back, and nothing is a finding before the repeat.
+    head = E; end = "failed its checks";
+    const seenStates: boolean[] = [];
+    r.onLine((l) => { if (l.kind === "ticket.queued" && (l.data as any).repeat) seenStates.push(T("T4").finding || P().stopped); });
+    expect(await h.liveLook()).toEqual({ opened: ["T7"] }); await wait(); await wait();
+    expect(seenStates).toEqual([false]);
+    expect(T("T4")).toMatchObject({ finding: false, healedBy: "T7" });
+    expect(T("T7")).toMatchObject({ finding: true });
+    // Put back to an earlier commit: that is a change too, and it is checked.
+    head = D; end = "passed";
+    expect(await h.liveLook()).toEqual({ opened: ["T8"] }); await wait();
+    // A check that came to no verdict and was removed does not come back for the same change.
+    head = A; crash = true;
+    expect(await h.liveLook()).toEqual({ opened: ["T9"] }); await wait();
+    expect(T("T9")).toMatchObject({ state: "crashed", finding: false });
+    expect(await h.liveLook()).toEqual({ opened: [] });
+    expect(h.remove("T9")).toEqual({ ok: true });
+    expect(await h.liveLook()).toEqual({ opened: [] });
+    // Switched off in Settings, a sleeping project: a new change opens nothing; switched on and awake, it does.
+    head = B; crash = false; h.saveSettings({ liveCheck: false });
     expect(await h.liveLook()).toEqual({ opened: [] });
     h.saveSettings({ liveCheck: true }); h.project({ repo: "o/p", asleep: true });
     expect(await h.liveLook()).toEqual({ opened: [] });
+    h.project({ repo: "o/p", asleep: false });
+    expect(await h.liveLook()).toEqual({ opened: ["T10"] }); await wait();
     expect(h.saveSettings({ liveCheckEveryMinutes: 1 })).toMatchObject({ ok: false });
   });
 

@@ -60,8 +60,10 @@ describe("projects", () => {
     expect(provenFrom(lines).has("o/p")).toBe(false);
     // No checks found is not a failure of the product: the line stays quiet and says what to do.
     expect(projectLights([card("o/n")], "o/n", [{ project: "o/n", state: "parked", removed: false, bringIn: true, parkedFor: "no checks" }])[0]).toMatchObject({ colour: "grey", says: "Nothing open. Not shown to run here yet: no checks were found for it. Write them in Settings." });
-    expect(isBringing({ bringIn: true, removed: false, state: "parked", parkedFor: "limit" })).toBe(true);
-    expect(isBringing({ bringIn: true, removed: false, state: "parked", parkedFor: "no checks" })).toBe(false);
+    // A try that stands still is not on its way: it can be sent again, and the live check is not held up by it.
+    expect(isBringing({ bringIn: true, removed: false, state: "working" })).toBe(true);
+    expect(isBringing({ bringIn: true, removed: false, state: "parked" })).toBe(false);
+    expect(isBringing({ bringIn: true, removed: false, state: "interrupted" })).toBe(false);
     expect(isBringing({ bringIn: false, removed: false, state: "waiting" })).toBe(false);
   });
 });

@@ -215,6 +215,14 @@ export class GitHub {
     return { owner: String(j.owner?.login ?? ""), name: String(j.name ?? name), url: String(j.html_url ?? "") };
   }
 
+  /** The commit a branch stands on right now (the default branch when none is named). One small call; nothing is fetched. */
+  async headSha(repo: GitHubRepo, branch = ""): Promise<string | null> {
+    const b = branch || String((await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}`, undefined, { anonymous: true })).default_branch ?? "");
+    if (!b) return null;
+    const sha = (await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}/branches/${encodeURIComponent(b)}`, undefined, { anonymous: true }))?.commit?.sha;
+    return typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+  }
+
   /** The repo's default branch (main when it cannot be read). */
   async defaultBranch(repo: GitHubRepo): Promise<string> {
     try { return String((await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}`, undefined, { anonymous: true })).default_branch ?? "main") || "main"; } catch { return "main"; }
