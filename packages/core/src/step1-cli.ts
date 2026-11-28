@@ -75,6 +75,7 @@ async function main(): Promise<void> {
       release: (ticket) => releaseHeld({ record, github, workDir }, ticket),
       // The live check asks GitHub where a project's starting branch stands: one small call, nothing is fetched.
       head: (repo, base) => github.headSha(repo, base),
+      changes: (repo, from, to) => github.changes(repo, from, to),
       // The reader at the gate sees the sentence and the project's file names, and works in the room like every agent.
       split: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askSplit(many() ? celled(exec, fence, "gate") : exec, fence, { sentence: q.sentence, failed: q.failed, files, model: q.model }); },
       gate: async (q) => { await cleared; const h = history({ github }, { repo: q.repo, base: q.base, workDir }); const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean); return askGate(many() ? celled(exec, fence, "gate") : exec, fence, { sentence: q.sentence, files, asked: q.asked ?? undefined, model: q.model }); },

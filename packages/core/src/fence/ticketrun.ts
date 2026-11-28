@@ -156,7 +156,7 @@ export const TICKET_KINDS = ["request", "bug", "task", "idea", "plan", "question
 export type TicketKind = (typeof TICKET_KINDS)[number];
 
 /** Open a ticket: it gets its name and its first line in the record. Nothing runs yet. */
-export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | { parent: string } | { bringIn: true; liveCheck?: { from: string; to: string } } | { fixes: string } | null = null): string {
+export function openTicket(record: TheRecord, project: string, sentence: string, kind: TicketKind = "request", from: { from: "github"; issue: number } | { parent: string } | { bringIn: true; liveCheck?: { from: string; to: string; changed?: { commits: number; files: string[]; total: number } } } | { fixes: string } | null = null): string {
   // Counting and writing happen under one lock, so two SoftwareFactory windows cannot give two tickets one name.
   record.db.exec("BEGIN IMMEDIATE");
   try {

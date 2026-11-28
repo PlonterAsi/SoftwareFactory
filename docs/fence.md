@@ -422,6 +422,9 @@ stands (Settings: how often). The asking is one small call to GitHub: nothing is
   It is a try like bringing in: it changes nothing, proposes nothing, and counts under limit 2 (what SoftwareFactory
   does by itself). One check for one change, also after its ticket was removed, and none while another try of the
   project is on its way.
+- **It reads the change first**: one more small call asks GitHub how many commits lie between the two and which files
+  they touch. The ticket says so ("What changed: 2 commits, 3 files: ..."), and keeps the first 40 names. When GitHub
+  does not answer, the check runs all the same and says nothing about files.
 - **Still runs**: the ticket says "Still runs here" and the project's proof moves to the new commit.
 - **A failure is run once more** on a fresh copy, by itself. Only a failure that shows twice is a **finding**: the
   project's line turns red ("It stopped running here after a change on GitHub"), and the ticket keeps the proof: the
@@ -430,7 +433,7 @@ stands (Settings: how often). The asking is one small call to GitHub: nothing is
   its output as its words (once per finding). Or remove the finding. SoftwareFactory does not start fixing by itself.
 - **Only the latest verdict is the finding.** When a later try of the project passes, or a later change is checked,
   the older finding steps back and says which ticket speaks for the project now.
-- The words of a fix ticket carry the check's output as marked data between two lines it cannot forge, cleaned of
+- The words of a fix ticket carry the names of the files the change touched and the check's output as marked data between two lines it cannot forge, cleaned of
   hidden characters, with the request said again after it: the output was written by whoever made the change.
 - **Settings**: the live check on or off, and how often GitHub is asked (5 to 1440 minutes).
 - Not yet: walking the main paths, free exploring, the weekly cap on findings, and saying a finding to the phone.
