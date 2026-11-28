@@ -34,4 +34,15 @@ describe("the project tells its own checks", () => {
   it("survives a package file that is not JSON", () => {
     expect(tree({ "package.json": "{nope" }).checks).toEqual([]);
   });
+
+  it("finds the one Python check that fetches nothing: every file compiles", () => {
+    const r = tree({ "requirements.txt": "flask", "run.py": "", "app/web.py": "", "tools/requirements.txt": "x", "tools/t.py": "", "docs/readme.md": "" });
+    expect(r.checks).toEqual(["python3 -m compileall -q -x '(^|/)(node_modules|\\.venv|venv|\\.sf-cache|\\.git)/' ."]);
+    expect(r.prepare).toEqual([]);
+    expect(r.found).toEqual(["requirements.txt: every Python file compiles"]);
+    expect(r.covers).toEqual([""]);
+    // Only a folder that holds Python files and says so; a lone requirements file is not a check.
+    expect(tree({ "requirements.txt": "x", "README.md": "" }).checks).toEqual([]);
+    expect(tree({ "api/pyproject.toml": "", "api/main.py": "", "web/package.json": JSON.stringify({ scripts: { build: "x" } }), "web/package-lock.json": "{}" }).checks).toEqual(["npm run build --prefix web", "python3 -m compileall -q -x '(^|/)(node_modules|\\.venv|venv|\\.sf-cache|\\.git)/' api"]);
+  });
 });

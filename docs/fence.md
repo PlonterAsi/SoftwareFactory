@@ -405,6 +405,8 @@ Adding a project is the one action. SoftwareFactory then shows, by itself, wheth
 - **A setting.** "When a project is added" (Settings): show at once that it runs here (the default), or only add it.
   A project named in the Settings field for the first time is added the same way.
   A sleeping project's bring-in ticket waits like its other tickets. It counts toward the limits like any run you sent.
+- **Python.** A Python project (pyproject.toml, requirements.txt, setup.py) gets the one check that fetches nothing:
+  every Python file compiles. Its tests need its packages, and the room cannot fetch Python packages yet.
 - What the project's own files say to an AI (CLAUDE.md, README) is told to the run as information about the project,
   not as orders. Reading them into the card, and looking through the history for keys, are the next pieces.
 

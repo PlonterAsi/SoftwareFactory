@@ -49,6 +49,7 @@ export function findChecks(files: string[], read: (path: string) => string | nul
   const at = (d: string, f: string) => (d ? `${d}/${f}` : f);
   const out: FoundChecks = { prepare: [], checks: [], found: [], watch: [], covers: [], workspaces: false };
   const go: FoundChecks = { prepare: [], checks: [], found: [], watch: [], covers: [], workspaces: false };
+  const py: FoundChecks = { prepare: [], checks: [], found: [], watch: [], covers: [], workspaces: false };
   const root = has.has("package.json") ? scriptsOf(read("package.json")) : null;
   for (const d of dirs) {
     // Node. With workspaces the top folder speaks for the folders under it.
@@ -74,6 +75,16 @@ export function findChecks(files: string[], read: (path: string) => string | nul
       go.found.push(`${at(d, "go.mod")}: vet and build`);
       go.covers.push(d);
     }
+    // Python. The one check that needs nothing but the code and Python itself: every file compiles. It fetches
+    // nothing, so it runs in the room as it is. Tests need the project's packages; they come in when the room can
+    // fetch them.
+    if (["pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile"].some((f) => has.has(at(d, f))) && files.some((f) => f.endsWith(".py") && (d ? f.startsWith(`${d}/`) : true))) {
+      py.checks.push(`python3 -m compileall -q -x '(^|/)(node_modules|\\.venv|venv|\\.sf-cache|\\.git)/' ${d || "."}`);
+      py.found.push(`${at(d, ["pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile"].find((f) => has.has(at(d, f)))!)}: every Python file compiles`);
+      py.covers.push(d);
+    }
   }
-  return { prepare: [...out.prepare, ...go.prepare], checks: [...out.checks, ...go.checks], found: [...out.found, ...go.found], watch: out.watch, covers: [...new Set([...out.covers, ...go.covers])], workspaces: !!root?.workspaces && out.watch.some((w) => w.path === "package.json") };
+  // A Python project's top folder speaks for the folders under it: one pass over everything is enough.
+  if (py.covers.includes("")) { py.checks.splice(1); py.found.splice(1); py.covers.splice(1); }
+  return { prepare: [...out.prepare, ...go.prepare], checks: [...out.checks, ...go.checks, ...py.checks], found: [...out.found, ...go.found, ...py.found], watch: out.watch, covers: [...new Set([...out.covers, ...go.covers, ...py.covers])], workspaces: !!root?.workspaces && out.watch.some((w) => w.path === "package.json") };
 }
