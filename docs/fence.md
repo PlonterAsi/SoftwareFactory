@@ -415,7 +415,8 @@ stands (Settings: how often). The asking is one small call to GitHub: nothing is
 
 - **Only a project that was shown to run here at least once is watched**, and only while it is on the list and
   awake. The commit its last try stood on is the starting point: the first look is the baseline.
-- **A change opens one ticket, by SoftwareFactory itself**: "Live check: the project changed on GitHub (from, to)".
+- **A change opens one ticket, by SoftwareFactory itself**: "Live check: the project's starting branch stands on
+  another commit than when it last ran here". New commits are a change, and so is naming another starting branch.
   It is a try like bringing in: it changes nothing, proposes nothing, and counts under limit 2 (what SoftwareFactory
   does by itself). One check for one change, also after its ticket was removed, and none while another try of the
   project is on its way.

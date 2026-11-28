@@ -334,7 +334,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
 export function storyLine(l: RecordLine): string {
     const d = l.data as any;
     const what =
-      l.kind === "ticket.opened" && d.liveCheck ? `SoftwareFactory opened it: the project changed on GitHub (${String(d.liveCheck.from ?? "").slice(0, 8)} to ${String(d.liveCheck.to ?? "").slice(0, 8)}), so it is run here again; nothing in it is changed` :
+      l.kind === "ticket.opened" && d.liveCheck ? `SoftwareFactory opened it: the project's starting branch moved since it last ran here (${String(d.liveCheck.from ?? "").slice(0, 8)} to ${String(d.liveCheck.to ?? "").slice(0, 8)}), so it is run here again; nothing in it is changed` :
       l.kind === "ticket.opened" && d.fixes ? `you asked, from the finding of ${d.fixes}: ${d.sentence}` :
       l.kind === "ticket.opened" && d.bringIn ? "you brought the project in: SoftwareFactory shows whether it runs here, and changes nothing" :
       l.kind === "ticket.opened" && l.who !== "you" ? `SoftwareFactory opened it${d.parent ? `, a smaller piece cut from ${d.parent}` : ""}: ${d.sentence}` :

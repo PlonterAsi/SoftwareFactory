@@ -631,7 +631,7 @@ export function createHome(deps: HomeDeps) {
         // Read again after the wait: one check for one change, and none while the owner's own try is on its way.
         const now = deps.settings.read(), still = cardOf(now, c.repo);
         if (!now.liveCheck || !still || still.asleep || bringingIn(c.repo) || lastTried(record.all()).get(c.repo.toLowerCase())?.sha === head || newestLive(c.repo)?.to === head) continue;
-        out.opened.push(openTicket(record, c.repo, `Live check: the project changed on GitHub (${last.sha.slice(0, 8)} to ${head.slice(0, 8)}). Does it still run here? Nothing in it is changed.`, "task", { bringIn: true, liveCheck: { from: last.sha, to: head } }));
+        out.opened.push(openTicket(record, c.repo, `Live check: the project's starting branch stands on another commit than when it last ran here (${last.sha.slice(0, 8)} then, ${head.slice(0, 8)} now). Does it still run here? Nothing in it is changed.`, "task", { bringIn: true, liveCheck: { from: last.sha, to: head } }));
       }
       lastLive = { at: new Date().toISOString(), opened: out.opened };
       if (out.opened.length) { tell(); pump(); }
