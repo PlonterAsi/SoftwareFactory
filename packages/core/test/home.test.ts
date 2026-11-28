@@ -555,9 +555,9 @@ describe("the page and its door", () => {
     const r = new TheRecord();
     const seen: { ticket: string; repo: string; base: string; checks: string[] }[] = [];
     const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
-    const h = createHome({ record: r, github: fakeGitHub().gh, settings: settingsFileIn(dir, { repo: "o/p", base: "main", checks: ["npm test"], ladder: false, gate: false }), hosts: ["127.0.0.1:1"], key: "k".repeat(48),
+    const h = createHome({ record: r, github: fakeGitHub().gh, settings: settingsFileIn(dir, { repo: "o/p", base: "main", checks: ["npm test"], ladder: false, gate: false, bringInOnAdd: false }), hosts: ["127.0.0.1:1"], key: "k".repeat(48),
       work: async (st, ticket) => { seen.push({ ticket, repo: `${st.repo.owner}/${st.repo.name}`, base: st.base, checks: st.checks }); r.append({ kind: "run.ended", who: "SF itself", ticket, project: `${st.repo.owner}/${st.repo.name}`, data: { end: "parked", reason: "x" } }); return {} as any; } });
-    expect(h.state().projects).toMatchObject([{ repo: "o/p", chosen: true, colour: "grey", says: "Nothing open." }]);
+    expect(h.state().projects).toMatchObject([{ repo: "o/p", chosen: true, colour: "grey", says: "Nothing open. Nothing has shown yet that it runs here." }]);
     // A second project: added, not chosen. A ticket of the first is still worked from the first one's card.
     expect(h.project({ repo: "nope" })).toMatchObject({ ok: false });
     expect(h.project({ repo: "o/q", name: "Second" })).toEqual({ ok: true });
@@ -593,6 +593,69 @@ describe("the page and its door", () => {
     expect(h.state().projects.find((p) => p.repo === "o/p")!.says).toBe("Not on the list: 1 ticket kept, none is worked. Choose it to bring it back.");
     expect(h.state().tickets.some((t) => t.ticket === "T1")).toBe(true);
     expect(r.all().filter((l) => l.kind === "setting.changed" && l.who === "you").length).toBeGreaterThan(4);
+  });
+
+  it("brings a new project in at once: one run that changes nothing, no gate, no ladder, and the project says whether it runs here", async () => {
+    const r = new TheRecord();
+    const seen: { ticket: string; repo: string; tryOnly: boolean; sentence: string }[] = [];
+    let gates = 0, end = "failed its checks";
+    const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
+    const h = createHome({ record: r, github: fakeGitHub().gh, settings: settingsFileIn(dir, { repo: "o/p", checks: ["npm test"] }), hosts: ["127.0.0.1:1"], key: "k".repeat(48),
+      gate: async () => { gates++; return { ok: false, why: "not used" } as any; },
+      work: async (st, ticket, sentence) => {
+        const project = `${st.repo.owner}/${st.repo.name}`, run = `${ticket}-${seen.length}`;
+        seen.push({ ticket, repo: project, tryOnly: !!st.tryOnly, sentence });
+        r.append({ kind: "run.started", who: "SF itself", run, ticket, project, data: { model: "sonnet", tryOnly: true } });
+        r.append({ kind: "run.checked", who: "SF itself", run, ticket, project, data: { command: "npm test", ok: end === "passed" } });
+        r.append({ kind: "run.ended", who: "SF itself", run, ticket, project, data: { end, reason: end === "passed" ? "the project runs here: 1 of 1 check passed" : "a check failed: npm test" } });
+        return {} as any;
+      } });
+    expect(h.state().projects[0]).toMatchObject({ repo: "o/p", proof: null, bringing: false, says: "Nothing open. Nothing has shown yet that it runs here." });
+    expect(h.project({ repo: "o/q" })).toEqual({ ok: true });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toEqual([{ ticket: "T1", repo: "o/q", tryOnly: true, sentence: expect.stringMatching(/^Bring this project in/) }]);
+    expect(gates).toBe(0);
+    // It failed: the ladder leaves it alone, its words cannot be changed, and the project says a ticket did not finish.
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toHaveLength(1);
+    expect(h.state().tickets[0]).toMatchObject({ ticket: "T1", bringIn: true, state: "failed its checks", canEdit: false, climbable: false, canAgain: true });
+    expect(h.state().projects.find((p) => p.repo === "o/q")).toMatchObject({ colour: "amber", proof: null });
+    expect(h.edit("T1", "Do something else.", "request")).toMatchObject({ ok: false });
+    // Shown again by name: the same ticket is sent again (no failed twin stays), still as a try, and now its check passes.
+    end = "passed";
+    expect(h.project({ repo: "o/q", bringIn: true })).toEqual({ ok: true });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen[1]).toMatchObject({ ticket: "T1", tryOnly: true });
+    const q = h.state().projects.find((p) => p.repo === "o/q")!;
+    expect(q).toMatchObject({ proof: { checks: 1, ticket: "T1" }, bringing: false, colour: "grey" });
+    expect(q.says).not.toMatch(/Nothing has shown/);
+    expect(h.state().tickets.find((t) => t.ticket === "T1")).toMatchObject({ state: "passed", bringIn: true, canAgain: false });
+    expect(h.state().tickets.find((t) => t.ticket === "T1")!.steps.map((s) => s.id)).toEqual(["asked", "ready", "fence", "worked", "checked"]);
+    // Once more after a pass is a new ticket; when that one fails, the proof is taken away.
+    end = "failed its checks";
+    expect(h.project({ repo: "o/q", bringIn: true })).toEqual({ ok: true });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen[2]).toMatchObject({ ticket: "T2", tryOnly: true });
+    expect(h.state().projects.find((p) => p.repo === "o/q")).toMatchObject({ proof: null, colour: "amber" });
+    // Work it again on the ticket itself stays a try.
+    expect(h.again("T2")).toEqual({ ok: true });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen[3]).toMatchObject({ ticket: "T2", tryOnly: true });
+    // A project named in the Settings field for the first time is brought in too.
+    expect(h.saveSettings({ repo: "o/typed" })).toMatchObject({ ok: true });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen[4]).toMatchObject({ repo: "o/typed", tryOnly: true });
+    // The call can say "only add it", and Settings can switch the first run off for every add.
+    expect(h.project({ repo: "o/zzz", bringIn: false })).toEqual({ ok: true });
+    expect(h.saveSettings({ bringInOnAdd: false })).toMatchObject({ ok: true });
+    expect(h.project({ repo: "o/yyy" })).toEqual({ ok: true });
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(seen).toHaveLength(5);
+    // While one waits, a second is refused.
+    h.saveSettings({ hold: true });
+    expect(h.project({ repo: "o/yyy", bringIn: true })).toEqual({ ok: true });
+    expect(h.project({ repo: "o/yyy", bringIn: true })).toMatchObject({ ok: false, why: expect.stringMatching(/already/) });
+    expect(h.state().projects.find((p) => p.repo === "o/yyy")).toMatchObject({ bringing: true });
   });
 
   it("shows what the watchdog said only while it is still the news", () => {

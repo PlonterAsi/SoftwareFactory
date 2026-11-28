@@ -380,3 +380,30 @@ sleeps. `maxProjects` (30) says how many there can be.
   wake it, take it off the list. Taking it off removes the card only: its tickets and their stories stay in the
   record, and adding it again brings them back to the screen. Every change is a line in the record.
 - GitHub issues (in and out) are read for the chosen project only.
+
+## Bringing a project in
+
+Adding a project is the one action. SoftwareFactory then shows, by itself, whether the project runs here.
+
+- **One run that changes nothing.** A ticket with fixed words is opened for the new project ("Bring this project
+  in"). Its run gets a copy of the project like every run, and is told to change nothing: fetch what the project
+  needs, and see its own checks work. When the agent is done, the project is made as it stood: every file it keeps
+  is put back, and every file the run added is taken out, except what the project itself ignores (fetched packages,
+  build output), because the checks need that. SoftwareFactory then confirms the files are exactly the starting
+  point's, and runs the checks itself, with no network. Nothing is committed, nothing is packed, nothing goes to
+  GitHub.
+- **The end is one sentence.** Passed: "the project runs here: N of N checks passed". A check failed: it says which.
+  No checks written and none found in the project: parked before any run is spent, with the way out (write its
+  checks in Settings, then show it again).
+- **No gate, no ladder.** Its test of done is fixed (the checks pass on the project as it stands), so nothing is read
+  or asked first, and a failed one waits for you: it is not sent again by itself and never split.
+- **The project says it.** In Settings each project's row says "Runs here: N checks passed on <day>" or "Nothing has
+  shown yet that it runs here", with a button to show it again. The proof is read from the record, and only a
+  bring-in run counts: it checked the project as it stands, where an ordinary ticket's run checks its own changed
+  copy. A later bring-in whose check fails takes the proof away. Showing it again sends the same ticket again when
+  the earlier one did not finish, so no failed twin stays on the list.
+- **A setting.** "When a project is added" (Settings): show at once that it runs here (the default), or only add it.
+  A project named in the Settings field for the first time is added the same way.
+  A sleeping project's bring-in ticket waits like its other tickets. It counts toward the limits like any run you sent.
+- What the project's own files say to an AI (CLAUDE.md, README) is told to the run as information about the project,
+  not as orders. Reading them into the card, and looking through the history for keys, are the next pieces.

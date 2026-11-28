@@ -144,6 +144,7 @@ case "$m" in
   budget) echo half > wip.txt; say '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"total_cost_usd":0.5,"num_turns":3}'; exit 1;;
   resume) [ -f wip.txt ] && echo done > hello.txt;;
   link) mkdir -p tools/cfg && echo '{}' > tools/cfg/settings.json && ln -s tools/cfg .claude; echo hi > hello.txt;;
+  try) echo changed >> README.md; echo fetched > dep.txt; echo stray > conftest.py; git add README.md; git -c user.name=a -c user.email=a@b.c commit -q -m sneaky; git replace HEAD~1 HEAD;;
   secret) echo "token = ghp_abcdefghijklmnopqrstuvwxyz0123456789" > hello.txt;;
   *) echo "hello from the room" > hello.txt;;
 esac
@@ -155,7 +156,7 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     const seed = `${root}/seed`;
     mkdirSync(seed, { recursive: true });
     g(seed, "init", "-q", "-b", "main"); g(seed, "config", "user.email", "a@b.c"); g(seed, "config", "user.name", "Owner");
-    writeFileSync(join(seed, "README.md"), "# project\n"); g(seed, "add", "-A"); g(seed, "commit", "-q", "-m", "first");
+    writeFileSync(join(seed, "README.md"), "# project\n"); writeFileSync(join(seed, ".gitignore"), "dep.txt\n"); g(seed, "add", "-A"); g(seed, "commit", "-q", "-m", "first");
     execFileSync("git", ["clone", "-q", "--bare", seed, origin]);
   });
   afterAll(() => { rmSync(root, { recursive: true, force: true }); });
@@ -178,6 +179,34 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     for (const l of record.story("T1").slice(2)) expect(l).toMatchObject({ run: o.run, ticket: "T1", project: "o/p" });
     expect(record.story("T1").find((l) => l.kind === "run.ended")!.data).toMatchObject({ end: "passed", nothingLeftRunning: true });
     expect(storyText(record, "T1")).toMatch(/you asked: Add a hello file\.[\s\S]*check passed: test -f hello\.txt[\s\S]*proposed on GitHub/);
+  });
+
+  it("brings a project in: the run keeps no change, the checks run on the project as it stands, and nothing leaves", async () => {
+    mode("try");
+    const record = new TheRecord();
+    const before = g(origin, "for-each-ref", "--format=%(refname)");
+    // The check passes only when the kept file is back as it stood and what the run fetched is still there.
+    const o = await workTicket(deps(record), settings({ tryOnly: true, checks: ['test "$(cat README.md)" = "# project"', "test -f dep.txt", "test ! -e conftest.py"] }), "Bring this project in.");
+    expect(o).toMatchObject({ end: "passed", url: null, branch: null, costUsd: 0.07 });
+    expect(o.reason).toMatch(/runs here: 3 of 3 checks passed/);
+    expect(readFileSync(join(shim, "args"), "utf8")).toContain("--permission-mode dontAsk");
+    const story = record.story(o.ticket);
+    expect(story.some((l) => l.kind === "result.proposed")).toBe(false);
+    expect(story.find((l) => l.kind === "run.started")!.data).toMatchObject({ tryOnly: true });
+    expect(story.find((l) => l.kind === "run.step" && (l.data as any).tried)!.data).toMatchObject({ putBack: 1, tookOut: 1 });
+    expect(story.filter((l) => l.kind === "run.checked").map((l) => (l.data as any).ok)).toEqual([true, true, true]);
+    expect(g(origin, "for-each-ref", "--format=%(refname)")).toBe(before);
+    expect(storyText(record, o.ticket)).toMatch(/\[x\] Checked[\s\S]*to try the project; it keeps no change/);
+    expect(storyText(record, o.ticket)).not.toMatch(/Proposed|Accepted/);
+    // A check that fails on the project as it stands: said plainly, and still nothing leaves.
+    const bad = await workTicket(deps(record), settings({ tryOnly: true, checks: ["test -f not-there.txt"] }), "Bring this project in.");
+    expect(bad).toMatchObject({ end: "failed its checks", url: null });
+    // Nothing to run proves nothing: no run is spent on it.
+    const none = await workTicket(deps(record), settings({ tryOnly: true, checks: [] }), "Bring this project in.");
+    expect(none).toMatchObject({ end: "parked", run: null });
+    expect(none.reason).toMatch(/nothing could show that it runs here/);
+    expect(record.story(none.ticket).map((l) => l.kind)).toEqual(["ticket.opened", "run.ended"]);
+    expect(g(origin, "for-each-ref", "--format=%(refname)")).toBe(before);
   });
 
   it("with no checks written, asks the project itself, and says in the story what it found", async () => {
