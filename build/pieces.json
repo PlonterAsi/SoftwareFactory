@@ -184,14 +184,14 @@
         {
           "id": "bring-in",
           "title": "Bring a project in with one action",
-          "status": "now",
+          "status": "proven",
           "from": "leg 5",
           "done": "A product is pointed at and proven to run in the fence."
         },
         {
           "id": "live-check",
           "title": "Live check: reads changes, runs it, walks the main paths",
-          "status": "later",
+          "status": "now",
           "from": "leg 5",
           "done": "A real new bug is found with proof."
         },

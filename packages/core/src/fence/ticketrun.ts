@@ -176,6 +176,25 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
   const out = (o: Partial<TicketOutcome> & Pick<TicketOutcome, "end" | "reason">): TicketOutcome => ({ ticket, run: null, url: null, branch: null, costUsd: 0, ...o });
   if (deps.signal?.aborted) return out({ end: "stopped", reason: "you pressed stop" });
 
+  // Bringing in with nothing to run proves nothing. The look for checks needs no room, so it comes before the fence
+  // test: no test and no run is spent on it.
+  if (st.tryOnly && !st.checks.length) {
+    try {
+      const h = history(deps, st);
+      const files = plainGit(h.dir, "ls-tree", "-r", "--name-only", "-z", `refs/heads/${h.base}`).split("\0").filter(Boolean);
+      const found = findChecks(files, (path) => { try { const t = plainGit(h.dir, "show", `refs/heads/${h.base}:${path}`); return t.length > 1_000_000 ? null : t; } catch { return null; } });
+      if (!found.checks.length) {
+        const reason = "no build, type check or test was found in this project, so nothing could show that it runs here. Write its checks in Settings, then show it again";
+        record.append({ kind: "run.ended", who: "SF itself", ticket, project, data: { end: "parked", reason, parkedFor: "no checks", where: "before the run", ...(found.found.length ? { found: found.found } : {}) } });
+        return out({ end: "parked", reason });
+      }
+    } catch (e) {
+      const reason = `the project could not be read from GitHub: ${(e as Error).message.slice(0, 250)}`;
+      record.append({ kind: "run.ended", who: "SF itself", ticket, project, data: { end: "crashed", reason, where: "before the run" } });
+      return out({ end: "crashed", reason });
+    }
+  }
+
   // Nothing starts before the fence proved itself. Not one line may be off.
   let fence: FenceReport;
   try { fence = await deps.fenceTest({ others: !!st.ownCell }); }
@@ -225,7 +244,7 @@ export async function workTicket(deps: TicketDeps, st: TicketSettings, sentence:
     }
     // Bringing in with nothing to run proves nothing, so no run is spent on it.
     if (st.tryOnly && !checks.length) {
-      const reason = "no build, type check or test was found in this project, so nothing could show that it runs here. Write its checks in Settings, then prove it again";
+      const reason = "no build, type check or test was found in this project, so nothing could show that it runs here. Write its checks in Settings, then show it again";
       record.append({ kind: "run.ended", who: "SF itself", ticket, project, data: { end: "parked", reason, parkedFor: "no checks", where: "before the run" } });
       return out({ end: "parked", reason });
     }

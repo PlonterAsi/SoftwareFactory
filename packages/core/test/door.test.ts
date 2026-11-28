@@ -205,7 +205,7 @@ say '{"type":"result","subtype":"success","is_error":false,"result":"Added hello
     const none = await workTicket(deps(record), settings({ tryOnly: true, checks: [] }), "Bring this project in.");
     expect(none).toMatchObject({ end: "parked", run: null });
     expect(none.reason).toMatch(/nothing could show that it runs here/);
-    expect(record.story(none.ticket).some((l) => l.kind === "run.started")).toBe(false);
+    expect(record.story(none.ticket).map((l) => l.kind)).toEqual(["ticket.opened", "run.ended"]);
     expect(g(origin, "for-each-ref", "--format=%(refname)")).toBe(before);
   });
 

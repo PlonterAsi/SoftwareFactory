@@ -292,7 +292,7 @@ ol.story li.flag .x { color: var(--bad); }
   function ticketNode(t) {
     var box = el("article", "ticket");
     var top = el("div", "top");
-    var chip = t.bringIn && t.state === "passed" ? ["Runs here", "accepted"] : CHIP[t.state] || [t.state, ""];
+    var chip = t.bringIn && t.state === "passed" ? ["Runs here", "accepted"] : t.bringIn && t.parkedFor === "no checks" ? ["No checks found", ""] : CHIP[t.state] || [t.state, ""];
     top.appendChild(el("span", "name", t.ticket));
     top.appendChild(el("span", "chip " + chip[1], t.removed ? "Removed" : chip[0] + (t.place ? ", place " + t.place : "")));
     if (t.kind && t.kind !== "request") top.appendChild(el("span", "meta", KINDS[t.kind] || t.kind));

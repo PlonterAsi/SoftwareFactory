@@ -112,7 +112,9 @@ export function projectLights(listed: ProjectCard[], chosen: string, tickets: Li
     const mine = tickets.filter((t) => !t.removed && same(t.project ?? "", c.repo));
     const count = (...states: string[]) => mine.filter((t) => states.includes(t.state)).length;
     const yours = count("asked") + mine.filter((t) => t.state === "held" && t.canRelease).length;
-    const unfinished = count("failed its checks", "parked", "stopped", "crashed", "not started", "interrupted") + mine.filter((t) => t.state === "held" && !t.canRelease).length;
+    // A bring-in that found nothing to run did not fail: the project is only not shown yet, and its line says so.
+    const noChecks = mine.filter((t) => t.bringIn && t.state === "parked" && t.parkedFor === "no checks").length;
+    const unfinished = count("failed its checks", "parked", "stopped", "crashed", "not started", "interrupted") - noChecks + mine.filter((t) => t.state === "held" && !t.canRelease).length;
     const ready = count("proposed"), waiting = count("waiting"), working = count("working") + running.filter((r) => same(r, c.repo)).length;
     const parts: string[] = [];
     if (yours) parts.push(`${n(yours, "ticket waits", "tickets wait")} for your word`);
@@ -125,7 +127,7 @@ export function projectLights(listed: ProjectCard[], chosen: string, tickets: Li
     const open = yours + unfinished + ready + working + waiting;
     const proof = proven.get(c.repo.toLowerCase()) ?? null, bringing = mine.some(isBringing);
     // Said only where nothing else is: a listed, awake project with nothing open that nothing has yet shown to run here.
-    const unproven = isListed && !c.asleep && !parts.length && !proof && !bringing ? " Nothing has shown yet that it runs here." : "";
+    const unproven = !isListed || c.asleep || proof || bringing ? "" : noChecks ? " Not shown to run here yet: no checks were found for it. Write them in Settings." : !parts.length ? " Nothing has shown yet that it runs here." : "";
     const says = !isListed ? `Not on the list: ${n(mine.length, "ticket", "tickets")} kept, none is worked. Choose it to bring it back.` : c.asleep ? `Asleep${open ? `: ${n(open, "ticket", "tickets")} kept, none is worked` : ""}.` : parts.length ? `${parts.join("; ")}.`.replace(/^./, (x) => x.toUpperCase()) : "Nothing open.";
     return { repo: c.repo, name: c.name, chosen: same(c.repo, chosen), asleep: c.asleep, listed: isListed, colour, says: says + unproven, open, proof, bringing };
   });

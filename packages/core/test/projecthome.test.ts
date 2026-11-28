@@ -58,6 +58,8 @@ describe("projects", () => {
     expect(provenFrom(lines).has("o/p")).toBe(true);
     lines.push(...tried("T6-a", "o/p", [false], "failed its checks"));
     expect(provenFrom(lines).has("o/p")).toBe(false);
+    // No checks found is not a failure of the product: the line stays quiet and says what to do.
+    expect(projectLights([card("o/n")], "o/n", [{ project: "o/n", state: "parked", removed: false, bringIn: true, parkedFor: "no checks" }])[0]).toMatchObject({ colour: "grey", says: "Nothing open. Not shown to run here yet: no checks were found for it. Write them in Settings." });
     expect(isBringing({ bringIn: true, removed: false, state: "parked", parkedFor: "limit" })).toBe(true);
     expect(isBringing({ bringIn: true, removed: false, state: "parked", parkedFor: "no checks" })).toBe(false);
     expect(isBringing({ bringIn: false, removed: false, state: "waiting" })).toBe(false);
