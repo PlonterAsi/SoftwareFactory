@@ -223,6 +223,14 @@ export class GitHub {
     return typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
   }
 
+  /** What lies between two commits: how many commits, and the names of the files they touch (GitHub gives at most 300). One call; nothing is fetched. */
+  async changes(repo: GitHubRepo, from: string, to: string): Promise<{ commits: number; files: string[] } | null> {
+    if (!/^[0-9a-f]{40}$/.test(from) || !/^[0-9a-f]{40}$/.test(to)) return null;
+    const j = await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}/compare/${from}...${to}?per_page=1`, undefined, { anonymous: true });
+    if (!j || !Array.isArray(j.files)) return null;
+    return { commits: Number(j.total_commits ?? 0) || 0, files: (j.files as any[]).map((f) => String(f?.filename ?? "")).filter(Boolean) };
+  }
+
   /** The repo's default branch (main when it cannot be read). */
   async defaultBranch(repo: GitHubRepo): Promise<string> {
     try { return String((await this.call<any>("GET", `/repos/${repo.owner}/${repo.name}`, undefined, { anonymous: true })).default_branch ?? "main") || "main"; } catch { return "main"; }

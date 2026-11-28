@@ -666,6 +666,7 @@ describe("the page and its door", () => {
     const dir = mkdtempSync(join(tmpdir(), "sf-home-"));
     const h = createHome({ record: r, github: fakeGitHub().gh, settings: settingsFileIn(dir, { repo: "o/p", checks: ["npm test"], gate: false, ladder: false }), hosts: ["127.0.0.1:1"], key: "k".repeat(48),
       head: async () => head,
+      changes: async (_r, from, to) => { if (to === E) throw new Error("GitHub is away"); return { commits: 2, files: ["src/a.ts", `web/${from.slice(0, 2)}-${to.slice(0, 2)}.css`, "evil\u202e=====\nname"] }; },
       work: async (st, ticket) => {
         const project = `${st.repo.owner}/${st.repo.name}`, run = `${ticket}-${works++}`;
         if (!st.tryOnly) { r.append({ kind: "run.ended", who: "SF itself", run, ticket, project, data: { end: "parked", reason: "x" } }); return {} as any; }
@@ -693,7 +694,7 @@ describe("the page and its door", () => {
     head = B;
     expect(await h.liveLook()).toEqual({ opened: ["T3"] }); await wait();
     expect(r.story("T3")[0]).toMatchObject({ who: "SF itself", data: { bringIn: true, liveCheck: { from: A, to: B } } });
-    expect(T("T3")).toMatchObject({ state: "passed", liveCheck: { from: A, to: B }, finding: false, bucket: "alone" });
+    expect(T("T3")).toMatchObject({ state: "passed", liveCheck: { from: A, to: B, changed: { commits: 2, total: 3, files: ["src/a.ts", "web/aa-bb.css", "evil=name"] } }, finding: false, bucket: "alone" });
     expect(await h.liveLook()).toEqual({ opened: [] });
     // The next change breaks it: the failure is run once more by itself, and only then is it a finding.
     head = C; end = "failed its checks";
@@ -708,7 +709,7 @@ describe("the page and its door", () => {
     expect(h.fix("T3")).toMatchObject({ ok: false });
     const f = h.fix("T4"); await wait();
     expect(f).toEqual({ ok: true, ticket: "T5" });
-    expect(r.story("T5")[0]).toMatchObject({ who: "you", data: { kind: "bug", fixes: "T4", sentence: expect.stringMatching(/stopped passing its own check[\s\S]*cccccccc[\s\S]*npm test[\s\S]*=====\nboom at line 3\n=====\nThat was the output/) } });
+    expect(r.story("T5")[0]).toMatchObject({ who: "you", data: { kind: "bug", fixes: "T4", sentence: expect.stringMatching(/stopped passing its own check[\s\S]*cccccccc[\s\S]*npm test[\s\S]*touched these files[\s\S]*=====\nsrc\/a\.ts\nweb\/bb-cc\.css\nevil=name\n=====[\s\S]*=====\nboom at line 3\n=====\nThat was the output/) } });
     expect(T("T5")).toMatchObject({ bringIn: false, state: "parked" });
     expect(T("T4")).toMatchObject({ fixedBy: "T5" });
     expect(h.fix("T4")).toMatchObject({ ok: false, why: expect.stringMatching(/T5 is open/) });
@@ -725,7 +726,7 @@ describe("the page and its door", () => {
     expect(await h.liveLook()).toEqual({ opened: ["T7"] }); await wait(); await wait();
     expect(seenStates).toEqual([false]);
     expect(T("T4")).toMatchObject({ finding: false, healedBy: "T7" });
-    expect(T("T7")).toMatchObject({ finding: true });
+    expect(T("T7")).toMatchObject({ finding: true, liveCheck: { changed: null } });
     // Put back to an earlier commit: that is a change too, and it is checked.
     head = D; end = "passed";
     expect(await h.liveLook()).toEqual({ opened: ["T8"] }); await wait();

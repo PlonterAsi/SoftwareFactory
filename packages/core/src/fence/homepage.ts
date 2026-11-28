@@ -316,6 +316,7 @@ ol.story li.flag .x { color: var(--bad); }
       erow.appendChild(save); erow.appendChild(ks); erow.appendChild(cancel);
       box.appendChild(ta); box.appendChild(erow);
     } else box.appendChild(el("p", "sentence", t.sentence));
+    if (t.liveCheck && t.liveCheck.changed) { var lc = t.liveCheck.changed, more = lc.total - lc.files.length; box.appendChild(el("p", "hint", "What changed: " + (lc.commits ? lc.commits + (lc.commits === 1 ? " commit, " : " commits, ") : "") + lc.total + (lc.total === 1 ? " file" : " files") + (lc.files.length ? ": " + lc.files.slice(0, 8).join(", ") + (lc.total > 8 ? " and " + (lc.total - Math.min(8, lc.files.length)) + " more" : "") : "") + ".")); }
     box.appendChild(el("p", t.state === "asked" ? "sentence" : "says", (t.state === "asked" ? "SoftwareFactory asks before it starts: " : "") + t.says));
     if (t.issue) { var ip = el("p", "says"); if (t.issue.url) { var ia = el("a", "", "Issue #" + t.issue.number + " on GitHub"); ia.href = t.issue.url; ia.target = "_blank"; ia.rel = "noopener noreferrer"; ip.appendChild(ia); } else ip.textContent = "Issue #" + t.issue.number + " on GitHub"; box.appendChild(ip); }
     if (t.stops && t.stops.length) {
